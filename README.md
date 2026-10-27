@@ -204,7 +204,8 @@ clean_up("charts")                # the agent's charts too ("s3", "lambda", "san
 
 It removes only what aws-analyzer made: a downloads folder without the `.gitignore` aws-analyzer writes in one, or
 one that holds the notebook, stays (the report says why), and only chart pictures leave `agent-charts/`. It never
-touches Python environments `new_env()` made, or files you saved to a path of your own. `downloads=["~/scratch/s3"]`
+touches Python environments `new_env()` made, the agent's notes and saved chats (`~/.cache/aws-analyzer/agent/`), or
+files you saved to a path of your own. `downloads=["~/scratch/s3"]`
 adds a downloads folder you moved elsewhere.
 
 </details>
@@ -2005,6 +2006,8 @@ agent.tools()                                           # what it can call, its 
 agent.transcript()                                      # every question and answer so far, with their cost
 agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
 agent.memory()                                          # what it remembers; forget("orders-etl") clears a note
+agent = AgentView(provider="bedrock", chats=True)       # every chat saved on this machine, titled from its first question
+agent.chats()                                           # your saved chats; open_chat(1) carries on the newest
 agent = AgentView(runbooks="~/team-runbooks")           # your team's step-by-step guides, beside the built-in ones
 agent.runbooks()                                        # the runbooks it follows when a question matches one
 ```
@@ -2212,9 +2215,32 @@ asks for a second click.
 The notes are kept per AWS account (STS `GetCallerIdentity`), so one account's never reach a question about another.
 Anything in a note that looks like a key or password is hidden before it's stored, the notes stay under 8 KB
 (`budget={"memory_bytes": ...}`), since they're sent with every conversation, and the agent can't delete them: only
-`forget()` and `forget_all()` do. Memory is off unless you turn it on, and conversations themselves still last only as
-long as the kernel. The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#memory) shows the report and
+`forget()` and `forget_all()` do. Memory is off unless you turn it on, and conversations themselves last only as long
+as the kernel unless you save them ([Saved chats](#saved-chats)). The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#memory) shows the report and
 the window, and what the agent notes and never notes.
+
+### Saved chats
+
+With `chats=True` every conversation is saved on this machine with a title, its first question until you rename it, so
+you can list your chats, open one again and carry it on where it left off, even after the kernel restarts.
+
+```python
+agent = AgentView(provider="bedrock", chats=True)        # chats in ~/.cache/aws-analyzer/agent/chats.sqlite
+agent = AgentView(chats="~/SageMaker/agent-chats.sqlite")    # a notebook instance keeps only ~/SageMaker when it stops
+agent.chats()                                            # every saved chat: title, questions, last asked, cost
+agent.open_chat(1)                                       # the newest, shown again; the next ask() carries it on
+agent.open_chat("nightly etl")                           # or by words of its title
+agent.rename_chat("Nightly ETL failures")                # a title of your own for the chat going on
+agent.delete_chat("nightly etl")                         # remove one from this machine
+```
+
+In the chat window, **🗂 chats** lists them, newest first: a click opens one in the window, a ✕ deletes it on a second
+click, and a box renames the chat that's open. The window's header shows the open chat's title.
+
+Each chat keeps every answer as you saw it (the text, findings, plan, charts and tool calls) and the conversation the
+model carries on (LangGraph's checkpoints), in one SQLite file. What's kept is what the agent showed: tool results had
+anything that looks like a key or password hidden before the model saw them. Saving chats is off unless you turn it on,
+and `clean_up()` leaves the file alone.
 
 ### Safe and bounded
 
@@ -2222,7 +2248,7 @@ the window, and what the agent notes and never notes.
   operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a
   knowledge base) before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
-  memory (with `memory=True`, its notes about the account in a local SQLite file). Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
+  memory (with `memory=True`, its notes about the account in a local SQLite file, and with `chats=True` the chats). Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
 - **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
   model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
@@ -2249,13 +2275,17 @@ the window, and what the agent notes and never notes.
 
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
+| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🗂 chats** lists the saved chats to open one again, rename it or delete it (with `chats=True`); **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
 | `ask(question, new=False)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
 | `memory()`                  | With `memory=True`: what the agent remembers about the account, each note and when it learned it, the notes old enough to check and how full its memory is, then your `notes=` file |
 | `forget(match)` / `forget_all()` | Clears the agent's notes holding these words (any case), or every note about this account; the next conversation starts without them |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
+| `chats()`                   | With `chats=True`: your saved chats, newest first: each one's title, questions, when it was last asked in, the model and what it cost |
+| `open_chat(chat)`           | Opens a saved chat again (its number in `chats()`, its ID or words of its title) and shows it question by question; the next `ask()` carries it on, even after a restart |
+| `rename_chat(title, *, chat=None)` | Gives the chat going on (or the one `chat=` names) a title of your own |
+| `delete_chat(chat)`         | Removes a saved chat from this machine: its answers and the conversation the model would carry on |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
 | `runbooks()`                | The runbooks the agent follows when a question matches one: each one's name, what it's for, where it's from and the toolkits it needs, and any that didn't load and why (a missing name or description, a name that isn't its folder's) |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
@@ -2278,6 +2308,7 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account (or a .md file)
     memory=True,                          # keeps its own notes between conversations (a path: where the SQLite file goes)
+    chats=True,                           # saves every conversation with a title, to open again (a path: the file)
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for: all three by default (s3_triggers
                                           # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
@@ -2299,6 +2330,9 @@ answer.stopped, answer.error   # why it stopped early, or what failed
 core.tools()                   # the tools themselves: plain functions, for another agent framework
 core.memories()                # MemoryState: notes (Note: text, learned), text, account, path, limit
 core.forget("orders-etl")      # the Notes it cleared; core.forget_all() returns how many
+core.chats()                   # ChatSummary: thread, title, started, updated, questions, cost, model
+core.open_chat(1)              # the ChatSummary it opened; its answers join core.history
+core.chat_title                # the title of the chat going on
 ```
 
 `chat_model=` takes any LangChain chat model instead (a `ChatOllama` with your own settings, say). The pure functions work without AWS or a model: `hide_secrets`,

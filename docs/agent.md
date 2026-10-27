@@ -16,6 +16,7 @@ Ask "Which Lambda failed last night?" in a notebook cell and get the answer: whi
   <li>A budget per question</li>
   <li>Follow-up questions</li>
   <li>Remembers your account, if you let it</li>
+  <li>Saved chats, with titles</li>
   <li>Lambda and S3, joined, and knowledge bases</li>
   <li>Any model: Bedrock, OpenAI, Azure, ...</li>
 </ul>
@@ -98,6 +99,7 @@ agent.ask("Which functions run close to their timeout this week?", new=True)   #
 agent.tools()                                                  # what it can call, its model and its budget
 agent.transcript()                                             # every question and answer so far, with their cost
 agent.memory()                                                 # with memory=True: what it remembers between conversations
+agent.chats()                                                  # with chats=True: your saved chats; open_chat(1) carries one on
 agent.runbooks()                                               # the step-by-step guides it follows when a question matches
 ```
 
@@ -178,7 +180,7 @@ Click the folded line to see the steps again, and click a call to see what's beh
 **Check its work**: each call opens to the operations it used, what it covered and the exact data the model read.
 ///
 
-- **Follow-ups** continue the conversation. **new chat** starts over (`agent.transcript()` still has every question).
+- **Follow-ups** continue the conversation. **new chat** starts over (`agent.transcript()` still has every question). With [`chats=True`](#chats), **🗂 chats** lists your saved chats: a click opens one to carry it on.
 - **stop** (the send button, while it works) ends the question: the agent finishes the step it's on and answers with what it found.
 - **Ask the next question while it works**: press Enter and it waits under the conversation, marked *queued*, and is asked as a follow-up once the answer before it is done. Questions you queue are asked in order; **✕** drops one, and **stop** ends the current answer so the next one starts sooner.
 - Questions asked with `agent.ask()` in other cells show up in the window too.
@@ -469,7 +471,34 @@ It's read for each new conversation, so editing it changes what the next one kno
 
 ??? more "Where the notes are kept, and what keeps them safe"
 
-    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves still last only as long as the kernel.
+    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves last only as long as the kernel unless you [save them](#chats).
+
+## Saved chats { #chats }
+
+With `chats=True`, every conversation is saved on this machine with a title, so you can open it again and carry on, even after the kernel restarts.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", chats=True)
+agent.ask("Which Lambda failed last night?")     # saved as the chat "Which Lambda failed last night?"
+agent.chats()                                    # every saved chat, newest first
+agent.open_chat(1)                               # the newest, shown again: the next ask() follows its last question
+agent.open_chat("lambda failed")                 # or by words of its title
+agent.rename_chat("Nightly ETL failures")        # a title of your own for the chat going on
+agent.delete_chat("nightly etl")                 # remove it from this machine
+```
+
+A chat's title is its first question until you rename it. `chats()` shows each one's title, how many questions it holds, when it was last asked in, the model that answered and what it cost, numbered so `open_chat(2)` opens the second. `transcript()` names each conversation by its title too.
+
+In the chat window, **🗂 chats** opens a panel under the header with a line per saved chat. A click opens it in the window, with its questions and answers, and your next question carries it on. The ✕ at the end of a line deletes that chat, on a second click. Above the list, a box renames the chat that's open, and the header shows its title.
+
+!!! tip "Worth knowing"
+
+    The chats live in `~/.cache/aws-analyzer/agent/chats.sqlite`. On a SageMaker notebook instance only `~/SageMaker` survives a stop, so keep them there: `AgentView(chats="~/SageMaker/agent-chats.sqlite")`. Studio keeps the whole home folder.
+
+??? more "What a chat keeps"
+
+    Each answer as you saw it: the question, the answer, its findings, plan, charts and tool calls (with what each handed the model), the tokens and the cost, as JSON. Beside them, the conversation the model reads to carry on, as LangGraph's checkpoints (its `SqliteSaver`, from the `langgraph-checkpoint-sqlite` package in the `[agent]` extra). It's what the agent showed you: tool results had anything that looks like a key or password hidden before the model saw them, and environment variable values are never read. Only `delete_chat()` and the window's ✕ remove a chat, and `clean_up()` leaves the file alone. Saving chats is off by default.
 
 ## Runbooks it follows { #runbooks }
 
@@ -512,7 +541,7 @@ Write the steps in terms of the agent's tools (`agent.tools()` lists them). File
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file, and with [`chats=True`](#chats), the saved chats). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -597,6 +626,8 @@ agent.core.resume("smaller")   # goes on with your choice: 'go', 'smaller' or 's
 agent.core.history             # every AgentAnswer so far
 agent.core.memories()          # with memory=True: MemoryState: notes (Note: text, learned), text, account, path, limit
 agent.core.forget("orders-etl")   # the Notes it cleared; forget_note(note) clears one, forget_all() every one
+agent.core.chats()             # with chats=True: ChatSummary: thread, title, started, updated, questions, cost, model
+agent.core.open_chat(1)        # the ChatSummary it opened; its answers join agent.core.history
 ```
 
 To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), its plan each time it writes or updates one (`'plan'`, `.plan`: the whole list), and each tool call as it starts (`'tool'`), pauses to ask you before a big read (`'asking'`, with `.call.waiting`), and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
@@ -623,6 +654,7 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account (or a file)
     memory=True,                                     # keeps notes between conversations; a path picks the file
+    chats=True,                                      # saves every conversation with a title; a path picks the file
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
@@ -741,7 +773,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
-| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🗂 chats opens a saved chat again (with `chats=True`); 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
 | `ask(question, new=False)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
@@ -750,6 +782,10 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `memory()` | With `memory=True`: what the agent remembers about the account, each note and when it learned it, and the notes old enough to check |
 | `forget(match)` | Clears the notes holding these words; `forget_all()` clears every note about this account |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |
+| `chats()` | With `chats=True`: your saved chats, newest first, each with its title, questions, when it was last asked in, the model and cost |
+| `open_chat(chat)` | Opens a saved chat again (its number in `chats()`, its ID or words of its title) and shows it; the next `ask()` carries it on |
+| `rename_chat(title, *, chat=None)` | Gives the chat going on (or the one `chat=` names) a title of your own |
+| `delete_chat(chat)` | Removes a saved chat from this machine |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
 | `use_model(provider=None, model=None, ...)` | Switches the model the agent answers with, and says where what it sends goes; the window's ⚙ model does it by clicking |

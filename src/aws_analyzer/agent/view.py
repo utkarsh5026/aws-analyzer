@@ -25,11 +25,12 @@ from .._bedrock.prices import _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _draws
 from .._kit.deps import _require
 from .._kit.errors import _Hint
-from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money, human_size
+from .._kit.fmt import _duration, _fmt_dt, _plural, _tz_label, _utcnow, _zone_name, human_money, human_size
 from .._kit.render import _base_css, _Look, _report_html
 from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
+from .chats import ChatSummary
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
@@ -250,6 +251,7 @@ class AgentView(_BaseView):
         "💬 Ask": ("chat", "ask", "new_conversation"),
         "✋ Big reads": ("go", "smaller", "skip"),
         "🔎 Look back": ("transcript", "save_charts"),
+        "🗂 Saved chats": ("chats", "open_chat", "rename_chat", "delete_chat"),
         "🧠 Memory": ("memory", "forget", "forget_all"),
         "🧰 What it can do": ("tools", "runbooks", "use_model"),
         "❓ Help": ("help",),
@@ -261,6 +263,7 @@ class AgentView(_BaseView):
         ("ask('Did the files uploaded to acme-raw last night get processed?')", "S3 and Lambda together"),
         ("AgentView(python='local').ask('Chart the CSVs in s3://acme-raw/sales/ by month')",
          "its own Python over your files, with charts"),
+        ("AgentView(chats=True).chats()", "your earlier chats, by title, to carry one on"),
         ("tools()", "what the agent can call, its model and its budget"),
     )
     _PROGRESS = ("Thinking", "steps")
@@ -544,9 +547,13 @@ class AgentView(_BaseView):
                     ("Model cost (est.)", human_money(sum(costs)) if costs else "unknown")]),
         ]
         threads: dict[str, int] = {}
+        titles = self._chat_titles()
         for answer in history:
             number = threads.setdefault(answer.thread, len(threads) + 1)
-            sub = f"conversation {number} · {_plural(len(answer.calls), 'tool call')} · {_duration(answer.seconds)}"
+            chat = f"conversation {number}"
+            if answer.thread in titles:
+                chat = f"{chat}: {titles[answer.thread]}"
+            sub = f"{chat} · {_plural(len(answer.calls), 'tool call')} · {_duration(answer.seconds)}"
             if answer.cost is not None:
                 sub += f" · {human_money(answer.cost)}"
             blocks.append(_Title(answer.question, sub))
@@ -555,6 +562,14 @@ class AgentView(_BaseView):
             if answer.charts:
                 blocks.append(_Charts(answer.charts))
         self._show(blocks)
+
+    def _chat_titles(self) -> dict[str, str]:
+        """
+        Each saved conversation's title, by thread (with chats=True; empty otherwise).
+        """
+        if self.core.chats_file is None:
+            return {}
+        return {chat.thread: chat.title for chat in self.core.chats()}
 
     @_friendly_errors
     def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> None:
@@ -701,6 +716,111 @@ class AgentView(_BaseView):
         count = self.core.forget_all()
         self._show([_Note(f"Cleared {_plural(count, 'note')} about account {self.core.account()}: the next "
                           "conversation starts from nothing but your notes=.", "ok")])
+
+    def _chats_off(self) -> list[Any]:
+        return [_Title("Saved chats"),
+                _Note("Chats aren't saved: each conversation ends with the kernel. AgentView(chats=True) keeps every "
+                      "one on this machine (~/.cache/aws-analyzer/agent/chats.sqlite), titled from its first "
+                      "question, so you can open it again and carry on, even after a restart.")]
+
+    def _chat_rows(self, saved: list[ChatSummary]) -> list[list[Any]]:
+        current = self.core.thread
+        rows = []
+        for number, chat in enumerate(saved, 1):
+            title = f"{chat.title} (open)" if chat.thread == current else chat.title
+            cost = human_money(chat.cost) if chat.cost is not None else "unknown"
+            rows.append([f"{number}", title, f"{chat.questions:,}", _fmt_dt(chat.updated), _fmt_dt(chat.started),
+                         short_model(chat.model) if chat.model else "", cost, chat.thread])
+        return rows
+
+    @_friendly_errors
+    def chats(self) -> None:
+        """
+        Your saved chats (with chats=True), the one you asked in last first: each one's title, how many questions it
+        holds, when it was last asked in, the model and what it cost, and its number to open it by:
+        open_chat(1) carries on the newest. Titles come from each chat's first question until you rename one.
+        """
+        core = self.core
+        if core.chats_file is None:
+            self._show(self._chats_off())
+            return
+        saved = core.chats()
+        if not saved:
+            self._show([_Title("Saved chats", str(core.chats_file)),
+                        _Note("No chats saved yet: each conversation is saved, with its first question as its title, "
+                              "once its first question is answered. Ask one: ask('Which Lambda failed last night?')."),
+                        _Next([("ask('Which Lambda failed last night?')", "a first question, saved as a chat")])])
+            return
+        costs = [chat.cost for chat in saved if chat.cost is not None]
+        blocks: list[Any] = [
+            _Title("Saved chats", f"{_plural(len(saved), 'chat')} · {core.chats_file}"),
+            _Cards([("Chats", f"{len(saved):,}"), ("Questions", f"{sum(c.questions for c in saved):,}"),
+                    ("Last asked", _fmt_dt(saved[0].updated)),
+                    ("Model cost (est.)", human_money(sum(costs)) if costs else "unknown")]),
+            _Table(["#", "Title", "Questions", f"Last asked ({_tz_label()})", f"Started ({_tz_label()})", "Model",
+                    "Cost (est.)", "ID"], self._chat_rows(saved), sortable=False),
+        ]
+        newest = saved[0]
+        nxt = [("open_chat(1)", f"carry on {newest.title!r}"),
+               ("rename_chat('Nightly ETL failures', chat=1)", "give it a title of your own"),
+               ("new_conversation()", "start a new chat")]
+        blocks.append(_Next(nxt))
+        self._show(blocks)
+
+    @_friendly_errors
+    def open_chat(self, chat: str | int) -> None:
+        """
+        Opens a saved chat again and shows it, question by question, so your next ask() carries it on where it left
+        off, even after the kernel restarted: open_chat(1) for the newest, or its title's words,
+        open_chat('nightly etl'). An open chat window shows it too.
+        """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then open the chat.")
+        picked = self.core.open_chat(chat)
+        if window is not None:
+            window.opened()
+        answers = [answer for answer in self.core.history if answer.thread == picked.thread]
+        blocks: list[Any] = [_Title(picked.title, f"saved chat · {_plural(picked.questions, 'question')} · last "
+                                                  f"asked {_fmt_dt(picked.updated, zone=True)}")]
+        for answer in answers:
+            blocks.append(_Title(answer.question, _fmt_dt(answer.asked) if answer.asked else ""))
+            blocks.append(_Answer(answer.text) if answer.text else
+                          _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
+            if answer.charts:
+                blocks.append(_Charts(answer.charts))
+        blocks.append(_Note("The chat is open: your next ask() follows its last question.", "ok"))
+        blocks.append(_Next([("ask('What changed since then?')", "a follow-up in this chat"),
+                             ("rename_chat('Nightly ETL failures')", "give it a title of your own"),
+                             ("chats()", "every saved chat")]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def rename_chat(self, title: str, *, chat: str | int | None = None) -> None:
+        """
+        Gives a saved chat a title of your own: the chat going on, or the one chat= names (its number in chats(), or
+        its title's words): rename_chat('Nightly ETL failures').
+        """
+        renamed = self.core.rename_chat(title, chat)
+        if self.window is not None:
+            self.window.renamed()
+        self._show([_Note(f"Renamed: the chat is now {renamed.title!r}.", "ok")])
+
+    @_friendly_errors
+    def delete_chat(self, chat: str | int) -> None:
+        """
+        Removes a saved chat from this machine (its number in chats(), or its title's words): its questions and
+        answers, and the conversation the model would carry on. Removing the chat going on starts a new one.
+        """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then delete.")
+        was_open = self.core.thread
+        removed = self.core.delete_chat(chat)
+        if window is not None and removed.thread == was_open:
+            window.cleared()
+        self._show([_Note(f"Deleted {removed.title!r} ({_plural(removed.questions, 'question')}): chats() lists the "
+                          "rest.", "ok")])
 
     def _budget_rows(self) -> list[list[str]]:
         """

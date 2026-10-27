@@ -39,6 +39,12 @@ from aws_analyzer.agent.window.model_panel import (
 from aws_analyzer.agent import (
     AgentAnalyzer,
     AgentAnswer,
+    BigRead,
+    ChatSummary,
+    answer_from_record,
+    answer_record,
+    chat_title,
+    find_chats,
     AgentView,
     Budget,
     LambdaToolkit,
@@ -3466,6 +3472,140 @@ def test_the_chat_windows_memory_panel_says_how_to_turn_memory_on(seeded):
     x.memory_button.click()
     assert not x.memory_panel.is_open
 
+
+
+def test_a_chat_is_titled_from_its_first_question():
+    from aws_analyzer.agent.chats import TITLE_CHARACTERS, UNTITLED, clean_title
+
+    assert chat_title("Which Lambda failed last night?") == "Which Lambda failed last night?"
+    assert chat_title("  Why did\n it fail?\nmore") == "Why did"
+    long = chat_title("Were the files uploaded to acme-raw last night processed by etl-nightly, and if not why not?")
+    assert long.endswith("…") and len(long) <= TITLE_CHARACTERS and long.startswith("Were the files uploaded")
+    assert chat_title("   ") == UNTITLED
+    assert clean_title("  Nightly   ETL\nfailures ") == "Nightly ETL failures"
+    with pytest.raises(ValueError, match="can't be empty"):
+        clean_title(" ")
+
+
+def test_find_chats_by_number_id_title_or_words():
+    when = datetime(2026, 10, 16, tzinfo=timezone.utc)
+    saved = [ChatSummary("aaa111", "Nightly ETL failures", when, when),
+             ChatSummary("bbb222", "Which Lambda failed last night?", when, when),
+             ChatSummary("ccc333", "Slow functions", when, when)]
+    assert find_chats(saved, 1) == [saved[0]] and find_chats(saved, "3") == [saved[2]] and find_chats(saved, 9) == []
+    assert find_chats(saved, "bbb222") == [saved[1]] and find_chats(saved, "slow FUNCTIONS") == [saved[2]]
+    assert find_chats(saved, "failed night") == [saved[1]] and find_chats(saved, "fail") == saved[:2]
+    with pytest.raises(ValueError, match="open_chat"):
+        find_chats(saved, " ")
+
+
+def test_an_answer_is_kept_and_read_back_as_it_was():
+    chart = Chart("Errors by day", "charts/errors.svg", b"<svg/>", "svg", {"mark": "bar"})
+    call = ToolCall("find_files", {"location": "s3://acme-raw/"}, summary="3 files", first="location",
+                    reads=("s3:ListObjectsV2",), result={"files": 3}, next=[("S3View().ls('acme-raw')", "the files")],
+                    asks=[BigRead("find_files", "many keys", "list on", "stop", cost=0.01, choice="go")])
+    answer = AgentAnswer("Which files arrived?", text="**3** files.", calls=[call], charts=[chart],
+                         plan=[PlanStep("list the files", "completed")],
+                         findings=[AgentFinding("warn", "One is empty.", "S3View().head('x')", "its size")],
+                         aws_calls={"s3:ListObjectsV2": 1}, model="gpt-test", cost=0.0012,
+                         rates=Rates(2.0, 8.0, "model_prices="), thread="t1",
+                         asked=datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc), exception=RuntimeError("x"))
+    back = answer_from_record(answer_record(answer))
+    assert back.exception is None and back.charts[0].data == b"<svg/>" and back.charts[0].spec == {"mark": "bar"}
+    back.exception = answer.exception
+    assert back == answer
+    with pytest.raises(ValueError):
+        answer_from_record("[]")
+
+
+def test_a_saved_chat_is_listed_and_carried_on_by_a_new_agent(seeded, tmp_path, capsys):
+    pytest.importorskip("langgraph.checkpoint.sqlite")
+    file = tmp_path / "chats.sqlite"
+    first = make(scripted(says("**etl-nightly** failed."), says("Slow: none.")), chats=file,
+                 model_prices={"gpt-test": (2.0, 8.0)})
+    first.ask("Which Lambda failed last night?", now=NOW)
+    first.new_conversation()
+    first.ask("Which functions are slow?", now=NOW + timedelta(minutes=5))
+    assert [c.title for c in first.chats()] == ["Which functions are slow?", "Which Lambda failed last night?"]
+    assert first.chats()[1].questions == 1 and first.chats()[1].cost == pytest.approx(150 * 2e-6 + 30 * 8e-6)
+
+    later = scripted(says("Because of a KeyError on customer_id."))
+    agent = make(later, chats=file)
+    view = AgentView(agent, mode="text", progress="off")
+    out = run(capsys, view.chats)
+    assert "Saved chats" in out and "2 chats" in out and "Which Lambda failed last night?" in out
+    assert "open_chat(1)" in out
+    out = run(capsys, view.open_chat, "lambda failed")
+    assert "etl-nightly" in out and "The chat is open" in out and agent.chat_title == "Which Lambda failed last night?"
+    agent.ask("Why did it fail?", now=NOW + timedelta(minutes=9))
+    sent = [str(message.content) for message in later.prompts[0]]
+    assert any("etl-nightly** failed" in text for text in sent), "the model carries on the saved conversation"
+    assert [a.question for a in agent.history] == ["Which Lambda failed last night?", "Why did it fail?"]
+    assert agent.chats()[0].title == "Which Lambda failed last night?" and agent.chats()[0].questions == 2
+
+    assert "now 'Nightly ETL failures'" in run(capsys, view.rename_chat, "Nightly ETL failures")
+    assert agent.chat_title == "Nightly ETL failures"
+    assert "conversation 1: Nightly ETL failures" in run(capsys, view.transcript)
+    out = run(capsys, view.delete_chat, "slow")
+    assert "Deleted 'Which functions are slow?'" in out and [c.title for c in agent.chats()] == ["Nightly ETL failures"]
+    assert "No saved chat matches 'slow'" in run(capsys, view.open_chat, "slow")
+    thread = agent.thread
+    agent.delete_chat(1)
+    assert agent.chats() == [] and agent.thread != thread
+    assert "No chats saved yet" in run(capsys, view.chats)
+
+
+def test_chats_are_off_unless_asked_and_say_how_to_turn_them_on(seeded, capsys):
+    view = AgentView(make(), mode="text", progress="off")
+    assert view.core.chats_file is None
+    assert "AgentView(chats=True)" in run(capsys, view.chats)
+    assert "Chats aren't saved" in run(capsys, view.open_chat, 1)
+    assert "Chats aren't saved" in run(capsys, view.rename_chat, "x")
+
+
+def test_the_chat_windows_chats_panel_opens_renames_and_deletes_chats(seeded, tmp_path):
+    pytest.importorskip("langgraph.checkpoint.sqlite")
+    file = tmp_path / "chats.sqlite"
+    earlier = make(scripted(says("etl-nightly failed.")), chats=file)
+    earlier.ask("Which Lambda failed last night?", now=NOW)
+
+    x = window(scripted(says("None are slow.")), chats=file)
+    panel = x.chats_panel
+    x.chats_button.click()
+    assert panel.is_open and "agc-on" in x.chats_button._dom_classes and not x.memory_panel.is_open
+    assert "This chat is saved once its first question is answered · 1 saved chat" in panel.head.value
+    assert panel.rename_row.layout.display == "none"
+
+    enter(x, "Which functions are slow?")
+    assert "Which functions are slow?" in x.title.value and len(panel.saved.children) == 2
+    assert "This chat: <b>Which functions are slow?</b>" in panel.head.value
+    assert "ag-open" in panel.saved.children[0].children[0].children[1].value
+
+    panel.saved.children[1].children[0].children[0].click()
+    assert x.view.core.chat_title == "Which Lambda failed last night?" and "etl-nightly failed." in page(x)
+    assert "None are slow." not in page(x)
+    assert "Opened 'Which Lambda failed last night?'" in html.unescape(x.status.value)
+
+    panel.title_box.value = "Nightly ETL"
+    panel.title_box._handle_custom_msg({"event": "submit"}, [])
+    assert "Nightly ETL" in x.title.value and "now 'Nightly ETL'" in html.unescape(x.status.value)
+
+    assert "ag-open" in panel.saved.children[1].children[0].children[1].value
+    panel.saved.children[1].children[1].click()
+    assert panel.sure == x.view.core.thread and panel.saved.children[1].children[1].description == "delete?"
+    assert len(x.view.core.chats()) == 2
+    panel.saved.children[1].children[1].click()
+    assert [c.title for c in x.view.core.chats()] == ["Which functions are slow?"]
+    assert "Deleted 'Nightly ETL'" in html.unescape(x.status.value) and "Nightly ETL" not in x.title.value
+    x.chats_button.click()
+    assert not panel.is_open
+
+
+def test_the_chat_windows_chats_panel_says_how_to_turn_chats_on(seeded):
+    x = window(scripted(says("ok")))
+    x.chats_button.click()
+    assert x.chats_panel.is_open and "AgentView(chats=True)" in x.chats_panel.head.value
+    assert x.chats_panel.saved.children == ()
 
 
 def write_runbook(folder, name, *, description="Use it when the test asks.", toolkits="", body="1. Do the thing.",

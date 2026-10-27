@@ -41,6 +41,10 @@ Quick start
     agent = AgentView(memory=True, notes="AGENTS.md")    # it keeps notes between conversations; yours from a file
     agent.memory()                                       # what it remembers about this account
     agent.forget("orders-etl")                           # clear the notes about it
+    agent = AgentView(chats=True)                        # every chat saved on this machine, with a title
+    agent.chats()                                        # your earlier chats, newest first
+    agent.open_chat(1)                                   # carry on the newest, even after a restart
+    agent.rename_chat("Nightly ETL failures")            # a title of your own for the chat going on
     agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
     agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
     agent.save_charts()                                  # those charts as files, in agent-charts/
@@ -72,6 +76,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      model's reply (its final_answer: the answer and its findings).
     memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
                      deepagents StoreBackend in a local SQLite file, secrets hidden, one set per AWS account.
+    chats.py         The saved chats (chats=True): every conversation kept with a title in a local SQLite file, its
+                     answers as JSON and LangGraph's checkpoints, so a chat opened again carries on.
     runbooks/        Step-by-step guides for common problems (runbooks=): each a folder with a SKILL.md, the
                      built-in ones beside its __init__.py (which reads them), offered to the model by name and
                      description and read whole through toolkits/runbook_tools.py's read_runbook.
@@ -91,7 +97,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      sandboxes/   The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
                                   (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
-                     (chat.py), its ⚙ model panel (model_panel.py) and its 🧠 memory panel (memory_panel.py).
+                     (chat.py), its 🗂 chats panel (chats_panel.py), ⚙ model panel (model_panel.py) and 🧠 memory panel
+                     (memory_panel.py).
 """
 
 from __future__ import annotations
@@ -129,6 +136,7 @@ from .llm import (
     model_rates,
     pick_provider,
 )
+from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
 from .prompt import asked_at, system_prompt
 from .results import hide_secrets
@@ -253,6 +261,12 @@ __all__ = [
     "stamp_notes",
     "drop_notes",
     "memory_findings",
+    "DEFAULT_CHATS",
+    "ChatSummary",
+    "chat_title",
+    "find_chats",
+    "answer_record",
+    "answer_from_record",
     "asked_at",
     "system_prompt",
     "answer_findings",
