@@ -90,8 +90,8 @@ just as well for people. The rules that matter most:
 
    With Claude Code, `/check` runs this and everything else CI runs, plus the project's own rule checks.
 6. Open a pull request, with screenshots. When it changes `src/aws_analyzer/`, its description's **Screenshots**
-   section shows each report or window it touches as a user sees it (Before and After for a change; light and dark
-   for a change to colours), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
+   section shows each report or window it touches as a user sees it (Before and After for a change; light mode
+   only, no dark-mode pictures), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
    tick "No screenshots" when nothing a user sees changed. The release notes copy them.
 7. CI runs lint and the tests on Python 3.10 to 3.14, imports each module with only boto3,
    builds the package, and builds the guide site with `--strict` when `docs/` changes.

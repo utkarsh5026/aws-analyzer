@@ -9,7 +9,7 @@ Required when the pull request changes src/aws_analyzer/ (the Screenshots check 
 Show each report or window the change touches, the way a user sees it in a notebook:
 - a new report: one screenshot of it, with the call that made it as a caption (`ui.summary("s3://demo-lake/")`)
 - a changed report: Before and After, side by side or one under the other
-- a change to colours or layout: light and dark
+- light mode only: no dark-mode screenshots needed
 `/demo <service> '<call>' --html out.html` draws any report on demo data, no AWS account needed.
 Drag the pictures in here. The release notes copy them from this section.
 -->
