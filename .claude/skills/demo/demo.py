@@ -2002,15 +2002,32 @@ def _demo_model():
                 + f"\n\nChecked {window.get('from', '?')} to {window.get('to', '?')} UTC in "
                 + ", ".join(health.get("regions") or []) + ".")
 
+    def findings(health: dict, reports: list[dict]) -> list[dict]:
+        causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        found = []
+        for row in (health.get("failed") or [])[:3]:
+            cause = causes.get(row["name"]) or {}
+            why = f"; the most common cause is {cause['kind']} ({cause['count']} times)" if cause.get("kind") else ""
+            region = f", region={row['region']!r}" if row["region"] != REGION else ""
+            call = f"LambdaView().errors({row['name']!r}, since='24h'{region})"
+            found.append({"level": "warn",
+                          "message": f"{row['name']} failed {row['errors']:,} calls in the last 24 hours "
+                                     f"({row['error_rate_pct']}% of them){why}: those runs did no work. Read each "
+                                     "cause with the lines around it, and fix the most common first.",
+                          "call": call, "shows": "its errors, grouped by cause"})
+        return found
+
     class DemoModel(BaseChatModel):
         model_name: str = "demo-model (scripted)"
+        replies: bool = False
 
         @property
         def _llm_type(self) -> str:
             return "demo"
 
         def bind_tools(self, tools, **kwargs):
-            return self
+            offered = {getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else None) for t in tools}
+            return self.model_copy(update={"replies": "final_answer" in offered})
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
             start = max(i for i, m in enumerate(messages) if m.type == "human")
@@ -2033,6 +2050,9 @@ def _demo_model():
                 reply = calls(*[("function_errors", {"function": row["name"], "since": "24h",
                                                      **({"region": row["region"]} if row["region"] != REGION else {})})
                                 for row in results[0]["failed"][:2]])
+            elif self.replies:
+                reply = calls(("final_answer", {"answer": answer(results[0], results[1:]),
+                                                "findings": findings(results[0], results[1:])}))
             else:
                 reply = AIMessage(content=answer(results[0], results[1:]), usage_metadata=usage)
             return ChatResult(generations=[ChatGeneration(message=reply)])

@@ -11,6 +11,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
+  - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
+  - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
+  - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
+
+- 🤖 **Agent: runbooks it reads when needed** ([#162](https://github.com/utkarsh5026/aws-analyzer/pull/162))
+  - Step-by-step guides for common problems; it reads one only when the question matches it, and says which.
+  - Three built in (`lambda-failing`, `s3-trigger-not-firing`, `kb-answer-wrong`); `AgentView(runbooks="~/team-runbooks")` adds yours.
+  - `runbooks()` lists them and any that didn't load; `runbooks=False` turns them off.
+
+## [0.35.0] - 2026-10-27
+
+### Added
+
 - 🤖 **Agent: asks before going past a limit** ([#156](https://github.com/utkarsh5026/aws-analyzer/pull/156))
   - A question that uses up a limit (tool calls, time, cost, Python runs, searches, charts, workspace size) asks to raise it for that question.
   - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
@@ -20,11 +34,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `AgentView(memory=True)`: it keeps dated notes like "orders-etl runs in eu-west-1" and starts from them next time.
   - `memory()` or the chat window's 🧠 memory shows them; `forget('orders-etl')`, a note's ✕ or `forget_all()` clears them.
   - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
-
-- 🤖 **Agent: runbooks it reads when needed** ([#162](https://github.com/utkarsh5026/aws-analyzer/pull/162))
-  - Step-by-step guides for common problems; it reads one only when the question matches it, and says which.
-  - Three built in (`lambda-failing`, `s3-trigger-not-firing`, `kb-answer-wrong`); `AgentView(runbooks="~/team-runbooks")` adds yours.
-  - `runbooks()` lists them and any that didn't load; `runbooks=False` turns them off.
 
 ## [0.34.0] - 2026-10-26
 
@@ -985,7 +994,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...v0.32.0

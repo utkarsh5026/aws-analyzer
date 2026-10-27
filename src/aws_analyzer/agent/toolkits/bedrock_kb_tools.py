@@ -460,6 +460,12 @@ class BedrockKBToolkit(Toolkit):
                "like a secret hidden; files in S3 are never read, only listed by name, size and date. answer_kb runs "
                "a Bedrock model in your account, billed at its price.")
 
+    def view_class(self) -> type:
+        """
+        BedrockKBView, whose commands the agent's findings can name.
+        """
+        return _kb_module().BedrockKBView
+
     @property
     def covers(self) -> str:
         return ("Amazon Bedrock Knowledge Bases: which knowledge bases exist and whether each is healthy (its data "
