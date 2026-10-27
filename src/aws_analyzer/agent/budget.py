@@ -45,6 +45,8 @@ class Budget:
         ask_keys        an S3 listing (find_files, folder_summary, save_s3_files) that goes past this many keys asks
                         the user first: go on (up to s3_keys), stop here, or skip it (with interrupt_on)
         ask_bytes       saving more than this into the workspace asks the user first (with interrupt_on)
+        memory_bytes    the most the agent's notes may hold (only with memory=): they go into every conversation's
+                        prompt, so a write past it is refused and the agent keeps the notes that matter most
 
     With interrupt_on, a log read longer than log_days asks too (go reads it all, smaller the last log_days) instead
     of being refused.
@@ -65,6 +67,7 @@ class Budget:
     kb_searches: int = 10
     ask_keys: int = 20_000
     ask_bytes: int = 10 * 1024 * 1024
+    memory_bytes: int = 8 * 1024
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:

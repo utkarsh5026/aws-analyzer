@@ -89,6 +89,7 @@ agent.ask("Which buckets are public, and what do they cost?", new=True)
 agent.ask("Which functions run close to their timeout this week?", new=True)   # a new conversation
 agent.tools()                                                  # what it can call, its model and its budget
 agent.transcript()                                             # every question and answer so far, with their cost
+agent.memory()                                                 # with memory=True: what it remembers between conversations
 ```
 
 With a Python sandbox (`AgentView(python="local")`, [below](#run-python)), it can also read your files and answer with charts: `agent.ask("Chart the orders in s3://acme-raw/sales/ by month")`, then `agent.save_charts()` for the pictures.
@@ -375,12 +376,38 @@ The chart is made with [Altair](https://altair-viz.github.io), and the sandbox d
     `answer.charts` holds them: each `Chart` has its `.title`, the workspace file it came from (`.path`), the SVG's bytes (`.data`), its `.kind` and `.mime`, and its Vega-Lite spec (`.spec`). With Altair installed in the notebook, `alt.Chart.from_dict(answer.charts[0].spec)` shows a chart again, with tooltips; `save_charts()` writes the spec beside each SVG as `.vl.json`, which the [Vega editor](https://vega.github.io/editor/) opens too. A chart that reads data from a URL is refused: its data must be in the chart, as Altair puts it. `show_chart` also takes PNG, SVG, JPEG, GIF and WebP pictures of up to 3 MB, and shows every chart as a picture, so nothing in an SVG runs. A question gets at most 8 charts: `budget={"charts": 12}` raises it. Showing the same file again replaces the chart with the new one. To draw with matplotlib instead, `LocalSandbox(packages=["pandas", "matplotlib"])`: its charts get the same colours.
 
 
+## Notes it keeps between conversations { #memory }
+
+With `memory=True`, the agent remembers what it learned about your account, so the next conversation doesn't look it up again.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", memory=True)
+agent.ask("Which Lambda failed last night?")   # it finds orders-etl in eu-west-1, and notes it
+agent.memory()                                 # what it remembers, and when it learned each note
+agent.forget("orders-etl")                     # clear the notes about it
+```
+
+When it finds a lasting fact (which region a function runs in, what a bucket is for, which bucket feeds which function, when a job runs, or something you tell it), it writes a dated line in its notes: `- orders-etl runs in eu-west-1 (learned 2026-10-27)`. The next conversation starts with them in its prompt, as facts it found rather than instructions: it uses a note to know where to look first, and when a tool says otherwise, the tool wins and it fixes the note. It never notes what changes from day to day (error counts, costs, sizes), settings' values or log lines. An answer that added a note says so under it.
+
+`memory()` lists the notes with their age, warns about notes over 90 days old (the account may have changed since), and says how full the memory is. `forget("words")` clears the notes holding those words, `forget_all()` every note about this account.
+
+Your own facts can come from a file too: `AgentView(notes="AGENTS.md")` reads it for each new conversation, so editing it changes what the next one knows. The agent never writes to it.
+
+!!! tip "Worth knowing"
+
+    The notes live in `~/.cache/aws-analyzer/agent/memory.sqlite`. On a SageMaker notebook instance only `~/SageMaker` survives a stop, so keep them there: `AgentView(memory="~/SageMaker/agent-memory.sqlite")`.
+
+??? more "Where the notes are kept, and what keeps them safe"
+
+    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it. `agent.core.memories()` returns the notes as data (`MemoryState`, with `Note(text, learned)`), and `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` work on any text. Memory is off by default; conversations themselves still last as long as the kernel.
+
 ## Safe and bounded { #safety }
 
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -406,6 +433,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
 | `kb_searches` | 10 | `search_kb`, `file_chunks` and `answer_kb` stop running |
+| `memory_bytes` | 8 KB | With `memory=True`: a note that would take its notes past it isn't kept |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -531,7 +559,7 @@ On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's 
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 
@@ -589,6 +617,8 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
 | `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |
 | `skip()` | The same, answering without it; the answer says what it didn't read |
+| `memory()` | With `memory=True`: what the agent remembers about the account, each note and when it learned it, and the notes old enough to check |
+| `forget(match)` | Clears the notes holding these words; `forget_all()` clears every note about this account |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |

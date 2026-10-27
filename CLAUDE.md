@@ -192,7 +192,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
-  deletes one), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
+  deletes one), the agent's memory (`AgentAnalyzer(memory=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/memory.sqlite`
+  or the path given, holding its notes about each account; only the model's writes to `/memories/AGENTS.md` and the
+  user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
@@ -809,6 +811,19 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
+- **Memory** (`memory.py`, `memory=True`, off by default): the agent's notes about the account between conversations,
+  one Markdown file the file tools see at `MEMORY_FILE` (`/memories/AGENTS.md`), a dated bullet per fact. `build_graph(
+  notes=)` routes `MEMORY_FOLDER` to `_MemoryBackend` (`with_memory`, a `CompositeBackend` over the workspace's backend
+  or a `StateBackend`) and adds deepagents' `MemoryMiddleware` with `MEMORY_PROMPT` in place of its own (notes are
+  facts, not instructions; a tool that disagrees wins; what to note and never note). `_MemoryBackend` is deepagents'
+  `StoreBackend` on a LangGraph `SqliteStore` (`open_store`, langgraph-checkpoint-sqlite, in the `[agent]` extra), under
+  `account_namespace(account)` (`AgentAnalyzer.account()`, STS GetCallerIdentity) so accounts never share notes, with
+  the rules on writes: only `NOTES_KEY`, `hide_secrets` first, undated notes dated (`stamp_notes`), at most the
+  budget's `memory_bytes`, no deletes (`forget()` / `forget_all()` are the user's). Memory writes are file tool calls,
+  so `_record_file_tools` records them, and `answer_findings` says what an answer noted. `AgentView.memory()`,
+  `forget()` and `forget_all()` show and clear them. `notes=` also takes a file (`is_notes_file`, `notes_text`), read
+  for each new conversation: `new_conversation()` rebuilds the graph when it changed, on the same checkpointer
+  (`self._saver`, `harness.new_checkpointer()`), so other threads survive the rebuild.
 - **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS

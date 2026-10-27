@@ -38,6 +38,9 @@ Quick start
     agent.new_conversation()                             # forget it
     agent.tools()                                        # what it can call, its model and its budget
     agent.transcript()                                   # every question and answer so far, with their cost
+    agent = AgentView(memory=True, notes="AGENTS.md")    # it keeps notes between conversations; yours from a file
+    agent.memory()                                       # what it remembers about this account
+    agent.forget("orders-etl")                           # clear the notes about it
     agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
     agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
     agent.save_charts()                                  # those charts as files, in agent-charts/
@@ -66,6 +69,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
     harness.py       The agent loop: deepagents built once, and one question streamed through it.
+    memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
+                     deepagents StoreBackend in a local SQLite file, secrets hidden, one set per AWS account.
     answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
                      does, told as it happens) and BigRead (what a tool asks before a big read), and the pure findings
                      and next steps a report shows about them.
@@ -113,6 +118,7 @@ from .llm import (
     model_rates,
     pick_provider,
 )
+from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
 from .prompt import asked_at, system_prompt
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
@@ -216,6 +222,13 @@ __all__ = [
     "pick_provider",
     "model_rates",
     "hide_secrets",
+    "DEFAULT_MEMORY",
+    "MemoryState",
+    "Note",
+    "parse_notes",
+    "stamp_notes",
+    "drop_notes",
+    "memory_findings",
     "asked_at",
     "system_prompt",
     "answer_findings",

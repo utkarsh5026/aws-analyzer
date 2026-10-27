@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: remembers your account between conversations**
+  - `AgentView(memory=True)`: it keeps dated notes like "orders-etl runs in eu-west-1" and starts from them next time.
+  - `memory()` shows them, `forget('orders-etl')` and `forget_all()` clear them; one set per AWS account.
+  - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
+
 ## [0.34.0] - 2026-10-26
 
 ### Added
