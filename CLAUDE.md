@@ -1145,7 +1145,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `.claude/skills/release/SKILL.md` step 3. Tests, CI, refactors and docs edits get none.
 - **Every pull request that changes `src/aws_analyzer/` shows screenshots** of what a user sees, in its description's
   `## Screenshots` section (`.github/pull_request_template.md`): each report or window it touches, Before and After
-  for a change, light and dark for a change to colours or layout, each captioned with the call that drew it. The
+  for a change, in light mode only (no dark-mode pictures), each captioned with the call that drew it. The
   Screenshots workflow (`.github/scripts/check_screenshots.py`) fails a pull request without a picture there,
   unless "No screenshots: nothing a user sees changed" is ticked (tests, CI, refactors; release and Dependabot
   branches are exempt), and `release.py notes` copies them into the GitHub release. Draw a report on demo data with

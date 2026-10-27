@@ -147,9 +147,13 @@ class Toolkit:
     @property
     def budget(self) -> Budget:
         """
-        The agent's budget per question (the defaults before it's bound).
+        The budget of the question being answered (the agent's, with any limit the user raised for it), else the
+        agent's budget per question (the defaults before it's bound).
         """
-        return self.agent.budget if self.agent is not None else Budget()
+        if self.agent is None:
+            return Budget()
+        run = self.agent._run
+        return run.budget if run is not None else self.agent.budget
 
     def regions(self, which: Any = None) -> list[str]:
         """

@@ -197,11 +197,17 @@ writes a short plan first and ticks it off as it works (answer.plan, a checklist
 plan=False leaves the plan out, which saves its instructions' tokens on every model call.
 
     Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
-    log read longer than log_days, a save into the workspace past ask_bytes) the agent pauses and asks: ask() returns
-    the answer with .waiting set (each call's .waiting says what it would read), and resume('go' | 'smaller' |
-    'skip') goes on. interrupt_on= picks the tools that ask: True (the default) for every one that can, a list of
-    tool names, or False to never ask (listings stop at s3_keys and long log reads are refused, as before). It's
-    about time and cost: the agent only reads, whichever you pick.
+    log read longer than log_days, a save into the workspace past ask_bytes, or a save that finds more files than
+    the model asked for) the agent pauses and asks: ask() returns the answer with .waiting set (each call's .waiting
+    says what it would read), and resume('go' | 'smaller' | 'skip') goes on. interrupt_on= picks the tools that ask:
+    True (the default) for every one that can, a list of tool names, or False to never ask (listings stop at s3_keys
+    and long log reads are refused, as before). It's about time and cost: the agent only reads, whichever you pick.
+
+    Used-up limits: when a question runs out of a limit of its budget (tool calls, time, model cost, Python runs,
+    knowledge base searches, charts, the workspace's size), the tool that hit it pauses the same way and asks
+    whether to raise it: go raises it for this question (twice as much, or what the save needs) and the agent goes
+    on; smaller or skip has it answer with what it found. ask_more=False never asks (the limit stops the agent, as
+    before); by default it asks whenever interrupt_on asks about anything.
 
     Its only list prices are Amazon Bedrock's (_bedrock's MODEL_PRICES): the other providers' depend on the plan or
     the deployment (see model_prices=). `provider` and `model_id` are the provider and model it was given or worked
@@ -241,6 +247,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         python: Workspace | None = None,
         plan: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
+        ask_more: bool | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -269,6 +276,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
              "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
              "python": {"workspace": workspace}})]
         self.interrupt_on = _interrupting(interrupt_on, self.toolkits)
+        self.ask_more = bool(self.interrupt_on) if ask_more is None else bool(ask_more)
         self._graph: Any = None
         self._run: _Run | None = None
         self._paused: _Paused | None = None
@@ -504,7 +512,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
             self._prompt_notes = notes_text(self.notes)
             prompt = self.instructions()
             workspace = self.workspace
-            backend = workspace_backend(workspace, lambda: self.budget) if workspace is not None else None
+            backend = workspace_backend(workspace, lambda: self._current_run().budget) if workspace is not None else None
             if self._saver is None:
                 self._saver = harness.new_checkpointer()
             self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
@@ -650,7 +658,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
                         "or resume('skip') first, or ask(..., new=True) to drop that question.")
         graph = self._harness()
         moment = now or _utcnow()
-        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step)
+        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more)
         answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
                              asked=moment)
         self._guard.reset()

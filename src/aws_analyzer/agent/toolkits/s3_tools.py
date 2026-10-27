@@ -45,7 +45,7 @@ from ..budget import Budget
 from ..results import _iso, _plain, _window, _with_permissions, hide_secrets
 from .base import Toolkit
 from .s3_listing import _AsksFirst, listing_read
-from .s3_saving import DEFAULT_FILES, MOST_FILES, SAVE_READS, plan_saves, read_files, summarize_saved
+from .s3_saving import DEFAULT_FILES, SAVE_READS, read_files, summarize_saved
 from .lambda_tools import _lambda_module
 
 if TYPE_CHECKING:
@@ -1333,8 +1333,9 @@ S3 and Lambda together
         one file ('s3://bucket/report.pdf') or every file under a location that matches. A PDF's, Word file's or
         PowerPoint file's text is saved beside it as <key>.txt. match: a glob on the file name, or on the whole key
         when it has a '/' ('*.pdf'). since/until: only files last written in that window, as ISO UTC times or
-        relative ('7d'). max_files: at most this many (up to 500), in key order. Call find_files first to see how
-        many files there are and how big.
+        relative ('7d'). max_files: at most this many, in key order; when more match, the user is asked whether
+        to copy them all, so pick the number the question needs rather than a guess. Call find_files first to see
+        how many files there are and how big.
         """
         python = self.peer("python")
         if python is None:
@@ -1346,9 +1347,8 @@ S3 and Lambda together
         found, scanned, more = self._matching("save_s3_files", location, keep)
         exact = [obj for obj in found if obj.key == prefix]
         room = self.budget.workspace_bytes - sum(f.size for f in python.workspace.files())
-        wanted = max(1, min(int(max_files or DEFAULT_FILES), MOST_FILES))
-        plan = plan_saves(exact or found, room=room, max_files=wanted)
-        plan = self._confirm_save(plan, exact or found, s3.s3_uri(bucket, prefix), room=room, max_files=wanted,
+        wanted = max(1, min(int(max_files or DEFAULT_FILES), self.budget.save_files))
+        plan = self._confirm_save(exact or found, s3.s3_uri(bucket, prefix), room=room, max_files=wanted,
                                   price=S3_REQUEST_PRICES["get"])
         read = read_files(self.analyzer, s3, plan.chosen)
         saved = python.save(f"s3/{bucket}", {**read.files, **read.texts}) if read.files else {

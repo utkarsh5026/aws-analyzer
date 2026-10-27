@@ -2087,7 +2087,7 @@ deepagents' file tools, below):
 | Tool                                         | What it returns                                                                                                                         |
 | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
 | `save_function_code(function, files, region)` | Saves the function's own source files (or `files=` globs, the libraries packed with it too) into the workspace, under `lambda/<function>/`. Secrets files (`.env`, keys) are never saved |
-| `save_s3_files(location, match, since, until, max_files)` | Copies one file, or the files under a location that match, into the workspace under `s3/<bucket>/<key>` (50 by default, up to 500). A PDF's, Word file's or PowerPoint file's text is saved beside it as `<key>.txt`; files in Glacier are skipped until they're restored |
+| `save_s3_files(location, match, since, until, max_files)` | Copies one file, or the files under a location that match, into the workspace under `s3/<bucket>/<key>` (50 by default; when more match it asks whether to copy them all, up to `save_files`). A PDF's, Word file's or PowerPoint file's text is saved beside it as `<key>.txt`; files in Glacier are skipped until they're restored |
 | `save_logs(function, since, until, search, region)` | Saves a window of a function's logs as `lines.jsonl` (each line) and `runs.jsonl` (each run: status, run time, memory, cold start, error), with anything that looks like a secret hidden |
 | `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
 | `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
@@ -2202,15 +2202,18 @@ long as the kernel.
 - **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
   model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
-  Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
-  `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
+  When a question uses up a limit, the agent stops and asks whether to raise it for that question (twice as much, or
+  what a save needs): **go** and it carries on, **smaller** or **skip** and it answers with what it has, and the report
+  says what was cut short (`ask_more=False`: it never asks).
+  `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them for every question. With `read_files=True`, a
   file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
-  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`) and 8
-  charts in an answer (`charts`). With the `bedrock_kb` toolkit, 10 knowledge base searches (`kb_searches`).
+  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`), 500
+  files per `save_s3_files` call (`save_files`) and 8 charts in an answer (`charts`). With the `bedrock_kb` toolkit, 10 knowledge base searches (`kb_searches`).
 - **Big reads ask first.** Before an S3 listing goes past 20,000 keys (`ask_keys`), a log read runs longer than
-  `log_days`, or a save into the workspace passes 10 MB (`ask_bytes`), the agent stops and asks: **go** (all of it,
-  with the requests it takes and what they cost), **smaller** (the keys listed so far, the last days of logs, the files
-  that fit) or **skip**. The chat window shows three buttons; after `ask()`, run `go()`, `smaller()` or `skip()`.
+  `log_days`, a save into the workspace passes 10 MB (`ask_bytes`), or a save finds more files than the model asked
+  for (`max_files`, 50 by default), the agent stops and asks: **go** (all of it, with the requests it takes and what
+  they cost), **smaller** (the keys listed so far, the last days of logs, the files that fit or that it asked for) or
+  **skip**. The chat window shows three buttons; after `ask()`, run `go()`, `smaller()` or `skip()`.
   It's about time and cost: the agent only reads either way. `interrupt_on=` picks the tools that ask (`False`: none,
   and long reads stop at the budget as before).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the

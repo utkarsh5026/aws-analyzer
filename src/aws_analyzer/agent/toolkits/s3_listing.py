@@ -1,7 +1,8 @@
 """
 How the S3 toolkit asks the user before a big read (interrupt_on): a listing that goes past the budget's ask_keys
 (KeyListing, which find_files, folder_summary and save_s3_files read their keys through, and listing_read, what it
-asks) and a save into the workspace past ask_bytes (save_read). Each BigRead says what each choice reads and what its
+asks), a save that finds more files than the model asked for (count_read) and a save into the workspace past
+ask_bytes (save_read). Each BigRead says what each choice reads and what its
 requests cost, at the list price it's given (USD per 1,000 requests). The functions are pure; _AsksFirst is the part
 of the S3 toolkit that lists through a KeyListing and asks before a save.
 """
@@ -57,6 +58,28 @@ def save_read(uri: str, *, files: int, size: int, smaller_files: int, smaller_si
                         f"the workspace, more than {human_size(limit)}.",
                    go=f"copy all {_plural(files, 'file')} ({human_size(size)}, {human_money(cost)} in requests)",
                    smaller=smaller, cost=cost)
+
+
+def count_read(uri: str, *, asked: int, files: int, size: int, most: int, found: int,  # noqa: PLR0913
+               price: float) -> BigRead:
+    """
+    What save_s3_files asks when more of the files under `uri` can be copied than the `asked` the model asked for:
+    Go copies `files` (`size` bytes; fewer than `found` when the budget's save_files, `most`, or the workspace stops
+    it), Smaller the first `asked` in key order. `price` is USD per 1,000 GET requests.
+    """
+    cost = files * price / _REQUESTS_PER_PRICE
+    if files == found:
+        go = f"copy all {_plural(files, 'file')} ({human_size(size)}, {human_money(cost)} in requests)"
+    elif files == most:
+        go = (f"copy {_plural(files, 'file')} ({human_size(size)}, {human_money(cost)} in requests), the most one "
+              "save takes (the budget's save_files)")
+    else:
+        go = (f"copy the {_plural(files, 'file')} that fit in the workspace ({human_size(size)}, "
+              f"{human_money(cost)} in requests)")
+    return BigRead("save_s3_files",
+                   what=f"save_s3_files found {_plural(found, 'file')} under {uri} to copy; it was asked for "
+                        f"{asked:,}.",
+                   go=go, smaller=f"copy the first {asked:,} in key order", cost=cost)
 
 
 class KeyListing:
@@ -123,16 +146,43 @@ class _AsksFirst:
         return KeyListing(keys, ask_at=ask_at, limit=budget.s3_keys,
                           stop_here=lambda: self._stop_listing(tool, location))
 
-    def _confirm_save(self, plan: SavePlan, files: list[ObjectInfo], uri: str, *, room: int,  # noqa: PLR0913
-                      max_files: int, price: float) -> SavePlan:
+    def _confirm_save(self, files: list[ObjectInfo], uri: str, *, room: int, max_files: int,
+                      price: float) -> SavePlan:
         """
-        The save to make: `plan` when it's no more than the budget's ask_bytes, else what the user picks: all of it,
-        or the files that fit in ask_bytes. `price` is USD per 1,000 GET requests.
+        The save to make of `files`: the first `max_files` that fit in `room`, unless the user picks more of them
+        (_confirm_count) or fewer bytes (_confirm_size). `price` is USD per 1,000 GET requests.
+        """
+        plan = self._confirm_count(files, uri, room=room, max_files=max_files, price=price)
+        return self._confirm_size(plan, files, uri, room=room, price=price)
+
+    def _confirm_count(self, files: list[ObjectInfo], uri: str, *, room: int, max_files: int,
+                       price: float) -> SavePlan:
+        """
+        The first `max_files` of `files` that fit in `room`, or, when more could be copied and the user picks Go,
+        as many as fit, up to the budget's save_files.
+        """
+        plan = plan_saves(files, room=room, max_files=max_files)
+        most = self.budget.save_files
+        if max_files >= most or not self.will_ask("save_s3_files"):
+            return plan
+        everything = plan_saves(files, room=room, max_files=most)
+        if len(everything.chosen) <= len(plan.chosen):
+            return plan
+        copyable = len(plan_saves(files, room=sum(f.size for f in files), max_files=len(files)).chosen)
+        read = count_read(uri, asked=max_files, files=len(everything.chosen), size=everything.size, most=most,
+                          found=copyable, price=price)
+        return everything if self.ask_user(read) == "go" else plan
+
+    def _confirm_size(self, plan: SavePlan, files: list[ObjectInfo], uri: str, *, room: int,
+                      price: float) -> SavePlan:
+        """
+        `plan` when it's no more than the budget's ask_bytes, else what the user picks: all of it, or the files that
+        fit in ask_bytes.
         """
         limit = self.budget.ask_bytes
         if plan.size <= limit or not self.will_ask("save_s3_files"):
             return plan
-        smaller = plan_saves(files, room=min(room, limit), max_files=max_files,
+        smaller = plan_saves(files, room=min(room, limit), max_files=len(plan.chosen),
                              past_room=f"past the {human_size(limit)} you picked")
         read = save_read(uri, files=len(plan.chosen), size=plan.size, smaller_files=len(smaller.chosen),
                          smaller_size=smaller.size, limit=limit, price=price)
