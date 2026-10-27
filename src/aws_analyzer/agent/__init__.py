@@ -102,6 +102,7 @@ from .answers import (
     answer_next,
     checked_call,
     choice_of,
+    limit_read,
     parse_plan,
     parse_reply,
     reply_findings,
@@ -170,7 +171,7 @@ from .toolkits.lambda_tools import (
 from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
 from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
-from .toolkits.s3_listing import listing_read, save_read
+from .toolkits.s3_listing import count_read, listing_read, save_read
 from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 
@@ -186,6 +187,7 @@ __all__ = [
     "BigRead",
     "CHOICES",
     "choice_of",
+    "limit_read",
     "Budget",
     "ReadOnlyError",
     "READ_PREFIXES",
@@ -255,6 +257,7 @@ __all__ = [
     "summarize_prefix",
     "summarize_file",
     "summarize_preview",
+    "count_read",
     "listing_read",
     "save_read",
     "count_arrivals",

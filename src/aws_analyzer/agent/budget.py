@@ -1,8 +1,9 @@
 """
 How far one question may go (Budget), and the state of the question being answered (_Run): its tool calls, what
 the model has cost so far, the stop button, and the clock, which stops while it waits for the user's choice on a big
-read. check_budget() is what every tool asks before it runs, and
-_REFUSED is what the table of tool calls says about a call that wasn't run.
+read. check_budget() is what every tool asks before it runs, _REFUSED is what the table of tool calls says about a
+call that wasn't run, and _LIMITS are the refusals the user can lift by raising a limit for the question
+(raised_limit, pure: twice as much, or what's needed).
 """
 
 from __future__ import annotations
@@ -10,10 +11,10 @@ from __future__ import annotations
 import difflib
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable
 
-from .._kit.fmt import _duration, _plural, human_money
+from .._kit.fmt import _duration, _plural, human_money, human_size
 
 if TYPE_CHECKING:
     from .answers import AgentStep, PlanStep, ToolCall
@@ -40,11 +41,15 @@ class Budget:
         python_runs     run_python calls per question (only with a Python workspace)
         python_seconds  the longest one run_python call may take
         workspace_bytes the most the tools may save into the workspace, in all
+        save_files      the most files one save_s3_files call may copy (only with a Python workspace)
         charts          the most charts show_chart may put in one answer (only with a Python workspace)
         kb_searches     search_kb, file_chunks and answer_kb calls per question (only with the Bedrock knowledge base toolkit)
         ask_keys        an S3 listing (find_files, folder_summary, save_s3_files) that goes past this many keys asks
                         the user first: go on (up to s3_keys), stop here, or skip it (with interrupt_on)
         ask_bytes       saving more than this into the workspace asks the user first (with interrupt_on)
+
+    With interrupt_on, a save_s3_files call that finds more files than the model asked for (its max_files) asks too:
+    go copies them all, up to save_files, smaller the ones it asked for.
 
     With interrupt_on, a log read longer than log_days asks too (go reads it all, smaller the last log_days) instead
     of being refused.
@@ -61,6 +66,7 @@ class Budget:
     python_runs: int = 10
     python_seconds: float = 30.0
     workspace_bytes: int = 50 * 1024 * 1024
+    save_files: int = 500
     charts: int = 8
     kb_searches: int = 10
     ask_keys: int = 20_000
@@ -100,6 +106,10 @@ class _Run:
         plan          the plan the model last wrote (write_todos), which the answer keeps
         paused_at     when it paused for the user's choice on a big read (time.monotonic), or None: the wait doesn't
                       count against the time budget
+        ask_more      a tool that runs out of a limit asks the user whether to raise it (AgentAnalyzer's ask_more)
+
+    `budget` starts as the agent's and is replaced (never changed) when the user raises a limit, so a raise lasts
+    for this question only.
     """
 
     budget: Budget
@@ -114,6 +124,7 @@ class _Run:
     charts: list[Chart] = field(default_factory=list)
     plan: list[PlanStep] = field(default_factory=list)
     paused_at: float | None = None
+    ask_more: bool = False
 
     @property
     def elapsed(self) -> float:
@@ -152,6 +163,15 @@ class _Run:
         if self.listener is not None:
             self.listener(step)
 
+    def raise_limit(self, name: str, value: float) -> None:
+        """
+        Raises the budget's `name` to `value` for this question (never lowers it: side-by-side calls may each raise
+        the same limit).
+        """
+        with self.lock:
+            if getattr(self.budget, name) < value:
+                self.budget = replace(self.budget, **{name: value})
+
     def read_metrics(self, count: int, price: float) -> None:
         """
         Counts `count` CloudWatch metrics a tool requested, at `price` USD per 1,000.
@@ -163,12 +183,13 @@ class _Run:
 
 class _Refused(Exception):
     """
-    A tool that won't run: the budget is used up, or the window is too long. Carries what to tell the model.
+    A tool that won't run: the budget is used up, or the window is too long. Carries what to tell the model, and
+    for a limit the user can raise, how much it needs (`needed`, in the limit's unit) when twice as much may not do.
     """
 
-    def __init__(self, reason: str, message: str, **extra: Any):
+    def __init__(self, reason: str, message: str, *, needed: float | None = None, **extra: Any):
         super().__init__(message)
-        self.reason, self.message, self.extra = reason, message, extra
+        self.reason, self.message, self.extra, self.needed = reason, message, extra, needed
 
 
 _REFUSED = {
@@ -182,7 +203,46 @@ _REFUSED = {
     "charts": "not shown: the answer has as many charts as the budget allows",
     "kb_searches": "not run: the budget of knowledge base searches was used up",
     "skipped": "not run: you skipped it",
+    "raised": "not run yet: you raised the limit, so the agent calls it again",
 }
+
+
+@dataclass(frozen=True)
+class _Limit:
+    """
+    A limit of the budget the user can raise when a tool runs out of it: the Budget field, what it limits, and how
+    an amount of it reads ('50 tool calls').
+    """
+
+    field: str
+    what: str
+    shown: Callable[[float], str]
+
+
+_LIMITS = {
+    "tool_calls": _Limit("tool_calls", "tool calls per question", lambda n: _plural(int(n), "tool call")),
+    "time": _Limit("seconds", "time per question", _duration),
+    "cost": _Limit("usd", "model cost per question", human_money),
+    "python_runs": _Limit("python_runs", "Python runs per question", lambda n: _plural(int(n), "Python run")),
+    "kb_searches": _Limit("kb_searches", "knowledge base searches per question",
+                          lambda n: f"{int(n):,} knowledge base search{'' if n == 1 else 'es'}"),
+    "charts": _Limit("charts", "charts per answer", lambda n: _plural(int(n), "chart")),
+    "workspace": _Limit("workspace_bytes", "the workspace's size", lambda n: human_size(int(n))),
+}
+
+
+def raised_limit(budget: Budget, reason: str, *, needed: float | None = None) -> tuple[_Limit, float, float] | None:
+    """
+    (the limit, its value now, what Go raises it to) for a refusal the user can lift by raising a limit: twice as
+    much, or `needed` when that's more. None for any other refusal ('stopped', 'log_window', ...).
+    """
+    limit = _LIMITS.get(reason)
+    if limit is None:
+        return None
+    now = getattr(budget, limit.field)
+    if now is None:
+        return None
+    return limit, now, max(now * 2, needed or 0)
 
 
 def check_budget(run: _Run, used: int) -> None:
