@@ -1380,6 +1380,8 @@ def test_a_used_up_limit_asks_to_raise_it_for_the_question(seeded):
     assert asked.what == ("This question has used its 1 tool call (tool calls per question), so function_errors "
                           "can't run.")
     assert asked.go == "raise it to 2 tool calls for this question and go on"
+    view = AgentView(core, mode="text", progress="off")
+    assert "It stopped at a limit of its budget" in view._render_text(view._waiting_blocks(core._paused.answer), 50)
     answer = core.resume("go")
     assert answer.text == "etl-nightly failed with a KeyError." and answer.stopped is None
     assert [(c.name, c.refused) for c in answer.calls] == [("function_health", None), ("function_errors", "raised"),

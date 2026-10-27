@@ -387,14 +387,20 @@ class AgentView(_BaseView):
 
     def _waiting_blocks(self, answer: AgentAnswer) -> list[Any]:
         """
-        A question paused before a big read: what it would read, the plan so far, and the three choices to run.
+        A question paused before a big read, or at a used-up limit of its budget: what it would read (or which limit
+        it reached), the plan so far, and the three choices to run.
         """
         call = answer.waiting[0]
         read = call.waiting
+        if read.limit:
+            finding = (f"It stopped at a limit of its budget: {read.what} Pick go() to raise it for this question, "
+                       "or smaller() or skip() to have it answer with what it found.")
+        else:
+            finding = (f"It stopped to ask before a big read: {read.what} Pick go(), smaller() or skip(); the agent "
+                       "only reads, whichever you pick.")
         blocks: list[Any] = [
             _Title(answer.question, f"waiting for you · {self._answer_line(answer)}"),
-            _Findings([("warn", f"It stopped to ask before a big read: {read.what} Pick go(), smaller() or skip(); "
-                                "the agent only reads, whichever you pick.")]),
+            _Findings([("warn", finding)]),
         ]
         if answer.plan:
             blocks.append(_Plan(answer.plan))
