@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-27
+
 ### Added
 
 - 🤖 **Agent: asks before going past a limit** ([#156](https://github.com/utkarsh5026/aws-analyzer/pull/156))
@@ -985,7 +987,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...v0.32.0
