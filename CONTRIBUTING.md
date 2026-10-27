@@ -38,6 +38,12 @@ version each has), and `make install-env` installs this checkout into the ones y
 extras, and whether to add a Jupyter kernel for one that has none. `make install-env ARGS="--env pytorch_p310
 --extras all --kernel --yes"` does the same without questions.
 
+`make clean` removes what these tasks built in the checkout (`.local-check/`, `dist/`, `build/`, `site/`, the test and
+lint caches and `__pycache__/` folders); `make clean ARGS="--all"` also removes the sandbox's Pyodide files from
+`~/.cache/aws-analyzer`, and `ARGS="--dry-run"` says what it would remove, and how much, without removing it. It
+never uninstalls from the environments `install-env` installed into, or deletes files saved beside your notebooks: it
+prints how to do those yourself.
+
 ## How the code is laid out
 
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads

@@ -83,6 +83,8 @@ make local                                     # the wheel in a fresh venv (.loc
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
 make local-agent                               # the same for the agent: a Python 3.11+, the wheel with [all], the
                                                # sandbox's Pyodide files, and the agent's demo question
+make clean                                     # what the tasks built in the checkout; ARGS="--all" also the
+                                               # sandbox's ~/.cache/aws-analyzer, ARGS="--dry-run" only says
 make envs                                      # the Python environments here (sagemaker_env's environments())
 make install-env                               # this checkout into ones you pick, asked in the terminal (or --env,
                                                # --extras, --kernel, --yes): pip in each, a Jupyter kernel if asked

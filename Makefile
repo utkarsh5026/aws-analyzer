@@ -9,6 +9,7 @@
 #   make envs                                the Python environments on this machine (a SageMaker notebook's conda ones)
 #   make install-env                         install this checkout into ones you pick: it asks which, and what with
 #   make install-env ARGS="--env pytorch_p310 --extras all --kernel --yes"   ... without questions
+#   make clean ARGS="--all --dry-run"        what clean --all would remove (the build folders and ~/.cache/aws-analyzer)
 #
 # make help lists every task. PYTHON is the checkout's .venv when there is one, else python3.
 
