@@ -184,6 +184,18 @@ def drop_notes(text: str, match: str) -> tuple[str, list[Note]]:
     return (kept_text + "\n" if kept_text and text.endswith("\n") else kept_text), dropped
 
 
+def remove_note(text: str, note: Note) -> tuple[str, bool]:
+    """
+    The memory file without its first line holding exactly this note, and whether there was one.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if parse_notes(line) == [note]:
+            kept = "\n".join(lines[:i] + lines[i + 1:])
+            return (kept + "\n" if kept and text.endswith("\n") else kept), True
+    return text, False
+
+
 def memory_findings(state: MemoryState, today: date) -> list[tuple[str, str]]:
     """
     What to do about the agent's notes: the ones old enough to check, and a memory that's nearly full, each with

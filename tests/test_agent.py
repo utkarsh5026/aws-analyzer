@@ -3178,3 +3178,56 @@ def test_notes_from_a_file_are_read_again_for_a_new_conversation(seeded, tmp_pat
     assert "Your notes" in run(capsys, AgentView(agent, mode="text", progress="off").memory)
     with pytest.raises(_Hint, match="isn't there"):
         make(notes=tmp_path / "missing.md").instructions()
+
+
+def test_the_chat_window_shows_and_clears_the_agents_notes(seeded, tmp_path):
+    pytest.importorskip("langgraph.store.sqlite")
+    from datetime import date
+
+    from aws_analyzer.agent.memory import remove_note
+
+    model = scripted(
+        calls(("write_file", {"file_path": "/memories/AGENTS.md", "content":
+                              "- eu-fn runs in eu-west-1 (learned 2026-05-01)\n- acme-raw feeds etl-nightly\n"})),
+        says("Noted."),
+    )
+    notes_file = tmp_path / "AGENTS.md"
+    notes_file.write_text("- etl-nightly runs at 02:00 IST\n")
+    x = window(model, memory=tmp_path / "memory.sqlite", notes=notes_file)
+    core, panel = x.view.core, x.memory_panel
+    core._today = lambda: date(2026, 10, 16)
+    x.memory_button.click()
+    assert panel.is_open and "agc-on" in x.memory_button._dom_classes and not x.panel.is_open
+    assert "Nothing noted yet" in panel.head.value and panel.notes.children == ()
+    assert "read for each new conversation" in panel.file_line.value
+    x.model_button.click()
+    assert x.panel.is_open and not panel.is_open and "agc-on" not in x.memory_button._dom_classes
+    x.memory_button.click()
+
+    enter(x, "Where is eu-fn?")
+    lines = [row.children[0].value for row in panel.notes.children]
+    assert "eu-fn runs in eu-west-1" in lines[0] and "168d ago" in lines[0] and "ag-nd warn" in lines[0]
+    assert "acme-raw feeds etl-nightly" in lines[1] and "today" in lines[1]
+    assert "2 notes" in panel.head.value and "account 123456789012" in panel.head.value
+    assert "1 note over 90 days old: check it" in panel.head.value
+
+    panel.notes.children[0].children[1].click()
+    assert [n.text for n in core.memories().notes] == ["acme-raw feeds etl-nightly"]
+    assert "Forgotten: eu-fn runs in eu-west-1" in x.status.value and len(panel.notes.children) == 1
+    panel.forget_all_button.click()
+    assert panel.sure and panel.forget_all_button.description == "click again to forget 1 note"
+    assert core.memories().notes
+    panel.forget_all_button.click()
+    assert core.memories().notes == [] and "Forgot 1 note about account 123456789012" in x.status.value
+    assert "Nothing noted yet" in panel.head.value and panel.forget_all_button.layout.display == "none"
+
+    assert remove_note("- a\n- b\n", Note("b")) == ("- a\n", True) and remove_note("- a", Note("c"))[1] is False
+
+
+def test_the_chat_windows_memory_panel_says_how_to_turn_memory_on(seeded):
+    x = window(scripted(says("ok")))
+    x.memory_button.click()
+    assert x.memory_panel.is_open and "AgentView(memory=True)" in x.memory_panel.head.value
+    assert x.memory_panel.forget_all_button.layout.display == "none" and x.memory_panel.file_line.value == ""
+    x.memory_button.click()
+    assert not x.memory_panel.is_open

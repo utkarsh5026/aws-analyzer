@@ -37,6 +37,7 @@ from .memory import (
     notes_text,
     open_store,
     parse_notes,
+    remove_note,
 )
 from .llm import (
     AZURE_API_VERSION,
@@ -573,6 +574,16 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         if dropped:
             notes.keep(kept)
         return dropped
+
+    def forget_note(self, note: Note) -> bool:
+        """
+        Clears one note, exactly as memories() returned it (the chat window's ✕), and says whether it was there.
+        """
+        notes = self._memory_or_hint()
+        kept, removed = remove_note(notes.notes_text(), note)
+        if removed:
+            notes.keep(kept)
+        return removed
 
     def forget_all(self) -> int:
         """

@@ -390,7 +390,7 @@ agent.forget("orders-etl")                     # clear the notes about it
 
 When it finds a lasting fact (which region a function runs in, what a bucket is for, which bucket feeds which function, when a job runs, or something you tell it), it writes a dated line in its notes: `- orders-etl runs in eu-west-1 (learned 2026-10-27)`. The next conversation starts with them in its prompt, as facts it found rather than instructions: it uses a note to know where to look first, and when a tool says otherwise, the tool wins and it fixes the note. It never notes what changes from day to day (error counts, costs, sizes), settings' values or log lines. An answer that added a note says so under it.
 
-`memory()` lists the notes with their age, warns about notes over 90 days old (the account may have changed since), and says how full the memory is. `forget("words")` clears the notes holding those words, `forget_all()` every note about this account.
+In the [chat window](#chat), **🧠 memory** opens the notes under its head, each with when it was learned and a ✕ that forgets it (old ones are marked; **forget all** asks for a second click). `memory()` lists the notes with their age, warns about notes over 90 days old (the account may have changed since), and says how full the memory is. `forget("words")` clears the notes holding those words, `forget_all()` every note about this account.
 
 Your own facts can come from a file too: `AgentView(notes="AGENTS.md")` reads it for each new conversation, so editing it changes what the next one knows. The agent never writes to it.
 
@@ -611,7 +611,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
-| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; ⚙ model picks the model |
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
 | `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |

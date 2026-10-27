@@ -821,7 +821,9 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   the rules on writes: only `NOTES_KEY`, `hide_secrets` first, undated notes dated (`stamp_notes`), at most the
   budget's `memory_bytes`, no deletes (`forget()` / `forget_all()` are the user's). Memory writes are file tool calls,
   so `_record_file_tools` records them, and `answer_findings` says what an answer noted. `AgentView.memory()`,
-  `forget()` and `forget_all()` show and clear them. `notes=` also takes a file (`is_notes_file`, `notes_text`), read
+  `forget()` and `forget_all()` show and clear them, and so does the chat window's **🧠 memory**
+  (`window/memory_panel.py`, `_MemoryPanel`: a line per note with a ✕, `forget_note()` through `remove_note`, forget
+  all on a second click, redrawn after each answer while open; `_AgentChat._toggle` keeps one head panel open). `notes=` also takes a file (`is_notes_file`, `notes_text`), read
   for each new conversation: `new_conversation()` rebuilds the graph when it changed, on the same checkpointer
   (`self._saver`, `harness.new_checkpointer()`), so other threads survive the rebuild.
 - **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a

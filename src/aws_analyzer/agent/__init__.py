@@ -86,7 +86,7 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      sandboxes/   The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
                                   (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
-                     (chat.py), and its ⚙ model panel (model_panel.py).
+                     (chat.py), its ⚙ model panel (model_panel.py) and its 🧠 memory panel (memory_panel.py).
 """
 
 from __future__ import annotations
