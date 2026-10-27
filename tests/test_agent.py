@@ -3109,6 +3109,21 @@ def test_the_chat_window_asks_with_three_buttons(seeded):
     assert x.view.core.history[-1].calls[0].asks[0].choice == "go"
 
 
+def test_the_chat_window_asks_to_raise_a_used_up_limit(seeded):
+    errors = ("function_errors", {"function": "etl-nightly", "since": "1h"})
+    x = window(scripted(calls(("function_health", {"since": "2h"})), calls(errors), calls(errors),
+                        says("etl-nightly failed with a KeyError.")), budget={"tool_calls": 1})
+    enter(x, "What failed and why?")
+    shown = page(x)
+    assert "Limit reached: raise it, or answer now?" in shown and "raise it to 2 tool calls" in shown
+    assert "raise the limit for this question" in shown and "Big read" not in shown
+    labels = [b.description for b in x.turn.ask.children[1:]]
+    assert labels == ["raise ▸", "answer now"]
+    x.turn.ask.children[1].click()
+    assert not x.busy and "etl-nightly failed with a KeyError." in page(x)
+    assert x.view.core.history[-1].stopped is None
+
+
 def test_stop_while_the_window_waits_skips_the_read(seeded):
     x = window(long_read(says("Stopped: I didn't read the logs.")))
     enter(x, "Errors this week?")

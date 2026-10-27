@@ -429,7 +429,7 @@ Four kinds of read ask first: an S3 listing that goes past 20,000 keys (`find_fi
 - **Smaller** reads the smaller part it names: the keys listed so far, the last 3 days of logs, the files that fit in 10 MB. The answer says what that left out.
 - **Skip** answers without it, and says what it didn't read.
 
-In the [chat window](#chat), the call's line says *✋ waiting for you* and three buttons sit under it; Stop skips the read and has the agent answer. With `ask()`, the report shows the question and the three calls to run: `agent.go()`, `agent.smaller()` or `agent.skip()`. The wait doesn't count against the time budget.
+In the [chat window](#chat), the call's line says *✋ waiting for you* and three buttons sit under it (two at a used-up limit: **raise** and **answer now**); Stop skips the read and has the agent answer. With `ask()`, the report shows the question and the three calls to run: `agent.go()`, `agent.smaller()` or `agent.skip()`. The wait doesn't count against the time budget.
 
 !!! note ""
 

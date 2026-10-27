@@ -203,6 +203,8 @@ _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file", 
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 _CHOICE_BUTTONS = (("go", "go ▸", "Read all of it"), ("smaller", "smaller", "Read the smaller part instead"),
                    ("skip", "skip", "Answer without it"))
+_LIMIT_BUTTONS = (("go", "raise ▸", "Raise the limit for this question and go on"),
+                  ("smaller", "answer now", "Answer with what it found"))
 
 _THEME_CSS = _terminal_theme((".agc-app",), "ag") + """
 @keyframes ag-spin{to{transform:rotate(360deg)}}
@@ -527,6 +529,10 @@ def _asked_html(call: ToolCall) -> str:
     read = call.waiting
     if read is None:
         return ""
+    if read.limit:
+        return (f'<div class="ag-asked"><b>✋ Limit reached: raise it, or answer now?</b> {_prose(read.what)}'
+                f'<span class="ag-k"># raise: {_esc(read.go)}</span>'
+                f'<span class="ag-k"># answer now: {_esc(read.smaller)}</span></div>')
     return (f'<div class="ag-asked"><b>✋ Big read: go, smaller or skip?</b> {_prose(read.what)}'
             f'<span class="ag-k"># go: {_esc(read.go)}</span><span class="ag-k"># smaller: {_esc(read.smaller)}</span>'
             '<span class="ag-k"># skip: answer without it · the agent only reads, whichever you pick</span></div>')
@@ -1123,12 +1129,14 @@ class _AgentChat(_Window):
     def _ask_choice(self, turn: _Turn, call: ToolCall) -> None:
         """
         The box under a question waiting for the user's choice on a big read: what it would read, and Go, Smaller and
-        Skip, which go on with that choice.
+        Skip, which go on with that choice. At a used-up limit of the budget, Smaller and Skip both answer now, so the
+        box has two buttons: raise the limit, or answer now.
         """
         if id(call) in turn.lines:
             self._set(turn.lines[id(call)], _wrap(_tool_html(call, running=False)))
+        at_limit = bool(call.waiting is not None and call.waiting.limit)
         buttons = []
-        for choice, label, tooltip in _CHOICE_BUTTONS:
+        for choice, label, tooltip in _LIMIT_BUTTONS if at_limit else _CHOICE_BUTTONS:
             button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto"))
             button.add_class("agc-choice")
             button.add_class(f"agc-{choice}")
@@ -1139,6 +1147,10 @@ class _AgentChat(_Window):
         turn.ask.add_class("agc-ask")
         turn.box.children = turn.shown
         self._tick()
+        if at_limit:
+            self._set_status("The agent is waiting for you: raise the limit for this question, or have it answer "
+                             "now with what it found.", "warn")
+            return
         self._set_status("The agent is waiting for you: go reads it all, smaller the smaller part, skip answers "
                          "without it.", "warn")
 
