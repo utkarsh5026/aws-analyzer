@@ -16,14 +16,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `clean_up()` removes what comes back by itself; `clean_up("all")` the charts too; `dry_run=True` only shows what would go.
   - Only folders aws-analyzer made: one without its `.gitignore`, or that holds the notebook, stays.
 
-- 🤖 **Agent: saved chats, each with a title**
+- 🤖 **Agent: saved chats, each with a title** ([#165](https://github.com/utkarsh5026/aws-analyzer/pull/165))
   - `AgentView(chats=True)` saves every conversation on this machine, titled from its first question.
   - `chats()` lists them; `open_chat(1)` carries one on, even after a restart; `rename_chat()` / `delete_chat()`.
   - The chat window's 🗂 chats does the same by clicking, and its header shows the open chat's title.
 
 ### Fixed
 
-- 🧰 **`clean_up()` keeps the agent's notes**
+- 🧰 **`clean_up()` keeps the agent's notes** ([#165](https://github.com/utkarsh5026/aws-analyzer/pull/165))
   - It removed all of `~/.cache/aws-analyzer`, the agent's memory with it; now `agent/` there stays.
 
 ## [0.36.0] - 2026-10-27
