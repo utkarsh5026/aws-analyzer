@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
   - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
 
+- 🤖 **Agent: runbooks it reads when needed** ([#162](https://github.com/utkarsh5026/aws-analyzer/pull/162))
+  - Step-by-step guides for common problems; it reads one only when the question matches it, and says which.
+  - Three built in (`lambda-failing`, `s3-trigger-not-firing`, `kb-answer-wrong`); `AgentView(runbooks="~/team-runbooks")` adds yours.
+  - `runbooks()` lists them and any that didn't load; `runbooks=False` turns them off.
+
 ## [0.35.0] - 2026-10-27
 
 ### Added

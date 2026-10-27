@@ -57,8 +57,9 @@ from .llm import (
     provider_info,
 )
 from .prompt import asked_at, system_prompt
+from .runbooks import runbook_sources
 from .runtime import as_tool
-from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, Toolkit, make_toolkits
+from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
 from .workspace import Workspace, workspace_of
 from .workspace.files import workspace_backend
 
@@ -200,6 +201,12 @@ filling in a set shape (findings=True, the default): the answer, and what it fou
 a real command with arguments it takes), which the report shows as its findings and next calls. findings=False
 has it answer in plain text, as does a model that can't be made to call a tool.
 
+    Runbooks: step-by-step guides for common problems ("a Lambda is failing", "an S3 upload didn't start my
+    function"), each a folder with a SKILL.md. The model sees only each one's name and one-line description, and reads
+    the whole guide (read_runbook) when a question needs it. runbooks=True (the default) gives it the built-in ones; a
+    folder of your own, or a list of them, adds yours (a runbook of yours with a built-in one's name replaces it), and
+    False gives it none. runbooks() lists what it found.
+
     Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
     log read longer than log_days, a save into the workspace past ask_bytes, or a save that finds more files than
     the model asked for) the agent pauses and asks: ask() returns the answer with .waiting set (each call's .waiting
@@ -250,6 +257,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
         plan: bool = True,
+        runbooks: bool | str | Path | Iterable[str | Path] = True,
         findings: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
@@ -281,6 +289,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
              "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
              "python": {"workspace": workspace}})]
+        if runbooks is not False and runbooks is not None:
+            self.toolkits.append(RunbookToolkit(runbook_sources(runbooks)).bind(self))
         self.interrupt_on = _interrupting(interrupt_on, self.toolkits)
         self.ask_more = bool(self.interrupt_on) if ask_more is None else bool(ask_more)
         self._graph: Any = None
@@ -385,6 +395,14 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone.
         """
         return _zone_from(self.timezone) if self.timezone is not None else _display_zone()
+
+    @property
+    def runbook_kit(self) -> RunbookToolkit | None:
+        """
+        The agent's runbooks (the Runbooks toolkit: .shelf is what it found, .offered what it can follow), or None
+        with runbooks=False.
+        """
+        return next((t for t in self.toolkits if isinstance(t, RunbookToolkit)), None)
 
     @property
     def workspace(self) -> Workspace | None:

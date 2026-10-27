@@ -1987,6 +1987,8 @@ agent.tools()                                           # what it can call, its 
 agent.transcript()                                      # every question and answer so far, with their cost
 agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
 agent.memory()                                          # what it remembers; forget("orders-etl") clears a note
+agent = AgentView(runbooks="~/team-runbooks")           # your team's step-by-step guides, beside the built-in ones
+agent.runbooks()                                        # the runbooks it follows when a question matches one
 ```
 
 <picture>
@@ -2237,6 +2239,7 @@ the window, and what the agent notes and never notes.
 | `forget(match)` / `forget_all()` | Clears the agent's notes holding these words (any case), or every note about this account; the next conversation starts without them |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
+| `runbooks()`                | The runbooks the agent follows when a question matches one: each one's name, what it's for, where it's from and the toolkits it needs, and any that didn't load and why (a missing name or description, a name that isn't its folder's) |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
 | `use_model(provider=None, model=None, *, endpoint=None, api_key=None, api_version=None, chat_model=None)` | Switches the model the agent answers with (`use_model('bedrock', 'sonnet')`, `use_model('openai', 'gpt-4.1', api_key=...)`), then says where what it sends goes. A new conversation starts; a missing key or package is said, and the agent keeps the model it had |
 
