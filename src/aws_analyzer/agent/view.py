@@ -600,10 +600,15 @@ class AgentView(_BaseView):
             _Findings(findings, empty="Every note is recent, and there's room for more."),
             _Table(["Note", "Learned"], rows, title="Notes, in the order it wrote them", sortable=False),
             _Text(state.text, title="/memories/AGENTS.md, as the agent reads it", collapsed=True),
-            _Next([(f"forget('{match_words(state.notes[0])}')", "clear the notes with these words"),
-                   ("forget_all()", "clear every note about this account"),
-                   ("ask('Which Lambda failed last night?')", "an answer that starts from these notes")]),
         ]
+
+    def _memory_next(self, state: MemoryState) -> _Next:
+        """
+        The memory() report's last block: clearing a note, every note, and a question that starts from them.
+        """
+        return _Next([(f"forget('{match_words(state.notes[0])}')", "clear the notes with these words"),
+                      ("forget_all()", "clear every note about this account"),
+                      ("ask('Which Lambda failed last night?')", "an answer that starts from these notes")])
 
     @_friendly_errors
     def memory(self) -> None:
@@ -614,6 +619,7 @@ class AgentView(_BaseView):
         """
         core = self.core
         blocks: list[Any] = []
+        state: MemoryState | None = None
         if core.memory_file is None:
             blocks += [_Title("What the agent remembers"),
                        _Note("The agent's memory is off: each conversation starts from nothing but your notes=. "
@@ -621,10 +627,13 @@ class AgentView(_BaseView):
                              "what a bucket is for) in ~/.cache/aws-analyzer/agent/memory.sqlite, one set per AWS "
                              "account, so it doesn't look them up again.")]
         else:
-            blocks += self._memory_blocks(core.memories())
+            state = core.memories()
+            blocks += self._memory_blocks(state)
         if is_notes_file(core.notes):
             blocks.append(_Text(notes_text(core.notes), title=f"Your notes ({core.notes}), read for each new "
                                                               "conversation", collapsed=True))
+        if state is not None and state.notes:
+            blocks.append(self._memory_next(state))
         self._show(blocks)
 
     @_friendly_errors
