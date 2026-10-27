@@ -284,12 +284,6 @@ class _ModelPanel:
         _class_if(self.window.model_button, "agc-on", False)
         self.window._quietly(self.key_box, value="")
 
-    def toggle(self) -> None:
-        if self.is_open:
-            self.close()
-        else:
-            self.open()
-
     def _uses_given(self) -> bool:
         """
         Whether the agent answers with the chat model passed in (chat_model=).

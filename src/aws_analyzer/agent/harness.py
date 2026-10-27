@@ -30,6 +30,7 @@ from .._kit.text import _clip
 from .answers import AgentAnswer, AgentStep, ToolCall, parse_plan
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .llm import answer_cost, explain_model_error
+from .memory import memory_middleware, with_memory
 
 _MIN_PYTHON = (3, 11)
 HIDDEN_TOOLS = frozenset({"task", "execute"})
@@ -68,21 +69,34 @@ def check_ready() -> None:
     _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
 
 
-def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
-                hidden: Iterable[str] = HIDDEN_TOOLS, backend: Any = None,
-                current_run: Callable[[], _Run] | None = None, plan: bool = True) -> Any:
+def new_checkpointer() -> Any:
     """
-    The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
-    InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
-    is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
-    workspace/files.py; by default deepagents' own in-memory files), and with both it and `current_run` (the
-    question being answered) each file tool call is recorded on it and counted against its budget. With `plan`, the
-    model has write_todos (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one.
+    Where the conversations are kept: LangGraph's InMemorySaver, for as long as the kernel runs.
+    """
+    memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
+    return memory.InMemorySaver()
+
+
+def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
+                hidden: Iterable[str] = HIDDEN_TOOLS, backend: Any = None, notes: Any = None,
+                current_run: Callable[[], _Run] | None = None, plan: bool = True, checkpointer: Any = None) -> Any:
+    """
+    The deepagents agent: the model, the tools, the instructions and a memory of each conversation (`checkpointer`,
+    by default a new InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own
+    tools the model is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
+    workspace/files.py; by default deepagents' own in-memory files). `notes` is the agent's memory between
+    conversations (memory.py's backend, or None): its file tools reach it at MEMORY_FOLDER, and its notes go in the
+    prompt when a conversation starts. With a backend or notes and `current_run` (the question being answered),
+    each file tool call is recorded on it and counted against its budget. With `plan`, the model has write_todos
+    (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one.
     """
     check_ready()
     deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
-    memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
+    if notes is not None:
+        backend = with_memory(backend, notes)
     middleware = [_hide_tools(set(hidden))]
+    if notes is not None:
+        middleware.append(memory_middleware(backend))
     if plan:
         middleware.append(_planning())
         if current_run is not None:
@@ -94,7 +108,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
         tools=tools,
         system_prompt=system_prompt,
         middleware=middleware,
-        checkpointer=memory.InMemorySaver(),
+        checkpointer=checkpointer if checkpointer is not None else new_checkpointer(),
         name="aws-analyzer",
         **({"backend": backend} if backend is not None else {}),
     )
