@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
+  - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
+  - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
+  - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
+
 ## [0.35.0] - 2026-10-27
 
 ### Added
@@ -22,11 +29,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `AgentView(memory=True)`: it keeps dated notes like "orders-etl runs in eu-west-1" and starts from them next time.
   - `memory()` or the chat window's 🧠 memory shows them; `forget('orders-etl')`, a note's ✕ or `forget_all()` clears them.
   - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
-
-- 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
-  - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
-  - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
-  - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
 
 ## [0.34.0] - 2026-10-26
 
