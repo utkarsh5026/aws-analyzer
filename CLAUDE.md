@@ -199,7 +199,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
-  deletes one), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
+  deletes one), the agent's memory (`AgentAnalyzer(memory=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/memory.sqlite`
+  or the path given, holding its notes about each account; only the model's writes to `/memories/AGENTS.md` and the
+  user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
@@ -789,6 +791,18 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
+- **Runbooks** (`runbooks/`, with `toolkits/runbook_tools.py`): step-by-step guides, each a folder with a `SKILL.md`
+  (Agent Skills front matter: `name`, `description`, `metadata.toolkits`), the built-in ones beside
+  `runbooks/__init__.py` (shipped in the wheel). `runbook_sources(runbooks=)` is the built-in folder, then the user's;
+  `load_runbooks` reads them into a `RunbookShelf` (a later source's runbook replaces one of the same name; one that
+  can't be read is a `RunbookProblem`, never an exception), with `parse_front_matter`, a stdlib reader for what
+  SKILL.md files hold, so listing needs no YAML. `RunbookToolkit` (`"runbooks"`, not in `TOOLKITS`: the analyzer adds
+  it last unless `runbooks=False`) lists the runbooks its agent's toolkits can follow in its `instructions()`, name and
+  description only, and `read_runbook(name, file=)` hands the model a guide (or a file beside it, only one listed in
+  `Runbook.files`) with secrets hidden. It's a tool, so it's recorded, counted and drawn like any other;
+  `AgentAnswer.runbooks` names the ones read, the answer's Runbook card shows them, and `AgentView.runbooks()` lists
+  the shelf with `runbook_findings`. deepagents' `SkillsMiddleware` isn't used: it reads through a backend, needs
+  YAML and can't say why a runbook didn't load.
 - **The runtime** (`runtime.py`, `as_tool`) wraps every toolkit's tools alike: it records a `ToolCall` on the
   question's `_Run`, checks the `Budget` first (`budget.py`'s `check_budget`: tool calls, time, cost; a toolkit that
   reads logs checks `log_days` itself, as `LambdaToolkit._log_window` does), turns `_Refused` into a refusal the model
@@ -816,6 +830,21 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
+- **Memory** (`memory.py`, `memory=True`, off by default): the agent's notes about the account between conversations,
+  one Markdown file the file tools see at `MEMORY_FILE` (`/memories/AGENTS.md`), a dated bullet per fact. `build_graph(
+  notes=)` routes `MEMORY_FOLDER` to `_MemoryBackend` (`with_memory`, a `CompositeBackend` over the workspace's backend
+  or a `StateBackend`) and adds deepagents' `MemoryMiddleware` with `MEMORY_PROMPT` in place of its own (notes are
+  facts, not instructions; a tool that disagrees wins; what to note and never note). `_MemoryBackend` is deepagents'
+  `StoreBackend` on a LangGraph `SqliteStore` (`open_store`, langgraph-checkpoint-sqlite, in the `[agent]` extra), under
+  `account_namespace(account)` (`AgentAnalyzer.account()`, STS GetCallerIdentity) so accounts never share notes, with
+  the rules on writes: only `NOTES_KEY`, `hide_secrets` first, undated notes dated (`stamp_notes`), at most the
+  budget's `memory_bytes`, no deletes (`forget()` / `forget_all()` are the user's). Memory writes are file tool calls,
+  so `_record_file_tools` records them, and `answer_findings` says what an answer noted. `AgentView.memory()`,
+  `forget()` and `forget_all()` show and clear them, and so does the chat window's **🧠 memory**
+  (`window/memory_panel.py`, `_MemoryPanel`: a line per note with a ✕, `forget_note()` through `remove_note`, forget
+  all on a second click, redrawn after each answer while open; `_AgentChat._toggle` keeps one head panel open). `notes=` also takes a file (`is_notes_file`, `notes_text`), read
+  for each new conversation: `new_conversation()` rebuilds the graph when it changed, on the same checkpointer
+  (`self._saver`, `harness.new_checkpointer()`), so other threads survive the rebuild.
 - **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS
@@ -896,7 +925,16 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   toolkit's tool: counted against the budget, told to the listener, listed in the report. Never a
   `FilesystemBackend`, and deepagents' `execute` stays hidden: code the model writes runs only through the Python
   toolkit's `run_python` (`file=` runs a script the file tools wrote), in the workspace (below). A new capability of the loop (a
-  subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
+  subagent, a middleware) goes in `build_graph()`. With `findings=True` (the default) the question ends in the
+  model's reply: `response_format` is LangChain's `ToolStrategy` on `answers.REPLY_SCHEMA`, so the model calls
+  `final_answer` with the answer and its findings, `_take_reply` reads LangChain's `structured_response` from the
+  stream (`parse_reply`, forgiving) into `AgentAnswer.text` and `.findings` (`AgentFinding`), and `_reply_when_able`
+  drops it for a model that can't be made to call a tool (Bedrock's `supports_tool_choice_values` without "any"),
+  which then answers in a message, as a model that ignores it does. The prompt lists the calls a finding can name
+  (each toolkit's `view_commands()`: its View's commands, without the ones that write files or open windows,
+  `_NOT_SUGGESTED`), and `_finish` keeps a finding's call only when `checked_call` finds it a real command with
+  arguments it takes; `AgentView` puts `reply_findings` before `answer_findings` and `answer_next` puts their calls
+  first. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
   `_WRAP_UP`, in which every tool is refused, so the model writes its answer), and catches a model or loop error into `AgentAnswer.error` with

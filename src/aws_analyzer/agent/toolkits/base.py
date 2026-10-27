@@ -11,6 +11,7 @@ each tool's AWS reads and the IAM permissions its operations need, and it define
                                   coverage keys (window, regions, cut_short, covered_from), and `_summary` (the report's
                                   one line) and `_next` ((View call, what it shows) pairs), which the agent takes out
     instructions(budget)          its section of the system prompt: how to use its tools well
+    view_class()                  the View named by `view`, whose commands a finding's call can name
     not_found(exc, arguments)     the result for a resource that isn't there (close names), or None
     request_cost(counts)          what its AWS requests cost (the guard's counts by operation), when they're billed
 
@@ -28,6 +29,7 @@ tool then does what it always did.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
 import boto3
@@ -40,6 +42,9 @@ from ..budget import Budget, _Refused
 
 if TYPE_CHECKING:
     from ..analyzer import AgentAnalyzer
+
+_NOT_SUGGESTED = frozenset({"help", "explore", "use", "link", "download", "download_zip", "clean_downloads",
+                            "save_file_list", "how_it_works_page"})
 
 
 class Toolkit:
@@ -103,6 +108,26 @@ class Toolkit:
         Its tools, as functions or methods (see this module's docstring).
         """
         raise NotImplementedError
+
+    def view_class(self) -> type | None:
+        """
+        The View class `view` names (LambdaView), whose commands the agent's findings can name as the call to run
+        next; None when it has none.
+        """
+        return None
+
+    def view_commands(self) -> dict[str, Callable[..., Any]]:
+        """
+        The commands of its View, name -> function, alphabetically: the calls a finding can name (empty without a
+        View). Commands that write files, delete downloads, make a link to share, open a window or change the View's
+        settings (_NOT_SUGGESTED) are left out: a finding points at a report to read.
+        """
+        view = self.view_class()
+        if view is None:
+            return {}
+        methods = {name: inspect.unwrap(member) for name, member in inspect.getmembers(view)
+                   if not name.startswith("_") and name not in _NOT_SUGGESTED}
+        return {name: method for name, method in methods.items() if inspect.isfunction(method)}
 
     def instructions(self, budget: Budget) -> str:
         """

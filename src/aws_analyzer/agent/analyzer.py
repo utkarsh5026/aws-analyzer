@@ -22,10 +22,23 @@ from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
-from .answers import AgentAnswer, AgentStep, ToolCall, choice_of
+from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
 from .workspace.charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
+from .memory import (
+    UNKNOWN_ACCOUNT,
+    MemoryState,
+    Note,
+    drop_notes,
+    is_notes_file,
+    memory_backend,
+    memory_path,
+    notes_text,
+    open_store,
+    parse_notes,
+    remove_note,
+)
 from .llm import (
     AZURE_API_VERSION,
     answer_cost,
@@ -44,8 +57,9 @@ from .llm import (
     provider_info,
 )
 from .prompt import asked_at, system_prompt
+from .runbooks import runbook_sources
 from .runtime import as_tool
-from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, Toolkit, make_toolkits
+from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
 from .workspace import Workspace, workspace_of
 from .workspace.files import workspace_backend
 
@@ -176,9 +190,22 @@ class AgentAnalyzer(_BaseAnalyzer):
     session's) or `regions` (a list, or 'all'); buckets are read wherever they are. The user's time zone, so "last night" means their night, is set_timezone()'s (or
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
-    IST"). `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
+    IST"), or a file of them (notes='AGENTS.md', read again for each new conversation). memory=True lets the agent
+    keep its own notes between conversations, like "orders-etl runs in eu-west-1", in a SQLite file
+    (~/.cache/aws-analyzer/agent/memory.sqlite, or the path memory= gives), one set per AWS account: memories()
+    shows them and forget() clears them. `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
 writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
-plan=False leaves the plan out, which saves its instructions' tokens on every model call.
+plan=False leaves the plan out, which saves its instructions' tokens on every model call. It ends each question by
+filling in a set shape (findings=True, the default): the answer, and what it found that needs your attention
+(answer.findings: warn or info, what's wrong and what to do, and the View call that shows more, kept only when it's
+a real command with arguments it takes), which the report shows as its findings and next calls. findings=False
+has it answer in plain text, as does a model that can't be made to call a tool.
+
+    Runbooks: step-by-step guides for common problems ("a Lambda is failing", "an S3 upload didn't start my
+    function"), each a folder with a SKILL.md. The model sees only each one's name and one-line description, and reads
+    the whole guide (read_runbook) when a question needs it. runbooks=True (the default) gives it the built-in ones; a
+    folder of your own, or a list of them, adds yours (a runbook of yours with a built-in one's name replaces it), and
+    False gives it none. runbooks() lists what it found.
 
     Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
     log read longer than log_days, a save into the workspace past ask_bytes, or a save that finds more files than
@@ -217,7 +244,8 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         model_prices: dict[str, tuple[float, float]] | None = None,
         timezone: str | tzinfo | None = None,
         regions: Any = None,
-        notes: str = "",
+        notes: str | os.PathLike = "",
+        memory: bool | str | os.PathLike = False,
         budget: Budget | dict[str, Any] | None = None,
         max_tokens: int | None = 4096,
         toolkits: Iterable[str | Toolkit | type[Toolkit]] | None = None,
@@ -229,6 +257,8 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
         plan: bool = True,
+        runbooks: bool | str | Path | Iterable[str | Path] = True,
+        findings: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
     ):
@@ -240,8 +270,15 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         self.timezone = _checked_zone(timezone)
         self.regions = regions
         self.notes = notes
+        self.memory_file = memory_path(memory)
+        self._store: Any = None
+        self._notes: Any = None
+        self._account: str | None = None
+        self._saver: Any = None
+        self._prompt_notes = ""
         self.budget = Budget.of(budget)
         self.plan = plan
+        self.findings = findings
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
@@ -252,6 +289,8 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
             {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
              "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
              "python": {"workspace": workspace}})]
+        if runbooks is not False and runbooks is not None:
+            self.toolkits.append(RunbookToolkit(runbook_sources(runbooks)).bind(self))
         self.interrupt_on = _interrupting(interrupt_on, self.toolkits)
         self.ask_more = bool(self.interrupt_on) if ask_more is None else bool(ask_more)
         self._graph: Any = None
@@ -356,6 +395,14 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone.
         """
         return _zone_from(self.timezone) if self.timezone is not None else _display_zone()
+
+    @property
+    def runbook_kit(self) -> RunbookToolkit | None:
+        """
+        The agent's runbooks (the Runbooks toolkit: .shelf is what it found, .offered what it can follow), or None
+        with runbooks=False.
+        """
+        return next((t for t in self.toolkits if isinstance(t, RunbookToolkit)), None)
 
     @property
     def workspace(self) -> Workspace | None:
@@ -473,21 +520,117 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         """
         The system prompt the agent starts every conversation with (system_prompt() for its toolkits).
         """
-        return system_prompt(self.default_regions(), notes=self.notes, budget=self.budget, toolkits=self.toolkits)
+        return system_prompt(self.default_regions(), notes=notes_text(self.notes), budget=self.budget,
+                             toolkits=self.toolkits, findings=self.findings)
 
     def _harness(self) -> Any:
         """
         The deepagents agent: the model, the tools, the instructions and a memory of the conversation, with its file
-        tools on the Python workspace when there is one and its plan unless plan=False. Made once; new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
+        tools on the Python workspace when there is one, its notes between conversations with memory=, and its plan
+        unless plan=False. Made once, and again when the file notes= names has changed; new_conversation() starts a
+        new thread in it, and every conversation is kept across a rebuild. Before anything else is made,
+        check_ready() says what's missing.
         """
         if self._graph is None:
             harness.check_ready()
+            self._prompt_notes = notes_text(self.notes)
             prompt = self.instructions()
             workspace = self.workspace
             backend = workspace_backend(workspace, lambda: self._current_run().budget) if workspace is not None else None
+            if self._saver is None:
+                self._saver = harness.new_checkpointer()
             self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
-                                              current_run=self._current_run, plan=self.plan)
+                                              notes=self._memory(), current_run=self._current_run, plan=self.plan,
+                                              checkpointer=self._saver, reply=self.findings)
         return self._graph
+
+    def _view_commands(self) -> dict[str, dict[str, Callable[..., Any]]]:
+        """
+        The calls a finding can name: each toolkit's View -> its commands (Toolkit.view_commands()).
+        """
+        return {toolkit.view: toolkit.view_commands() for toolkit in self.toolkits if toolkit.view}
+
+    def account(self) -> str:
+        """
+        The AWS account the agent's session is in (STS GetCallerIdentity, read once), which its notes are kept under;
+        'unknown' when it can't be read.
+        """
+        if self._account is None:
+            try:
+                sts = self._cached_client("sts", lambda: self.session.client("sts", config=self._config))
+                self._account = str(sts.get_caller_identity()["Account"])
+            except (ClientError, BotoCoreError, KeyError):
+                self._account = UNKNOWN_ACCOUNT
+        return self._account
+
+    def _today(self) -> Any:
+        """
+        The user's date (in the agent's time zone), which a new note is dated with.
+        """
+        return _utcnow().astimezone(self.zone).date()
+
+    def _memory(self) -> Any:
+        """
+        The agent's notes about its account as a deepagents backend (memory.py's), made once; None when memory is off.
+        """
+        if self.memory_file is None:
+            return None
+        if self._notes is None:
+            if self._store is None:
+                self._store = open_store(self.memory_file)
+            self._notes = memory_backend(self._store, self.account(), lambda: self.budget, self._today)
+        return self._notes
+
+    def _memory_or_hint(self) -> Any:
+        """
+        The agent's notes backend, or _Hint saying how to turn memory on.
+        """
+        notes = self._memory()
+        if notes is None:
+            raise _Hint("The agent's memory is off: AgentView(memory=True) lets it keep notes about your account "
+                        "between conversations, in ~/.cache/aws-analyzer/agent/memory.sqlite.")
+        return notes
+
+    def memories(self) -> MemoryState:
+        """
+        What the agent remembers about its account: each note it wrote (its text and the day it learned it), the
+        file they're in, where it's stored and how much it may hold. _Hint when memory is off.
+        """
+        text = self._memory_or_hint().notes_text()
+        return MemoryState(parse_notes(text), text, self.account(), self.memory_file, self.budget.memory_bytes)
+
+    def forget(self, match: str) -> list[Note]:
+        """
+        Clears the agent's notes whose text holds `match` (any case: forget('orders-etl')), and returns them. The
+        next conversation starts without them.
+        """
+        if not str(match or "").strip():
+            raise ValueError("forget() needs a few words of the note to clear, like forget('orders-etl'); "
+                             "forget_all() clears every note")
+        notes = self._memory_or_hint()
+        kept, dropped = drop_notes(notes.notes_text(), str(match))
+        if dropped:
+            notes.keep(kept)
+        return dropped
+
+    def forget_note(self, note: Note) -> bool:
+        """
+        Clears one note, exactly as memories() returned it (the chat window's ✕), and says whether it was there.
+        """
+        notes = self._memory_or_hint()
+        kept, removed = remove_note(notes.notes_text(), note)
+        if removed:
+            notes.keep(kept)
+        return removed
+
+    def forget_all(self) -> int:
+        """
+        Clears every note the agent kept about its account, and returns how many there were.
+        """
+        notes = self._memory_or_hint()
+        count = len(parse_notes(notes.notes_text()))
+        notes.clear()
+        return count
 
     def new_conversation(self) -> str:
         """
@@ -496,6 +639,8 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         """
         self.thread = _new_thread()
         self._paused = None
+        if is_notes_file(self.notes) and notes_text(self.notes) != self._prompt_notes:
+            self._graph = None
         return self.thread
 
     def interrupts(self, tool: str) -> bool:
@@ -608,6 +753,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         when a tool is waiting for the user's choice.
         """
         answer.calls = list(run.calls)
+        check_findings(answer.findings, self._view_commands())
         answer.plan = list(run.plan)
         answer.charts = list(run.charts)
         answer.aws_calls = dict(self._guard.counts)

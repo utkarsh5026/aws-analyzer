@@ -3,17 +3,24 @@ What a question gives back (AgentAnswer, with a ToolCall per tool call and the p
 how it was reached: answer_findings() and the commands worth running next, answer_next(). All pure: no AWS, no
 model.
 
+The model ends a question by filling REPLY_SCHEMA (its final_answer): the answer's markdown and its findings about
+the account (AgentFinding: warn or info, the message, a View call). parse_reply() reads what it sent forgivingly,
+checked_call() keeps a call only when it names a real command of one of the agent's Views with arguments it takes,
+and reply_findings() / answer_next() put them in the report's findings and next calls.
+
 A BigRead is what a tool asks the user before a read big enough to cost time or money (interrupt_on): what it would
 read, and what each of CHOICES does. choice_of() reads the user's answer forgivingly ('Go', 'yes', 'small').
 """
 
 from __future__ import annotations
 
+import ast
+import inspect
 import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
@@ -21,6 +28,7 @@ from .._kit.text import _clip
 from .budget import Budget, raised_limit
 from .workspace.charts import Chart
 from .llm import Rates
+from .memory import MEMORY_FOLDER, parse_notes
 
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
 
@@ -250,6 +258,158 @@ def parse_plan(todos: Any) -> list[PlanStep]:
 
 
 @dataclass
+class AgentFinding:
+    """
+    Something the agent found in the account that the user should act on or know, as it filled it in its reply
+    (REPLY_SCHEMA): 'warn' or 'info', what's wrong and why it matters, and the View call that shows more ('' when it
+    named none that runs).
+
+        level    'warn' or 'info'
+        message  "orders-etl fails on KeyError 'customer_id' since the 03:00 deploy: 14 runs lost. Read the code ..."
+        call     "LambdaView().errors('orders-etl', since='24h')", checked by checked_call()
+        shows    what that call shows, in a few words: "its errors, grouped by cause"
+    """
+
+    level: str
+    message: str
+    call: str = ""
+    shows: str = ""
+
+
+REPLY_TOOL = "final_answer"
+LEVELS = ("warn", "info")
+_MAX_FINDINGS = 8
+_FINDING_CHARACTERS = 600
+_SHOWS_CHARACTERS = 80
+REPLY_SCHEMA: dict[str, Any] = {
+    "title": REPLY_TOOL,
+    "description": "Gives the user your answer, with what you found that they should act on or know. Call it once, "
+                   "when you're done, instead of writing the answer as a message.",
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string",
+                   "description": "The answer in markdown, as 'How to answer' says."},
+        "findings": {
+            "type": "array",
+            "description": "What needs the user's attention, the most important first; empty when nothing does.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "level": {"type": "string", "enum": list(LEVELS),
+                              "description": "warn: something is broken, at risk or costing money; info: worth "
+                                             "knowing."},
+                    "message": {"type": "string",
+                                "description": "What's wrong: why it matters (with a number or a price when the "
+                                               "tools gave one). What to do about it. One to three sentences."},
+                    "call": {"type": "string",
+                             "description": "One View call that shows more or helps fix it, from 'Calls a finding "
+                                            "can name', with its arguments filled in: "
+                                            "LambdaView().errors('orders-etl', since='24h'). Empty when none fits."},
+                    "shows": {"type": "string",
+                              "description": "What that call shows, in a few words: 'its errors, by cause'."},
+                },
+                "required": ["level", "message"],
+            },
+        },
+    },
+    "required": ["answer", "findings"],
+}
+
+
+def _level_of(value: Any) -> str:
+    """
+    A finding's level as one of LEVELS: 'warn' (or 'warning', 'bad', 'error'), else 'info'.
+    """
+    word = str(value or "").strip().lower()
+    return "warn" if word in ("warn", "warning", "bad", "error") else "info"
+
+
+def _finding_of(item: Any) -> AgentFinding | None:
+    """
+    One item of a reply's findings as an AgentFinding, or None when it says nothing.
+    """
+    if isinstance(item, str):
+        item = {"message": item}
+    if not isinstance(item, dict):
+        return None
+    message = _clip(" ".join(str(item.get("message") or "").split()), _FINDING_CHARACTERS)
+    if not message:
+        return None
+    shows = _clip(" ".join(str(item.get("shows") or "").split()), _SHOWS_CHARACTERS)
+    return AgentFinding(_level_of(item.get("level")), message, str(item.get("call") or "").strip(), shows)
+
+
+def parse_reply(reply: Any) -> tuple[str, list[AgentFinding]]:
+    """
+    The model's reply (the final_answer arguments REPLY_SCHEMA asks for) as (the answer's markdown, its findings):
+    forgiving about what a model sends, so a missing list, a finding given as plain text or an unknown level still
+    reads. At most _MAX_FINDINGS findings; their calls are as the model wrote them (checked_call() checks them).
+    """
+    if not isinstance(reply, dict):
+        return "", []
+    items = reply.get("findings")
+    if not isinstance(items, (list, tuple)):
+        items = []
+    findings = [finding for finding in map(_finding_of, items) if finding is not None]
+    return str(reply.get("answer") or "").strip(), findings[:_MAX_FINDINGS]
+
+
+def _call_parts(node: ast.expr) -> tuple[str, str, list[Any], dict[str, Any]] | None:
+    """
+    A View call's parts, (View, command, arguments, keyword arguments), when `node` is `<View>().<command>(...)`
+    with literal arguments only; else None.
+    """
+    is_command = isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    made = node.func.value if is_command else None
+    is_view = isinstance(made, ast.Call) and isinstance(made.func, ast.Name) and not made.args and not made.keywords
+    if not is_view or any(keyword.arg is None for keyword in node.keywords):
+        return None
+    try:
+        args = [ast.literal_eval(arg) for arg in node.args]
+        kwargs = {keyword.arg: ast.literal_eval(keyword.value) for keyword in node.keywords}
+    except ValueError:
+        return None
+    return made.func.id, node.func.attr, args, kwargs
+
+
+def checked_call(text: str, commands: dict[str, dict[str, Callable[..., Any]]]) -> str:
+    """
+    A call the model put in a finding, written as a report writes it ("LambdaView().errors('etl', since='24h')"),
+    when it names a command of one of the agent's Views (`commands`: View name -> command name -> its function)
+    with arguments that command takes, all literal values; else ''. So a call the model made up, misspelt or gave
+    code to is never shown as one to run.
+    """
+    source = str(text or "").strip().strip("`").strip()
+    try:
+        node = ast.parse(source, mode="eval").body
+    except SyntaxError:
+        return ""
+    parts = _call_parts(node)
+    if parts is None:
+        return ""
+    view, command, args, kwargs = parts
+    function = commands.get(view, {}).get(command)
+    if function is None:
+        return ""
+    try:
+        inspect.signature(function).bind(None, *args, **kwargs)
+    except TypeError:
+        return ""
+    return f"{view}()." + _call(command, *args, **kwargs)
+
+
+def check_findings(findings: list[AgentFinding], commands: dict[str, dict[str, Callable[..., Any]]]) -> None:
+    """
+    Keeps only the calls in the findings that run (checked_call()), written as reports write them; a finding whose
+    call doesn't run keeps its message, without the call.
+    """
+    for finding in findings:
+        finding.call = checked_call(finding.call, commands) if finding.call else ""
+        if not finding.call:
+            finding.shows = ""
+
+
+@dataclass
 class AgentStep:
     """
     Something the agent did while answering, told as it happens (ask(on_step=...)), so a window can show its work.
@@ -278,6 +438,9 @@ class AgentAnswer:
     One question and its answer, with every tool call it made, the AWS reads, the tokens and what it cost.
 
         text          the answer, in markdown
+        findings      what the agent found that the user should act on or know (AgentFinding: level, message, the
+                      View call that shows more), as it filled them in its reply; empty when it found nothing, or
+                      answered in plain text (findings=False, or a model that can't fill a set shape)
         plan          the steps the agent planned for it (write_todos), as it last left them; empty when it
                       didn't plan (a question of a step or two)
         charts        the charts it drew to show with the text (show_chart), in order: .title, .data, .mime
@@ -293,6 +456,7 @@ class AgentAnswer:
         rates         the prices `cost` is at (Rates: per 1M input and output tokens, yours or Bedrock's list prices)
         stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
         waiting       the calls paused for the user's choice on a big read (resume() goes on); empty once answered
+        runbooks      the runbooks it read to answer (read_runbook), by name, in the order it read them
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
         exception     the error itself, to raise when debugging
@@ -300,6 +464,7 @@ class AgentAnswer:
 
     question: str
     text: str = ""
+    findings: list[AgentFinding] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     plan: list[PlanStep] = field(default_factory=list)
     charts: list[Chart] = field(default_factory=list)
@@ -327,6 +492,18 @@ class AgentAnswer:
         The calls paused for the user's choice on a big read, in the order they asked.
         """
         return [call for call in self.calls if call.waiting is not None]
+
+    @property
+    def runbooks(self) -> list[str]:
+        """
+        The runbooks it read to answer (read_runbook calls that found one), by name, each once, in the order read.
+        """
+        names: list[str] = []
+        for call in self.calls:
+            name = (call.result or {}).get("runbook") if call.name == "read_runbook" else None
+            if name and name not in names:
+                names.append(name)
+        return names
 
 
 def _choice_findings(call: ToolCall) -> list[tuple[str, str]]:
@@ -392,6 +569,35 @@ def _plan_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
                      "Check it does, or ask about them in a follow-up.")]
 
 
+_NOTE_TOOLS = {"write_file": "content", "edit_file": "new_string"}
+_NOTE_CHARACTERS = 90
+
+
+def _noted(call: ToolCall) -> list[str]:
+    """
+    The notes a tool call wrote into the agent's memory (a write_file or edit_file under MEMORY_FOLDER that went
+    through), as their text; empty for any other call.
+    """
+    written = _NOTE_TOOLS.get(call.name)
+    path = str(call.args.get("file_path") or "")
+    if written is None or not call.ok or not path.startswith(MEMORY_FOLDER):
+        return []
+    return [note.text for note in parse_notes(str(call.args.get(written) or ""))]
+
+
+def _memory_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
+    """
+    What the agent noted for next time while answering, with the calls that show and clear its notes.
+    """
+    noted = [text for call in answer.calls for text in _noted(call)]
+    if not noted:
+        return []
+    shown = "; ".join(_clip(text, _NOTE_CHARACTERS) for text in noted[:2])
+    more = f" and {_plural(len(noted) - 2, 'more')}" if len(noted) > 2 else ""
+    return [("info", f"It kept {_plural(len(noted), 'note')} for next time ({shown}{more}): the next conversation "
+                     "starts from them. See them all with memory(), or clear one with forget('...').")]
+
+
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
     """
     What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
@@ -425,20 +631,45 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
                                   "out. README lists the read-only IAM permissions each tool needs."))
         found += _coverage_findings(call, budget)
     found += _plan_findings(answer)
+    found += _memory_findings(answer)
     if not answer.calls and not answer.error and answer.stopped is None:
         found.append(("info", "It answered without calling a tool, so nothing in the answer comes from your account. "
                               "Ask about your functions or buckets, or a time window."))
     return found
 
 
+def reply_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
+    """
+    What the agent found in the account, as (level, message) pairs: each finding of its reply, with the call that
+    shows more after the message when the message doesn't already name it.
+    """
+    pairs = []
+    for finding in answer.findings:
+        named = not finding.call or finding.call in finding.message
+        pairs.append((finding.level, finding.message if named else f"{finding.message} ({finding.call})"))
+    return pairs
+
+
+def _command_key(command: str) -> str:
+    """
+    What makes two next calls the same: the command and its first argument, "LambdaView().errors('etl'".
+    """
+    key = re.match(r"(?:\w+\(\)\.)?(\w+)\(('[^']*')?", command)
+    return key.group(0) if key else command
+
+
 def answer_next(answer: AgentAnswer, n: int = 3) -> list[tuple[str, str]]:
     """
-    The commands worth running next: the View calls behind the tools the answer used, the most specific first,
-    without repeats: one per command and function (errors('etl') once, with the latest window).
+    The commands worth running next: the calls the agent's findings name, the most important first, then the View
+    calls behind the tools the answer used, the most specific first, without repeats: one per command and function
+    (errors('etl') once, with the latest window).
     """
     seen: dict[str, tuple[str, str]] = {}
+    for finding in answer.findings:
+        if finding.call:
+            what = finding.shows or _clip(finding.message, _SHOWS_CHARACTERS)
+            seen.setdefault(_command_key(finding.call), (finding.call, what))
     for call in reversed(answer.calls):
         for command, what in call.next:
-            key = re.match(r"(?:\w+\(\)\.)?(\w+)\(('[^']*')?", command)
-            seen.setdefault(key.group(0) if key else command, (command, what))
+            seen.setdefault(_command_key(command), (command, what))
     return list(seen.values())[:n]

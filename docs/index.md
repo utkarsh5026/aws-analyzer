@@ -177,7 +177,7 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <li><a href="agent.html">
 <img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Ask in plain English</span><code>agent/</code></span>
-<span class="asks"><span>Were last night's uploads to acme-raw processed?</span><span>Any question about Lambda and S3, in a sentence.</span></span>
+<span class="asks"><span>Were last night's uploads to acme-raw processed?</span><span>Any question about Lambda and S3, in a sentence.</span><span>Remembers where things run, next time.</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 </ul>

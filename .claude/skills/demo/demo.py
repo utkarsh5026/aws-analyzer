@@ -1967,7 +1967,7 @@ def seed_lambda_functions() -> dict:
 def seed_agent() -> dict:
     """
     The Lambda demo data, and a scripted stand-in for the model (no Azure OpenAI needed, but the agent's packages
-    are): it calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
+    are): it reads the lambda-failing runbook, then calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
     and writes its answer from what they returned, so the report shows the demo data's real numbers. It only knows
     that one plan; with --live the agent asks your Azure OpenAI deployment instead (AZURE_OPENAI_* variables).
     """
@@ -2002,19 +2002,38 @@ def _demo_model():
                 + f"\n\nChecked {window.get('from', '?')} to {window.get('to', '?')} UTC in "
                 + ", ".join(health.get("regions") or []) + ".")
 
+    def findings(health: dict, reports: list[dict]) -> list[dict]:
+        causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        found = []
+        for row in (health.get("failed") or [])[:3]:
+            cause = causes.get(row["name"]) or {}
+            why = f"; the most common cause is {cause['kind']} ({cause['count']} times)" if cause.get("kind") else ""
+            region = f", region={row['region']!r}" if row["region"] != REGION else ""
+            call = f"LambdaView().errors({row['name']!r}, since='24h'{region})"
+            found.append({"level": "warn",
+                          "message": f"{row['name']} failed {row['errors']:,} calls in the last 24 hours "
+                                     f"({row['error_rate_pct']}% of them){why}: those runs did no work. Read each "
+                                     "cause with the lines around it, and fix the most common first.",
+                          "call": call, "shows": "its errors, grouped by cause"})
+        return found
+
     class DemoModel(BaseChatModel):
         model_name: str = "demo-model (scripted)"
+        replies: bool = False
 
         @property
         def _llm_type(self) -> str:
             return "demo"
 
         def bind_tools(self, tools, **kwargs):
-            return self
+            offered = {getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else None) for t in tools}
+            return self.model_copy(update={"replies": "final_answer" in offered})
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
             start = max(i for i, m in enumerate(messages) if m.type == "human")
-            results = [json.loads(m.content) for m in messages[start + 1:] if m.type == "tool"]
+            read = [json.loads(m.content) for m in messages[start + 1:] if m.type == "tool"]
+            results = [result for result in read if "runbook" not in result]
+            has_runbook = "lambda-failing:" in str(messages[0].content)
             usage = {"input_tokens": 2400 + 1500 * len(results), "output_tokens": 90, "total_tokens": 0}
             usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
 
@@ -2023,12 +2042,17 @@ def _demo_model():
                     {"name": name, "args": args, "id": f"{name}-{i}", "type": "tool_call"}
                     for i, (name, args) in enumerate(steps)])
 
-            if not results:
+            if not read and has_runbook:
+                reply = calls(("read_runbook", {"name": "lambda-failing"}))
+            elif not results:
                 reply = calls(("function_health", {"since": "24h"}))
             elif len(results) == 1 and results[0].get("failed"):
                 reply = calls(*[("function_errors", {"function": row["name"], "since": "24h",
                                                      **({"region": row["region"]} if row["region"] != REGION else {})})
                                 for row in results[0]["failed"][:2]])
+            elif self.replies:
+                reply = calls(("final_answer", {"answer": answer(results[0], results[1:]),
+                                                "findings": findings(results[0], results[1:])}))
             else:
                 reply = AIMessage(content=answer(results[0], results[1:]), usage_metadata=usage)
             return ChatResult(generations=[ChatGeneration(message=reply)])

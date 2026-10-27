@@ -15,6 +15,7 @@ Ask "Which Lambda failed last night?" in a notebook cell and get the answer: whi
   <li>Says what it checked</li>
   <li>A budget per question</li>
   <li>Follow-up questions</li>
+  <li>Remembers your account, if you let it</li>
   <li>Lambda and S3, joined, and knowledge bases</li>
   <li>Any model: Bedrock, OpenAI, Azure, ...</li>
 </ul>
@@ -49,6 +50,13 @@ It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is
 
     It reads AWS with the notebook's IAM execution role and region, like every other view, and `agent.tools()` shows which model it picked.
 
+3. **Let it remember your account** (optional). With `memory=True` it keeps notes like "orders-etl runs in eu-west-1" between conversations, so it doesn't look them up again. [Notes it keeps](#memory) says what it notes and how to clear it.
+
+    ```python
+    agent = AgentView(provider="bedrock", memory=True)                   # notes in ~/.cache/aws-analyzer/agent/
+    # agent = AgentView(provider="bedrock", memory="~/SageMaker/agent-memory.sqlite")   # kept when a notebook instance stops
+    ```
+
 </div>
 
 ??? more "Every model it can use, and time zones"
@@ -72,7 +80,7 @@ It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is
 
 !!! tip "Worth knowing"
 
-    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either unless you turn on [`read_files=True`](#read-files).
+    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either unless you turn on [`read_files=True`](#read-files). With [`memory=True`](#memory), the agent's notes about your account go too, at the start of each conversation; they stay on this machine otherwise.
 
 ## Start here { #tour }
 
@@ -89,6 +97,8 @@ agent.ask("Which buckets are public, and what do they cost?", new=True)
 agent.ask("Which functions run close to their timeout this week?", new=True)   # a new conversation
 agent.tools()                                                  # what it can call, its model and its budget
 agent.transcript()                                             # every question and answer so far, with their cost
+agent.memory()                                                 # with memory=True: what it remembers between conversations
+agent.runbooks()                                               # the step-by-step guides it follows when a question matches
 ```
 
 With a Python sandbox (`AgentView(python="local")`, [below](#run-python)), it can also read your files and answer with charts: `agent.ask("Chart the orders in s3://acme-raw/sales/ by month")`, then `agent.save_charts()` for the pictures.
@@ -203,12 +213,17 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 2. Calls `function_health` for that window: CloudWatch's counts for every function at once, in a few seconds.
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
+5. Fills in its findings: each problem it found, why it matters and what to do, with the call that shows more. The report shows them in its findings panel, warnings first, and their calls lead the commands to run next.
+
+??? more "How the findings are made"
+
+    The model ends a question by calling a `final_answer` tool with a set shape (LangChain's `response_format`): the answer in markdown, and a list of findings, each `warn` or `info`, a message and a View call. A call is kept only when it names a real command of `LambdaView`, `S3View` or `BedrockKBView` with arguments that command takes, so one the model made up never shows as a call to run; commands that write files or open a window are never suggested. A model that can't be made to call a tool (a few on Amazon Bedrock) answers in plain text instead, without findings; so does `AgentView(findings=False)`, which also leaves the list of calls out of its instructions.
 
 ??? more "How it checks that uploads were processed"
 
     For "Were last night's uploads to acme-raw processed?" it calls `s3_triggers` for the bucket and the window. That reads the bucket's event notifications (which functions it invokes, on which events, for which keys), lists the files written in the window, checks that the function is there and that its resource policy lets the bucket invoke it, and reads the function's runs and failures from CloudWatch for the same window. The findings name what broke the link: files whose ending is `.CSV` when the filter says `.csv` (S3 compares case-sensitively), files uploaded in parts when the notification fires only on PUT uploads, a function that isn't there, a permission that's missing (with the `aws lambda add-permission` command), or no file arriving at all. Then `function_errors` reads why the runs that did happen failed.
 
-Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. `new=True` or `agent.new_conversation()` starts a fresh one. The kernel's stop button stops a question, and the report shows what it found until then.
+Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. `new=True` or `agent.new_conversation()` starts a fresh one, which knows nothing of the last unless [memory](#memory) is on: then it starts from the agent's notes about your account. The kernel's stop button stops a question, and the report shows what it found until then.
 
 ## What it can call { #tools }
 
@@ -375,12 +390,129 @@ The chart is made with [Altair](https://altair-viz.github.io), and the sandbox d
     `answer.charts` holds them: each `Chart` has its `.title`, the workspace file it came from (`.path`), the SVG's bytes (`.data`), its `.kind` and `.mime`, and its Vega-Lite spec (`.spec`). With Altair installed in the notebook, `alt.Chart.from_dict(answer.charts[0].spec)` shows a chart again, with tooltips; `save_charts()` writes the spec beside each SVG as `.vl.json`, which the [Vega editor](https://vega.github.io/editor/) opens too. A chart that reads data from a URL is refused: its data must be in the chart, as Altair puts it. `show_chart` also takes PNG, SVG, JPEG, GIF and WebP pictures of up to 3 MB, and shows every chart as a picture, so nothing in an SVG runs. A question gets at most 8 charts: `budget={"charts": 12}` raises it. Showing the same file again replaces the chart with the new one. To draw with matplotlib instead, `LocalSandbox(packages=["pandas", "matplotlib"])`: its charts get the same colours.
 
 
+## Notes it keeps between conversations { #memory }
+
+With `memory=True`, the agent remembers what it learned about your account, so the next conversation doesn't look it up again.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", memory=True)
+agent.ask("Which Lambda failed last night?")     # finds orders-etl in eu-west-1; notes it
+agent.ask("Is orders-etl slow too?", new=True)   # next time: straight to eu-west-1
+agent.memory()                                   # each note, and when it learned it
+agent.forget("orders-etl")                       # clear the notes about it
+```
+
+Without memory, every conversation starts from nothing: it lists the regions again to find `orders-etl`, and you tell it again which bucket feeds which function. With memory, it writes down what it found the first time. Memory is off until you turn it on.
+
+### What it notes { #memory-notes }
+
+Lasting facts that save a lookup, one dated line each: `- orders-etl runs in eu-west-1 (learned 2026-10-27)`.
+{ .gist }
+
+| It notes | It never notes |
+|---|---|
+| Which region a function, bucket or knowledge base is in | Error counts, the latest failure, costs and sizes: they change every day |
+| What a function or bucket is for, and when a job runs | The values of settings or environment variables |
+| Which bucket feeds which function, and what a prefix holds | Keys, tokens, passwords (and anything that looks like one is hidden before it's stored) |
+| What you tell it about your account ("orders-etl is owned by the data team") | Log lines, or anything you ask it not to keep |
+
+It writes a note just before it answers, and the answer says so: *It kept 1 note for next time (orders-etl runs in eu-west-1)*.
+
+The next conversation starts with the notes in its prompt, as facts it found, not instructions: a note tells it where to look first, and when a tool says otherwise, the tool wins and it fixes the note.
+
+!!! note ""
+
+    A note helps from the **next** conversation on. The one going on already knows what it found; `new_conversation()` (or **new chat**) starts one that begins from the notes.
+
+### See them, and clear them { #memory-clear }
+
+`memory()` shows every note with its age; the chat window's 🧠 memory does the same, with a ✕ on each.
+{ .gist }
+
+![The memory() report: the agent badge and the title What the agent remembers, with account 123456789012 and the path ~/.cache/aws-analyzer/agent/memory.sqlite under it; cards for 5 notes, 469 B of 8.0 KB, the oldest note 137 days ago (marked) and the account; a warning, 1 note over 90 days old, saying the account may have changed since and to clear one you know is wrong with forget('support-docs is the'); a table of the five notes in the order the agent wrote them, from orders-etl runs in eu-west-1, not us-east-1 (today) to support-docs is the knowledge base for customer support (137 days ago); folded, the notes file as the agent reads it and your own AGENTS.md; and Next: forget('orders-etl runs in'), forget_all() and ask('Which Lambda failed last night?')](images/agent-memory-light.webp#only-light){ width="984" height="733" loading=lazy }
+![The memory() report: the agent badge and the title What the agent remembers, with account 123456789012 and the path ~/.cache/aws-analyzer/agent/memory.sqlite under it; cards for 5 notes, 469 B of 8.0 KB, the oldest note 137 days ago (marked) and the account; a warning, 1 note over 90 days old, saying the account may have changed since and to clear one you know is wrong with forget('support-docs is the'); a table of the five notes in the order the agent wrote them, from orders-etl runs in eu-west-1, not us-east-1 (today) to support-docs is the knowledge base for customer support (137 days ago); folded, the notes file as the agent reads it and your own AGENTS.md; and Next: forget('orders-etl runs in'), forget_all() and ask('Which Lambda failed last night?')](images/agent-memory-dark.webp#only-dark){ width="984" height="733" loading=lazy }
+/// caption
+`agent.memory()`: each note and when it learned it, the ones old enough to check, and how full it is.
+///
+
+A note over 90 days old is marked: the account may have changed since. `forget("words")` clears the notes holding those words (any case), `forget_all()` every note about this account. Notes about other accounts, and your own notes file, stay as they are.
+
+![The chat window with its 🧠 memory button highlighted in the header, beside ⚙ model and new chat; under the header, a line reading 5 notes · 469 B of 8.0 KB · account 123456789012 · 1 note over 90 days old: check it; then the five notes, one per line, each with how long ago it was learned (today, 6d ago, 27d ago, and 137d ago marked in amber) and a ✕ at the end of the line; a line saying Your notes: AGENTS.md, read for each new conversation; the agent never writes to it; the forget all and close buttons; and under them the empty conversation's greeting and questions to start from](images/agent-chat-memory-light.webp#only-light){ width="984" height="705" loading=lazy }
+![The chat window with its 🧠 memory button highlighted in the header, beside ⚙ model and new chat; under the header, a line reading 5 notes · 469 B of 8.0 KB · account 123456789012 · 1 note over 90 days old: check it; then the five notes, one per line, each with how long ago it was learned (today, 6d ago, 27d ago, and 137d ago marked in amber) and a ✕ at the end of the line; a line saying Your notes: AGENTS.md, read for each new conversation; the agent never writes to it; the forget all and close buttons; and under them the empty conversation's greeting and questions to start from](images/agent-chat-memory-dark.webp#only-dark){ width="984" height="705" loading=lazy }
+/// caption
+`agent.chat()` with 🧠 memory open: a ✕ forgets one note; **forget all** asks for a second click.
+///
+
+The panel shows the notes as they are after each answer, so a note the agent just kept appears there. With memory off, it says how to turn it on.
+
+### Your own facts, from a file { #memory-file }
+
+Facts you want the agent to know from the start go in a file of your own, which the agent only reads.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", notes="AGENTS.md", memory=True)
+```
+
+```markdown title="AGENTS.md"
+- orders-etl runs at 02:00 IST and loads the day's orders from s3://acme-raw/incoming/
+- The data team owns everything named *-etl
+- report-api is the dashboard's backend; its errors are what users see
+```
+
+It's read for each new conversation, so editing it changes what the next one knows. Keep it beside the notebook and in git with it, so your team's agents start from the same facts. `notes=` also takes the facts as text: `notes="orders-etl runs at 02:00 IST"`.
+
+!!! tip "Worth knowing"
+
+    The notes live in `~/.cache/aws-analyzer/agent/memory.sqlite`. On a SageMaker notebook instance only `~/SageMaker` survives a stop, so keep them there: `AgentView(memory="~/SageMaker/agent-memory.sqlite")`. Studio keeps the whole home folder.
+
+??? more "Where the notes are kept, and what keeps them safe"
+
+    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves still last only as long as the kernel.
+
+## Runbooks it follows { #runbooks }
+
+A runbook is your team's way of working through a kind of problem, and the agent reads one only when a question needs it.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", runbooks="~/team-runbooks")   # yours, beside the built-in ones
+agent.runbooks()                                 # each one, where it's from, and any that didn't load
+agent.ask("Why didn't last night's upload to acme-raw start orders-etl?")   # reads s3-trigger-not-firing first
+```
+
+The model sees each runbook's name and one-line description. When a question matches one, it reads the whole guide (`read_runbook`), follows its steps with what it finds, and says which one it followed; the answer's **Runbook** card says so too. So the prompt stays short however many runbooks there are.
+
+Three come built in: `lambda-failing` (from which function failed to the line behind it), `s3-trigger-not-firing` (the first broken link from an upload to its function's run) and `kb-answer-wrong` (a file that isn't indexed, a search that misses it, or a model that ignores it).
+
+### Write your own { #runbooks-write }
+
+A runbook is a folder with a `SKILL.md`, in the [Agent Skills](https://agentskills.io) format: front matter with a `name` (the folder's name: lowercase letters, digits and hyphens) and a one-line `description` the model picks it by, then the guide in markdown.
+
+```markdown title="~/team-runbooks/nightly-load-late/SKILL.md"
+---
+name: nightly-load-late
+description: The nightly orders load hasn't finished by 06:00. Use when the user asks why today's orders are missing.
+metadata:
+  toolkits: s3 lambda
+---
+1. `find_files('s3://acme-raw/incoming/', since='12h')`: did the night's files arrive?
+2. If they did, follow the s3-trigger-not-firing runbook.
+3. If not, the upstream export is late: say so, and name the team that owns it (data-platform).
+```
+
+Write the steps in terms of the agent's tools (`agent.tools()` lists them). Files beside the `SKILL.md` (a list of commands, a table of owners) are read with `read_runbook(name, file=...)` when the guide says to. `runbooks=` takes a folder of runbook folders, one runbook's own folder, or a list of them; they're read after the built-in ones, so one of yours with a built-in one's name replaces it. `metadata.toolkits` offers a runbook only to an agent with those toolkits. `runbooks()` says what's wrong with one that didn't load.
+
+!!! tip "Worth knowing"
+    A runbook is followed like your own instructions, so keep the folder to guides your team wrote. It can't widen what the agent does: it still only reads, and a step that would change something becomes a command for you to run. A guide is read from its file each time, so an edit counts at once; a new runbook needs a new `AgentView`.
+
 ## Safe and bounded { #safety }
 
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -407,6 +539,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `save_files` | 500 | With `python=`: the most files one `save_s3_files` call copies, even when you say go |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
 | `kb_searches` | 10 | `search_kb`, `file_chunks` and `answer_kb` stop running |
+| `memory_bytes` | 8 KB | With `memory=True`: a note that would take its notes past it isn't kept |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -448,6 +581,7 @@ In the [chat window](#chat), the call's line says *✋ waiting for you* and thre
 ```python
 answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
+answer.findings                # AgentFinding: level ('warn', 'info'), message, call (a View call, checked), shows
 answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
@@ -461,6 +595,8 @@ answer.error                   # what went wrong with the model, and what to do
 answer.waiting                 # calls paused before a big read: .waiting.what / .go / .smaller say what it asks
 agent.core.resume("smaller")   # goes on with your choice: 'go', 'smaller' or 'skip'
 agent.core.history             # every AgentAnswer so far
+agent.core.memories()          # with memory=True: MemoryState: notes (Note: text, learned), text, account, path, limit
+agent.core.forget("orders-etl")   # the Notes it cleared; forget_note(note) clears one, forget_all() every one
 ```
 
 To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), its plan each time it writes or updates one (`'plan'`, `.plan`: the whole list), and each tool call as it starts (`'tool'`), pauses to ask you before a big read (`'asking'`, with `.call.waiting`), and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
@@ -485,17 +621,20 @@ core = AgentAnalyzer(
     model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens, over the list prices
     timezone="Asia/Kolkata",                         # for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
-    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account
+    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account (or a file)
+    memory=True,                                     # keeps notes between conversations; a path picks the file
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
+    runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
+    findings=False,                                  # answer in plain text, without findings; on by default
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
@@ -534,7 +673,7 @@ On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's 
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 
@@ -576,6 +715,22 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
     The question needed more tool calls, time or log days than the budget allows. Ask a narrower question (one function, a shorter window), or raise the limit it names: `AgentView(budget={"tool_calls": 50})`.
 
+??? question "Memory is on, but it looked something up again"
+
+    Notes are read when a conversation starts, so they help from the next one: `agent.new_conversation()`, or **new chat** in the window. If the next one still looks it up, the agent didn't note it: `agent.memory()` shows what it kept. Tell it in a sentence ("remember that orders-etl runs in eu-west-1") and it notes that, or put it in your [`notes=` file](#memory-file).
+
+??? question "A note is wrong"
+
+    The agent fixes a note when a tool says otherwise, but you can clear it yourself: `agent.forget("orders-etl runs in")` (a few words of it), or its ✕ under the chat window's 🧠 memory. `agent.forget_all()` clears every note about this account.
+
+??? question "“No module named 'langgraph.store.sqlite'”"
+
+    Memory keeps its notes with `langgraph-checkpoint-sqlite`, which comes with the agent's extra from this version on. Run `%pip install -U "aws-analyzer[agent]"` and restart the kernel.
+
+??? question "The notes were gone after the notebook instance restarted"
+
+    A SageMaker notebook instance keeps only `~/SageMaker` when it stops, and the notes are in `~/.cache` by default. Keep them under it: `AgentView(memory="~/SageMaker/agent-memory.sqlite")`. Studio keeps the whole home folder.
+
 ??? question "`ask()` says the agent is waiting for my choice"
 
     The last question stopped to ask before a [big read](#big-reads). Run `agent.go()`, `agent.smaller()` or `agent.skip()` to let it finish, or `agent.ask("...", new=True)` to drop it and start a new conversation.
@@ -586,12 +741,14 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
-| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; ⚙ model picks the model |
-| `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
+| `ask(question, new=False)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
 | `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |
 | `skip()` | The same, answering without it; the answer says what it didn't read |
+| `memory()` | With `memory=True`: what the agent remembers about the account, each note and when it learned it, and the notes old enough to check |
+| `forget(match)` | Clears the notes holding these words; `forget_all()` clears every note about this account |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
