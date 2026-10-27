@@ -77,7 +77,17 @@ from aws_analyzer.agent import (
     system_prompt,
     trigger_findings,
 )
-from aws_analyzer.agent import Note, PlanStep, parse_plan, summarize_kb_files
+from aws_analyzer.agent import (
+    REPLY_SCHEMA,
+    AgentFinding,
+    Note,
+    PlanStep,
+    checked_call,
+    parse_plan,
+    parse_reply,
+    reply_findings,
+    summarize_kb_files,
+)
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
@@ -350,6 +360,62 @@ def test_answer_next_prefers_the_latest_calls_without_repeats():
     ])
     assert answer_next(answer) == [("LambdaView().logs('etl', request_id='r1')", "one run"),
                                    ("LambdaView().errors('etl', since='1h')", "errors")]
+
+
+def test_a_reply_reads_forgivingly():
+    text, findings = parse_reply({"answer": " **etl** failed. ", "findings": [
+        {"level": "warning", "message": "etl fails:  KeyError.\nRead its code.", "call": "LambdaView().code('etl')",
+         "shows": "its code"},
+        {"level": "?", "message": "Logs are kept forever."},
+        "A finding as plain text",
+        {"level": "warn", "message": "  "},
+        42,
+    ]})
+    assert text == "**etl** failed."
+    assert findings == [AgentFinding("warn", "etl fails: KeyError. Read its code.", "LambdaView().code('etl')",
+                                     "its code"),
+                        AgentFinding("info", "Logs are kept forever."), AgentFinding("info", "A finding as plain text")]
+    assert parse_reply({"answer": "a", "findings": "none"}) == ("a", [])
+    assert parse_reply(None) == ("", [])
+    assert len(parse_reply({"answer": "a", "findings": ["x"] * 20})[1]) == 8
+    assert REPLY_SCHEMA["title"] == "final_answer" and REPLY_SCHEMA["required"] == ["answer", "findings"]
+
+
+def test_a_finding_keeps_only_a_call_that_runs():
+    commands = {"LambdaView": LambdaToolkit().view_commands()}
+    assert "errors" in commands["LambdaView"] and "download" not in commands["LambdaView"]
+    assert checked_call("`LambdaView().errors(\"etl\", since='24h')`", commands) == (
+        "LambdaView().errors('etl', since='24h')")
+    assert checked_call("LambdaView().logs('etl', request_id='r1', n=20)", commands) == (
+        "LambdaView().logs('etl', request_id='r1', n=20)")
+    for made_up in ("LambdaView().errors('etl', window='24h')",
+                    "LambdaView().errors()",
+                    "LambdaView().delete('etl')",
+                    "LambdaView().download('etl')",
+                    "S3View().ls('s3://b/')",
+                    "LambdaView(region='eu-west-1').errors('etl')",
+                    "LambdaView().errors(name)",
+                    "LambdaView().errors('etl', **opts)",
+                    "import os; os.remove('x')", "errors('etl'", ""):
+        assert checked_call(made_up, commands) == "", made_up
+
+
+def test_findings_lead_the_report_and_their_calls_come_next_first():
+    answer = AgentAnswer("q", text="a", findings=[
+        AgentFinding("warn", "etl fails on KeyError: 14 runs lost.", "LambdaView().errors('etl', since='24h')",
+                     "its errors, by cause"),
+        AgentFinding("info", "Run LambdaView().code('etl') to see where it reads the field.",
+                     "LambdaView().code('etl')"),
+        AgentFinding("info", "Logs are kept forever."),
+    ], calls=[ToolCall("function_errors", next=[("LambdaView().errors('etl', since='1h')", "errors"),
+                                                ("LambdaView().logs('etl', request_id='r1')", "one run")])])
+    assert reply_findings(answer) == [
+        ("warn", "etl fails on KeyError: 14 runs lost. (LambdaView().errors('etl', since='24h'))"),
+        ("info", "Run LambdaView().code('etl') to see where it reads the field."),
+        ("info", "Logs are kept forever.")]
+    assert answer_next(answer) == [("LambdaView().errors('etl', since='24h')", "its errors, by cause"),
+                                   ("LambdaView().code('etl')", "Run LambdaView().code('etl') to see where it reads the field."),
+                                   ("LambdaView().logs('etl', request_id='r1')", "one run")]
 
 
 def test_tool_call_reads_as_the_call_the_model_made():
@@ -1445,6 +1511,69 @@ def test_a_stop_request_ends_the_question_with_what_it_found(seeded):
                                                             ("function_errors", "stopped")]
     wrap_up = [m for m in model.prompts[-1] if "The user pressed stop before you finished" in str(m.content)]
     assert len(wrap_up) == 1 and answer.model_calls == 3 and answer.error is None
+
+
+def replies(answer, *findings, tokens=(150, 30)):
+    """
+    The model's reply: a final_answer call with the answer and its findings ((level, message, call) each).
+    """
+    items = [{"level": level, "message": message, "call": call} for level, message, call in findings]
+    return calls(("final_answer", {"answer": answer, "findings": items}), tokens=tokens)
+
+
+def test_the_answer_comes_with_the_findings_the_model_filled_in(seeded, capsys):
+    model = scripted(
+        thinks("I'll check last night's failures.", ("function_health", {"since": "2h"})),
+        replies("**etl-nightly** failed 40 times: KeyError 'customer_id'.",
+                ("warn", "etl-nightly fails on KeyError 'customer_id': 40 runs lost in 2 hours. Check the field.",
+                 "LambdaView().errors('etl-nightly', since='2h')"),
+                ("info", "Its logs are kept forever.", "LambdaView().delete_logs('etl-nightly')")),
+    )
+    steps = []
+    view = AgentView(make(model), mode="text", progress="off")
+    answer = view.core.ask("Which Lambda failed last night?", now=NOW, on_step=steps.append)
+    assert answer.text == "**etl-nightly** failed 40 times: KeyError 'customer_id'." and answer.error is None
+    assert [(f.level, f.call) for f in answer.findings] == [
+        ("warn", "LambdaView().errors('etl-nightly', since='2h')"), ("info", "")]
+    assert [s.kind for s in steps if s.kind == "thinking"] == ["thinking"]
+    assert [c.name for c in answer.calls] == ["function_health"] and answer.model_calls == 2
+    assert "final_answer" in model.bound[0]
+    prompt = system_text(model)
+    assert "Give the answer with final_answer" in prompt and "Calls a finding can name" in prompt
+    assert "- LambdaView(): code(name, file=None, *, region=None, max_size='50MB')" in prompt
+    assert "clean_downloads" not in prompt and "delete_logs" not in prompt
+    view._show(view._answer_blocks(answer))
+    out = capsys.readouterr().out
+    assert out.index("40 runs lost") < out.index("What it checked")
+    assert "Check the field. (LambdaView().errors('etl-nightly', since='2h'))" in out
+    looks = out[out.index("Look closer (aws_analyzer.LambdaView)"):]
+    assert looks.splitlines()[1].strip().startswith("LambdaView().errors('etl-nightly', since='2h')")
+    assert looks.count("LambdaView().errors('etl-nightly'") == 1
+
+
+def test_findings_false_answers_in_plain_text(seeded):
+    model = scripted(says("**etl-nightly** failed."))
+    answer = make(model, findings=False).ask("Which Lambda failed?")
+    assert answer.text == "**etl-nightly** failed." and answer.findings == []
+    assert "final_answer" not in model.bound[0] and "Calls a finding can name" not in system_text(model)
+
+
+def test_a_model_that_cant_be_made_to_call_a_tool_answers_in_plain_text(seeded):
+    model = scripted(says("**etl-nightly** failed."))
+    model.__dict__["supports_tool_choice_values"] = ("auto",)
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.text == "**etl-nightly** failed." and answer.findings == []
+    assert "final_answer" not in model.bound[0]
+
+
+def test_a_stopped_question_wraps_up_with_its_reply(seeded):
+    stop = threading.Event()
+    model = scripted(calls(("function_health", {"since": "2h"})),
+                     replies("Stopped early: I didn't check any function.",
+                             ("info", "Nothing was read.", "LambdaView().functions()")))
+    answer = make(model).ask("What failed?", stop=stop, on_step=lambda step: step.kind == "tool" and stop.set())
+    assert answer.stopped == "stopped" and answer.text == "Stopped early: I didn't check any function."
+    assert [(f.message, f.call) for f in answer.findings] == [("Nothing was read.", "LambdaView().functions()")]
 
 
 def test_a_stop_whose_wrap_up_fails_ends_without_an_answer(seeded):

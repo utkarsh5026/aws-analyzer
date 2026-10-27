@@ -1,8 +1,8 @@
 """
 AgentView: the agent's notebook UI. ask() shows the answer first, with the charts the agent drew for it (_Charts),
-then the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
+then its findings (what it found in the account, and what to do), the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
-View commands to look closer; transcript() and tools() show the questions so far and what the agent can call. A
+View commands to look closer, the ones its findings name first; transcript() and tools() show the questions so far and what the agent can call. A
 question that pauses before a big read shows what it would read instead, and go(), smaller() and skip() go on.
 
 Its reports sit in a box of the class _ROOT, which scopes its stylesheet's rules, and each title starts with
@@ -30,7 +30,7 @@ from .._kit.render import _base_css, _Look, _report_html
 from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next
+from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
 from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
@@ -428,8 +428,9 @@ class AgentView(_BaseView):
 
     def _checked_blocks(self, answer: AgentAnswer) -> list[Any]:
         """
-        What an answer's report shows under the answer: the cards, the findings, the plan it worked to, each tool call, the AWS reads, what
-        it cost and the commands to look closer.
+        What an answer's report shows under the answer: the cards, the findings (what the agent found in the account,
+        then what to know about how it got the answer), the plan it worked to, each tool call, the AWS reads, what
+        it cost and the commands to look closer (the calls its findings name first).
         """
         core = self.core
         failed = sum(1 for c in answer.calls if c.error)
@@ -445,7 +446,7 @@ class AgentView(_BaseView):
             ("Model cost (est.)", cost),
             ("Time", _duration(answer.seconds)),
         ]))
-        blocks.append(_Findings(answer_findings(answer, core.budget)))
+        blocks.append(_Findings([*reply_findings(answer), *answer_findings(answer, core.budget)]))
         if answer.plan:
             blocks.append(_Plan(answer.plan))
         if answer.calls:

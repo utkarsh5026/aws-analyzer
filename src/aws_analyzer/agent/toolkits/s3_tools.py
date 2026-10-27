@@ -957,6 +957,12 @@ class S3Toolkit(_AsksFirst, Toolkit):
         super().__init__(analyzer)
         self.read_files = read_files
 
+    def view_class(self) -> type:
+        """
+        S3View, whose commands the agent's findings can name.
+        """
+        return _s3_module().S3View
+
     @property
     def privacy(self) -> str:
         if self.peer("python") is not None:
