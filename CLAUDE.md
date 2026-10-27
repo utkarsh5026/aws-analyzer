@@ -889,7 +889,16 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   toolkit's tool: counted against the budget, told to the listener, listed in the report. Never a
   `FilesystemBackend`, and deepagents' `execute` stays hidden: code the model writes runs only through the Python
   toolkit's `run_python` (`file=` runs a script the file tools wrote), in the workspace (below). A new capability of the loop (a
-  subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
+  subagent, a middleware) goes in `build_graph()`. With `findings=True` (the default) the question ends in the
+  model's reply: `response_format` is LangChain's `ToolStrategy` on `answers.REPLY_SCHEMA`, so the model calls
+  `final_answer` with the answer and its findings, `_take_reply` reads LangChain's `structured_response` from the
+  stream (`parse_reply`, forgiving) into `AgentAnswer.text` and `.findings` (`AgentFinding`), and `_reply_when_able`
+  drops it for a model that can't be made to call a tool (Bedrock's `supports_tool_choice_values` without "any"),
+  which then answers in a message, as a model that ignores it does. The prompt lists the calls a finding can name
+  (each toolkit's `view_commands()`: its View's commands, without the ones that write files or open windows,
+  `_NOT_SUGGESTED`), and `_finish` keeps a finding's call only when `checked_call` finds it a real command with
+  arguments it takes; `AgentView` puts `reply_findings` before `answer_findings` and `answer_next` puts their calls
+  first. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
   `_WRAP_UP`, in which every tool is refused, so the model writes its answer), and catches a model or loop error into `AgentAnswer.error` with

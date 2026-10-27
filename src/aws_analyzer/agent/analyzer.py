@@ -22,7 +22,7 @@ from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
-from .answers import AgentAnswer, AgentStep, ToolCall, choice_of
+from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
 from .workspace.charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
@@ -178,7 +178,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
     IST"). `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
 writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
-plan=False leaves the plan out, which saves its instructions' tokens on every model call.
+plan=False leaves the plan out, which saves its instructions' tokens on every model call. It ends each question by
+filling in a set shape (findings=True, the default): the answer, and what it found that needs your attention
+(answer.findings: warn or info, what's wrong and what to do, and the View call that shows more, kept only when it's
+a real command with arguments it takes), which the report shows as its findings and next calls. findings=False
+has it answer in plain text, as does a model that can't be made to call a tool.
 
     Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
     log read longer than log_days, a save into the workspace past ask_bytes) the agent pauses and asks: ask() returns
@@ -223,6 +227,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
         plan: bool = True,
+        findings: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
@@ -235,6 +240,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         self.notes = notes
         self.budget = Budget.of(budget)
         self.plan = plan
+        self.findings = findings
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
@@ -465,7 +471,8 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         """
         The system prompt the agent starts every conversation with (system_prompt() for its toolkits).
         """
-        return system_prompt(self.default_regions(), notes=self.notes, budget=self.budget, toolkits=self.toolkits)
+        return system_prompt(self.default_regions(), notes=self.notes, budget=self.budget, toolkits=self.toolkits,
+                             findings=self.findings)
 
     def _harness(self) -> Any:
         """
@@ -478,8 +485,14 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
             workspace = self.workspace
             backend = workspace_backend(workspace, lambda: self.budget) if workspace is not None else None
             self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
-                                              current_run=self._current_run, plan=self.plan)
+                                              current_run=self._current_run, plan=self.plan, reply=self.findings)
         return self._graph
+
+    def _view_commands(self) -> dict[str, dict[str, Callable[..., Any]]]:
+        """
+        The calls a finding can name: each toolkit's View -> its commands (Toolkit.view_commands()).
+        """
+        return {toolkit.view: toolkit.view_commands() for toolkit in self.toolkits if toolkit.view}
 
     def new_conversation(self) -> str:
         """
@@ -600,6 +613,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         when a tool is waiting for the user's choice.
         """
         answer.calls = list(run.calls)
+        check_findings(answer.findings, self._view_commands())
         answer.plan = list(run.plan)
         answer.charts = list(run.charts)
         answer.aws_calls = dict(self._guard.counts)

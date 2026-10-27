@@ -203,6 +203,11 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 2. Calls `function_health` for that window: CloudWatch's counts for every function at once, in a few seconds.
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
+5. Fills in its findings: each problem it found, why it matters and what to do, with the call that shows more. The report shows them in its findings panel, warnings first, and their calls lead the commands to run next.
+
+??? more "How the findings are made"
+
+    The model ends a question by calling a `final_answer` tool with a set shape (LangChain's `response_format`): the answer in markdown, and a list of findings, each `warn` or `info`, a message and a View call. A call is kept only when it names a real command of `LambdaView`, `S3View` or `BedrockKBView` with arguments that command takes, so one the model made up never shows as a call to run; commands that write files or open a window are never suggested. A model that can't be made to call a tool (a few on Amazon Bedrock) answers in plain text instead, without findings; so does `AgentView(findings=False)`, which also leaves the list of calls out of its instructions.
 
 ??? more "How it checks that uploads were processed"
 
@@ -445,6 +450,7 @@ In the [chat window](#chat), the call's line says *✋ waiting for you* and thre
 ```python
 answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
+answer.findings                # AgentFinding: level ('warn', 'info'), message, call (a View call, checked), shows
 answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
@@ -487,12 +493,13 @@ core = AgentAnalyzer(
     toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
+    findings=False,                                  # answer in plain text, without findings; on by default
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
@@ -584,7 +591,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | Command | What it shows |
 |---|---|
 | `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; ⚙ model picks the model |
-| `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
+| `ask(question, new=False)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
 | `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |

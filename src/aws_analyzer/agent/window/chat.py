@@ -1094,7 +1094,7 @@ class _AgentChat(_Window):
     def _reply_html(self, answer: AgentAnswer, trail: list[Any]) -> str:
         """
         The answer as the window shows it: the plan as it left it, the steps it took folded into one line (open when
-        something went wrong), the answer and its charts, the findings about how it was reached, who answered and what it cost, and the rest of the report
+        something went wrong), the answer and its charts, the findings (what it found, and how it got there), who answered and what it cost, and the rest of the report
         (each call, the AWS reads, the commands to look closer) under details.
         """
         view = self.view

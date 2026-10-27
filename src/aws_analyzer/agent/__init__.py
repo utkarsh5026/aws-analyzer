@@ -45,7 +45,7 @@ Quick start
     agent.smaller()                                      # ... or only the smaller part it named
     agent.skip()                                         # ... or answer without it
 
-    answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .calls, .aws_calls, .cost
+    answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .findings, .calls, .cost
     agent.core.ask("Which functions are slow?", on_step=print)   # each AgentStep as it happens
 
 How it's built
@@ -65,9 +65,11 @@ One concern per module, so a new service's tools or a new agent capability goes 
     prompt.py        The system prompt (shared rules, then each toolkit's section) and each question's time line.
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
-    harness.py       The agent loop: deepagents built once, and one question streamed through it.
+    harness.py       The agent loop: deepagents built once, and one question streamed through it, ending in the
+                     model's reply (its final_answer: the answer and its findings).
     answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
-                     does, told as it happens) and BigRead (what a tool asks before a big read), and the pure findings
+                     does, told as it happens), BigRead (what a tool asks before a big read) and AgentFinding (what
+                     the model found, from its reply: REPLY_SCHEMA, parse_reply, checked_call), and the pure findings
                      and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
@@ -89,15 +91,20 @@ from __future__ import annotations
 from .analyzer import AgentAnalyzer
 from .answers import (
     CHOICES,
+    REPLY_SCHEMA,
     AgentAnswer,
+    AgentFinding,
     AgentStep,
     BigRead,
     PlanStep,
     ToolCall,
     answer_findings,
     answer_next,
+    checked_call,
     choice_of,
     parse_plan,
+    parse_reply,
+    reply_findings,
 )
 from .budget import Budget
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
@@ -172,6 +179,8 @@ __all__ = [
     "AgentView",
     "AgentAnswer",
     "AgentStep",
+    "AgentFinding",
+    "REPLY_SCHEMA",
     "PlanStep",
     "ToolCall",
     "BigRead",
@@ -220,6 +229,9 @@ __all__ = [
     "system_prompt",
     "answer_findings",
     "answer_next",
+    "reply_findings",
+    "parse_reply",
+    "checked_call",
     "parse_plan",
     "answer_cost",
     "explain_model_error",

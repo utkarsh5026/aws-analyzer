@@ -16,6 +16,12 @@ _record_file_tools counts each call against the question's budget and records it
 A question pauses when a tool asks the user about a big read (pause_for: LangGraph's interrupt, kept with the
 conversation by the checkpointer): the stream ends, pauses() lists what's waiting, and resume_turn() goes on with the
 user's choices.
+
+A question ends with the model's reply (reply=True): LangChain's ToolStrategy with REPLY_SCHEMA, which makes the model
+call final_answer (REPLY_TOOL) with the answer's markdown and its findings, read from the stream by _stream() into
+the answer. ToolStrategy makes the model call a tool on every turn (tool_choice "any"), which a few models can't
+(some on Amazon Bedrock): for them _reply_when_able drops it, and they answer in a message as before, without
+findings. So does a model that writes its answer as a message anyway.
 """
 
 from __future__ import annotations
@@ -27,7 +33,7 @@ from typing import Any, Callable, Iterable
 
 from .._kit.deps import _require
 from .._kit.text import _clip
-from .answers import AgentAnswer, AgentStep, ToolCall, parse_plan
+from .answers import REPLY_SCHEMA, REPLY_TOOL, AgentAnswer, AgentStep, ToolCall, parse_plan, parse_reply
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .llm import answer_cost, explain_model_error
 
@@ -41,7 +47,7 @@ each a few plain words saying what you'll check ("check every function's health"
 "read the code where it fails"). The user sees it as a checklist that ticks off as you work. Mark a step in_progress
 when you start it and completed as soon as it's done, add or drop steps when what you find changes the plan, and
 never call `write_todos` twice in one turn. Skip the plan for a question one or two tool calls answer. The plan isn't
-the answer: write the answer in a message after your last `write_todos` call."""
+the answer: give the answer after your last `write_todos` call."""
 _PLAN_TOOL_TEXT = ("Writes your plan for the question as a checklist the user sees: the whole list each time, every "
                    "step with its status (pending, in_progress or completed). Use it only for questions that need "
                    "three or more tool calls.")
@@ -52,8 +58,10 @@ _FILE_RESULT_CHARACTERS = 4000
 _OVERTIME_SECONDS = 60
 _WRAP_UP_STEPS = 8
 _WRAP_UP_SECONDS = 90
-_WRAP_UP = ("[The user pressed stop before you finished. Don't call any more tools: they won't run. Answer the "
+_WRAP_UP = ("[The user pressed stop before you finished. Don't read anything more: your tools won't run. Answer the "
             "question now from what your tools already returned, and say what you didn't get to check.]")
+_REPLIED = "Your answer is with the user."
+_FORCED_CHOICE = "any"
 _AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
 
@@ -70,14 +78,15 @@ def check_ready() -> None:
 
 def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
                 hidden: Iterable[str] = HIDDEN_TOOLS, backend: Any = None,
-                current_run: Callable[[], _Run] | None = None, plan: bool = True) -> Any:
+                current_run: Callable[[], _Run] | None = None, plan: bool = True, reply: bool = True) -> Any:
     """
     The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
     InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
     is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
     workspace/files.py; by default deepagents' own in-memory files), and with both it and `current_run` (the
     question being answered) each file tool call is recorded on it and counted against its budget. With `plan`, the
-    model has write_todos (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one.
+    model has write_todos (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one. With
+    `reply`, it answers by calling final_answer (REPLY_SCHEMA: the answer and its findings) when it can.
     """
     check_ready()
     deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
@@ -89,6 +98,10 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
             middleware.append(_record_plan(current_run))
     if current_run is not None and backend is not None:
         middleware.append(_record_file_tools(current_run))
+    extra: dict[str, Any] = {"backend": backend} if backend is not None else {}
+    if reply:
+        middleware.append(_reply_when_able())
+        extra["response_format"] = _reply_format()
     return deepagents.create_deep_agent(
         model=model,
         tools=tools,
@@ -96,7 +109,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
         middleware=middleware,
         checkpointer=memory.InMemorySaver(),
         name="aws-analyzer",
-        **({"backend": backend} if backend is not None else {}),
+        **extra,
     )
 
 
@@ -173,10 +186,11 @@ def _stream(graph: Any, start: Any, *, thread: str, run: _Run, answer: AgentAnsw
         for update in graph.stream(start, config=config, stream_mode="updates"):
             for msg in _model_messages(update):
                 count(msg)
-                if getattr(msg, "tool_calls", None):
+                if _calls_tools(msg):
                     _tell_thinking(msg, run)
                 else:
                     text = _message_text(msg) or text
+            text = _take_reply(update, answer) or text
             steps += 1
             if progress:
                 progress(steps)
@@ -192,14 +206,15 @@ def _stream(graph: Any, start: Any, *, thread: str, run: _Run, answer: AgentAnsw
         answer.exception = exc
     asked_to_stop = answer.stopped == "stopped" and run.stop.is_set()
     if asked_to_stop and not text:
-        text = _wrap_up(graph, config, count)
+        text = _wrap_up(graph, config, count, answer)
     return text
 
 
-def _wrap_up(graph: Any, config: dict[str, Any], count: Callable[[Any], None]) -> str:
+def _wrap_up(graph: Any, config: dict[str, Any], count: Callable[[Any], None], answer: AgentAnswer) -> str:
     """
     The answer to a question the user stopped: one more turn in the same conversation, telling the model to answer
-    from what its tools returned, each model message counted like the question's own (`count`). Every tool it calls anyway is refused (run.stop is set, so check_budget says
+    from what its tools returned, each model message counted like the question's own (`count`) and its reply's
+    findings put on `answer`. Every tool it calls anyway is refused (run.stop is set, so check_budget says
     so), and the turn ends after _WRAP_UP_STEPS steps or _WRAP_UP_SECONDS. A tool call the stop cut off is closed
     by deepagents before the model sees it. A wrap-up that fails, or is interrupted, leaves the answer without text
     and the stop as the reason, rather than an error the user didn't cause.
@@ -212,13 +227,35 @@ def _wrap_up(graph: Any, config: dict[str, Any], count: Callable[[Any], None]) -
                                    stream_mode="updates"):
             for msg in _model_messages(update):
                 count(msg)
-                if not getattr(msg, "tool_calls", None):
+                if not _calls_tools(msg):
                     text = _message_text(msg) or text
+            text = _take_reply(update, answer) or text
             if text or time.monotonic() > deadline:
                 break
     except (KeyboardInterrupt, Exception):  # noqa: BLE001
         return text
     return text
+
+
+def _calls_tools(message: Any) -> bool:
+    """
+    Whether a model message calls tools to read with: a call of final_answer alone is its reply, not a step.
+    """
+    return any(call.get("name") != REPLY_TOOL for call in getattr(message, "tool_calls", None) or [])
+
+
+def _take_reply(update: Any, answer: AgentAnswer) -> str:
+    """
+    The answer's text from the model's reply when one LangGraph stream update carries it (final_answer's arguments,
+    LangChain's structured_response), with its findings put on `answer`; '' when the update has none. A reply with
+    no text leaves the text to the model's message, if it wrote one.
+    """
+    for node in (update or {}).values():
+        reply = node.get("structured_response") if isinstance(node, dict) else None
+        if reply is not None:
+            text, answer.findings = parse_reply(reply)
+            return text
+    return ""
 
 
 def _model_messages(update: Any) -> list[Any]:
@@ -472,3 +509,44 @@ def _record_plan(current: Callable[[], _Run]) -> Any:
             return result
 
     return RecordPlan()
+
+
+def _reply_format() -> Any:
+    """
+    The shape the model answers in: LangChain's ToolStrategy with REPLY_SCHEMA, so the model calls final_answer with
+    the answer and its findings. The tool's result tells the model its answer is with the user (_REPLIED), so a
+    follow-up question sees no long echo of it.
+    """
+    structured = _require("langchain.agents.structured_output", "The agent's findings", package="aws-analyzer[agent]")
+    return structured.ToolStrategy(schema=REPLY_SCHEMA, tool_message_content=_REPLIED)
+
+
+def _can_force_tools(model: Any) -> bool:
+    """
+    Whether a chat model can be made to call a tool (tool_choice "any"), which ToolStrategy asks of it: only Amazon
+    Bedrock's model class says it can't (supports_tool_choice_values: some models there only choose for themselves).
+    """
+    choices = getattr(model, "supports_tool_choice_values", None)
+    return choices is None or _FORCED_CHOICE in choices
+
+
+def _reply_when_able() -> Any:
+    """
+    A deepagents middleware that leaves out the reply's set shape (response_format) for a model that can't be made to
+    call a tool (_can_force_tools), which then answers in a message, without findings, instead of failing.
+    """
+    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
+
+    def able(request: Any) -> Any:
+        if request.response_format is None or _can_force_tools(request.model):
+            return request
+        return request.override(response_format=None)
+
+    class ReplyWhenAble(types.AgentMiddleware):
+        def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            return handler(able(request))
+
+        async def awrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            return await handler(able(request))
+
+    return ReplyWhenAble()

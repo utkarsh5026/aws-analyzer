@@ -2197,7 +2197,7 @@ agent = AgentView(provider="bedrock", python=MySandbox())
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
-| `ask(question, new=False)`  | The answer first, then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
+| `ask(question, new=False)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
@@ -2226,11 +2226,13 @@ core = AgentAnalyzer(
                                           # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
     python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
+    findings=False,                       # answer in plain text, without findings (on by default)
 )
 agent = AgentView(core)
 
 answer = core.ask("Which Lambda failed last night?")    # AgentAnswer
 answer.text                    # the answer, in markdown
+answer.findings                # AgentFinding: level, message, call (a View call to run next, checked), shows
 answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
