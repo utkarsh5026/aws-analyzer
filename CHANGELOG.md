@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
   - Go, smaller or skip, as for big reads; `AgentView(ask_more=False)` never asks.
 
+- 🧹 **Free the disk: `local_files()` and `clean_up()`**
+  - `local_files()` lists what aws-analyzer saved on this machine: S3 and Lambda downloads, the agent's charts, the sandbox's cache.
+  - `clean_up()` removes what comes back by itself; `clean_up("all")` the charts too; `dry_run=True` only shows what would go.
+  - Only folders aws-analyzer made: one without its `.gitignore`, or that holds the notebook, stays.
+
 ## [0.34.0] - 2026-10-26
 
 ### Added

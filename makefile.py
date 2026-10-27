@@ -420,8 +420,8 @@ def shown_path(path: Path) -> str:
 LEFT_ALONE = """Left alone (clean never touches them):
   - aws-analyzer installed into other environments by install-env: <python> -m pip uninstall aws-analyzer
     in each, and jupyter kernelspec remove <name> for a kernel it added (make envs lists both)
-  - files the package saved beside your notebooks (s3-downloads/, lambda-downloads/, agent-charts/, saved pages and
-    file lists): S3View().clean_downloads() removes S3's, delete the others yourself once you don't need them
+  - files the package saved beside your notebooks (s3-downloads/, lambda-downloads/, agent-charts/): in a notebook,
+    from aws_analyzer import clean_up, local_files; local_files() lists them and clean_up() removes them
   - Python environments new_env() made: SageMakerView().envs() shows the rm -rf command for each"""
 
 

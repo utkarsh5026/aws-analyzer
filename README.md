@@ -144,7 +144,7 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
-<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone</summary>
+<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone, freeing the disk</summary>
 
 ```python
 from aws_analyzer import S3Analyzer, S3View
@@ -188,6 +188,24 @@ set_theme("soft")                 # None goes back to the default
 
 To pick it for every notebook, set the `AWS_ANALYZER_THEME` environment variable (`AWS_ANALYZER_THEME=editorial`).
 The explorer and chat windows keep their own look, and text output reads the same in every theme.
+
+To free the disk, `local_files()` lists what aws-analyzer saved on this machine (the `s3-downloads/` and
+`lambda-downloads/` folders beside the notebook, `agent-charts/`, and the agent sandbox's Pyodide files in
+`~/.cache/aws-analyzer`), with each one's size, and `clean_up()` removes them:
+
+```python
+from aws_analyzer import clean_up, local_files
+
+local_files()                     # what's there, how big, and how each comes back
+clean_up(dry_run=True)            # what clean_up() would remove, removing nothing
+clean_up()                        # the downloads and the sandbox's cache: everything that comes back by itself
+clean_up("charts")                # the agent's charts too ("s3", "lambda", "sandbox", "charts" or "all")
+```
+
+It removes only what aws-analyzer made: a downloads folder without the `.gitignore` aws-analyzer writes in one, or
+one that holds the notebook, stays (the report says why), and only chart pictures leave `agent-charts/`. It never
+touches Python environments `new_env()` made, or files you saved to a path of your own. `downloads=["~/scratch/s3"]`
+adds a downloads folder you moved elsewhere.
 
 </details>
 
