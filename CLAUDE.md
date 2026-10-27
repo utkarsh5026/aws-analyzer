@@ -83,6 +83,8 @@ make local                                     # the wheel in a fresh venv (.loc
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
 make local-agent                               # the same for the agent: a Python 3.11+, the wheel with [all], the
                                                # sandbox's Pyodide files, and the agent's demo question
+make clean                                     # what the tasks built in the checkout; ARGS="--all" also the
+                                               # sandbox's ~/.cache/aws-analyzer, ARGS="--dry-run" only says
 make envs                                      # the Python environments here (sagemaker_env's environments())
 make install-env                               # this checkout into ones you pick, asked in the terminal (or --env,
                                                # --extras, --kernel, --yes): pip in each, a Jupyter kernel if asked
@@ -178,11 +180,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
-  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead). The one exception is
+  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead). The two exceptions are
+  `aws_analyzer.clean_up()` (`_kit/local_files.py`'s `remove_local_files`, drawn by `_kit/housekeeping.py` with
+  `local_files()`), which removes the S3 and Lambda downloads folders beside the notebook only when they hold
+  aws-analyzer's `.gitignore` (`_made_by_aws_analyzer`) and aren't `_protected_folder`s, the agent sandbox's cache
+  (`$XDG_CACHE_HOME/aws-analyzer`), and, only when named, the chart files in `agent-charts/` (never another file
+  there), and
   `s3`'s `clean_downloads()` (`s3/analyzer/downloads.py`, with every guard below), which deletes what the user
   downloaded, and only from a downloads folder s3 made:
   `S3Analyzer._make_downloads_folder` writes `_DOWNLOADS_MARK` (a `.gitignore` of `*`) when the folder is new or
-  empty, `_made_for_downloads` checks for it, and `_protected_folder` refuses the notebook's own folder, the home
+  empty, `_made_for_downloads` checks for it, and `_protected_folder` (`_kit/local_files.py`, shared with `clean_up()`) refuses the notebook's own folder, the home
   folder and the ones above them, even when marked. Local files are only written where the user asks: S3 downloads,
   `lambda_functions`' `download()` and the explorer's Download .zip (`LambdaAnalyzer._save_package`: one .zip, written
   to `<name>.zip.part` then renamed, in `lambda-downloads/` or the path given; a downloads folder it makes gets its own

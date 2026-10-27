@@ -18,7 +18,8 @@ from ..helpers import base_prefix, parse_s3_uri, relative_key, s3_uri
 from ..prices import ARCHIVE_CLASSES
 from ..readers.formats import detect_format
 from ..analysis.downloads import downloads_findings, zip_checks, zip_findings
-from ..analyzer.downloads import _free_space, _made_for_downloads, _protected_folder
+from ..._kit.local_files import _protected_folder
+from ..analyzer.downloads import _free_space, _made_for_downloads
 
 
 _PANDAS_READERS = {  # format -> how pandas opens a downloaded file of it

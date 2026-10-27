@@ -21,6 +21,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.errors import _error_code
 from ..._kit.fmt import file_extension, human_size, parse_size, parse_time
+from ..._kit.local_files import _protected_folder
 
 from ..helpers import KB, MB, base_prefix, parse_s3_uri, relative_key, s3_uri
 from ..prices import ARCHIVE_CLASSES
@@ -38,23 +39,6 @@ def _free_space(path: str) -> int:
     while not os.path.isdir(folder):
         folder = os.path.dirname(folder)
     return shutil.disk_usage(folder).free
-
-
-def _protected_folder(folder: str) -> str:
-    """
-    Why clean_downloads must never empty `folder` (absolute), or '': the notebook's folder or one above it, the
-    home folder, or a disk's root.
-    """
-    here = os.path.abspath(os.getcwd())
-    if folder == here:
-        return "the notebook's own folder"
-    if os.path.dirname(folder) == folder:
-        return "the root of the disk"
-    if folder == os.path.abspath(os.path.expanduser("~")):
-        return "your home folder"
-    if here.startswith(folder.rstrip(os.sep) + os.sep):
-        return "a folder that holds the notebook's own"
-    return ""
 
 
 def _made_for_downloads(folder: str) -> bool:
