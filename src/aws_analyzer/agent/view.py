@@ -769,7 +769,7 @@ class AgentView(_BaseView):
         except (ValueError, BotoCoreError):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
-            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits if t.tools()) + ", read-only"),
+            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits if t.name != "runbooks") + ", read-only"),
             _Cards([("Model", model, *([] if is_set_up else ["warn"])), ("Provider", provider),
                     ("Regions", regions), ("Time zone", _zone_label(core.zone)), ("Tools", f"{len(core.tools())}")]),
         ]

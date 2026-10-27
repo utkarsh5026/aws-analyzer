@@ -71,6 +71,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
     harness.py       The agent loop: deepagents built once, and one question streamed through it.
     memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
                      deepagents StoreBackend in a local SQLite file, secrets hidden, one set per AWS account.
+    runbooks/        Step-by-step guides for common problems (runbooks=): each a folder with a SKILL.md, the
+                     built-in ones beside its __init__.py (which reads them), offered to the model by name and
+                     description and read whole through toolkits/runbook_tools.py's read_runbook.
     answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
                      does, told as it happens) and BigRead (what a tool asks before a big read), and the pure findings
                      and next steps a report shows about them.
@@ -170,6 +173,8 @@ from .toolkits.lambda_tools import (
 from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
 from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
+from .toolkits.runbook_tools import RunbookToolkit, summarize_runbook
+from .runbooks import Runbook, RunbookProblem, RunbookShelf, load_runbooks, parse_front_matter, runbook_findings
 from .toolkits.s3_listing import count_read, listing_read, save_read
 from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
@@ -201,6 +206,14 @@ __all__ = [
     "Arrivals",
     "TriggerLink",
     "PythonToolkit",
+    "RunbookToolkit",
+    "Runbook",
+    "RunbookProblem",
+    "RunbookShelf",
+    "load_runbooks",
+    "parse_front_matter",
+    "runbook_findings",
+    "summarize_runbook",
     "LocalSandbox",
     "PYODIDE_VERSION",
     "Workspace",

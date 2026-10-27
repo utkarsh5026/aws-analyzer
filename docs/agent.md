@@ -98,6 +98,7 @@ agent.ask("Which functions run close to their timeout this week?", new=True)   #
 agent.tools()                                                  # what it can call, its model and its budget
 agent.transcript()                                             # every question and answer so far, with their cost
 agent.memory()                                                 # with memory=True: what it remembers between conversations
+agent.runbooks()                                               # the step-by-step guides it follows when a question matches
 ```
 
 With a Python sandbox (`AgentView(python="local")`, [below](#run-python)), it can also read your files and answer with charts: `agent.ask("Chart the orders in s3://acme-raw/sales/ by month")`, then `agent.save_charts()` for the pictures.
@@ -465,6 +466,42 @@ It's read for each new conversation, so editing it changes what the next one kno
 
     The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves still last only as long as the kernel.
 
+## Runbooks it follows { #runbooks }
+
+A runbook is your team's way of working through a kind of problem, and the agent reads one only when a question needs it.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", runbooks="~/team-runbooks")   # yours, beside the built-in ones
+agent.runbooks()                                 # each one, where it's from, and any that didn't load
+agent.ask("Why didn't last night's upload to acme-raw start orders-etl?")   # reads s3-trigger-not-firing first
+```
+
+The model sees each runbook's name and one-line description. When a question matches one, it reads the whole guide (`read_runbook`), follows its steps with what it finds, and says which one it followed; the answer's **Runbook** card says so too. So the prompt stays short however many runbooks there are.
+
+Three come built in: `lambda-failing` (from which function failed to the line behind it), `s3-trigger-not-firing` (the first broken link from an upload to its function's run) and `kb-answer-wrong` (a file that isn't indexed, a search that misses it, or a model that ignores it).
+
+### Write your own { #runbooks-write }
+
+A runbook is a folder with a `SKILL.md`, in the [Agent Skills](https://agentskills.io) format: front matter with a `name` (the folder's name: lowercase letters, digits and hyphens) and a one-line `description` the model picks it by, then the guide in markdown.
+
+```markdown title="~/team-runbooks/nightly-load-late/SKILL.md"
+---
+name: nightly-load-late
+description: The nightly orders load hasn't finished by 06:00. Use when the user asks why today's orders are missing.
+metadata:
+  toolkits: s3 lambda
+---
+1. `find_files('s3://acme-raw/incoming/', since='12h')`: did the night's files arrive?
+2. If they did, follow the s3-trigger-not-firing runbook.
+3. If not, the upstream export is late: say so, and name the team that owns it (data-platform).
+```
+
+Write the steps in terms of the agent's tools (`agent.tools()` lists them). Files beside the `SKILL.md` (a list of commands, a table of owners) are read with `read_runbook(name, file=...)` when the guide says to. `runbooks=` takes a folder of runbook folders, one runbook's own folder, or a list of them; they're read after the built-in ones, so one of yours with a built-in one's name replaces it. `metadata.toolkits` offers a runbook only to an agent with those toolkits. `runbooks()` says what's wrong with one that didn't load.
+
+!!! tip "Worth knowing"
+    A runbook is followed like your own instructions, so keep the folder to guides your team wrote. It can't widen what the agent does: it still only reads, and a step that would change something becomes a command for you to run. A guide is read from its file each time, so an edit counts at once; a new runbook needs a new `AgentView`.
+
 ## Safe and bounded { #safety }
 
 It can't change your account, it says what it checked, and each question has a budget.
@@ -584,12 +621,13 @@ core = AgentAnalyzer(
     toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
+    runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 

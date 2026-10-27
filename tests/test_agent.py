@@ -77,7 +77,7 @@ from aws_analyzer.agent import (
     system_prompt,
     trigger_findings,
 )
-from aws_analyzer.agent import Note, PlanStep, parse_plan, summarize_kb_files
+from aws_analyzer.agent import Note, PlanStep, load_runbooks, parse_plan, runbook_findings, summarize_kb_files
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
@@ -405,9 +405,9 @@ class Notes(Toolkit):
 def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     notes = Notes()
     core = AgentAnalyzer(region=REGION, toolkits=["lambda", notes])
-    assert [t.name for t in core.toolkits] == ["lambda", "notes"] and core.toolkit("notes") is notes
+    assert [t.name for t in core.toolkits] == ["lambda", "notes", "runbooks"] and core.toolkit("notes") is notes
     assert notes.agent is core and isinstance(core.toolkit("lambda"), LambdaToolkit)
-    assert [t.__name__ for t in core.tools()][-2:] == ["read_note", "list_notes"]
+    assert [t.__name__ for t in core.tools()][-3:] == ["read_note", "list_notes", "read_runbook"]
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
 
     # The agent's runtime runs its tools: results made JSON-ready, errors turned into results.
@@ -420,7 +420,7 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert "You cover:\n- AWS Lambda: which functions exist" in text and "\n- the user's notes: what" in text
     assert text.index("\nAWS Lambda\n") < text.index("\nNotes\n- Read a note") < text.index("How to answer")
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 13" in out
+    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 14" in out
     assert "secrets files (.env, keys) are never read. Notes marked private are never read." in out
     assert viewmod._look_closer([("NotesView().note('plan', region='eu-west-1')", "the note"),
                                  ("LambdaView().errors('etl')", "errors")]) == (
@@ -457,7 +457,7 @@ def test_toolkits_says_what_it_takes():
         AgentAnalyzer(region=REGION, toolkits=[5])
     with pytest.raises(KeyError, match="no 's3' toolkit; it has lambda"):
         AgentAnalyzer(region=REGION, toolkits=["lambda"]).toolkit("s3")
-    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb"]  # the default
+    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb", "runbooks"]  # the default
     notes = Notes()
     AgentAnalyzer(region=REGION, toolkits=[notes])
     with pytest.raises(ValueError, match="already belongs to another AgentAnalyzer"):
@@ -1206,7 +1206,8 @@ def test_the_kb_toolkit_tells_the_model_how_to_use_it(world, capsys):
     assert "file_info on a file's s3:// path" not in text
     assert "file_info on a file's s3:// path" in AgentAnalyzer(region=REGION, toolkits=["s3", "bedrock_kb"]).instructions()
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Bedrock Knowledge Bases, read-only" in out and "Tools: 7" in out and "bedrock:Retrieve" in out
+    assert "Bedrock Knowledge Bases, read-only" in out and "Tools: 8" in out and "bedrock:Retrieve" in out
+    assert "kb-answer-wrong: A Bedrock knowledge base" in text and "lambda-failing" not in text
     assert "bedrock:RetrieveAndGenerate" in out
     assert "KB searches" in out and "ask('Why does support-docs miss the refund policy?')" in out
     assert "Passages and chunks of the knowledge base's documents (search_kb, file_chunks) and its answers" in out
@@ -2239,10 +2240,10 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
 
     workspace = Folder(tmp_path)
     core = AgentAnalyzer(region=REGION, python=workspace)
-    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python"] and core.workspace is workspace
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python", "runbooks"] and core.workspace is workspace
     assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
     names = [fn.__name__ for fn in core.tools()]
-    assert names[-3:] == ["run_python", "workspace_files", "show_chart"] and "save_function_code" in names
+    assert names[-4:] == ["run_python", "workspace_files", "show_chart", "read_runbook"] and "save_function_code" in names
     assert core.reads["save_function_code"][0] == "lambda:GetFunction" and core.reads["run_python"] == ()
     prompt = core.instructions()
     assert "run_python runs code you write in a sandbox" in prompt and "save_function_code puts its files" in prompt
@@ -2250,9 +2251,9 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
     assert "save_function_code" not in plain.instructions()
 
     alone = AgentAnalyzer(region=REGION, toolkits=["python"], python=Folder(tmp_path))
-    assert [t.name for t in alone.toolkits] == ["python"] and alone.region == REGION
+    assert [t.name for t in alone.toolkits] == ["python", "runbooks"] and alone.region == REGION
     assert [t.name for t in AgentAnalyzer(region=REGION, toolkits="lambda", python=workspace).toolkits] == [
-        "lambda", "python"]
+        "lambda", "python", "runbooks"]
     with pytest.raises(ValueError, match="needs a workspace"):
         AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
     with pytest.raises(TypeError, match="python= takes 'local'"):
@@ -3333,3 +3334,154 @@ def test_the_chat_windows_memory_panel_says_how_to_turn_memory_on(seeded):
     assert x.memory_panel.forget_all_button.layout.display == "none" and x.memory_panel.file_line.value == ""
     x.memory_button.click()
     assert not x.memory_panel.is_open
+
+
+
+def write_runbook(folder, name, *, description="Use it when the test asks.", toolkits="", body="1. Do the thing.",
+                  files=None):
+    """
+    A runbook folder `name` under `folder`, with a SKILL.md and any `files` beside it; returns its folder.
+    """
+    book = folder / name
+    book.mkdir(parents=True)
+    meta = f"metadata:\n  toolkits: {toolkits}\n" if toolkits else ""
+    (book / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n{meta}---\n{body}\n")
+    for path, text in (files or {}).items():
+        (book / path).write_text(text)
+    return book
+
+
+def test_front_matter_reads_what_skill_files_hold():
+    from aws_analyzer.agent import parse_front_matter
+    text = """---
+name: s3-trigger-not-firing
+description: >
+  Files uploaded to S3 should have started
+  a Lambda function.
+license: 'MIT'
+metadata:
+  toolkits: s3 lambda
+  owner: "data team"
+allowed-tools: [s3_triggers, function_errors]
+---
+# The guide
+
+1. Step one.
+"""
+    meta, guide = parse_front_matter(text)
+    assert meta["name"] == "s3-trigger-not-firing" and meta["license"] == "MIT"
+    assert meta["description"] == "Files uploaded to S3 should have started a Lambda function."
+    assert meta["metadata"] == {"toolkits": "s3 lambda", "owner": "data team"}
+    assert meta["allowed-tools"] == ["s3_triggers", "function_errors"]
+    assert guide == "# The guide\n\n1. Step one."
+    with pytest.raises(ValueError, match="doesn't start with front matter"):
+        parse_front_matter("# Just a guide")
+    with pytest.raises(ValueError, match="no closing"):
+        parse_front_matter("---\nname: x\n")
+    with pytest.raises(ValueError, match="can't read the line 'just words'"):
+        parse_front_matter("---\nname: x\njust words\n---\n")
+
+
+@pytest.mark.parametrize("name, folder, wrong", [
+    ("lambda-failing", "lambda-failing", None),
+    ("", "lambda-failing", "it has no name: add name: lambda-failing"),
+    ("Lambda_Failing", "Lambda_Failing", "isn't one: use lowercase letters"),
+    ("lambda--failing", "lambda--failing", "isn't one"),
+    ("lambda-failing", "lambda-down", "isn't its folder's ('lambda-down')"),
+])
+def test_runbook_names_follow_the_agent_skills_rules(name, folder, wrong):
+    from aws_analyzer.agent.runbooks import check_name
+    said = check_name(name, folder)
+    assert said is None if wrong is None else wrong in said
+
+
+def test_built_in_runbooks_load_and_name_only_tools_the_agent_has():
+    import re
+    from aws_analyzer.agent.runbooks import BUILT_IN_LABEL, runbook_sources
+    from aws_analyzer.agent.toolkits import TOOLKITS
+    shelf = load_runbooks(runbook_sources(True))
+    assert sorted(shelf.runbooks) == ["kb-answer-wrong", "lambda-failing", "s3-trigger-not-firing"]
+    assert not shelf.problems and {b.source for b in shelf.runbooks.values()} == {BUILT_IN_LABEL}
+    core = AgentAnalyzer(region=REGION)
+    tools = {fn.__name__ for t in core.toolkits for fn in type(t).__dict__.values() if callable(fn)}
+    for book in shelf.runbooks.values():
+        assert set(book.toolkits) <= set(TOOLKITS)
+        named = set(re.findall(r"`([a-z_]+)`", book.path.read_text()))
+        assert named <= tools | {"in_code", "ran_on", "match", "search", "question", "failed", "throttled",
+                                 "near_timeout", "timeout"}, (book.name, named - tools)
+
+
+def test_your_runbooks_add_to_and_replace_the_built_in_ones(tmp_path):
+    from aws_analyzer.agent.runbooks import runbook_sources
+    team = tmp_path / "team-runbooks"
+    write_runbook(team, "lambda-failing", description="Our way: page the on-call first.")
+    write_runbook(team, "nightly-load-late", description="The nightly load is late.", toolkits="s3")
+    write_runbook(team, "broken", description="")
+    (team / "notes").mkdir()
+    single = write_runbook(tmp_path / "one", "etl-retry", description="Retry an ETL run.")
+    shelf = load_runbooks(runbook_sources([team, single, tmp_path / "missing"]))
+    assert shelf.runbooks["lambda-failing"].description == "Our way: page the on-call first."
+    assert shelf.runbooks["lambda-failing"].source == "team-runbooks" and "etl-retry" in shelf.runbooks
+    assert shelf.replaced == {"lambda-failing": "built-in"}
+    assert [p.message for p in shelf.problems] == ["it has no description: add one line saying what problem it's "
+                                                   "for and when to use it", "there's no folder there"]
+    assert [b.name for b in shelf.usable(["lambda"])] == ["etl-retry", "lambda-failing"]
+    findings = runbook_findings(shelf, ["lambda"])
+    assert findings[0][0] == "warn" and "broken/SKILL.md: it has no description" in findings[0][1]
+    assert ("info", "nightly-load-late isn't offered to this agent: it needs the 's3' toolkit (metadata.toolkits in "
+                    "its SKILL.md), which the agent hasn't got.") in findings
+    assert ("info", "lambda-failing from team-runbooks replaces the built-in one of that name.") in findings
+
+
+def test_the_agent_is_offered_the_runbooks_its_toolkits_can_follow(seeded, tmp_path):
+    team = tmp_path / "team"
+    write_runbook(team, "etl-retry", description="Retry an ETL run.", toolkits="lambda",
+                  files={"commands.md": "aws lambda invoke --function-name etl\npassword=hunter2\n"})
+    core = make(toolkits=["lambda"], runbooks=team)
+    text = core.instructions()
+    assert "\nRunbooks\n- Runbooks are step-by-step guides" in text
+    assert "  - etl-retry: Retry an ETL run." in text and "  - lambda-failing: A Lambda function is failing" in text
+    assert "s3-trigger-not-firing" not in text and "kb-answer-wrong" not in text
+    assert [t.name for t in core.toolkits] == ["lambda", "runbooks"] and "read_runbook" in {f.__name__ for f in core.tools()}
+    read = tool(core, "read_runbook")
+    guide = read("Etl Retry")
+    assert guide["runbook"] == "etl-retry" and guide["text"] == "1. Do the thing." and guide["files"] == ["commands.md"]
+    extra = read("etl-retry", file="commands.md")
+    assert "aws lambda invoke" in extra["text"] and "hunter2" not in extra["text"]
+    assert "has no file '../../secrets'" in read("etl-retry", file="../../secrets")["message"]
+    assert read("s3-trigger-not-firing")["close_names"] == ["etl-retry", "lambda-failing"]
+
+    off = make(toolkits=["lambda"], runbooks=False)
+    assert off.runbook_kit is None and "Runbooks" not in off.instructions()
+    assert "read_runbook" not in {f.__name__ for f in off.tools()}
+
+
+def test_runbooks_report_lists_them_and_what_to_fix(seeded, tmp_path, capsys):
+    team = tmp_path / "team"
+    write_runbook(team, "etl-retry", description="Retry an ETL run.")
+    write_runbook(team, "Bad_Name")
+    out = run(capsys, AgentView(make(runbooks=team), mode="text").runbooks)
+    assert "Runbooks\n========\n4 runbooks the agent can follow" in out
+    assert "Offered: 4   Found: 4   Sources: built-in, team   Not loaded: 1 (!)" in out
+    assert "A runbook wasn't loaded:" in out and "Bad_Name/SKILL.md: its name 'Bad_Name' isn't one" in out
+    assert "etl-retry" in out and "built-in" in out and "AgentView(runbooks='~/team-runbooks')" not in out
+    out = run(capsys, AgentView(make(runbooks=False), mode="text").runbooks)
+    assert "Runbooks are off for this agent (runbooks=False)" in out
+    assert "runbooks" in AgentView._GROUPS["🧰 What it can do"]
+
+
+def test_the_agent_reads_a_runbook_and_the_report_says_it_followed_it(seeded, capsys):
+    model = scripted(
+        calls(("read_runbook", {"name": "lambda-failing"})),
+        calls(("function_health", {"since": "2h"})),
+        says("**etl-nightly** failed 40 times (followed lambda-failing)."),
+    )
+    view = AgentView(make(model), mode="text")
+    out = run(capsys, view.ask, "Which Lambda failed last night?")
+    answer = view.core.history[-1]
+    assert answer.runbooks == ["lambda-failing"] and answer.calls[0].summary == "lambda-failing (the guide, built-in)"
+    assert "Runbook: lambda-failing" in out and "read_runbook('lambda-failing')" in out
+    assert "lambda-failing: A Lambda function is failing" in system_text(model)
+    assert "# A Lambda function is failing" in model.prompts[1][-1].content
+    assert "reading the runbook lambda-failing" in _tool_html(ToolCall("read_runbook", {"name": "lambda-failing"},
+                                                                       first="name"), running=True)

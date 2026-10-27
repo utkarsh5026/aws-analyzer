@@ -784,6 +784,18 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
+- **Runbooks** (`runbooks/`, with `toolkits/runbook_tools.py`): step-by-step guides, each a folder with a `SKILL.md`
+  (Agent Skills front matter: `name`, `description`, `metadata.toolkits`), the built-in ones beside
+  `runbooks/__init__.py` (shipped in the wheel). `runbook_sources(runbooks=)` is the built-in folder, then the user's;
+  `load_runbooks` reads them into a `RunbookShelf` (a later source's runbook replaces one of the same name; one that
+  can't be read is a `RunbookProblem`, never an exception), with `parse_front_matter`, a stdlib reader for what
+  SKILL.md files hold, so listing needs no YAML. `RunbookToolkit` (`"runbooks"`, not in `TOOLKITS`: the analyzer adds
+  it last unless `runbooks=False`) lists the runbooks its agent's toolkits can follow in its `instructions()`, name and
+  description only, and `read_runbook(name, file=)` hands the model a guide (or a file beside it, only one listed in
+  `Runbook.files`) with secrets hidden. It's a tool, so it's recorded, counted and drawn like any other;
+  `AgentAnswer.runbooks` names the ones read, the answer's Runbook card shows them, and `AgentView.runbooks()` lists
+  the shelf with `runbook_findings`. deepagents' `SkillsMiddleware` isn't used: it reads through a backend, needs
+  YAML and can't say why a runbook didn't load.
 - **The runtime** (`runtime.py`, `as_tool`) wraps every toolkit's tools alike: it records a `ToolCall` on the
   question's `_Run`, checks the `Budget` first (`budget.py`'s `check_budget`: tool calls, time, cost; a toolkit that
   reads logs checks `log_days` itself, as `LambdaToolkit._log_window` does), turns `_Refused` into a refusal the model
