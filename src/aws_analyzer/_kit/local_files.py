@@ -4,7 +4,8 @@ notebook, the agent's charts, and the agent sandbox's cache of Pyodide files. No
 and clean_up() in _kit/housekeeping.py draw these as reports.
 
 Only what aws-analyzer made is ever removed: a downloads folder whose .gitignore it wrote (_made_by_aws_analyzer),
-the chart pictures in the charts folder (never another file there), and its own cache folder. The notebook's
+the chart pictures in the charts folder (never another file there), and its own cache folder, but for the agent's
+memory and saved chats in it (KEPT_IN_CACHE), which don't come back. The notebook's
 folder, the home folder and the ones above them never are (_protected_folder), even when marked.
 """
 
@@ -19,6 +20,7 @@ S3_DOWNLOADS = "s3-downloads"
 LAMBDA_DOWNLOADS = "lambda-downloads"
 AGENT_CHARTS = "agent-charts"
 CACHE_NAME = "aws-analyzer"
+KEPT_IN_CACHE = ("agent",)
 
 KINDS = ("s3", "lambda", "sandbox", "charts")
 COMES_BACK = ("s3", "lambda", "sandbox")
@@ -141,14 +143,16 @@ class Cleanup:
         return sum(folder.size for folder in self.removed if folder.path not in self.failed)
 
 
-def _measure(folder: LocalFolder, *, only_charts: bool = False) -> None:
+def _measure(folder: LocalFolder, *, only_charts: bool = False, skip: tuple[str, ...] = ()) -> None:
     """
     Adds up the files in `folder` (not following links): their count, size and newest change. With only_charts,
-    only the files save_charts() writes, at the top of the folder.
+    only the files save_charts() writes, at the top of the folder; `skip` names folders at its top left out.
     """
     newest = 0.0
     try:
         for root, folders, names in os.walk(folder.path):
+            if root == folder.path:
+                folders[:] = [name for name in folders if name not in skip]
             if only_charts:
                 folders.clear()
                 names = [name for name in names if _is_chart(name)]
@@ -188,9 +192,28 @@ def _charts_folder(path: str) -> LocalFolder:
 
 
 def _sandbox_folder(path: str) -> LocalFolder:
+    """
+    The cache folder: the sandbox's downloads, without the agent's memory and saved chats (KEPT_IN_CACHE).
+    """
     folder = LocalFolder("sandbox", path)
-    _measure(folder)
+    _measure(folder, skip=KEPT_IN_CACHE)
     return folder
+
+
+def _remove_cache(folder: LocalFolder) -> None:
+    """
+    Removes everything in the cache folder but KEPT_IN_CACHE, and the folder too once nothing is left.
+    """
+    for name in os.listdir(folder.path):
+        if name in KEPT_IN_CACHE:
+            continue
+        path = os.path.join(folder.path, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    if not os.listdir(folder.path):
+        os.rmdir(folder.path)
 
 
 def _named_kinds(kinds: tuple[str, ...]) -> tuple[str, ...]:
@@ -238,9 +261,12 @@ def find_local_files(*, folder: str | os.PathLike | None = None,
 
 def _remove(folder: LocalFolder) -> None:
     """
-    Removes what clean_up() may of `folder`: the chart files in the charts folder (and the folder, once empty), or the
-    whole folder otherwise.
+    Removes what clean_up() may of `folder`: the chart files in the charts folder (and the folder, once empty), the
+    cache folder's downloads, or the whole folder otherwise.
     """
+    if folder.kind == "sandbox":
+        _remove_cache(folder)
+        return
     if folder.kind != "charts":
         shutil.rmtree(folder.path)
         return

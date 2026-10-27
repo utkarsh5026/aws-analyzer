@@ -184,7 +184,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `aws_analyzer.clean_up()` (`_kit/local_files.py`'s `remove_local_files`, drawn by `_kit/housekeeping.py` with
   `local_files()`), which removes the S3 and Lambda downloads folders beside the notebook only when they hold
   aws-analyzer's `.gitignore` (`_made_by_aws_analyzer`) and aren't `_protected_folder`s, the agent sandbox's cache
-  (`$XDG_CACHE_HOME/aws-analyzer`), and, only when named, the chart files in `agent-charts/` (never another file
+  (`$XDG_CACHE_HOME/aws-analyzer`, but never its `agent/` folder, `KEPT_IN_CACHE`: the memory and saved chats), and, only when named, the chart files in `agent-charts/` (never another file
   there), and
   `s3`'s `clean_downloads()` (`s3/analyzer/downloads.py`, with every guard below), which deletes what the user
   downloaded, and only from a downloads folder s3 made:
@@ -201,7 +201,10 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
   deletes one), the agent's memory (`AgentAnalyzer(memory=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/memory.sqlite`
   or the path given, holding its notes about each account; only the model's writes to `/memories/AGENTS.md` and the
-  user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
+  user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's saved chats
+  (`AgentAnalyzer(chats=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/chats.sqlite` or the path given, holding
+  each answer as JSON and LangGraph's checkpoints; only answers and the user's `rename_chat()` / `delete_chat()` change
+  it, and nothing deletes the file), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
@@ -845,6 +848,16 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   all on a second click, redrawn after each answer while open; `_AgentChat._toggle` keeps one head panel open). `notes=` also takes a file (`is_notes_file`, `notes_text`), read
   for each new conversation: `new_conversation()` rebuilds the graph when it changed, on the same checkpointer
   (`self._saver`, `harness.new_checkpointer()`), so other threads survive the rebuild.
+- **Saved chats** (`chats.py`, `chats=True`, off by default): every conversation kept with a title in one SQLite
+  file. `ChatStore` (stdlib `sqlite3`) holds each chat's row (`ChatSummary`: title from `chat_title` of its first
+  question, times, questions, cost, model) and its answers as `answer_record` JSON (`answer_from_record` reads them
+  back; the exception isn't kept), saved by `AgentAnalyzer._finish` once an answer isn't paused. The same file holds
+  LangGraph's `SqliteSaver` (`open_checkpointer`, in place of `harness.new_checkpointer()`'s `InMemorySaver`), so
+  `open_chat()` (`find_chats`: a number, an ID or title words) sets `thread` and the model carries the chat on;
+  its answers join `history`, which the window's `_fill_log` draws (`opened()`). `rename_chat()` / `delete_chat()`
+  (rows and `delete_thread`) are the user's. `AgentView.chats()` / `open_chat()` / `rename_chat()` / `delete_chat()`
+  show them, and so does the chat window's **🗂 chats** (`window/chats_panel.py`, `_ChatsPanel`: a `_row_button` per
+  chat, ✕ on a second click, a box renaming the open one); the head shows `core.chat_title` (`renamed()`).
 - **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS

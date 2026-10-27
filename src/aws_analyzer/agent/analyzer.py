@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
@@ -24,6 +24,16 @@ from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
+from .chats import (
+    ChatStore,
+    ChatSummary,
+    chat_title,
+    chats_path,
+    clean_title,
+    find_chats,
+    no_chats_hint,
+    open_checkpointer,
+)
 from .workspace.charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
 from .memory import (
@@ -193,7 +203,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     IST"), or a file of them (notes='AGENTS.md', read again for each new conversation). memory=True lets the agent
     keep its own notes between conversations, like "orders-etl runs in eu-west-1", in a SQLite file
     (~/.cache/aws-analyzer/agent/memory.sqlite, or the path memory= gives), one set per AWS account: memories()
-    shows them and forget() clears them. `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
+    shows them and forget() clears them. chats=True saves every conversation on this machine, titled from its first
+    question (~/.cache/aws-analyzer/agent/chats.sqlite, or the path chats= gives): chats() lists them, open_chat()
+    carries one on, even after the kernel restarts, and rename_chat() gives one a title of your own. `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
 writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
 plan=False leaves the plan out, which saves its instructions' tokens on every model call. It ends each question by
 filling in a set shape (findings=True, the default): the answer, and what it found that needs your attention
@@ -246,6 +258,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         regions: Any = None,
         notes: str | os.PathLike = "",
         memory: bool | str | os.PathLike = False,
+        chats: bool | str | os.PathLike = False,
         budget: Budget | dict[str, Any] | None = None,
         max_tokens: int | None = 4096,
         toolkits: Iterable[str | Toolkit | type[Toolkit]] | None = None,
@@ -275,6 +288,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         self._notes: Any = None
         self._account: str | None = None
         self._saver: Any = None
+        self.chats_file = chats_path(chats)
+        self._chat_store: ChatStore | None = None
         self._prompt_notes = ""
         self.budget = Budget.of(budget)
         self.plan = plan
@@ -538,11 +553,20 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             workspace = self.workspace
             backend = workspace_backend(workspace, lambda: self._current_run().budget) if workspace is not None else None
             if self._saver is None:
-                self._saver = harness.new_checkpointer()
+                self._saver = self._new_checkpointer()
             self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
                                               notes=self._memory(), current_run=self._current_run, plan=self.plan,
                                               checkpointer=self._saver, reply=self.findings)
         return self._graph
+
+    def _new_checkpointer(self) -> Any:
+        """
+        Where the conversations are kept for the model: in the chats' file with chats=, so a chat opened again
+        carries on; in memory otherwise.
+        """
+        if self.chats_file is not None:
+            return open_checkpointer(self.chats_file)
+        return harness.new_checkpointer()
 
     def _view_commands(self) -> dict[str, dict[str, Callable[..., Any]]]:
         """
@@ -642,6 +666,93 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         if is_notes_file(self.notes) and notes_text(self.notes) != self._prompt_notes:
             self._graph = None
         return self.thread
+
+    def _chats(self) -> ChatStore:
+        """
+        The saved chats' file, opened once; _Hint when chats aren't saved (chats=False).
+        """
+        if self.chats_file is None:
+            raise no_chats_hint()
+        with self._lock:
+            if self._chat_store is None:
+                self._chat_store = ChatStore(self.chats_file)
+        return self._chat_store
+
+    def chats(self) -> list[ChatSummary]:
+        """
+        Every saved chat (chats=True), the one asked in last first: its ID, title, when it started and was last asked
+        in, how many questions it holds and what they cost.
+        """
+        return self._chats().chats()
+
+    def find_chat(self, match: str | int) -> ChatSummary:
+        """
+        The saved chat `match` names: a number as chats() lists them (1 is the newest), its ID, or words of its title.
+        _Hint when none does, or several do.
+        """
+        saved = self.chats()
+        found = find_chats(saved, match)
+        if not found:
+            listed = "; ".join(f"{i}. {chat.title}" for i, chat in enumerate(saved[:3], 1)) or "none saved yet"
+            raise _Hint(f"No saved chat matches {str(match)!r}. The newest: {listed} (chats() lists them all).")
+        if len(found) > 1:
+            names = "; ".join(repr(chat.title) for chat in found[:3])
+            raise _Hint(f"{len(found)} chats match {str(match)!r} ({names}): name one by more of its title, or by "
+                        "its number in chats().")
+        return found[0]
+
+    @property
+    def chat_title(self) -> str:
+        """
+        The title of the conversation going on: its saved title with chats=True, else its first question's; '' before
+        anything is asked in it.
+        """
+        if self.chats_file is not None:
+            saved = self._chats().chat(self.thread)
+            if saved is not None:
+                return saved.title
+        asked = [answer for answer in self.history if answer.thread == self.thread]
+        return chat_title(asked[0].question) if asked else ""
+
+    def open_chat(self, match: str | int) -> ChatSummary:
+        """
+        Carries on a saved chat (find_chat() says which): the next question follows its last, and its questions join
+        `history`. A question waiting for your choice on a big read is dropped. Returns the chat.
+        """
+        chat = self.find_chat(match)
+        answers = self._chats().answers(chat.thread)
+        self.thread = chat.thread
+        self._paused = None
+        if not any(answer.thread == chat.thread for answer in self.history):
+            self.history.extend(answers)
+        return chat
+
+    def rename_chat(self, title: str, chat: str | int | None = None) -> ChatSummary:
+        """
+        Gives a saved chat a title of your own: the one going on unless `chat` names another (as find_chat() takes).
+        Returns it renamed.
+        """
+        title = clean_title(title)
+        store = self._chats()
+        saved = self.find_chat(chat) if chat is not None else store.chat(self.thread)
+        if saved is None:
+            raise _Hint("Nothing is saved in this chat yet: ask its first question, then rename it.")
+        store.rename(saved.thread, title)
+        return replace(saved, title=title)
+
+    def delete_chat(self, match: str | int) -> ChatSummary:
+        """
+        Removes a saved chat from the file (find_chat() says which): its answers, and the conversation the model
+        would carry on; removing the chat going on starts a new conversation. Returns what was removed.
+        """
+        chat = self.find_chat(match)
+        self._chats().delete(chat.thread)
+        if self._saver is None:
+            self._saver = self._new_checkpointer()
+        self._saver.delete_thread(chat.thread)
+        if chat.thread == self.thread:
+            self.new_conversation()
+        return chat
 
     def interrupts(self, tool: str) -> bool:
         """
@@ -772,6 +883,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         if answer.stopped is None:
             refused = [c.refused for c in answer.calls if c.refused in ("tool_calls", "time", "cost")]
             answer.stopped = refused[0] if refused else None
+        if self.chats_file is not None:
+            self._chats().save(answer)
         return answer
 
     def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> list[Path]:

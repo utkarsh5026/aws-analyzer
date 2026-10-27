@@ -59,6 +59,19 @@ def test_clean_up_removes_what_comes_back_by_itself(notebook, tmp_path):
     assert (notebook / "analysis.ipynb").exists()
 
 
+def test_the_agents_memory_and_saved_chats_stay_in_the_cache(notebook, tmp_path):
+    kept = tmp_path / "cache" / "aws-analyzer" / "agent"
+    write(kept / "memory.sqlite", b"x" * 300)
+    write(kept / "chats.sqlite", b"x" * 400)
+    sandbox = next(folder for folder in find_local_files().folders if folder.kind == "sandbox")
+    assert sandbox.size == 9000 and sandbox.files == 1
+
+    remove_local_files("all")
+
+    assert sorted(os.listdir(tmp_path / "cache" / "aws-analyzer")) == ["agent"]
+    assert sorted(os.listdir(kept)) == ["chats.sqlite", "memory.sqlite"]
+
+
 def test_charts_go_only_when_named_and_other_files_stay(notebook):
     remove_local_files("charts")
 
