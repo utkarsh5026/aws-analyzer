@@ -19,7 +19,7 @@ from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
 from .budget import Budget, raised_limit
-from .charts import Chart
+from .workspace.charts import Chart
 from .llm import Rates
 
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")

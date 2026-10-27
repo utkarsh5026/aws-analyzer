@@ -21,9 +21,9 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
-from aws_analyzer.agent.sandboxes import local as localmod
+from aws_analyzer.agent.workspace.sandboxes import local as localmod
 from aws_analyzer.agent.toolkits import s3_saving
-from aws_analyzer.agent import workspace_files
+from aws_analyzer.agent.workspace import files as workspace_files
 from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
@@ -2359,7 +2359,7 @@ def test_chart_of_takes_pictures_only_and_names_them(tmp_path):
     with pytest.raises(ValueError, match="more than the 3.0 MB a chart may be"):
         chart_of("big.png", PNG + bytes(4 * 1024 * 1024))
 
-    from aws_analyzer.agent.charts import write_charts
+    from aws_analyzer.agent.workspace.charts import write_charts
     (tmp_path / "errors-by-day.png").write_bytes(b"mine")
     written = write_charts([chart, Chart("Errors by day", "b.svg", b"<svg/>", "svg"), chart], tmp_path)
     assert [p.name for p in written] == ["errors-by-day-2.png", "errors-by-day.svg", "errors-by-day-3.png"]
@@ -2374,7 +2374,7 @@ SPEC = {"$schema": "https://vega.github.io/schema/vega-lite/v6.1.0.json", "title
 
 
 def test_read_spec_takes_vega_lite_charts_drawn_from_their_own_data():
-    from aws_analyzer.agent.charts import is_spec, read_spec, themed_spec
+    from aws_analyzer.agent.workspace.charts import is_spec, read_spec, themed_spec
 
     data = json.dumps(SPEC).encode()
     assert is_spec(b"  {") and not is_spec(PNG) and read_spec("c.json", data) == SPEC
@@ -2404,7 +2404,7 @@ def test_a_workspace_that_cant_draw_vega_lite_asks_for_a_picture(seeded, tmp_pat
 
 
 def test_saved_vega_lite_charts_keep_their_spec_beside_them(tmp_path):
-    from aws_analyzer.agent.charts import write_charts
+    from aws_analyzer.agent.workspace.charts import write_charts
 
     (tmp_path / "orders.vl.json").write_text("mine")
     chart = Chart("Orders", "charts/c.json", b"<svg/>", "svg", spec=SPEC)

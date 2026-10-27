@@ -24,7 +24,7 @@ from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, choice_of
 from .budget import Budget, _Run
-from .charts import CHARTS_FOLDER, write_charts
+from .workspace.charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
 from .llm import (
     AZURE_API_VERSION,
@@ -47,7 +47,7 @@ from .prompt import asked_at, system_prompt
 from .runtime import as_tool
 from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, Toolkit, make_toolkits
 from .workspace import Workspace, workspace_of
-from .workspace_files import workspace_backend
+from .workspace.files import workspace_backend
 
 if TYPE_CHECKING:
     from ..bedrock_kb import BedrockKBAnalyzer

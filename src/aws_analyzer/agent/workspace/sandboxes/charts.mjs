@@ -1,4 +1,4 @@
-// The local sandbox's chart drawer (aws_analyzer.agent.sandboxes.local): one Vega-Lite chart drawn as SVG.
+// The local sandbox's chart drawer (aws_analyzer.agent.workspace.sandboxes.local): one Vega-Lite chart drawn as SVG.
 //
 // Deno runs it like a run of the model's code, with read access to the cache folder only: no network, no environment,
 // no other files. The request comes on stdin as JSON ({nonce, spec, config}): Vega-Lite compiles the spec with the

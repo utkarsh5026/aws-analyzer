@@ -18,7 +18,7 @@ from .._kit.fmt import _duration, _plural, human_money, human_size
 
 if TYPE_CHECKING:
     from .answers import AgentStep, PlanStep, ToolCall
-    from .charts import Chart
+    from .workspace.charts import Chart
 
 
 _METRICS_PER_PRICE = 1000
