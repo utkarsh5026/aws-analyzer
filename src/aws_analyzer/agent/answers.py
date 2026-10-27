@@ -293,6 +293,7 @@ class AgentAnswer:
         rates         the prices `cost` is at (Rates: per 1M input and output tokens, yours or Bedrock's list prices)
         stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
         waiting       the calls paused for the user's choice on a big read (resume() goes on); empty once answered
+        runbooks      the runbooks it read to answer (read_runbook), by name, in the order it read them
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
         exception     the error itself, to raise when debugging
@@ -327,6 +328,18 @@ class AgentAnswer:
         The calls paused for the user's choice on a big read, in the order they asked.
         """
         return [call for call in self.calls if call.waiting is not None]
+
+    @property
+    def runbooks(self) -> list[str]:
+        """
+        The runbooks it read to answer (read_runbook calls that found one), by name, each once, in the order read.
+        """
+        names: list[str] = []
+        for call in self.calls:
+            name = (call.result or {}).get("runbook") if call.name == "read_runbook" else None
+            if name and name not in names:
+                names.append(name)
+        return names
 
 
 def _choice_findings(call: ToolCall) -> list[tuple[str, str]]:

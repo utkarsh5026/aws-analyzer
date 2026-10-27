@@ -188,6 +188,7 @@ _TOOL_WORDS = {
                                      "the function"),
     "save_logs": _ToolWords("saving {t}'s logs to the workspace", "saved {t}'s logs to the workspace", "the function"),
     "save_s3_files": _ToolWords("saving {t} to the workspace", "saved {t} to the workspace", "files"),
+    "read_runbook": _ToolWords("reading the runbook {t}", "read the runbook {t}", "a runbook"),
     "run_python": _ToolWords("running Python", "ran Python"),
     "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
     "show_chart": _ToolWords("putting {t} in the answer", "put {t} in the answer", "a chart"),

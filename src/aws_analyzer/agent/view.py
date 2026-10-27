@@ -33,6 +33,7 @@ from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
+from .runbooks import RUNBOOK_FILE, runbook_findings
 
 if TYPE_CHECKING:
     from .window import _AgentChat
@@ -248,7 +249,7 @@ class AgentView(_BaseView):
         "💬 Ask": ("chat", "ask", "new_conversation"),
         "✋ Big reads": ("go", "smaller", "skip"),
         "🔎 Look back": ("transcript", "save_charts"),
-        "🧰 What it can do": ("tools", "use_model"),
+        "🧰 What it can do": ("tools", "runbooks", "use_model"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -442,6 +443,7 @@ class AgentView(_BaseView):
             ("Tokens", tokens),
             ("Model cost (est.)", cost),
             ("Time", _duration(answer.seconds)),
+            *([("Runbook", ", ".join(answer.runbooks))] if answer.runbooks else []),
         ]))
         blocks.append(_Findings(answer_findings(answer, core.budget)))
         if answer.plan:
@@ -565,6 +567,45 @@ class AgentView(_BaseView):
                     _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
 
+    @_friendly_errors
+    def runbooks(self) -> None:
+        """
+        The agent's runbooks: the step-by-step guides it reads when a question needs one (each one's name, what it's
+        for, where it's from and the toolkits it needs), and any that couldn't be loaded and why. Add your own with
+        AgentView(runbooks='~/team-runbooks'): a folder of runbook folders, each with a SKILL.md.
+        """
+        kit = self.core.runbook_kit
+        if kit is None:
+            self._show([_Title("Runbooks"), _Note("Runbooks are off for this agent (runbooks=False): "
+                                                  "AgentView(runbooks=True) gives it the built-in ones.")])
+            return
+        shelf, offered = kit.shelf, kit.offered
+        toolkits = [t.name for t in self.core.toolkits]
+        theirs = [s for s in shelf.sources if s.label != "built-in"]
+        blocks: list[Any] = [
+            _Title("Runbooks", f"{_plural(len(offered), 'runbook')} the agent can follow"),
+            _Cards([("Offered", f"{len(offered):,}"), ("Found", f"{len(shelf.runbooks):,}"),
+                    ("Sources", ", ".join(s.label for s in shelf.sources) or "none"),
+                    ("Not loaded", f"{len(shelf.problems):,}", *(["warn"] if shelf.problems else []))]),
+            _Findings(runbook_findings(shelf, toolkits), empty="Every runbook loaded, and the agent can follow them all."),
+        ]
+        rows = [[book.name, book.description, book.source, " ".join(book.toolkits) or "any",
+                 "yes" if book in offered else "no"] for _name, book in sorted(shelf.runbooks.items())]
+        if rows:
+            blocks.append(_Table(["Runbook", "What it's for", "From", "Needs", "Offered"], rows, prose_cols=(1,)))
+        folders = [[s.label, str(s.folder)] for s in shelf.sources]
+        blocks.append(_Table(["Source", "Folder"], folders, title="Where they're read from", path_cols=(1,),
+                             collapsed=True, sortable=False))
+        blocks.append(_Note(f"The model sees each runbook's name and description, and reads the whole {RUNBOOK_FILE} "
+                            "(read_runbook) only when a question matches it. A runbook can't widen what the agent "
+                            "does: it still only reads."))
+        nxt = [("ask('Which Lambda failed last night?')", "a question a runbook covers")]
+        if not theirs:
+            nxt.append(("AgentView(runbooks='~/team-runbooks')", "add your team's runbooks"))
+        nxt.append(("tools()", "every tool the agent can call"))
+        blocks.append(_Next(nxt))
+        self._show(blocks)
+
     def _budget_rows(self) -> list[list[str]]:
         """
         The tools() report's Budget table: each limit per question, and what happens past it.
@@ -631,7 +672,7 @@ class AgentView(_BaseView):
         except (ValueError, BotoCoreError):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
-            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits) + ", read-only"),
+            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits if t.tools()) + ", read-only"),
             _Cards([("Model", model, *([] if is_set_up else ["warn"])), ("Provider", provider),
                     ("Regions", regions), ("Time zone", _zone_label(core.zone)), ("Tools", f"{len(core.tools())}")]),
         ]
