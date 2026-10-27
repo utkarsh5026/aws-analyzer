@@ -3118,9 +3118,10 @@ def test_the_chat_window_asks_to_raise_a_used_up_limit(seeded):
     assert "Limit reached: raise it, or answer now?" in shown and "raise it to 2 tool calls" in shown
     assert "raise the limit for this question" in shown and "Big read" not in shown
     labels = [b.description for b in x.turn.ask.children[1:]]
-    assert labels == ["raise ▸", "answer now"]
+    assert labels == ["raise ▸", "answer now"] and "raise the limit, or answer now?" in shown
     x.turn.ask.children[1].click()
-    assert not x.busy and "etl-nightly failed with a KeyError." in page(x)
+    shown = page(x)
+    assert not x.busy and "etl-nightly failed with a KeyError." in shown and "not read" not in shown
     assert x.view.core.history[-1].stopped is None
 
 

@@ -551,7 +551,10 @@ def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
     after it, and how to stop it.
     """
     running = len(turn.running)
-    if turn.ask is not None:
+    waiting = next((call.waiting for call in turn.calls if call.waiting is not None), None)
+    if turn.ask is not None and waiting is not None and waiting.limit:
+        doing = "Waiting for you: raise the limit, or answer now?"
+    elif turn.ask is not None:
         doing = "Waiting for you: go, smaller or skip?"
     elif running:
         doing = f"Waiting for {_plural(running, 'tool call')}…"
@@ -569,13 +572,14 @@ def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
 def _trail_html(trail: list[Any], seconds: float, *, is_open: bool) -> str:
     """
     The steps a finished question took, folded into one line: how many tool calls, how long, and the services they
-    read; a click shows them again.
+    read; a click shows them again. A call that stopped at a limit the user raised isn't counted as not read: the
+    agent called it again.
     """
     calls = [step for step in trail if isinstance(step, ToolCall)]
     steps = "".join(_tool_html(step, running=False) if isinstance(step, ToolCall) else _thinking_html(step)
                     for step in trail)
     services = [code for call in calls for code in call.services]
-    failed = sum(1 for call in calls if not call.ok)
+    failed = sum(1 for call in calls if not call.ok and call.refused != "raised")
     trouble = f'<span class="ag-bad">{failed} not read</span>' if failed else ""
     return (f'<details class="ag-trail"{" open" if is_open else ""}><summary><span class="ag-car">▸</span>'
             f"<span>{_esc(_plural(len(calls), 'tool call'))} · {_esc(_duration(seconds))}</span>{trouble}"
