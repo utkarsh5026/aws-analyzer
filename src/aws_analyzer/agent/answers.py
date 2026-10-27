@@ -18,7 +18,7 @@ from typing import Any, Iterable
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
-from .budget import Budget
+from .budget import Budget, raised_limit
 from .workspace.charts import Chart
 from .llm import Rates
 
@@ -77,6 +77,8 @@ class BigRead:
         smaller  what Smaller reads instead: 'stop at the 20,000 keys listed so far'
         cost     the estimated USD of Go's AWS requests, None when they're free
         choice   'go', 'smaller' or 'skip' once the user has answered, else None
+        limit    for a used-up limit of the budget, the refusal it lifts ('tool_calls', 'time', ...), else ''
+        raise_to what Go raises that limit to for the question
     """
 
     tool: str
@@ -85,6 +87,8 @@ class BigRead:
     smaller: str
     cost: float | None = None
     choice: str | None = None
+    limit: str = ""
+    raise_to: float | None = None
 
     @property
     def question(self) -> str:
@@ -100,6 +104,21 @@ class BigRead:
         """
         return {"call": call_key, "tool": self.tool, "what": self.what, "go": self.go, "smaller": self.smaller,
                 "cost": self.cost}
+
+
+def limit_read(tool: str, reason: str, budget: Budget, *, needed: float | None = None) -> BigRead | None:
+    """
+    What a tool asks when the question has run out of a limit of its budget (`reason`, a refusal's: 'tool_calls',
+    'time', ...): Go raises it for the question, Smaller has the agent answer with what it found. None for a refusal
+    no raise lifts.
+    """
+    raised = raised_limit(budget, reason, needed=needed)
+    if raised is None:
+        return None
+    limit, now, to = raised
+    return BigRead(tool, what=f"This question has used its {limit.shown(now)} ({limit.what}), so {tool} can't run.",
+                   go=f"raise it to {limit.shown(to)} for this question and go on",
+                   smaller="answer now with what it found", limit=reason, raise_to=to)
 
 
 def _call_key() -> str:

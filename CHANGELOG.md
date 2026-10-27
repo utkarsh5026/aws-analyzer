@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: asks before going past a limit** ([#156](https://github.com/utkarsh5026/aws-analyzer/pull/156))
+  - A question that uses up a limit (tool calls, time, cost, Python runs, searches, charts, workspace size) asks to raise it for that question.
+  - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
+  - Go, smaller or skip, as for big reads; `AgentView(ask_more=False)` never asks.
+
 ## [0.34.0] - 2026-10-26
 
 ### Added

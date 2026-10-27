@@ -7,6 +7,10 @@ A tool can pause the question to ask the user about a big read (ask_user, throug
 leaves the agent loop, the call is kept as paused, and once the user has chosen, LangGraph runs the tool again from its
 start, as the same call (_Run.paused_call), its asks answered in the order it made them. _CURRENT is the call a tool is
 running for, on the thread it runs on.
+
+A tool that runs out of a limit of the budget asks the same way whether to raise it (_more_budget, when the question's
+ask_more is on): Go raises it for the question and tells the model to call the tool again, so the ask is always the
+last thing the tool does and it asks the same questions when it runs again.
 """
 
 from __future__ import annotations
@@ -23,8 +27,8 @@ from botocore.exceptions import ClientError
 from .._kit.errors import _error_code, _why
 from .._kit.text import _clip
 from . import harness
-from .answers import AgentStep, BigRead, ToolCall, choice_of
-from .budget import _REFUSED, _Refused, _Run, check_budget
+from .answers import AgentStep, BigRead, ToolCall, choice_of, limit_read
+from .budget import _REFUSED, _Refused, _Run, check_budget, raised_limit
 from .guard import ReadOnlyError
 from .results import _plain
 
@@ -57,9 +61,20 @@ def ask_user(read: BigRead) -> str:
     the tool and the agent loop; LangGraph then runs the tool again from its start, and the asks it makes again return
     the choices made, in order.
     """
+    asked = _asked(read)
+    if asked is None:
+        return ""
+    return asked.choice or ""
+
+
+def _asked(read: BigRead) -> BigRead | None:
+    """
+    The read as the user answered it (the one first asked, when the tool runs again), or None when no tool call is
+    running: see ask_user().
+    """
     current = _CURRENT.get()
     if current is None:
-        return ""
+        return None
     call, index = current.call, current.asked
     current.asked += 1
     if index < len(call.asks):
@@ -67,7 +82,7 @@ def ask_user(read: BigRead) -> str:
     else:
         call.asks.append(read)
     read.choice = choice_of(harness.pause_for(read.as_value(call.key)))
-    return read.choice
+    return read
 
 
 def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
@@ -90,8 +105,7 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
         started = time.monotonic()
         token = _CURRENT.set(_Current(call))
         try:
-            check_budget(run, used)
-            result = fn(*args, **kwargs)
+            result = _within_budget(fn, run, call, used, args, kwargs)
         except Exception as exc:  # noqa: BLE001
             if harness.is_pause(exc):
                 _paused(run, call, started)
@@ -105,6 +119,52 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
         return reported
 
     return tool
+
+
+def _within_budget(fn: Callable[..., dict[str, Any]], run: _Run, call: ToolCall, used: int,  # noqa: PLR0913
+                   args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    The tool's result once the budget lets it run (`used` tool calls so far), or, when it runs out of a limit the user
+    can raise, what they picked (_more_budget). A call that asked about a limit before it ran asks again when it runs
+    again, though a call beside it may have raised that limit since, so its asks stay in the same order.
+    """
+    try:
+        first = call.asks[0] if call.asks else None
+        if first is not None and first.limit in _CHECKED:
+            raise _Refused(first.limit, _CHECKED[first.limit])
+        check_budget(run, used)
+        return fn(*args, **kwargs)
+    except _Refused as refused:
+        return _more_budget(run, call, refused)
+
+
+_CHECKED = {"tool_calls": "The budget of tool calls for this question is used up: answer now with what you found.",
+            "time": "The time budget for this question is used up: answer now with what you found.",
+            "cost": "The cost budget for this question is used up: answer now with what you found."}
+
+
+def _more_budget(run: _Run, call: ToolCall, refused: _Refused) -> dict[str, Any]:
+    """
+    What a tool that ran out of a limit hands the model: when the question asks (ask_more) and the user picks Go, the
+    limit is raised for the question and the model is told to call the tool again; otherwise the refusal stands.
+    """
+    if not run.ask_more:
+        raise refused
+    read = limit_read(call.name, refused.reason, run.budget, needed=refused.needed)
+    if read is None:
+        raise refused
+    asked = _asked(read)
+    if asked is None or asked.choice != "go" or asked.raise_to is None:
+        raise refused
+    raised = raised_limit(run.budget, refused.reason)
+    if raised is None:
+        raise refused
+    limit, _now, _to = raised
+    run.raise_limit(limit.field, asked.raise_to)
+    call.refused, call.summary = "raised", _REFUSED["raised"]
+    return {"raised": limit.field, "message": f"The user raised this question's limit ({limit.what}) to "
+                                              f"{limit.shown(asked.raise_to)}: call {call.name} again with the same "
+                                              "arguments to go on."}
 
 
 def _new_call(run: _Run, fn: Callable[..., Any], toolkit: Toolkit, arguments: dict[str, Any]) -> ToolCall:
