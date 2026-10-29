@@ -1168,3 +1168,61 @@ def test_explorer_zips_selected_files_and_folders(explorer, tmp_path, monkeypatc
     out = text(x)
     assert "Can't zip this here yet" in out and "untick some files, or raise the limits with ⚙" in out
     assert "click ⬇ Download selected again" in out and not (tmp_path / "s3-downloads" / "again.zip").exists()
+
+
+
+def recent_chips(x):
+    return [chip.description for chip in x._recent_box.children[1:]]
+
+
+def test_short_place():
+    from aws_analyzer.s3.explorer.recent import _short_place
+
+    assert _short_place("s3://lake/") == "lake"
+    assert _short_place("s3://lake/raw/") == "lake/raw/"
+    assert _short_place("s3://lake/raw/events/2026/") == "lake/…/2026/"
+
+
+def test_recent_row_takes_you_back_to_the_folders_you_opened(explorer, tmp_path):
+    places = tmp_path / "places.sqlite"
+    x = explorer(history=str(places))
+    assert x.recent == [] and x._recent_box.layout.display == "none"
+
+    x.open("s3://lake/raw/events/")
+    x.open("s3://lake/curated/")
+    x.open("s3://lake/raw/events/")
+    assert x.recent == ["s3://lake/raw/events/", "s3://lake/curated/"]
+    assert x._recent_box.layout.display == "none"
+
+    again = explorer(history=str(places))
+    assert again._recent_box.layout.display is None
+    assert recent_chips(again) == ["↩ lake/…/events/", "lake/curated/"]
+    assert "Pick up where you left off: s3://lake/raw/events/" in again._recent_box.children[1].tooltip
+
+    again._recent_box.children[2].click()
+    assert again.location == "s3://lake/curated/"
+    assert "📋  table.json" in rows(again)
+
+    again._edit_btn.click()
+    assert recent_chips(again) == ["↩ lake/…/events/"]
+    again._recent_box.children[1].click()
+    assert again.location == "s3://lake/raw/events/" and again._path.layout.display == "none"
+
+
+def test_refresh_is_not_a_visit_and_forget_recent_clears(explorer, tmp_path):
+    x = explorer("s3://lake/raw/", history=str(tmp_path / "places.sqlite"))
+    x.refresh()
+    assert [place.visits for place in x._recent_places()] == [1]
+    x.open("s3://lake/curated/")
+
+    x.forget_recent("lake/raw")
+    assert x.recent == ["s3://lake/curated/"]
+    x.forget_recent()
+    assert x.recent == [] and "Forgot every folder" in str(x.shown)
+
+
+def test_history_off_remembers_nothing(explorer, tmp_path):
+    x = explorer("s3://lake/raw/", history=False)
+    assert x.recent == []
+    x.forget_recent()
+    assert "Recent places are off" in str(x.shown)

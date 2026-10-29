@@ -41,12 +41,14 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
-           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code")
+           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code",
+           "lambda-explorer-recent")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
 os.environ.update({{"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
-                   "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}})
+                   "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1",
+                   "AWS_ANALYZER_HISTORY": "off"}})
 os.environ.pop("AWS_PROFILE", None)
 from moto import mock_aws
 mock_aws().start()
@@ -54,7 +56,8 @@ import demo
 from aws_analyzer import lambda_functions
 core = lambda_functions.LambdaAnalyzer(region="us-east-1", **demo.seed_lambda_functions())
 # height=620: the figures don't grow with the browser's height
-x = lambda_functions.LambdaExplorer(core=core, height=620)"""
+import tempfile
+x = lambda_functions.LambdaExplorer(core=core, height=620, history=tempfile.mktemp(suffix=".sqlite"))"""
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:
@@ -155,6 +158,17 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         time.sleep(0.4)
         page.mouse.move(1, 1)
         shot("lambda-explorer-json")
+    if "lambda-explorer-recent" in wanted:
+        if "lambda-explorer-json" not in wanted:
+            page.locator(".lmx-app .lmx-trig-b").first.click()
+            page.locator(".lmx-app .lmx-pop input").fill("report")
+            page.locator(".lmx-app .lmx-pop input").press("Enter")
+            settled()
+        tab("Functions")
+        page.locator(".lmx-app button.lmx-chip", has_text="Recent").first.click()
+        time.sleep(0.5)
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-recent")
     return taken
 
 

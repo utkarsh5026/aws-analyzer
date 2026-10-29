@@ -67,6 +67,15 @@ class Figure:
 
 
 START = 'x = S3Explorer(core=core, height=500)'
+RECENT = """import datetime, tempfile
+from aws_analyzer._kit.history import PlaceHistory
+recent = PlaceHistory(tempfile.mktemp(suffix=".sqlite"), "s3")
+now = datetime.datetime.now(datetime.timezone.utc)
+for uri, hours_ago in [("s3://acme-ml-data/training/", 50), ("s3://acme-ml-data/training/", 26),
+                       ("s3://acme-ml-data/raw/events/dt=2025-10-10/", 30), ("s3://acme-ml-data/docs/", 120),
+                       ("s3://acme-ml-data/training/", 4), ("s3://acme-ml-data/curated/features/churn/", 1)]:
+    recent.record(core.account_id() or "", uri, at=now - datetime.timedelta(hours=hours_ago))
+x = S3Explorer(core=core, height=500, history=recent.path)"""
 FIGURES = [
     Figure("explorer", 'x = S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet", core=core, height=500)',
            "First 20 rows"),
@@ -75,6 +84,7 @@ FIGURES = [
     Figure("explorer-pdf-text", 'x = S3Explorer("s3://acme-ml-data/docs/data-retention-policy.pdf", core=core, height=500)',
            "Text of page 1", (Step("act:Text", "Left out what repeats"),)),
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
+    Figure("explorer-recent", RECENT, "Your buckets"),
     Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'
            'x.filter(".tar", subfolders=True)', "Files below"),
     Figure("explorer-zip", 'x = S3Explorer("s3://acme-ml-data/raw/events/dt=2025-10-10/", core=core, height=500)',
@@ -100,7 +110,8 @@ FIGURES = [
 ]
 SEED = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
-os.environ.update(AWS_ACCESS_KEY_ID="testing", AWS_SECRET_ACCESS_KEY="testing", AWS_DEFAULT_REGION="us-east-1")
+os.environ.update(AWS_ACCESS_KEY_ID="testing", AWS_SECRET_ACCESS_KEY="testing", AWS_DEFAULT_REGION="us-east-1",
+                  AWS_ANALYZER_HISTORY="off")
 from moto import mock_aws
 mock_aws().start()
 import shots

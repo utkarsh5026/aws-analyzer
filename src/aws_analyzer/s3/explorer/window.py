@@ -14,6 +14,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.blocks import _Next, _Note, _Title
 from ..._kit.deps import _in_notebook, _require
+from ..._kit.history import PlaceHistory
 from ..._kit.window import _cell_number, _css_height, _window_errors
 from ..analyzer.s3_analyzer import S3Analyzer
 from ..readers.formats import _DATA_ERRORS
@@ -22,12 +23,13 @@ from ..view.s3_view import S3View
 from .navigator import _KINDS, Entry, Folder, S3Navigator, _s3_module, parse_filter, parse_location
 from .frame import _CHECK, _CSS, _PAGE_BUTTONS, _Row
 from .listing import _ListPane
+from .recent import _RecentPane
 from .report import _ReportPane
 from .selection import _SelectionPane
 from .settings import _SettingsPane
 
 
-class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane):
+class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentPane):
     """
     Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
     click on the right. Click a folder to open it; ← → ↑ go back, forward and up; click the path to jump
@@ -51,6 +53,10 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane):
     files in a zip (zip_max_files, 10,000).
     downloads: the folder "Download" and the zips save into (s3.py's downloads folder: 's3-downloads', next to the
     notebook); ⚙ Settings changes it too. x.ui.downloads() lists what's there and x.ui.clean_downloads() deletes it.
+    history: whether to remember the folders you open, between sessions, for the Recent row over your list of
+    buckets (and while you type a path), where ↩ picks up where you left off: True (in aws-analyzer's cache folder,
+    ~/.cache/aws-analyzer/history/, per AWS account; only the paths and when), False, or a file to keep them in.
+    AWS_ANALYZER_HISTORY=off turns it off everywhere. x.recent lists them and x.forget_recent() clears them.
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
@@ -70,9 +76,11 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane):
         downloads: str | None = None,
         mode: str = "auto",
         progress: str = "auto",
+        history: bool | str = True,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
+        self._history = PlaceHistory.from_setting(history, "s3")
         self.height = height
         self.page_size = max(10, int(page_size))
         self.zip_max_size = zip_max_size  # "Download .zip" zips a folder up to this size (⚙ Settings changes it)
@@ -371,6 +379,9 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane):
             self._show_folder(folder)
         self._draw_status(folder)
         self._draw_picks()
+        if not same:
+            self._remember()
+        self._draw_recent()
 
     def _select(self, uri: str) -> None:
         """
@@ -444,7 +455,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane):
         self._chips: list[Any] = []  # a button per file type, reused as the types change
         self._chip_types: list[str] = []  # the type each chip stands for now
         self._more_types = button("", "s3x-chip s3x-more", "", self._on_more_types)
-        self._finder = w.VBox([search, self._kinds, self._types], layout=w.Layout(width="100%", flex="0 0 auto"))
+        self._finder = w.VBox([self._build_recent(), search, self._kinds, self._types], layout=w.Layout(width="100%", flex="0 0 auto"))
         self._finder.add_class("s3x-find")
 
         self._check_all = button("✓", " ".join(_CHECK), "Select everything listed", self._on_check_all)

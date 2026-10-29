@@ -184,7 +184,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `aws_analyzer.clean_up()` (`_kit/local_files.py`'s `remove_local_files`, drawn by `_kit/housekeeping.py` with
   `local_files()`), which removes the S3 and Lambda downloads folders beside the notebook only when they hold
   aws-analyzer's `.gitignore` (`_made_by_aws_analyzer`) and aren't `_protected_folder`s, the agent sandbox's cache
-  (`$XDG_CACHE_HOME/aws-analyzer`, but never its `agent/` folder, `KEPT_IN_CACHE`: the memory and saved chats), and, only when named, the chart files in `agent-charts/` (never another file
+  (`$XDG_CACHE_HOME/aws-analyzer`, but never its `agent/` and `history/` folders, `KEPT_IN_CACHE`: the memory, saved chats and the explorers' recent places), and, only when named, the chart files in `agent-charts/` (never another file
   there), and
   `s3`'s `clean_downloads()` (`s3/analyzer/downloads.py`, with every guard below), which deletes what the user
   downloaded, and only from a downloads folder s3 made:
@@ -204,7 +204,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's saved chats
   (`AgentAnalyzer(chats=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/chats.sqlite` or the path given, holding
   each answer as JSON and LangGraph's checkpoints; only answers and the user's `rename_chat()` / `delete_chat()` change
-  it, and nothing deletes the file), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
+  it, and nothing deletes the file), the S3 and Lambda explorers' recent places (`_kit/history.py`'s `PlaceHistory`, `history=True` by default: one SQLite file, `~/.cache/aws-analyzer/history/places.sqlite`, `AWS_ANALYZER_HISTORY`'s path or the `history=` path given, holding each folder's s3:// path or function's ARN and when it was opened, per account and explorer, the newest `KEPT_VISITS`; only opening a place and the user's `forget_recent()` change it, and nothing deletes the file; `tests/conftest.py` sets `AWS_ANALYZER_HISTORY=off`, and so do the explorers' `*_shots.py` but for their recent figures), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a

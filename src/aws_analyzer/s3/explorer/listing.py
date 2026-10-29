@@ -594,6 +594,7 @@ class _ListPane:
         self._edit_btn.description = "✎" if editing else "✕"
         self._edit_btn.tooltip = "Type or paste a path" if editing else "Cancel"
         self._edit_btn._dom_classes = ("s3x-nav", "s3x-ic", "s3x-i-edit" if editing else "s3x-i-close")
+        self._draw_recent()
 
     def _on_path(self) -> None:
         value = self._path.value.strip()

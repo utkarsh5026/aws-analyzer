@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _why
-from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money
+from ..._kit.fmt import _count, _plural, _total, _utcnow, human_age, human_money
 from ..._kit.text import _esc, _marked, search_rank
 from ..._kit.window import _class_if
 
@@ -38,9 +38,22 @@ _COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width);
 )
 
 _FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it names; again shows every function
-    ("", "All", "all"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
+    ("", "All", "all"), ("recent", "Recent", "all"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
     ("runtime", "Old runtime", "warn"), ("public", "Public", "warn"), ("idle", "Not called", "idle"),
 )
+
+_CHIP_TIPS = {
+    "": "Show every function",
+    "recent": "Show only the functions you've opened here before, the ones you open most first (click again for all)",
+}
+
+
+def _arn_account(arn: str) -> str:
+    """
+    The account in a function's ARN ('arn:aws:lambda:us-east-1:123456789012:function:etl' -> '123456789012').
+    """
+    parts = arn.split(":")
+    return parts[4] if len(parts) > 4 else ""
 
 
 @dataclass
@@ -224,6 +237,7 @@ class _FunctionsTab:
         self.overview = ov
         self._listing = False
         self._compute_facts()
+        self._load_recent()
         denied = sorted({code for key, code in ov.errors.items() if key.endswith(":list")})
         self.field.problem = (f"Couldn't list the functions ({', '.join(denied)}; needs lambda:ListFunctions). Type "
                               "a function's name or ARN and press Enter." if denied and not ov.functions else "")
@@ -366,9 +380,36 @@ class _FunctionsTab:
         self._offset = 0
         self._refilter(renew=True)
 
+    def _load_recent(self) -> None:
+        """
+        The listed functions you've opened before (in this account), the ones you open most and most lately first.
+        """
+        functions = self.overview.functions if self.overview is not None else []
+        if self._history is None or not functions:
+            self._recent = {}
+            return
+        listed = {fn.arn for fn in functions}
+        places = self._history.places(_arn_account(functions[0].arn))
+        self._recent = {place.key: place for place in places if place.key in listed}
+
+    def _remember(self, fn: Function) -> None:
+        """
+        Adds a visit to fn, and redraws the Recent chip and the function field's order.
+        """
+        if self._history is None:
+            return
+        self._history.record(_arn_account(fn.arn), fn.arn, fn.name)
+        self._load_recent()
+        if self._facts:
+            self._draw_chips()
+
+    def _recent_note(self, fn: Function) -> str:
+        place = self._recent.get(fn.arn)
+        return f"opened {human_age(place.last)}" if place is not None else ""
+
     def _in_chip(self, f: _Facts, key: str) -> bool:
         m = f.metrics
-        return {"": True, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
+        return {"": True, "recent": f.fn.arn in self._recent, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
                 "runtime": f.status.state in ("deprecated", "blocked", "ending"),
                 "public": any(t.public for t in f.triggers), "idle": bool(m is not None and not m.invocations)}[key]
 
@@ -409,8 +450,7 @@ class _FunctionsTab:
             n = sum(1 for f in facts if self._in_chip(f, key))
             if key and not n:
                 continue
-            tip = ("Show every function" if not key
-                   else f"Show only the functions that are {label.lower()} (click again for all)")
+            tip = _CHIP_TIPS.get(key, f"Show only the functions that are {label.lower()} (click again for all)")
             chips.append((self._chip_button(self._function_chips, key, tone, self._pick_chip), f"{label} {n:,}", tip,
                           key == self._chip))
         self._show_chips(self.chips, chips if facts else [])
@@ -432,6 +472,13 @@ class _FunctionsTab:
             return ((m.last_invoked.timestamp() if m is not None and m.last_invoked else 0.0),)
         return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
 
+    def _most_yours_first(self, facts: list[_Facts]) -> list[_Facts]:
+        """
+        The Recent chip's order, unless a column sorts: the functions you open most and most lately first.
+        """
+        rank = {arn: i for i, arn in enumerate(self._recent)}
+        return sorted(facts, key=lambda f: rank.get(f.fn.arn, len(rank)))
+
     def _refilter(self, renew: bool = False) -> None:
         facts = [f for f in self._facts.values() if self._in_chip(f, self._chip)] if self._chip else list(
             self._facts.values())
@@ -448,6 +495,8 @@ class _FunctionsTab:
         if not self._query or self._sort != "problems":  # a search ranks its best match first, unless a column sorts
             facts = sorted(facts, key=lambda f: (f.fn.name.lower(), f.fn.region))
             facts = sorted(facts, key=self._sort_key, reverse=self._descending)
+        if self._chip == "recent" and self._sort == "problems":
+            facts = self._most_yours_first(facts)
         self._visible = facts
         self._offset = min(self._offset, max(0, (len(facts) - 1) // _FUNCTION_PAGE * _FUNCTION_PAGE))
         for key, button in self.column_buttons.items():

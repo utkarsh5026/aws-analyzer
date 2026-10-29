@@ -218,6 +218,7 @@ class _FunctionTab:
         self._asked = set()
         self._quietly(self.log_find, value="")
         self._quietly(self.code_find, value="")
+        self._remember(fn)
         self.field.value = fn.arn
         self.field.draw()
         self._draw_title()

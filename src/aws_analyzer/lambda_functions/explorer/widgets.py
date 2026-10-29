@@ -58,6 +58,17 @@ class _FunctionField(_Picker):
         if self.is_open:
             self._draw_list()
 
+    def matches(self) -> list[Function]:
+        """
+        The functions the search box finds, best first; while it's empty, the ones you've opened first (most yours
+        first), then the rest by name.
+        """
+        found = super().matches()
+        if str(self.search.value or "").strip():
+            return found
+        rank = {arn: i for i, arn in enumerate(self.app._recent)}
+        return sorted(found, key=lambda fn: rank.get(fn.arn, len(rank)))
+
     def _query(self, text: str) -> str:
         try:
             name, _, _ = parse_function_ref(text)
@@ -78,7 +89,8 @@ class _FunctionField(_Picker):
         m = facts.metrics if facts is not None else None
         numbers = (f"{_count(round(m.invocations))} calls" + (f", {_pct(m.error_rate)} failed" if m.errors else "")
                    if m is not None and m.invocations else "not called in 30 days" if m is not None else "")
-        note = " · ".join(p for p in (fn.description, fn.region if self.app.multi else "", numbers) if p)
+        recent = self.app._recent_note(fn)
+        note = " · ".join(p for p in (fn.description, fn.region if self.app.multi else "", numbers, recent) if p)
         tip = " · ".join(p for p in (fn.name, fn.runtime or "container image", note) if p)
         if button.tooltip != tip:
             button.tooltip = tip

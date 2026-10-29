@@ -3074,3 +3074,32 @@ def test_view_explore_opens_the_window(core):
     x = view.explorer
     assert isinstance(x, LambdaExplorer) and x.ui is view and x.function.name == "etl-nightly" and x._tab == "logs"
     assert x.pages["logs"].layout.height == "700px"
+
+
+def test_explorer_remembers_the_functions_you_open(explorer, tmp_path):
+    places = str(tmp_path / "places.sqlite")
+    x = explorer(history=places)
+    assert x.recent == [] and "Recent" not in " ".join(c.description for c in x.chips.children)
+    row_of(x, "etl-nightly").button.click()
+    assert [arn.split(":")[-1] for arn in x.recent] == ["etl-nightly"]
+
+    again = explorer(history=places)
+    assert [c.description for c in again.chips.children][:2] == ["All 2", "Recent 1"]
+    again.field.button.click()
+    assert [arn.split(":")[-1] for arn in again.field.shown] == ["etl-nightly", "api-handler"]
+    assert "opened just now" in plain(again.field.rows[again.field.shown[0]][2].value)
+    again.field.close()
+
+    again.chips.children[1].click()
+    assert [f.fn.name for f in again._visible] == ["etl-nightly"]
+
+    again.forget_recent("etl-nightly")
+    assert again.recent == [] and plain(again.status.value) == "Forgot etl-nightly."
+
+
+def test_explorer_without_history_remembers_nothing(explorer):
+    x = explorer(history=False)
+    row_of(x, "etl-nightly").button.click()
+    assert x.recent == []
+    x.forget_recent()
+    assert "Recent places are off" in plain(x.status.value)

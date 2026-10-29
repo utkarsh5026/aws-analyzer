@@ -180,6 +180,14 @@ The **Functions** tab puts the functions that need attention first. A dot says h
 
 Search by name, description, runtime, region or trigger (`sqs`), click a chip for only the failing, old or public ones, and click **Logs** on a line to go straight to its logs.
 
+**Recent** shows only the functions you've opened before, the ones you open most and most lately first, and the function field lists them first, each saying when you last opened it. The window remembers them between sessions, per AWS account: only their ARNs and when, in `~/.cache/aws-analyzer/history/places.sqlite`, which `clean_up()` keeps. `x.recent` lists them, `x.forget_recent("orders-etl")` forgets one and `x.forget_recent()` every one. `explore(history=False)` remembers nothing, and `AWS_ANALYZER_HISTORY=off` turns it off for every explorer.
+
+![The Functions tab with the Recent chip picked: All 5, Recent 2, and only orders-etl and report-api in the list, the two functions opened before](images/lambda-explorer-recent-light.webp#only-light){ width="984" height="861" loading=lazy }
+![The Functions tab with the Recent chip picked: All 5, Recent 2, and only orders-etl and report-api in the list, the two functions opened before](images/lambda-explorer-recent-dark.webp#only-dark){ width="984" height="861" loading=lazy }
+/// caption
+**Recent**: the functions you've opened, in this session or an earlier one.
+///
+
 ### Logs, run by run { #explorer-logs }
 
 The **Logs** tab is CloudWatch grouped the way you think about it: one line per run, ✓ or ✕, newest first. Click a run to read every line it logged.
@@ -740,7 +748,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 
 | Command | What it shows |
 |---|---|
-| `explore(name=None, tab=None, region=None, height=None)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
+| `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |

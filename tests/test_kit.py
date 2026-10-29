@@ -388,3 +388,56 @@ def test_a_view_draws_its_reports_in_the_theme_picked(monkeypatch):
     view._show([_Title("Report")])
     assert '<div class="ddb theme-console">' in drawn[0] and ".ddb.theme-console{" in drawn[0]
     assert '<div class="ddb theme-editorial">' in drawn[1] and "theme-console" not in drawn[1]
+
+
+
+def test_frecency_counts_often_and_lately():
+    from datetime import datetime, timedelta, timezone
+
+    from aws_analyzer._kit.history import Visit, frecency, rank_places
+
+    now = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    assert frecency([now], now) == 1.0 and frecency([now - timedelta(days=7)], now) == 0.5
+    daily = [Visit("s3://lake/daily/", "daily", now - timedelta(days=d)) for d in range(5)]
+    march = [Visit("s3://lake/march/", "march", now - timedelta(days=210)) for _ in range(30)]
+    once = [Visit("s3://lake/once/", "once", now - timedelta(hours=1))]
+    ranked = rank_places(march + once + daily, now)
+    assert [p.key for p in ranked] == ["s3://lake/daily/", "s3://lake/once/", "s3://lake/march/"]
+    assert ranked[0].visits == 5 and ranked[0].last == now
+    assert len(rank_places(march + once, now, limit=1)) == 1
+
+
+def test_history_path_and_store(tmp_path, monkeypatch):
+    from aws_analyzer._kit import history
+
+    assert history.history_path(False) == "" and history.history_path(True) == ""
+    monkeypatch.setenv(history.HISTORY_ENV, str(tmp_path / "h.sqlite"))
+    assert history.history_path(True) == str(tmp_path / "h.sqlite")
+    monkeypatch.delenv(history.HISTORY_ENV)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert history.history_path(True) == str(tmp_path / "aws-analyzer" / "history" / "places.sqlite")
+
+    store = history.PlaceHistory(str(tmp_path / "places.sqlite"), "s3")
+    assert store.places("111") == [] and store.last("111") is None
+    store.record("111", "s3://a/", "a")
+    store.record("111", "s3://b/", "b")
+    store.record("222", "s3://other/", "other")
+    assert [p.key for p in store.places("111")] == ["s3://b/", "s3://a/"] and store.last("111").key == "s3://b/"
+    assert history.PlaceHistory(store.path, "lambda").places("111") == []
+    assert store.forget("111", "s3://a/") == 1 and store.forget("111") == 1
+    assert [p.key for p in store.places("222")] == ["s3://other/"]
+
+    monkeypatch.setattr(history, "KEPT_VISITS", 3)
+    for i in range(5):
+        store.record("111", f"s3://k{i}/")
+    assert len(store.visits("111")) == 3
+
+
+def test_history_that_cant_be_written_turns_itself_off(tmp_path):
+    from aws_analyzer._kit.history import PlaceHistory
+
+    blocker = tmp_path / "file"
+    blocker.write_text("not a folder")
+    store = PlaceHistory(str(blocker / "places.sqlite"), "s3")
+    store.record("111", "s3://a/")
+    assert not store.is_on and "Recent places are off" in store.problem and store.places("111") == []

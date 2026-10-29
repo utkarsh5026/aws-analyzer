@@ -21,6 +21,7 @@ for name, value in {
     os.environ[name] = value
 os.environ.pop("AWS_ANALYZER_TZ", None)  # reports show times in UTC unless a test picks a zone
 os.environ.pop("AWS_ANALYZER_THEME", None)
+os.environ["AWS_ANALYZER_HISTORY"] = "off"
 AGENT_MODEL_SETTINGS = ("AWS_ANALYZER_AGENT_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY",
                         "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
 for name in AGENT_MODEL_SETTINGS:
