@@ -121,8 +121,8 @@ The folder on the left, the file you clicked on the right. One click on the path
 The explorer remembers the folders you open, so your list of buckets starts with them: **↩** picks up where you left off.
 { .gist }
 
-![S3Explorer on the list of buckets: over the search box a Recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-light.webp#only-light){ width="984" height="587" loading=lazy }
-![S3Explorer on the list of buckets: over the search box a Recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+![S3Explorer on the list of buckets: over the search box a # recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-light.webp#only-light){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: over the search box a # recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-dark.webp#only-dark){ width="984" height="579" loading=lazy }
 /// caption
 `S3Explorer()`: the folder you were in last, then the ones you open most. Point at a chip for its whole path.
 ///

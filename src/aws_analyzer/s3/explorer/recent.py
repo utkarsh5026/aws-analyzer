@@ -65,7 +65,7 @@ class _RecentPane:
 
     def _build_recent(self) -> Any:
         w = self._widgets
-        label = w.HTML('<span class="s3x-recent-l">Recent</span>', layout=w.Layout(width="auto"))
+        label = w.HTML('<span class="s3x-recent-l"># recent</span>', layout=w.Layout(width="auto"))
         self._recent_chips, self._recent_keys = [], []
         self._recent_box = w.HBox([label], layout=w.Layout(width="100%", display="none"))
         self._recent_box.add_class("s3x-recent")
