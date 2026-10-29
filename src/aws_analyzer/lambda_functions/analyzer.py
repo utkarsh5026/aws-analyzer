@@ -132,6 +132,25 @@ def _join_slices(
     return events, truncated, (events[0].time if truncated and events else None)
 
 
+def _slice_reach(part: _LogSlice) -> datetime | None:
+    """
+    How far back a log read has reached once this slice (and every newer one) is read: the slice's start, or its
+    oldest event when the limit cut it short.
+    """
+    if part.has_more and part.events:
+        return part.events[0].time
+    return _from_ms(part.first)
+
+
+def _tell_reach(reached: Callable[[datetime], None] | None, part: _LogSlice) -> None:
+    """
+    Tells reached() how far back a log read has come, once a slice is in.
+    """
+    moment = _slice_reach(part)
+    if reached is not None and moment is not None:
+        reached(moment)
+
+
 def _log_group(entry: dict[str, Any]) -> LogGroup:
     return LogGroup(
         entry.get("logGroupName", ""),
@@ -783,13 +802,15 @@ class LambdaAnalyzer(_BaseAnalyzer):
         *,
         stream: str | None = None,
         progress: Callable[..., None] | None = None,
+        reached: Callable[[datetime], None] | None = None,
     ) -> tuple[list[LogEvent], bool, datetime | None]:
         """
         The newest `limit` events from start to end that match the filter pattern, oldest first; whether reading
         stopped at the limit, and then how far back it reached. Reads backwards in growing slices (a minute, then
         4, 16, ...), so the newest events are the ones kept. A log group's slices are read _LOG_READERS at a time,
         newest first, so a search over days takes a fraction of the time one slice after another would; a stream's
-        window (one run at a time) is small and read in order.
+        window (one run at a time) is small and read in order. progress(count) hears the events read so far, and
+        reached(moment) how far back the read has come, after each slice, from the calling thread.
         """
         client = self._service("logs", region)
         params: dict[str, Any] = {"logGroupName": group}
@@ -806,9 +827,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         readers = 1 if stream or self.max_workers <= 1 else _LOG_READERS
         slices = _log_slices(low, high, readers)
         if readers > 1 and len(slices) > 1:
-            parts = self._read_side_by_side(read, slices, limit, readers, progress)
+            parts = self._read_side_by_side(read, slices, limit, readers, progress, reached)
         else:
-            parts = self._read_in_order(read, slices, limit, progress)
+            parts = self._read_in_order(read, slices, limit, progress, reached)
         return _join_slices(parts, low, limit)
 
     @staticmethod
@@ -840,6 +861,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         slices: list[tuple[int, int]],
         limit: int | None,
         progress: Callable[..., None] | None,
+        reached: Callable[[datetime], None] | None = None,
     ) -> list[_LogSlice]:
         """
         The slices read one after another, newest first, each asking only for what the limit still leaves.
@@ -854,6 +876,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
             count += len(part.events)
             if progress:
                 progress(count)
+            _tell_reach(reached, part)
         return parts
 
     @staticmethod
@@ -863,6 +886,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         limit: int | None,
         readers: int,
         progress: Callable[..., None] | None,
+        reached: Callable[[datetime], None] | None = None,
     ) -> list[_LogSlice]:
         """
         The slices read `readers` at a time, newest first, taken in order until they hold the limit; the older ones
@@ -881,6 +905,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
                     count += len(part.events)
                     if progress:
                         progress(count)
+                    _tell_reach(reached, part)
                     if limit is not None and count >= limit:
                         break
             finally:
@@ -949,9 +974,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         request_id: str | None = None,
         limit: int | None = 10_000,
         progress: Callable[..., None] | None = None,
+        reached: Callable[[datetime], None] | None = None,
     ) -> LogPage:
         """
-        log_events() for a function already read (no GetFunction).
+        log_events() for a function already read (no GetFunction); reached= hears how far back the read has come.
         """
         page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
         try:
@@ -966,7 +992,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
                         fn.log_group, fn.region, first, last, None, limit, stream=stream, progress=progress)
             else:
                 page.events, page.truncated, page.covered_from = self._filter(
-                    fn.log_group, fn.region, start, end, pattern, limit, progress=progress)
+                    fn.log_group, fn.region, start, end, pattern, limit, progress=progress, reached=reached)
         except ClientError as exc:
             page.errors["logs"] = _error_code(exc)
             return page
@@ -1007,17 +1033,19 @@ class LambdaAnalyzer(_BaseAnalyzer):
         search: str | None = None,
         limit: int | None = 3_000,
         progress: Callable[..., None] | None = None,
+        reached: Callable[[datetime], None] | None = None,
     ) -> LogPage:
         """
-        log_runs() for a function already read (no GetFunction).
+        log_runs() for a function already read (no GetFunction); reached= hears how far back the read (or the
+        search, before the runs it found are read) has come.
         """
         pattern = _filter_pattern(search)
         if not pattern:
-            return self._log_page(fn, start, end, limit=limit, progress=progress)
+            return self._log_page(fn, start, end, limit=limit, progress=progress, reached=reached)
         page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
         try:
             hits, page.truncated, page.covered_from = self._filter(
-                fn.log_group, fn.region, start, end, pattern, _SEARCH_HITS, progress=progress)
+                fn.log_group, fn.region, start, end, pattern, _SEARCH_HITS, progress=progress, reached=reached)
             phrase = _phrase(search)
             if phrase:  # the same check here, for log stores that only roughly apply patterns
                 hits = [e for e in hits if phrase in e.message]
