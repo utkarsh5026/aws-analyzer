@@ -13,7 +13,6 @@ from ..._kit.window import _skeleton
 
 from ..helpers import human_ms
 from ..models import Invocation, Performance
-from ..analyzer import LambdaAnalyzer
 from .frame import _run_clock
 from .widgets import _Row
 
@@ -37,7 +36,7 @@ class _PerformanceTab:
             return
         self._asked.add("performance")
         fn = self._full()
-        start, end = LambdaAnalyzer.time_range(self._range)
+        start, end = self._range_window()
         self.perf = None
         self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._range_text()}…"))
         self._set(self.slow_head, "")

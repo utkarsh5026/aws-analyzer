@@ -5,6 +5,7 @@ The Logs tab: each run's line and its lines of log, and the tab's mixin.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import re
 import time
@@ -13,10 +14,10 @@ from typing import Any, Callable
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _why
-from ..._kit.fmt import _count, _in_zone, _plural, _tz_label, _utcnow, _zone_name, human_age
+from ..._kit.fmt import _count, _fmt_dt, _in_zone, _plural, _tz_label, _utcnow, _zone_name, human_age, parse_time
 from ..._kit.highlight import _json_source_html
 from ..._kit.text import _clip, _esc, _marked
-from ..._kit.window import _class_if, _running_loop, _skeleton
+from ..._kit.window import _class_if, _running_loop
 
 from ..helpers import _pct, human_ms
 from ..models import LogEvent
@@ -32,6 +33,10 @@ from .widgets import _RunRow
 _RANGES = (("Last 15 minutes", "15m"), ("Last hour", "1h"), ("Last 3 hours", "3h"), ("Last 12 hours", "12h"),
            ("Last 24 hours", "24h"), ("Last 3 days", "3d"), ("Last 7 days", "7d"), ("Last 30 days", "30d"))
 
+_CUSTOM_RANGE = "custom"
+
+_RANGE_CHOICES = (*_RANGES, ("Custom range…", _CUSTOM_RANGE))
+
 
 _RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
 
@@ -44,6 +49,68 @@ _LIVE_MINUTES = 15  # ...and for how long, before it stops by itself
 
 _RUN_CHIPS = (("", "All runs", "all"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
               ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"))
+
+
+@dataclasses.dataclass
+class _Reading:
+    """
+    A read of the Logs tab's time range under way (the job's key): what it says it's doing, the range, the most
+    lines it reads, and what it says once the range is read but it isn't done (a search then reads each run found).
+    """
+
+    key: str
+    label: str
+    start: datetime
+    end: datetime
+    limit: int
+    then: str = ""
+
+
+def _read_share(reading: _Reading, reach: datetime | None, lines: int) -> float:
+    """
+    How much of a read is done, 0 to 1: the share of the time range read so far (it reads back from the end), or of
+    the lines it stops at, whichever is further, since either ends it.
+    """
+    span = (reading.end - reading.start).total_seconds()
+    covered = (reading.end - reach).total_seconds() / span if reach is not None and span > 0 else 0.0
+    return min(1.0, max(covered, lines / reading.limit if reading.limit else 0.0))
+
+
+def _reading_html(reading: _Reading, reach: datetime | None, lines: int) -> str:
+    """
+    The bar over the runs while the time range is read: what's being read, how much is done, how far back it has
+    read and the lines found; a bar that shimmers until the first slice is in.
+    """
+    share = _read_share(reading, reach, lines)
+    percent = round(share * 100)
+    facts = [f"<b>{percent}%</b>"] if reach is not None or lines else ["starting…"]
+    if reach is not None:
+        facts.append(f"read back to {_esc(_fmt_dt(reach))}")
+    if lines:
+        facts.append(f"{lines:,} {'line' if lines == 1 else 'lines'} found")
+    if share >= 1 and reading.then:
+        facts.append(_esc(reading.then))
+    waiting = " lmx-wait" if reach is None and not lines else ""
+    return (f'<div class="lmx-reading"><div class="lmx-reading-t">{_esc(reading.label)}</div>'
+            f'<div class="lmx-meter{waiting}"><i style="width:{percent}%"></i></div>'
+            f'<div class="lmx-reading-f">{" · ".join(facts)}</div></div>')
+
+
+def _picker_time(moment: datetime) -> datetime:
+    """
+    A moment as the From and To fields show it: in the zone reports show times in, to the minute, without its zone.
+    """
+    return _in_zone(moment).replace(second=0, microsecond=0, tzinfo=None)
+
+
+def _span_text(start: datetime, end: datetime) -> str:
+    """
+    A custom range as sentences name it: '2026-10-26 09:00 – 2026-10-28 17:30', or '2026-10-28 09:00 – 17:30' within
+    a day.
+    """
+    first, last = _fmt_dt(start), _fmt_dt(end)
+    same_day = first[:10] == last[:10]
+    return f"{first} – {last[11:] if same_day else last}"
 
 
 def _offset(seconds: float) -> str:
@@ -223,7 +290,7 @@ class _LogsTab:
 
     def _logs_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        self.range_pick = self._range_pick()
+        self.range_pick = self._range_pick(_RANGE_CHOICES)
         self.log_find = w.Text(placeholder="Find runs with: an order ID, KeyError, a request ID… (Enter searches "
                                            "CloudWatch)", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
@@ -245,6 +312,7 @@ class _LogsTab:
         again.on_click(self._safely(lambda _button: self._reload_logs()))
         bar = w.HBox([self.range_pick, ask, self.live_button, again], layout=layout(width="100%"))
         bar.add_class("lmx-bar")
+        self.custom_bar = self._custom_range_bar()
         self.run_chips = w.HBox(layout=layout(width="100%"))
         self.run_chips.add_class("lmx-chips")
         self.run_head = w.HTML(layout=layout(width="100%"))
@@ -259,17 +327,40 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, self.run_chips, self.run_head, self.jump_button, self.runs_box, pager])
+        page = w.VBox([bar, self.custom_bar, self.run_chips, self.run_head, self.jump_button, self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
 
-    def _range_pick(self) -> Any:
+    def _custom_range_bar(self) -> Any:
+        """
+        The From and To fields a custom range is picked with (a calendar and a clock each, in the zone reports show
+        times in), shown while the range field says Custom range.
+        """
+        w, layout = self._w, self._w.Layout
+        label_width = {"description_width": "initial"}
+        self.range_from = w.NaiveDatetimePicker(description="From", style=label_width, layout=layout(width="auto"))
+        self.range_to = w.NaiveDatetimePicker(description="To", style=label_width, layout=layout(width="auto"))
+        show = w.Button(description="Show runs", tooltip="Read the runs from From to To", button_style="primary",
+                        layout=layout(width="auto"))
+        show.add_class("lmx-small")
+        show.on_click(self._safely(lambda _button: self._apply_custom_range()))
+        self.range_hint = w.HTML(layout=layout(width="auto"))
+        self.range_hint.add_class("lmx-rangehint")
+        bar = w.HBox([self.range_from, self.range_to, show, self.range_hint],
+                     layout=layout(width="100%", display="none"))
+        for name in ("lmx-bar", "lmx-custom"):
+            bar.add_class(name)
+        return bar
+
+    def _range_pick(self, choices: tuple[tuple[str, str], ...] | None = None) -> Any:
         """
         A time range dropdown. The Logs, Errors and Performance tabs each have one, and they share one range: a
-        pick in one is the pick in all three, so the tabs always show the same stretch of time.
+        pick in one is the pick in all three, so the tabs always show the same stretch of time. The Logs tab's
+        `choices` end in Custom range…; the others list the presets and the custom range picked there, if any.
         """
         w = self._w
-        pick = w.Dropdown(options=self._range_options(), value=self._range, layout=w.Layout(width="auto"))
+        options = list(choices) if choices is not None else self._shared_options()
+        pick = w.Dropdown(options=options, value=self._range_value(), layout=w.Layout(width="auto"))
         pick.add_class("lmx-range")
         pick.observe(self._safely(self._range_changed), names="value")
         self.range_picks.append(pick)
@@ -289,38 +380,102 @@ class _LogsTab:
 
     # ------------------------------------------------------------------ logs
 
-    def _range_options(self) -> list[tuple[str, str]]:
+    def _range_value(self) -> str:
         """
-        The presets, and the range picked when it isn't one of them ('Since 2026-10-01').
+        What the range fields show: a preset's value, or _CUSTOM_RANGE for any other range.
+        """
+        is_preset = self._until is None and self._range in {value for _, value in _RANGES}
+        return self._range if is_preset else _CUSTOM_RANGE
+
+    def _shared_options(self) -> list[tuple[str, str]]:
+        """
+        The Errors and Performance tabs' range field: the presets, and the custom range the Logs tab picked
+        ('Since 2026-10-01 00:00', '2026-10-28 09:00 – 17:30').
         """
         options = list(_RANGES)
-        if self._range not in {value for _, value in options}:
-            options.append((f"Since {self._range}", self._range))
+        if self._range_value() == _CUSTOM_RANGE:
+            text = self._range_text()
+            options.append((text[:1].upper() + text[1:], _CUSTOM_RANGE))
         return options
 
-    def _set_range(self, since: str) -> None:
+    def _set_range(self, since: Any, until: Any = None) -> None:
         """
-        Picks a time range in every tab's field. The tabs that read with the old one read again when they're opened.
+        Picks a time range in every tab's field: one of the presets, or a custom range (since= and until= as
+        LambdaAnalyzer.time_range reads them), shown in the Logs tab's From and To fields. The tabs that read the
+        old range read again when they're opened.
         """
-        if since != self._range:
+        if (since, until) != (self._range, self._until):
             self._asked -= {"logs", "errors", "performance"}
-        self._range = since
+        self._range, self._until = since, until
         for pick in self.range_picks:
-            self._quietly(pick, options=self._range_options(), value=since)
+            if pick is not self.range_pick:
+                self._quietly(pick, options=self._shared_options(), value=self._range_value())
+        if self._range_value() != _CUSTOM_RANGE:
+            self._quietly(self.range_pick, value=since)
+            self.custom_bar.layout.display = "none"
+            return
+        self._quietly(self.range_pick, value=_CUSTOM_RANGE)
+        self._fill_custom_range()
 
-    def _range_text(self, value: str | None = None) -> str:
+    def _range_window(self) -> tuple[datetime, datetime]:
         """
-        'the last hour', 'the last 3 days', 'since 2026-10-01'.
+        The Logs tab's time range, (start, end), worked out now: '1h' moves with the clock, a custom range doesn't.
         """
-        value = value or self._range
+        return LambdaAnalyzer.time_range(self._range, self._until)
+
+    def _range_text(self, value: Any = None) -> str:
+        """
+        'the last hour', 'the last 3 days', 'since 2026-10-01 00:00', '2026-10-28 09:00 – 17:30'; the Logs tab's
+        range without a value.
+        """
+        if value is None and self._until is not None:
+            return _span_text(*self._range_window())
+        value = self._range if value is None else value
         label = next((label for label, v in _RANGES if v == value), None)
-        return f"the {label.lower()}" if label else f"since {value}"
+        if label:
+            return f"the {label.lower()}"
+        if isinstance(value, datetime):
+            return f"since {_fmt_dt(value)}"
+        return f"since {value}"
+
+    def _fill_custom_range(self) -> None:
+        """
+        Shows the From and To fields, set to the range the tab reads (To empty when it runs up to now).
+        """
+        start, end = self._range_window()
+        self._quietly(self.range_from, value=_picker_time(start))
+        self._quietly(self.range_to, value=_picker_time(end) if self._until is not None else None)
+        self._set(self.range_hint, f"Times in {_esc(_tz_label())}; an empty To means up to now.")
+        self.custom_bar.layout.display = ""
+
+    def _apply_custom_range(self) -> None:
+        """
+        Show runs: reads the runs from From to To (or up to now), or says what's wrong with them.
+        """
+        if self.range_from.value is None:
+            self._status("Pick when the range starts in From, then Show runs.", "warn")
+            return
+        since = parse_time(self.range_from.value)
+        until = parse_time(self.range_to.value) if self.range_to.value is not None else None
+        try:
+            LambdaAnalyzer.time_range(since, until)
+        except ValueError:
+            end = "To" if until is not None else "now"
+            self._status(f"From ({_fmt_dt(since)}) has to be before {end}: pick an earlier From.", "warn")
+            return
+        self._set_range(since, until)
+        self._reload_logs()
 
     def _range_changed(self, change: dict[str, Any]) -> None:
         """
         A time range picked in one tab's field: every tab's field shows it, and the tab on show reads it.
         """
         if self.quiet or not change.get("new"):
+            return
+        if change["new"] == _CUSTOM_RANGE:
+            if change.get("owner") is self.range_pick:
+                self._fill_custom_range()
+                self._status("Pick From and To (To empty means up to now), then Show runs.")
             return
         self._set_range(str(change["new"]))
         reload = {"logs": self._reload_logs, "errors": self._load_errors, "performance": self._load_perf}
@@ -341,25 +496,54 @@ class _LogsTab:
             return
         self._asked.add("logs")
         self._stop_live()
-        start, end = LambdaAnalyzer.time_range(self._range)
+        start, end = self._range_window()
         self.logs_page, self._runs, self._run_offset = None, [], 0
         self.jump_button.layout.display = self.older_button.layout.display = "none"
-        self._set(self.run_head, _skeleton(f"Reading what {fn.name} logged in {self._range_text()}…"))
         self.runs_box.children = []
-        self._counted = 0
-        self._status(f"Reading {fn.name}'s logs from {self._range_text()}…", busy=True, owner="logs")
-        self._later("logs", lambda: self.core._log_runs(fn, start, end, limit=_RUN_LINES,
-                                                        progress=lambda n: setattr(self, "_counted", n)),
+        self._draw_run_chips()
+        self._draw_pager("runs", 0, 0, _RUN_PAGE, "runs", None)
+        self._start_reading(_Reading("logs", f"Reading what {fn.name} logged in {self._range_text()}…", start, end,
+                                     _RUN_LINES))
+        self._status(f"Reading what {fn.name} logged in {self._range_text()}…", busy=True, owner="logs")
+        self._later("logs", lambda: self.core._log_runs(fn, start, end, limit=_RUN_LINES, progress=self._count_lines,
+                                                        reached=self._note_reach),
                     self._got_logs, self._logs_failed, counting=f"Reading {fn.name}'s logs… {{n}} lines read so far",
-                    owner="logs")
+                    owner="logs", ticking=lambda: self._draw_reading("logs"))
+
+    def _start_reading(self, reading: _Reading) -> None:
+        """
+        Shows the bar a read of the time range fills as it goes (_draw_reading, as the job ticks).
+        """
+        self._reading, self._reach, self._counted = reading, None, 0
+        self._set(self.run_head, _reading_html(reading, None, 0))
+
+    def _count_lines(self, count: int) -> None:
+        self._counted = count
+
+    def _note_reach(self, moment: datetime) -> None:
+        self._reach = moment
+
+    def _draw_reading(self, key: str) -> None:
+        """
+        Redraws the bar of the read under way, if it's this job's.
+        """
+        reading = self._reading
+        if reading is not None and reading.key == key:
+            self._set(self.run_head, _reading_html(reading, self._reach, self._counted))
+
+    def _done_reading(self, key: str) -> None:
+        if self._reading is not None and self._reading.key == key:
+            self._reading = None
 
     def _logs_failed(self, exc: BaseException) -> None:
+        self._done_reading("logs")
         text = self._error_text(exc)
         self._set(self.run_head, self._html([_Note(f"Couldn't read the logs: {text}", "warn")]))
         if self._tab == "logs":
             self._status(text, "warn")
 
     def _got_logs(self, page: LogPage) -> None:
+        self._done_reading("logs")
         self.logs_page = page
         self._runs = page.runs
         self._run_offset = 0
@@ -432,21 +616,25 @@ class _LogsTab:
             else:
                 self._draw_runs(renew=True)
             return
-        start, end = LambdaAnalyzer.time_range(self._range)
+        start, end = self._range_window()
         self._searched = self._log_query = text
         self._stop_live()
-        self._status(f"Searching {fn.name}'s logs from {self._range_text()} for {text!r}, then reading each run it's "
-                     "in…", busy=True, owner="logs")
-        self._set(self.run_head, _skeleton(f"Searching {self._range_text()} for {text!r}…"))
-        self._later("search", lambda: self.core._log_runs(fn, start, end, search=text, limit=_RUN_LINES),
-                    self._got_search, self._search_failed)
+        self._status(f"Searching what {fn.name} logged in {self._range_text()} for {text!r}, then reading each run "
+                     "it's in…", busy=True, owner="logs")
+        self._start_reading(_Reading("search", f"Searching {self._range_text()} for {text!r}…", start, end,
+                                     _SEARCH_HITS, then="now reading each run it's in"))
+        self._later("search", lambda: self.core._log_runs(fn, start, end, search=text, limit=_RUN_LINES,
+                                                          progress=self._count_lines, reached=self._note_reach),
+                    self._got_search, self._search_failed, ticking=lambda: self._draw_reading("search"))
 
     def _search_failed(self, exc: BaseException) -> None:
+        self._done_reading("search")
         text = self._error_text(exc)
         self._set(self.run_head, self._html([_Note(f"The search failed: {text}", "warn")]))
         self._status(text, "warn")
 
     def _got_search(self, page: LogPage) -> None:
+        self._done_reading("search")
         self.found = page
         self._found_runs = page.runs
         self._run_offset = 0
@@ -701,6 +889,10 @@ class _LogsTab:
             return
         if self.function is None or self.logs_page is None:
             self._status("Live follows the logs shown: open a function's Logs tab first.", "warn")
+            return
+        if self._until is not None:
+            self._status("Live adds the newest lines, and this range ends before now: empty To, or pick a range "
+                         "like the last hour, then Live.", "warn")
             return
         if self.found is not None:  # back to every run: Live adds to them
             self._quietly(self.log_find, value="")

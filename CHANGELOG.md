@@ -9,6 +9,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda explorer: logs between any two times** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - The Logs tab's time range has **Custom range…**: pick From and To on a calendar, then **Show runs**.
+  - Leave To empty to read up to now; times are in the reports' time zone.
+  - From code: `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")`.
+
+- ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
+
 ### Changed
 
 - ⚡ **Lambda explorer: quicker to see what's wrong** ([#167](https://github.com/utkarsh5026/aws-analyzer/pull/167))

@@ -2692,6 +2692,64 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     assert x._range == "24h"  # run() looks back a day at least
 
 
+def test_explorer_logs_tab_reads_a_custom_range(core, explorer):
+    now = datetime.now(timezone.utc)
+    old = seed_runs(now - timedelta(days=2), stream="2026/10/04/[$LATEST]old")
+    x = explorer("etl-nightly", tab="logs")
+    assert [run.request_id for run in x._runs] == [RID] and x.custom_bar.layout.display == "none"
+    x.range_pick.value = "custom"
+    assert x.custom_bar.layout.display == "" and x.range_to.value is None and x._range == "24h"
+    assert abs(x.range_from.value - (now - timedelta(hours=24)).replace(tzinfo=None)) < timedelta(minutes=1)
+    assert x.range_from.value.second == 0 and plain(x.range_hint.value) == "Times in UTC; an empty To means up to now."
+    x.range_from.value = (now - timedelta(days=3)).replace(tzinfo=None)
+    x.range_to.value = (now - timedelta(days=1)).replace(tzinfo=None)
+    show = next(b for b in x.custom_bar.children if getattr(b, "description", "") == "Show runs")
+    show.click()
+    assert [run.request_id for run in x._runs] == list(reversed(old)) and x._until is not None
+    span = f"{now - timedelta(days=3):%Y-%m-%d %H:%M} – {now - timedelta(days=1):%Y-%m-%d %H:%M}"
+    assert plain(x.status.value) == f"4 runs in {span} · click a run to see its lines"
+    assert f"Newest first, {span}; times in UTC" in plain(x.run_head.value)
+    assert x.errors_pick.value == "custom" and (span, "custom") in x.errors_pick.options
+    x.live_button.click()
+    assert not x._live and "this range ends before now" in plain(x.status.value)
+    x.range_to.value = None
+    show.click()
+    assert {run.request_id for run in x._runs} == {RID, *old} and x._until is None
+    x.range_from.value = (now + timedelta(hours=1)).replace(tzinfo=None)
+    show.click()
+    assert "has to be before now" in plain(x.status.value) and len(x._runs) == 5
+    x.range_pick.value = "1h"
+    assert x.custom_bar.layout.display == "none" and x._until is None and [r.request_id for r in x._runs] == [RID]
+    x.logs(since=now - timedelta(days=3), until="1d")
+    assert x.range_pick.value == "custom" and x.custom_bar.layout.display == ""
+    assert [run.request_id for run in x._runs] == list(reversed(old))
+    x.run(RID)
+    assert x._range == "24h" and x._until is None and x.custom_bar.layout.display == "none"
+
+
+def test_log_reads_say_how_far_back_they_have_come(core):
+    now = datetime.now(timezone.utc)
+    seed_runs(now - timedelta(hours=5), stream="2026/10/04/[$LATEST]old")
+    fn = core.function("etl-nightly")
+    reaches = []
+    core._log_runs(fn, now - timedelta(hours=6), now, reached=reaches.append)
+    assert reaches and reaches == sorted(reaches, reverse=True)
+    assert abs(reaches[-1] - (now - timedelta(hours=6))) < timedelta(seconds=1)
+
+
+def test_explorer_reading_bar_fills_as_the_range_is_read():
+    end = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    reading = logs_tab._Reading("logs", "Reading what etl logged in the last 4 hours…", end - timedelta(hours=4),
+                                end, 3_000)
+    assert "starting…" in plain(logs_tab._reading_html(reading, None, 0))
+    assert "lmx-wait" in logs_tab._reading_html(reading, None, 0)
+    halfway = plain(logs_tab._reading_html(reading, end - timedelta(hours=1), 120))
+    assert halfway.endswith("25% · read back to 2026-10-29 11:00 · 120 lines found")
+    assert "100%" in plain(logs_tab._reading_html(reading, end - timedelta(hours=1), 3_000))
+    search = logs_tab._Reading("search", "Searching…", reading.start, end, 1_000, then="now reading each run it's in")
+    assert plain(logs_tab._reading_html(search, search.start, 4)).endswith("4 lines found · now reading each run it's in")
+
+
 def test_explorer_live_adds_new_runs(core, explorer):
     x = explorer("etl-nightly", tab="logs")
     assert [run.request_id for run in x._runs] == [RID]
@@ -2740,7 +2798,7 @@ def test_explorer_tabs_share_one_time_range(core, explorer):
     assert x.logs_page.since < datetime.now(timezone.utc) - timedelta(days=2) and "the last 3 days" in plain(
         x.run_head.value)
     x.logs(since="2026-01-01")
-    assert x.errors_pick.value == "2026-01-01" and ("Since 2026-01-01", "2026-01-01") in x.perf_pick.options
+    assert x.range_pick.value == x.errors_pick.value == "custom" and ("Since 2026-01-01", "custom") in x.perf_pick.options
 
 
 def test_explorer_list_draws_each_functions_last_two_weeks():
@@ -3033,8 +3091,10 @@ def test_explorer_reads_in_the_background(seeded):
         assert list(x._tasks) == ["list"] and x._said[2] and x.overview is None  # it returned at once
         await settle(x, "list", "numbers", "extras")
         assert x.function.name == "etl-nightly" and "logs" in x._tasks and x.logs_page is None
-        assert "skw" in x.run_head.value
+        assert "lmx-reading" in x.run_head.value and "starting…" in plain(x.run_head.value)
         await settle(x, "describe")
+        x.tab_buttons["logs"].click()
+        assert x.run_chips.children == () and x._reading is not None
         x.tab_buttons["settings"].click()  # the window answers while the logs are read
         assert "Settings of etl-nightly" in plain(x.settings_view.value)
         x.tab_buttons["logs"].click()

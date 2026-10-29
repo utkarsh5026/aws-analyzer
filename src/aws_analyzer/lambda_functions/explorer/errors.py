@@ -13,7 +13,6 @@ from ..._kit.window import _skeleton
 
 from ..models import ErrorReport, LogEvent
 from ..analysis.errors import classify_error
-from ..analyzer import LambdaAnalyzer
 from ..view import _stamp
 from .frame import _run_clock
 from .widgets import _Row
@@ -40,7 +39,7 @@ class _ErrorsTab:
             return
         self._asked.add("errors")
         fn = self._full()
-        start, end = LambdaAnalyzer.time_range(self._range)
+        start, end = self._range_window()
         self.error_report = None
         self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text()}…"))
         self._set(self.error_head, "")
