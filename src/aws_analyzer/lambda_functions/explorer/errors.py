@@ -26,7 +26,7 @@ class _ErrorsTab:
 
     def _errors_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        bar, (self.errors_pick, again) = self._range_bar("24h", self._errors_range_changed, "its errors")
+        bar, (self.errors_pick, again) = self._range_bar("its errors")
         again.on_click(self._safely(lambda _button: self._load_errors()))
         self.errors_view = w.HTML(layout=layout(width="100%"))
         self.error_head = w.HTML(layout=layout(width="100%"))
@@ -35,21 +35,14 @@ class _ErrorsTab:
 
     # ------------------------------------------------------------------ errors and performance
 
-    def _errors_range_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or not change.get("new"):
-            return
-        self._errors_range = str(change["new"])
-        self._load_errors()
-
     def _load_errors(self) -> None:
         if self.function is None:
             return
         self._asked.add("errors")
         fn = self._full()
-        start, end = LambdaAnalyzer.time_range(self._errors_range)
+        start, end = LambdaAnalyzer.time_range(self._range)
         self.error_report = None
-        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text(self._errors_range)}"
-                                              "…"))
+        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text()}…"))
         self._set(self.error_head, "")
         self.error_rows_box.children = []
         self._counted = 0
@@ -66,7 +59,7 @@ class _ErrorsTab:
 
     def _got_errors(self, report: ErrorReport) -> None:
         self.error_report = report
-        self._draw("errors", self.errors_view, self.ui._errors_blocks(report, since=self._errors_range, for_window=True))
+        self._draw("errors", self.errors_view, self.ui._errors_blocks(report, since=self._range, for_window=True))
         failed = [e for e in report.newest]
         today = _in_zone(_utcnow()).date()
         while len(self._error_rows) < len(failed):

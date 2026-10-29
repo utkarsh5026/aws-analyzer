@@ -7,12 +7,13 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _why
 from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money
+from ..._kit.render import _split_lead
 from ..._kit.text import _esc, _marked, search_rank
 from ..._kit.window import _class_if
 
@@ -21,14 +22,18 @@ from ..models import Function, FunctionMetrics, ProvisionedConcurrency, RuntimeS
 from ..analysis.functions import runtime_status
 from ..analysis.cost import function_monthly_cost
 from ..analysis.overview import Overview
-from ..analysis.findings import _day_age, _errors_level, account_findings, function_findings
+from ..analysis.findings import (
+    RECENT_DAYS, _day_age, _errors_level, _recent, _runtime_findings, account_findings, function_findings,
+)
 from ..view import _unread
-from .frame import _FUNCTION_PAGE, _FUNCTION_TABS
+from .frame import _FUNCTION_PAGE, _FUNCTION_TABS, _window_text
 from .widgets import _Row
 
 
 _COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width); a header sorts, again reverses
     ("name", "Function", "Sort by name", ""),
+    ("trend", "Last 14 days", f"Calls a day, the failed part in red. Sort by the share of calls that failed in the last "
+                              f"{RECENT_DAYS} days", "96px"),
     ("calls", "Calls · 30d", "Sort by calls in the last 30 days", "86px"),
     ("errors", "Errors", "Sort by the share of calls that failed", "64px"),
     ("duration", "Avg run", "Sort by the average run time", "72px"),
@@ -42,11 +47,17 @@ _FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it na
     ("runtime", "Old runtime", "warn"), ("public", "Public", "warn"), ("idle", "Not called", "idle"),
 )
 
+_TREND_DAYS = 14
+
+_SHORTEST_BAR = 12
+
 
 @dataclass
 class _Facts:
     """
-    What the explorer's list says about one function, worked out once each time more is read.
+    What the explorer's list says about one function, worked out once each time more is read. Its tone is its dot:
+    'bad' (failing), 'warn' (a warning), 'ok', 'idle' (not called) or '' (not read yet); its headline is what its
+    line says is wrong, in place of its description.
     """
 
     fn: Function
@@ -55,7 +66,8 @@ class _Facts:
     findings: list[tuple[str, str]]
     triggers: list[Trigger]
     cost: float | None
-    tone: str  # its dot: 'bad' (failing), 'warn' (a warning), 'ok', 'idle' (not called), '' (not read yet)
+    tone: str
+    headline: str = ""
 
     @property
     def warnings(self) -> list[str]:
@@ -77,7 +89,59 @@ def _function_facts(fn: Function, ov: Overview, prices: dict[str, float], now: d
         tone = "ok" if m.invocations else "idle"
     else:
         tone = ""
-    return _Facts(fn, m, status, found, detail.triggers, cost, tone)
+    return _Facts(fn, m, status, found, detail.triggers, cost, tone, _headline(fn, m, status, found, now))
+
+
+def _headline(fn: Function, m: FunctionMetrics | None, status: RuntimeStatus, found: list[tuple[str, str]],
+              now: datetime) -> str:
+    """
+    What a function's line in the list says is wrong: the lead of its first warning ('3 of 120 calls failed (2.5%)
+    in the last 30 days'), or '' when it has none. When its calls fail often enough to act on, that comes before an
+    old runtime, so the line says why its dot is red.
+    """
+    warnings = [message for level, message in found if level == "warn"]
+    if _errors_level(m, now) == "warn":
+        about_runtime = {message for _, message in _runtime_findings(fn, status)}
+        warnings = [message for message in warnings if message not in about_runtime] or warnings
+    if not warnings:
+        return ""
+    lead, _, _ = _split_lead(warnings[0])
+    return _window_text(lead or warnings[0])
+
+
+def _trend_days(m: FunctionMetrics | None, now: datetime) -> list[tuple[float, float]]:
+    """
+    (calls, failed calls) for each of the last _TREND_DAYS UTC days, oldest first, 0 for a day without calls; [] when
+    CloudWatch's numbers aren't daily ones.
+    """
+    if m is None or m.period < 86400:
+        return []
+    by_day = {d.start.astimezone(timezone.utc).date(): d for d in m.daily}
+    today = _midnight(now)
+    days = []
+    for back in range(_TREND_DAYS - 1, -1, -1):
+        usage = by_day.get((today - timedelta(days=back)).date())
+        days.append((usage.invocations, usage.errors) if usage is not None else (0.0, 0.0))
+    return days
+
+
+def _trend_html(days: list[tuple[float, float]]) -> str:
+    """
+    The trend column: a bar a day as tall as its calls against the busiest day, its failed part in red on top. A day
+    with any calls is at least _SHORTEST_BAR percent tall, so it stays visible beside a busy one.
+    """
+    if not days:
+        return "-"
+    busiest = max(calls for calls, _ in days)
+    bars = []
+    for calls, failed in days:
+        if not calls:
+            bars.append('<i class="z"></i>')
+            continue
+        height = max(_SHORTEST_BAR, 100 * calls / busiest)
+        red = f'<b style="height:{min(100.0, 100 * failed / calls):.1f}%"></b>' if failed else ""
+        bars.append(f'<i style="height:{height:.1f}%">{red}</i>')
+    return f'<span class="tr">{"".join(bars)}</span>'
 
 
 def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now: datetime) -> str:
@@ -88,6 +152,10 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     runtime = f.status.label
     parts = [fn.description, _triggers_text(f.triggers), f"{fn.memory:,} MB", f"{fn.timeout} s"]
     line = " · ".join(p for p in parts if p)
+    if f.headline and not words:
+        about = f'<div class="ff hl {f.tone}">{_esc(f.headline)}</div>'
+    else:
+        about = f'<div class="ff">{_marked(line, words)}</div>'
     loading = '<span class="sk"></span>'
 
     def cell(css: str, value: str, tone: str = "") -> str:
@@ -96,11 +164,13 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
 
     if m is None:
         dash = loading if numbers else "-"
-        cells = "".join(f'<div class="fc {css}">{dash}</div>' for css in ("", "", "c-dur", "", "c-called"))
+        columns = ("c-trend", "", "", "c-dur", "", "c-called")
+        cells = "".join(f'<div class="fc {css}">{dash}</div>' for css in columns)
     else:
         level = _errors_level(m, now)
         rate = _pct(m.error_rate) if m.invocations else "-"
-        cells = (cell("", _count(round(m.invocations)) if m.invocations else "0")
+        cells = (f'<div class="fc c-trend">{_trend_html(_trend_days(m, now))}</div>'
+                 + cell("", _count(round(m.invocations)) if m.invocations else "0")
                  + cell("" if m.invocations else "dim", rate, "bad" if level == "warn" else "warn" if level else "")
                  + cell("c-dur" + ("" if m.invocations else " dim"), human_ms(m.avg_duration) if m.invocations
                         else "-")
@@ -113,7 +183,7 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     return (f'<div class="fr"><span class="dot {f.tone}"></span><div class="fm"><div class="fn">'
             f"<b>{_marked(fn.name, words)}</b>"
             f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}</div>'
-            f'<div class="ff">{_marked(line, words)}</div></div>{cells}<div class="fc">{badge}</div><div></div></div>')
+            f'{about}</div>{cells}<div class="fc">{badge}</div><div></div></div>')
 
 
 def _triggers_text(triggers: list[Trigger]) -> str:
@@ -422,6 +492,10 @@ class _FunctionsTab:
             return (f.fn.name.lower(), f.fn.region)
         if self._sort == "calls":
             return (calls,)
+        if self._sort == "trend":
+            recent = _recent(m, _utcnow()) if m is not None else None
+            failed_lately = recent[1] / recent[0] if recent and recent[0] else -1.0
+            return (failed_lately, recent[1] if recent else -1.0)
         if self._sort == "errors":
             return ((m.error_rate or 0.0) if m is not None else -1.0, m.errors if m is not None else -1.0)
         if self._sort == "duration":

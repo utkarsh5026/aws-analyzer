@@ -83,7 +83,7 @@ class _FunctionTab:
         if self.function is None:
             facts = list(self._facts.values())
             if self.overview is None:
-                cards = [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate", "…", "sk-on")]
+                cards = [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate · 30d", "…", "sk-on")]
             else:
                 read = [f.metrics for f in facts if f.metrics is not None]
                 calls = sum(m.invocations for m in read)
@@ -93,7 +93,7 @@ class _FunctionTab:
                 attention = sum(1 for f in facts if f.warnings)
                 cards.append(("Functions", f"{len(facts):,}", ""))
                 cards.append(("Calls · 30d", "…" if loading else _count(round(calls)), "sk-on" if loading else ""))
-                cards.append(("Error rate", "…" if loading else (_pct(failed / calls) if calls else "-"),
+                cards.append(("Error rate · 30d", "…" if loading else (_pct(failed / calls) if calls else "-"),
                               "sk-on" if loading else "warn" if warn else ""))
                 cards.append(("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"),
                               "sk-on" if loading else ""))
@@ -106,14 +106,14 @@ class _FunctionTab:
             if m is None:
                 waiting = loading or self.detail is None
                 cards += [(label, "…" if waiting else "-", "sk-on" if waiting else "")
-                          for label in ("Calls · 30d", "Error rate", "Avg / longest run")]
+                          for label in ("Calls · 30d", "Error rate · 30d", "Avg / longest · 30d")]
             else:
                 level = _errors_level(m, now)
                 near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
                 cards.append(("Calls · 30d", _count(round(m.invocations)), ""))
-                cards.append(("Error rate", _pct(m.error_rate) if m.invocations else "-",
+                cards.append(("Error rate · 30d", _pct(m.error_rate) if m.invocations else "-",
                               "bad" if level == "warn" else "warn" if level else ""))
-                cards.append(("Avg / longest run", f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}"
+                cards.append(("Avg / longest · 30d", f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}"
                               if m.invocations else "not called in 30 days", "warn" if near else ""))
             if self.detail is not None:
                 cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,

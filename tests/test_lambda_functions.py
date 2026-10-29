@@ -27,7 +27,7 @@ from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_f
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
-from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, logs as logs_tab
+from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.blocks import _Next, _Report
@@ -2507,14 +2507,21 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     assert x.region == REGION and sorted(f.name for f in x.overview.functions) == ["api-handler", "etl-nightly"]
     assert plain(x.title.value) == ("Lambda explorer us-east-1 2 functions · every function, its logs run by run, its "
                                     "errors and code · read-only")
-    assert plain(x.stats.value) == ("Functions 2 Calls · 30d 1,000 Error rate 4.0% Est. $ / month <$0.01 "
+    assert plain(x.stats.value) == ("Functions 2 Calls · 30d 1,000 Error rate · 30d 4.0% Est. $ / month <$0.01 "
                                     "Need attention 2")
     assert [c.description for c in x.chips.children] == ["All 2", "Needs attention 2", "With errors 1",
                                                          "Old runtime 1", "Public 1", "Not called 1"]
     assert [f.fn.name for f in x._visible] == ["etl-nightly", "api-handler"]  # problems first
     assert faces(x._rows, 2) == [
-        "etl-nightly python3.9 (ended) Nightly orders load · SQS, S3 · 1,024 MB · 900 s 1,000 4.0% 250 ms <$0.01 today 3",
-        "api-handler python3.12 Anyone (public) · 128 MB · 3 s 0 - - $0.00 not in 30d 1"]
+        "etl-nightly python3.9 (ended) 40 of 1,000 calls failed (4.0%) in the last 30 days, the last today 1,000 4.0% "
+        "250 ms <$0.01 today 3",
+        "api-handler python3.12 Its resource policy lets anyone invoke it (statement open: Principal \"*\" with no "
+        "condition) 0 - - $0.00 not in 30d 1"]
+    assert "lmx-app" not in row_of(x, "etl-nightly").face.value and 'class="ff hl bad"' in row_of(
+        x, "etl-nightly").face.value and row_of(x, "etl-nightly").face.value.count('<i style="height:') == 1
+    x.find.value = "nightly"
+    assert "(ended) Nightly orders load · SQS, S3" in faces(x._rows, 1)[0]
+    x.find.value = ""
     status = plain(x.status.value)
     assert status.startswith("2 functions in us-east-1, read in") and "2 need attention" in status
     assert "(15 CloudWatch metrics, about <$0.01)" in status  # what reading the list cost
@@ -2524,7 +2531,7 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     row_of(x, "etl-nightly").button.click()
     assert x.function.name == "etl-nightly" and x._tab == "overview" and x.detail.function.tags == {"team": "ml"}
     assert "etl-nightly python3.9" in plain(x.field.face.value) and "lmx-on" in row_of(x, "etl-nightly").box._dom_classes
-    assert plain(x.stats.value) == ("Calls · 30d 1,000 Error rate 4.0% Avg / longest run 250 ms / 4m 10s "
+    assert plain(x.stats.value) == ("Calls · 30d 1,000 Error rate · 30d 4.0% Avg / longest · 30d 250 ms / 4m 10s "
                                     "Est. $ / month <$0.01 Warnings 3")
     overview = plain(x.overview_view.value)
     assert "Runtime python3.9 (ended) Memory 1,024 MB Timeout 900 s Architecture x86_64 Triggers 2" in overview
@@ -2610,8 +2617,8 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     assert [c.description for c in x.run_chips.children] == ["All runs 5", "Failed 1", "Cold starts 1"]
     head = plain(x.run_head.value)
     assert "5 runs 1 failed (20.0%) median 52 ms slowest 102 ms of 900 s memory up to 88 of 1,024 MB" in head
-    assert "Newest first, the last hour; times in UTC" in head
-    assert plain(x.status.value) == "5 runs in the last hour, 1 failed · click a run to see its lines"
+    assert "Newest first, the last 24 hours; times in UTC" in head
+    assert plain(x.status.value) == "5 runs in the last 24 hours, 1 failed · click a run to see its lines"
     failed = x._run_rows[4]
     assert "✕" in plain(failed.face.value) and "KeyError: 'customer_id' 8f5ce35b" in plain(failed.face.value)
     assert "cold 300 ms" in plain(failed.face.value) and failed.body.layout.display == "none"
@@ -2634,7 +2641,7 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     enter(x.log_find)  # CloudWatch searches the whole range, and brings back whole runs
     assert x.found is not None and [run.request_id for run in x._found_runs] == [ids[1]]
     assert x._run_rows[0].body.layout.display == "" and " hit" in x._run_rows[0].body.value  # opened, line marked
-    assert plain(x.status.value) == "1 run with 'ORD-77' in the last hour · ✕ shows every run again"
+    assert plain(x.status.value) == "1 run with 'ORD-77' in the last 24 hours · ✕ shows every run again"
     x.log_find.value = ""
     assert x.found is None and len(x._visible_runs()) == 5
     x.log_find.value = "?ERROR ?WARN"
@@ -2645,7 +2652,7 @@ def test_explorer_shows_times_in_the_zone_picked(core, explorer):
     seed_runs(datetime.now(timezone.utc))
     set_timezone("Asia/Kolkata")
     x = explorer("etl-nightly", tab="logs")
-    assert "Newest first, the last hour; times in IST" in plain(x.run_head.value)
+    assert "Newest first, the last 24 hours; times in IST" in plain(x.run_head.value)
     row = x._run_rows[0]
     clock = row.run.start.astimezone(ZoneInfo("Asia/Kolkata"))
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -2674,6 +2681,7 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     x._reload_logs()
     assert x.logs_page.truncated and x.older_button.layout.display == ""
     assert "These are the newest 6 lines" in plain(x.run_head.value)
+    assert plain(x.run_head.value).startswith("the newest 2 runs") and plain(x.status.value).startswith("The newest")
     for _ in range(5):
         if not x.logs_page.truncated:
             break
@@ -2715,10 +2723,39 @@ def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     perf = plain(x.perf_view.value)
     assert "Performance of etl-nightly" in perf and "256 MB still leaves room" in perf and "The slowest runs" not in perf
     assert "102 ms 88 of 1,024 MB · cold start 300 ms" in plain(x._slow_rows[0].face.value)
-    x.errors_pick.value = "3d"
-    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(days=2)
     x._slow_rows[0].button.click()
     assert x._tab == "logs" and x._found_runs[0].request_id == RID
+
+
+
+def test_explorer_tabs_share_one_time_range(core, explorer):
+    x = explorer("etl-nightly", tab="logs")
+    assert x._range == "24h" and x.range_pick.value == x.errors_pick.value == x.perf_pick.value == "24h"
+    x.tab_buttons["errors"].click()
+    x.errors_pick.value = "3d"
+    assert x._range == "3d" and x.range_pick.value == x.perf_pick.value == "3d"
+    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(days=2)
+    assert "logs" not in x._asked
+    x.tab_buttons["logs"].click()
+    assert x.logs_page.since < datetime.now(timezone.utc) - timedelta(days=2) and "the last 3 days" in plain(
+        x.run_head.value)
+    x.logs(since="2026-01-01")
+    assert x.errors_pick.value == "2026-01-01" and ("Since 2026-01-01", "2026-01-01") in x.perf_pick.options
+
+
+def test_explorer_list_draws_each_functions_last_two_weeks():
+    now = datetime(2026, 10, 20, 15, tzinfo=timezone.utc)
+    day = timedelta(days=1)
+    midnight = now.replace(hour=0)
+    daily = [DailyUsage(midnight - 20 * day, 50), DailyUsage(midnight - 3 * day, 100, 0),
+             DailyUsage(midnight, 40, 10)]
+    metrics = FunctionMetrics("etl", 30, 86400, 190, 10, daily=daily)
+    days = functions_tab._trend_days(metrics, now)
+    assert len(days) == 14 and days[-1] == (40, 10) and days[-4] == (100, 0) and days[0] == (0.0, 0.0)
+    html = functions_tab._trend_html(days)
+    assert html.count("<i") == 14 and html.count('class="z"') == 12
+    assert '<i style="height:100.0%"></i>' in html and '<i style="height:40.0%"><b style="height:25.0%"></b></i>' in html
+    assert functions_tab._trend_days(FunctionMetrics("etl", 1, 3600), now) == [] and functions_tab._trend_html([]) == "-"
 
 
 NESTED = zipped({

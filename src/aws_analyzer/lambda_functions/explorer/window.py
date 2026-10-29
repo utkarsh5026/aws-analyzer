@@ -119,14 +119,14 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._query, self._chip, self._sort, self._descending, self._offset = "", "", "problems", True, 0
         self._rows: list[_Row] = []
         self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
-        self._range, self._log_query, self._run_chip, self._run_offset = "1h", "", "", 0
+        self._range, self._log_query, self._run_chip, self._run_offset = "24h", "", "", 0
+        self.range_picks: list[Any] = []
         self._runs: list[LogRun] = []  # logs_page's runs, newest first
         self._found_runs: list[LogRun] = []  # found's
         self._searched = ""  # what the CloudWatch search (or the run opened) looked for
         self._open_runs: set[str] = set()  # LogRun.key of the runs opened to show their lines
         self._run_rows: list[_RunRow] = []
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
-        self._errors_range, self._perf_range = "24h", "24h"
         self._error_rows: list[_Row] = []
         self._slow_rows: list[_Row] = []
         self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package

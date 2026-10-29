@@ -223,9 +223,7 @@ class _LogsTab:
 
     def _logs_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        self.range_pick = w.Dropdown(options=list(_RANGES), value="1h", layout=layout(width="auto"))
-        self.range_pick.add_class("lmx-range")
-        self.range_pick.observe(self._safely(self._range_changed), names="value")
+        self.range_pick = self._range_pick()
         self.log_find = w.Text(placeholder="Find runs with: an order ID, KeyError, a request ID… (Enter searches "
                                            "CloudWatch)", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
@@ -265,15 +263,24 @@ class _LogsTab:
         page.add_class("lmx-logpage")
         return page
 
-    def _range_bar(self, value: str, on_change: Callable[[dict[str, Any]], None], label: str) -> tuple[Any, Any]:
+    def _range_pick(self) -> Any:
         """
-        A time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs.
+        A time range dropdown. The Logs, Errors and Performance tabs each have one, and they share one range: a
+        pick in one is the pick in all three, so the tabs always show the same stretch of time.
+        """
+        w = self._w
+        pick = w.Dropdown(options=self._range_options(), value=self._range, layout=w.Layout(width="auto"))
+        pick.add_class("lmx-range")
+        pick.observe(self._safely(self._range_changed), names="value")
+        self.range_picks.append(pick)
+        return pick
+
+    def _range_bar(self, label: str) -> tuple[Any, Any]:
+        """
+        The time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs.
         """
         w, layout = self._w, self._w.Layout
-        pick = w.Dropdown(options=[option for option in _RANGES if option[1] != "15m"], value=value,
-                          layout=layout(width="auto"))
-        pick.add_class("lmx-range")
-        pick.observe(self._safely(on_change), names="value")
+        pick = self._range_pick()
         again = w.Button(description="↻", tooltip=f"Read {label} again", layout=layout(width="auto"))
         again.add_class("lmx-small")
         bar = w.HBox([pick, again], layout=layout(width="100%"))
@@ -282,15 +289,24 @@ class _LogsTab:
 
     # ------------------------------------------------------------------ logs
 
-    def _set_range(self, since: str) -> None:
+    def _range_options(self) -> list[tuple[str, str]]:
         """
-        Picks a time range in the Logs tab's field, adding it to the list when it isn't one of the presets.
+        The presets, and the range picked when it isn't one of them ('Since 2026-10-01').
         """
         options = list(_RANGES)
-        if since not in {value for _, value in options}:
-            options.append((f"Since {since}", since))
+        if self._range not in {value for _, value in options}:
+            options.append((f"Since {self._range}", self._range))
+        return options
+
+    def _set_range(self, since: str) -> None:
+        """
+        Picks a time range in every tab's field. The tabs that read with the old one read again when they're opened.
+        """
+        if since != self._range:
+            self._asked -= {"logs", "errors", "performance"}
         self._range = since
-        self._quietly(self.range_pick, options=options, value=since)
+        for pick in self.range_picks:
+            self._quietly(pick, options=self._range_options(), value=since)
 
     def _range_text(self, value: str | None = None) -> str:
         """
@@ -301,13 +317,14 @@ class _LogsTab:
         return f"the {label.lower()}" if label else f"since {value}"
 
     def _range_changed(self, change: dict[str, Any]) -> None:
+        """
+        A time range picked in one tab's field: every tab's field shows it, and the tab on show reads it.
+        """
         if self.quiet or not change.get("new"):
             return
-        self._range = str(change["new"])
-        if self.found is not None and self._searched and self._searched == self._log_query:
-            self._log_search()
-        else:
-            self._load_logs()
+        self._set_range(str(change["new"]))
+        reload = {"logs": self._reload_logs, "errors": self._load_errors, "performance": self._load_perf}
+        reload.get(self._tab, self._reload_logs)()
 
     def _reload_logs(self) -> None:
         if self.found is not None and self._searched and self._searched == self._log_query:
@@ -366,7 +383,9 @@ class _LogsTab:
         if self.found is not None:
             return (f"{_plural(len(runs), 'run')} with {self._searched!r} in {self._range_text()}"
                     + (f", {failed:,} failed" if failed else "") + " · ✕ shows every run again")
-        return (f"{_plural(len(runs), 'run')} in {self._range_text()}" + (f", {failed:,} failed" if failed else "")
+        counted = (f"The newest {_plural(len(runs), 'run')} of {self._range_text()}" if page.truncated
+                   else f"{_plural(len(runs), 'run')} in {self._range_text()}")
+        return (counted + (f", {failed:,} failed" if failed else "")
                 + " · click a run to see its lines" + (" · Older runs reads further back" if page.truncated else ""))
 
     def _words(self) -> list[str]:
@@ -587,7 +606,9 @@ class _LogsTab:
             durations = [r.duration for r in runs if r.duration is not None]
             used = [(r.report.max_memory, r.report.memory) for r in runs if r.report is not None and r.report.memory]
             cold = sum(1 for r in runs if r.cold)
-            bits.append(f"<span><b>{len(runs):,}</b> {'run' if len(runs) == 1 else 'runs'}</span>")
+            sampled = self.found is None and page.truncated
+            newest = "the newest " if sampled else ""
+            bits.append(f"<span>{newest}<b>{len(runs):,}</b> {'run' if len(runs) == 1 else 'runs'}</span>")
             if failed:
                 bits.append(f'<span class="bad"><b>{failed:,}</b> failed ({_pct(failed / len(runs))})</span>')
             if durations:
