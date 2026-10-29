@@ -10,7 +10,7 @@ shots.py renders reports, which are plain HTML. The explorer is ipywidgets, whic
 a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's Lambda functions (moto, us-east-1),
 then uses it the way a person would: reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired),
 its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors tab and the
-Code tab (a folder of its tree open), then picks report-api in the function field for its JSON logs, a failed run and a
+Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError (the line it failed on), then picks report-api in the function field for its JSON logs, a failed run and a
 good one open. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/lambda_functions.md, by
 shots.py's set_height.
@@ -41,7 +41,7 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
-           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code")
+           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -141,6 +141,15 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     time.sleep(0.4)
     page.mouse.move(1, 1)
     shot("lambda-explorer-code")
+    if "lambda-explorer-failed-line" in wanted:
+        tab("Errors")
+        settled()
+        cause = page.locator(".lmx-app .lmx-row:has(.er.cause)", has_text="KeyError").first
+        cause.hover()
+        cause.locator("button.lmx-act").click()
+        settled()
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-failed-line")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON
         page.locator(".lmx-app .lmx-trig-b").first.click()
         page.locator(".lmx-app .lmx-pop input").fill("report")

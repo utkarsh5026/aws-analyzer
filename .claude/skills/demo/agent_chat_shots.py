@@ -57,7 +57,7 @@ PLAN = ("Check every function's failures in the last 24 hours", "Read the logs o
 ANSWER = """\
 **orders-etl** is the one that failed: 66 of its 2,226 calls in the last 24 hours (3.0%). Its logs show three causes:
 
-1. **`KeyError: 'customer_id'`** (8 times): `etl.py` line 23 reads `row["customer_id"]`, and some input rows don't \
+1. **`KeyError: 'customer_id'`** (8 times): `etl.py` line 22 reads `row["customer_id"]`, and some input rows don't \
 have it.
 2. **Timeouts** (3 times): runs hit the 60 s limit, and its slowest run took 58.2 s, so it's close even when it works.
 3. **`AccessDeniedException` on `dynamodb:PutItem`** (2 times): its role, `acme-lambda-role`, can't write to the \

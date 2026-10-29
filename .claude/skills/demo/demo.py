@@ -1846,7 +1846,7 @@ def seed_lambda_functions() -> dict:
                                    "arn:aws:lambda:us-east-1::runtime:5ad8c1e3b3f0b7e2a1f9d4c6e8b0a2f4c6d8e0b2"))
         if kind == "key":
             lines.append((seconds - 0.01, "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n  "
-                                          "File \"/var/task/etl.py\", line 23, in handler\n    table.put_item(Item="
+                                          "File \"/var/task/etl.py\", line 22, in handler\n    table.put_item(Item="
                                           "{\"pk\": row[\"customer_id\"], \"sk\": row[\"order_id\"]})"))
         elif kind == "denied":
             lines.append((seconds - 0.01, "[ERROR] ClientError: An error occurred (AccessDeniedException) when calling "
