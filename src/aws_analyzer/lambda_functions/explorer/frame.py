@@ -236,6 +236,20 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app .lmx-ask:focus-within{border-color:var(--lx-accent);box-shadow:0 0 0 3px var(--lx-soft)}
 .lmx-app.lmx-app .lmx-ask .widget-text input,.lmx-app.lmx-app .lmx-ask .jupyter-widget-text input,.lmx-app.lmx-app .lmx-ask .widget-text input:focus,.lmx-app.lmx-app .lmx-ask .jupyter-widget-text input:focus{border:0;box-shadow:none;background-color:transparent;height:28px;font-size:13px}
 .lmx-app.lmx-app .lmx-range{flex:0 0 auto;width:150px}
+.lmx-app.lmx-app .lmx-custom{gap:12px;padding:2px 2px 10px}
+.lmx-app.lmx-app .lmx-custom .widget-datetimepicker{width:auto;height:auto;margin:0;align-items:center;gap:6px}
+.lmx-app.lmx-app .lmx-custom .widget-label{width:auto;min-width:0;margin:0;font-size:12px;font-weight:600;opacity:.72}
+.lmx-app.lmx-app .lmx-custom .widget-datetimepicker input{height:32px;padding:0 10px;border:1px solid var(--lx-line-2);border-radius:9px;background:var(--lx-surface);color:inherit;font:inherit;font-variant-numeric:tabular-nums;color-scheme:light dark}
+.lmx-app.lmx-app .lmx-custom .widget-datetimepicker input:focus{outline:none;border-color:var(--lx-accent);box-shadow:0 0 0 3px var(--lx-soft)}
+.lmx-app .lmx-rangehint .widget-html-content{font-size:12px;opacity:.68;white-space:nowrap}
+.lmx-app .lmx-reading{padding:4px 2px 12px}
+.lmx-app .lmx-reading-t{font-size:12.5px;font-weight:600;margin:0 0 7px}
+.lmx-app .lmx-meter{position:relative;height:6px;border-radius:999px;background:var(--lx-tint-2);overflow:hidden}
+.lmx-app .lmx-meter>i{position:absolute;inset:0 auto 0 0;border-radius:999px;background:var(--lx-accent);transition:width .35s ease}
+.lmx-app .lmx-meter.lmx-wait>i{width:35%!important;animation:lmx-sweep 1.2s ease-in-out infinite}
+@keyframes lmx-sweep{0%{left:-35%}100%{left:100%}}
+.lmx-app .lmx-reading-f{font-size:12px;opacity:.72;margin-top:6px;font-variant-numeric:tabular-nums}
+.lmx-app .lmx-reading-f b{font-weight:650;opacity:1}
 .lmx-app.lmx-app button.lmx-live{width:auto;height:32px;padding:0 14px;border-radius:999px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px;flex:0 0 auto}
 .lmx-app.lmx-app button.lmx-live::before{content:"";width:8px;height:8px;border-radius:50%;background:rgba(127,127,127,.55)}
 .lmx-app.lmx-app button.lmx-live.lmx-on,.lmx-app.lmx-app button.lmx-live.lmx-on:hover:enabled{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.55);color:var(--lx-ink-bad)}

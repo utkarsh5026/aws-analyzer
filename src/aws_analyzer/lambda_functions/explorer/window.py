@@ -4,6 +4,7 @@ LambdaExplorer, made of its tabs' mixins, and explore().
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from ..._kit.blocks import _Note
@@ -28,7 +29,7 @@ from .frame import (
 from .widgets import _FunctionField, _Row, _RunRow
 from .functions import _Facts, _FunctionsTab
 from .function import _FunctionTab
-from .logs import _LogsTab
+from .logs import _LogsTab, _Reading
 from .errors import _ErrorsTab
 from .performance import _PerformanceTab
 from .code import _CodeTab
@@ -120,6 +121,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._rows: list[_Row] = []
         self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
         self._range, self._log_query, self._run_chip, self._run_offset = "1h", "", "", 0
+        self._until: Any = None
+        self._reading: _Reading | None = None
+        self._reach: datetime | None = None
         self._runs: list[LogRun] = []  # logs_page's runs, newest first
         self._found_runs: list[LogRun] = []  # found's
         self._searched = ""  # what the CloudWatch search (or the run opened) looked for
@@ -176,22 +180,31 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._open_named(name, tab)
 
     @_window_errors
-    def logs(self, name: str | None = None, *, search: str | None = None, since: str | None = None) -> None:
+    def logs(
+        self, name: str | None = None, *, search: str | None = None, since: Any = None, until: Any = None
+    ) -> None:
         """
         Shows a function's logs in the Logs tab (the one picked, or name=), as clicking the tab does. since= picks
-        the time range ('15m', '1h', '24h', '7d', a date...), and search= finds the runs with a line that has the text
-        (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole time range.
+        the time range ('15m', '1h', '24h', '7d', a date...), and until= where it ends ('2026-10-28 17:30', '1d', a
+        datetime; now when left out), as the range field's Custom range does. search= finds the runs with a line that
+        has the text (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole
+        time range.
         """
-        if since is not None:
-            LambdaAnalyzer.time_range(since)  # a time it can't read is said before anything changes
+        ranged = since is not None or until is not None
+        if ranged:
+            since = self._range if since is None else since
+            LambdaAnalyzer.time_range(since, until)  # a time it can't read is said before anything changes
         if self._w is None:
             target = name or (self.function.name if self.function is not None else None)
             if target is None:
                 raise _Hint("Name the function: x.logs('my-function').")
+            if until is not None:
+                raise _Hint("until= is the explorer window's (it needs ipywidgets in Jupyter): without it, logs() reads "
+                            "up to now, so pick since= alone.")
             self.ui.logs(target, search=search, since=since)
             return
-        if since is not None:
-            self._set_range(str(since))
+        if ranged:
+            self._set_range(since, until)
         if name is not None:
             if self._listing:
                 self._want, self._want_tab, self._want_search = name, "logs", search
@@ -221,7 +234,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         if self._w is None:
             self.ui.logs(self.function.name, request_id=request_id)
             return
-        if _seconds(self._range) < 86400:
+        if self._until is not None or _seconds(self._range) < 86400:
             self._set_range("24h")
         self._show_tab("logs", load=False)
         self._quietly(self.log_find, value=request_id)
