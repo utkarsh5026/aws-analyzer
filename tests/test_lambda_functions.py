@@ -2617,8 +2617,8 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     assert [c.description for c in x.run_chips.children] == ["All runs 5", "Failed 1", "Cold starts 1"]
     head = plain(x.run_head.value)
     assert "5 runs 1 failed (20.0%) median 52 ms slowest 102 ms of 900 s memory up to 88 of 1,024 MB" in head
-    assert "Newest first, the last 24 hours; times in UTC" in head
-    assert plain(x.status.value) == "5 runs in the last 24 hours, 1 failed · click a run to see its lines"
+    assert "Newest first, the last hour; times in UTC" in head
+    assert plain(x.status.value) == "5 runs in the last hour, 1 failed · click a run to see its lines"
     failed = x._run_rows[4]
     assert "✕" in plain(failed.face.value) and "KeyError: 'customer_id' 8f5ce35b" in plain(failed.face.value)
     assert "cold 300 ms" in plain(failed.face.value) and failed.body.layout.display == "none"
@@ -2641,7 +2641,7 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     enter(x.log_find)  # CloudWatch searches the whole range, and brings back whole runs
     assert x.found is not None and [run.request_id for run in x._found_runs] == [ids[1]]
     assert x._run_rows[0].body.layout.display == "" and " hit" in x._run_rows[0].body.value  # opened, line marked
-    assert plain(x.status.value) == "1 run with 'ORD-77' in the last 24 hours · ✕ shows every run again"
+    assert plain(x.status.value) == "1 run with 'ORD-77' in the last hour · ✕ shows every run again"
     x.log_find.value = ""
     assert x.found is None and len(x._visible_runs()) == 5
     x.log_find.value = "?ERROR ?WARN"
@@ -2652,7 +2652,7 @@ def test_explorer_shows_times_in_the_zone_picked(core, explorer):
     seed_runs(datetime.now(timezone.utc))
     set_timezone("Asia/Kolkata")
     x = explorer("etl-nightly", tab="logs")
-    assert "Newest first, the last 24 hours; times in IST" in plain(x.run_head.value)
+    assert "Newest first, the last hour; times in IST" in plain(x.run_head.value)
     row = x._run_rows[0]
     clock = row.run.start.astimezone(ZoneInfo("Asia/Kolkata"))
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -2698,8 +2698,8 @@ def test_explorer_logs_tab_reads_a_custom_range(core, explorer):
     x = explorer("etl-nightly", tab="logs")
     assert [run.request_id for run in x._runs] == [RID] and x.custom_bar.layout.display == "none"
     x.range_pick.value = "custom"
-    assert x.custom_bar.layout.display == "" and x.range_to.value is None and x._range == "24h"
-    assert abs(x.range_from.value - (now - timedelta(hours=24)).replace(tzinfo=None)) < timedelta(minutes=1)
+    assert x.custom_bar.layout.display == "" and x.range_to.value is None and x._range == "1h"
+    assert abs(x.range_from.value - (now - timedelta(hours=1)).replace(tzinfo=None)) < timedelta(minutes=1)
     assert x.range_from.value.second == 0 and plain(x.range_hint.value) == "Times in UTC; an empty To means up to now."
     x.range_from.value = (now - timedelta(days=3)).replace(tzinfo=None)
     x.range_to.value = (now - timedelta(days=1)).replace(tzinfo=None)
@@ -2788,8 +2788,9 @@ def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
 
 def test_explorer_tabs_share_one_time_range(core, explorer):
     x = explorer("etl-nightly", tab="logs")
-    assert x._range == "24h" and x.range_pick.value == x.errors_pick.value == x.perf_pick.value == "24h"
+    assert x.range_pick.value == "1h" and x.errors_pick.value == x.perf_pick.value == "24h"
     x.tab_buttons["errors"].click()
+    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(hours=23)
     x.errors_pick.value = "3d"
     assert x._range == "3d" and x.range_pick.value == x.perf_pick.value == "3d"
     assert x.error_report.since < datetime.now(timezone.utc) - timedelta(days=2)

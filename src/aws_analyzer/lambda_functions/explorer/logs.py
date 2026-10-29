@@ -37,6 +37,8 @@ _CUSTOM_RANGE = "custom"
 
 _RANGE_CHOICES = (*_RANGES, ("Custom range…", _CUSTOM_RANGE))
 
+_FIRST_TAB_RANGE = "24h"
+
 
 _RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
 
@@ -354,13 +356,17 @@ class _LogsTab:
 
     def _range_pick(self, choices: tuple[tuple[str, str], ...] | None = None) -> Any:
         """
-        A time range dropdown. The Logs, Errors and Performance tabs each have one, and they share one range: a
-        pick in one is the pick in all three, so the tabs always show the same stretch of time. The Logs tab's
-        `choices` end in Custom range…; the others list the presets and the custom range picked there, if any.
+        A time range dropdown. The Logs, Errors and Performance tabs each have one. Logs starts at the last hour, and
+        Errors and Performance at _FIRST_TAB_RANGE; once a range is picked in any of them, the three share it, so the
+        tabs show the same stretch of time. The Logs tab's `choices` end in Custom range…; the others list the
+        presets and the custom range picked there, if any.
         """
         w = self._w
-        options = list(choices) if choices is not None else self._shared_options()
-        pick = w.Dropdown(options=options, value=self._range_value(), layout=w.Layout(width="auto"))
+        if choices is not None:
+            options, value = list(choices), self._range_value()
+        else:
+            options, value = self._shared_options(), self._range_value() if self._linked else _FIRST_TAB_RANGE
+        pick = w.Dropdown(options=options, value=value, layout=w.Layout(width="auto"))
         pick.add_class("lmx-range")
         pick.observe(self._safely(self._range_changed), names="value")
         self.range_picks.append(pick)
@@ -400,13 +406,13 @@ class _LogsTab:
 
     def _set_range(self, since: Any, until: Any = None) -> None:
         """
-        Picks a time range in every tab's field: one of the presets, or a custom range (since= and until= as
+        Picks a time range in every tab's field, which from then on share it: one of the presets, or a custom range (since= and until= as
         LambdaAnalyzer.time_range reads them), shown in the Logs tab's From and To fields. The tabs that read the
         old range read again when they're opened.
         """
-        if (since, until) != (self._range, self._until):
+        if (since, until) != (self._range, self._until) or not self._linked:
             self._asked -= {"logs", "errors", "performance"}
-        self._range, self._until = since, until
+        self._range, self._until, self._linked = since, until, True
         for pick in self.range_picks:
             if pick is not self.range_pick:
                 self._quietly(pick, options=self._shared_options(), value=self._range_value())
@@ -416,6 +422,19 @@ class _LogsTab:
             return
         self._quietly(self.range_pick, value=_CUSTOM_RANGE)
         self._fill_custom_range()
+
+    def _tab_range(self) -> tuple[Any, Any]:
+        """
+        The Errors and Performance tabs' range, (since, until): _FIRST_TAB_RANGE until a range is picked, then the
+        one the three tabs share.
+        """
+        return (self._range, self._until) if self._linked else (_FIRST_TAB_RANGE, None)
+
+    def _tab_window(self) -> tuple[datetime, datetime]:
+        return LambdaAnalyzer.time_range(*self._tab_range())
+
+    def _tab_range_text(self) -> str:
+        return self._range_text() if self._linked else self._range_text(_FIRST_TAB_RANGE)
 
     def _range_window(self) -> tuple[datetime, datetime]:
         """

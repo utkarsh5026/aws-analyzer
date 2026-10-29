@@ -120,7 +120,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._query, self._chip, self._sort, self._descending, self._offset = "", "", "problems", True, 0
         self._rows: list[_Row] = []
         self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
-        self._range, self._log_query, self._run_chip, self._run_offset = "24h", "", "", 0
+        self._range, self._log_query, self._run_chip, self._run_offset = "1h", "", "", 0
+        self._linked = False
         self._until: Any = None
         self._reading: _Reading | None = None
         self._reach: datetime | None = None

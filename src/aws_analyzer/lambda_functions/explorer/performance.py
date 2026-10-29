@@ -36,9 +36,9 @@ class _PerformanceTab:
             return
         self._asked.add("performance")
         fn = self._full()
-        start, end = self._range_window()
+        start, end = self._tab_window()
         self.perf = None
-        self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._range_text()}…"))
+        self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._tab_range_text()}…"))
         self._set(self.slow_head, "")
         self.slow_rows_box.children = []
         self._counted = 0
@@ -56,7 +56,7 @@ class _PerformanceTab:
     def _got_perf(self, perf: Performance) -> None:
         self.perf = perf
         fn = perf.function
-        self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._range,
+        self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._tab_range()[0],
                                                                               for_window=True))
         slowest = sorted(perf.invocations, key=lambda r: r.duration, reverse=True)[:10]
         today = _in_zone(_utcnow()).date()

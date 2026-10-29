@@ -39,9 +39,9 @@ class _ErrorsTab:
             return
         self._asked.add("errors")
         fn = self._full()
-        start, end = self._range_window()
+        start, end = self._tab_window()
         self.error_report = None
-        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text()}…"))
+        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._tab_range_text()}…"))
         self._set(self.error_head, "")
         self.error_rows_box.children = []
         self._counted = 0
@@ -58,7 +58,8 @@ class _ErrorsTab:
 
     def _got_errors(self, report: ErrorReport) -> None:
         self.error_report = report
-        self._draw("errors", self.errors_view, self.ui._errors_blocks(report, since=self._range, for_window=True))
+        blocks = self.ui._errors_blocks(report, since=self._tab_range()[0], for_window=True)
+        self._draw("errors", self.errors_view, blocks)
         failed = [e for e in report.newest]
         today = _in_zone(_utcnow()).date()
         while len(self._error_rows) < len(failed):
