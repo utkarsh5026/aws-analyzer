@@ -20,6 +20,7 @@ from ..._kit.window import _cell_number, _running_loop
 from ..helpers import _MAX_PICTURES
 from ..readers.formats import _READ_ERRORS
 from ..style import _render_html
+from ..._kit.themes import _theme_name
 from ..view.s3_view import S3View
 
 from .navigator import Entry, Folder, _extension, breadcrumbs, entry_icon, explain_list_error, parse_location
@@ -165,7 +166,7 @@ class _ReportPane:
             for blocks in reports:
                 type(self._pane)._show(self._pane, blocks)
             return
-        self._content.value = "".join(_render_html(blocks, self._pane.max_rows) for blocks in reports)
+        self._content.value = "".join(_render_html(blocks, self._pane.max_rows, theme=_theme_name()) for blocks in reports)
         self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(keep)
         self._draw_expand(keep)
@@ -527,5 +528,5 @@ class _ReportPane:
         self._expand_all = not self._expand_all
         for tree in self._trees():
             tree.unfold("all" if self._expand_all else "start")
-        self._content.value = "".join(_render_html(blocks, self._pane.max_rows) for blocks in self._reports)
+        self._content.value = "".join(_render_html(blocks, self._pane.max_rows, theme=_theme_name()) for blocks in self._reports)
         self._draw_expand()
