@@ -586,6 +586,8 @@ class _LogsTab:
         if self.found is not None:
             return (f"{_plural(len(runs), 'run')} with {self._searched!r} in {self._range_text()}"
                     + (f", {failed:,} failed" if failed else "") + " · ✕ shows every run again")
+        if not runs:
+            return f"Nothing logged in {self._range_text()} · pick another time range above"
         counted = (f"The newest {_plural(len(runs), 'run')} of {self._range_text()}" if page.truncated
                    else f"{_plural(len(runs), 'run')} in {self._range_text()}")
         return (counted + (f", {failed:,} failed" if failed else "")
