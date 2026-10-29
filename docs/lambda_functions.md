@@ -203,7 +203,7 @@ Each run shows how long it ran against the timeout, the memory it used, a cold s
 
 ??? more "The time range, searching CloudWatch, the chips and Live"
 
-    - **The time range**, from the last 15 minutes to the last 30 days (the last hour at first). The newest 3,000 lines are read; when the range holds more, **Older runs** under the list reads further back. A range with nothing in it says when the function last logged, and a button picks a range that reaches it.
+    - **The time range**, from the last 15 minutes to the last 30 days (the last hour at first), or **Custom range…**: pick **From** and **To** on a calendar (in the reports' time zone; leave To empty for up to now) and click **Show runs**, to read last Tuesday's 09:00 to 17:30. While a range is read, a bar fills as it goes, with how far back it has read and the lines found so far. The newest 3,000 lines are read; when the range holds more, **Older runs** under the list reads further back. A range with nothing in it says when the function last logged, and a button picks a range that reaches it.
     - **The search box** finds runs as you type: an order ID, `KeyError`, a request ID, in any case, among the runs read. **Enter** asks CloudWatch to search the whole time range, and brings back each run with a matching line whole, the matching lines marked. A CloudWatch Logs filter pattern (`?ERROR ?WARN`, `{ $.level = "ERROR" }`) works too, with Enter. ✕ shows every run again.
     - **The chips** show only the runs that failed, timed out, logged an error (and may have handled it) or were cold starts.
     - **Live** looks for new lines every 5 seconds and puts the new runs at the top, to watch a function while you test it. It stops when you leave the tab, and after 15 minutes.
@@ -265,7 +265,7 @@ The other tabs are the reports below, a click away: **Errors** is [`errors()`](#
 
 ??? more "Driving the window from code"
 
-    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package`, `x.code_map` (what **How it works** read) and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
+    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package`, `x.code_map` (what **How it works** read) and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")` (or `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")` for a custom range), `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
 
 ## Every function { #functions }
 

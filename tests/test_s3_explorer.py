@@ -391,7 +391,7 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert "s3://lake/raw/events/part-2.csv" in x._status.value
     assert list(x._act_buttons) == ["preview", "head", "download", "open", "close"]
     assert x._act_buttons["preview"]._dom_classes == ("s3x-act", "s3x-on")
-    assert 'class="s3a"' in x._content.value and "<table" in x._content.value
+    assert 'class="s3a theme-console"' in x._content.value and "<table" in x._content.value
 
     x._act_buttons["head"].click()
     assert "System metadata" in text(x) and x._act_buttons["head"]._dom_classes == ("s3x-act", "s3x-on")

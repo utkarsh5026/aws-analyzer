@@ -11,9 +11,18 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- ⚡ **Lambda explorer: logs between any two times** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - The Logs tab's time range has **Custom range…**: pick From and To on a calendar, then **Show runs**.
+  - Leave To empty to read up to now; times are in the reports' time zone.
+  - From code: `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")`.
+
+- ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
+
 - 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** row over your buckets; **↩** picks up where you left off.
   - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
+
 - ⚡ **Lambda explorer: your recent functions first** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** chip, and the function field lists the ones you've opened first.
   - `explore(history=False)` turns it off; `x.forget_recent()` clears it.

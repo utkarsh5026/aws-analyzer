@@ -6,7 +6,9 @@ what no window meets (a command that can't run, an error that should still raise
 reports read, and each window's tests click through it.
 """
 
+import asyncio
 import itertools
+import threading
 import os
 import re
 import time
@@ -26,7 +28,7 @@ from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
 from aws_analyzer._kit.render import _base_css, _copy_button, _Look, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
-from aws_analyzer._kit.window import _for_window, _Window, _window_errors
+from aws_analyzer._kit.window import _Explorer, _for_window, _Window, _window_errors
 from aws_analyzer.dynamodb import style as ddb_style
 
 # Each service: its module, Analyzer and View, and its list prices.
@@ -363,6 +365,28 @@ def test_a_themes_rules_reach_only_reports_drawn_in_it(theme):
     selectors = re.findall(r"(?:^|})\s*([^{}@]+){", css)
     unscoped = [part for group in selectors for part in group.split(",") if scoped not in part]
     assert not unscoped, f"rules that would restyle reports drawn in other themes: {unscoped}"
+
+
+def test_background_jobs_tick_while_they_run():
+    explorer = _Explorer()
+    explorer._COUNT_EVERY = 0.01
+    released, ticks, results = threading.Event(), [], []
+
+    def work():
+        released.wait(5)
+        return "read"
+
+    async def main():
+        explorer._later("logs", work, results.append, ticking=lambda: ticks.append(len(ticks)))
+        while len(ticks) < 3:
+            await asyncio.sleep(0.01)
+        released.set()
+        await explorer._tasks["logs"]
+        count = len(ticks)
+        await asyncio.sleep(0.05)
+        return count
+
+    assert asyncio.run(main()) == len(ticks) >= 3 and results == ["read"]
 
 
 def test_classic_and_the_windows_reports_draw_no_theme():
