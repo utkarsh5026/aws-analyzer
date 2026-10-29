@@ -19,6 +19,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
   - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
 
+- ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
+  - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
+  - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
+
 ### Changed
 
 - ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))

@@ -361,6 +361,20 @@ class ErrorGroup:
 
 
 @dataclass
+class CodeFrame:
+    """
+    A line of the function's deployment package that a traceback or stack trace names: its path in the package
+    ('etl.py', 'lib/orders.js'), the line, the function it's in, and whether it's in a library the package bundles
+    (requests, botocore, node_modules/...) rather than the function's own code.
+    """
+
+    path: str
+    line: int
+    function: str = ""
+    library: bool = False
+
+
+@dataclass
 class ErrorReport:
     function: Function
     log_group: str

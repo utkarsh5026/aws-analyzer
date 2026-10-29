@@ -21,7 +21,7 @@ from ..._kit.window import _class_if, _running_loop
 
 from ..helpers import _pct, human_ms
 from ..models import LogEvent
-from ..analysis.errors import _phrase
+from ..analysis.errors import _phrase, failing_frame
 from ..analysis.logs import LogPage, LogRun, _marker, line_level
 from ..analysis.performance import percentile
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
@@ -755,6 +755,7 @@ class _LogsTab:
             if opened:
                 self._set(row.body, _run_body(run, words))
             row.body.layout.display = "" if opened else "none"
+            self._draw_run_code(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
         if not page:
             children = [self._empty("runs", self._no_runs_text())]
@@ -855,6 +856,22 @@ class _LogsTab:
         if target:
             self.range_pick.value = target  # its observer reads the logs again
 
+    def _draw_run_code(self, row: _RunRow, opened: bool) -> None:
+        """
+        The button under an open run's lines that opens, in the Code tab, the line of its own code its traceback
+        names; hidden when the run is folded or names none.
+        """
+        run = row.run
+        frame = failing_frame("\n".join(e.message for e in run.events)) if opened and run is not None else None
+        row.frame = frame
+        row.code_button.layout.display = "" if frame is not None else "none"
+        if frame is None:
+            return
+        label = f"Open {frame.path}, line {frame.line}, in the Code tab ›"
+        if row.code_button.description != label:
+            row.code_button.description = label
+            row.code_button.tooltip = "Where this run failed: the file from its deployment package, that line shaded"
+
     def _toggle_run(self, row: _RunRow) -> None:
         run = row.run
         if run is None:
@@ -867,6 +884,7 @@ class _LogsTab:
             self._set(row.body, _run_body(run, self._words()))
             row.body.layout.display = ""
         opened = run.key in self._open_runs
+        self._draw_run_code(row, opened)
         _class_if(row.box, "lmx-open", opened)
         row.button.tooltip = _run_tip(run, opened)
 

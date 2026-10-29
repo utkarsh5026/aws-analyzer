@@ -14,7 +14,7 @@ from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
 
 from ..helpers import parse_function_ref
-from ..models import CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance, SavedPage
+from ..models import CodeFrame, CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance, SavedPage
 from ..analysis.text import _window
 from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
@@ -133,6 +133,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._run_rows: list[_RunRow] = []
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
         self._error_rows: list[_Row] = []
+        self._cause_rows: list[_Row] = []
+        self._code_target: CodeFrame | None = None
         self._slow_rows: list[_Row] = []
         self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package
         self._package_data: bytes | None = None

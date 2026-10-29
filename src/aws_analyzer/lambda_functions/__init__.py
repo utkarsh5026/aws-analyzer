@@ -62,7 +62,7 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
+    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
     LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
@@ -73,7 +73,9 @@ from .analysis.functions import (
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, function_findings, secret_like
-from .analysis.errors import classify_error, error_findings, group_errors, request_id_of
+from .analysis.errors import (
+    cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
+)
 from .analysis.logs import LogPage, LogRun, line_level, parse_report, split_runs
 from .analysis.performance import percentile, performance_findings, suggest_memory
 from .analysis.package import (
@@ -123,6 +125,7 @@ __all__ = [
     "CodeStep",
     "DailyUsage",
     "EnvRead",
+    "CodeFrame",
     "ErrorGroup",
     "ErrorReport",
     "EventField",
@@ -158,7 +161,9 @@ __all__ = [
     "Version",
     "VersionDiff",
     "account_findings",
+    "cause_search",
     "classify_error",
+    "code_frames",
     "code_graph",
     "code_map_findings",
     "diff_findings",
@@ -168,6 +173,7 @@ __all__ = [
     "explore",
     "function_findings",
     "function_monthly_cost",
+    "failing_frame",
     "group_errors",
     "handler_file",
     "human_age",

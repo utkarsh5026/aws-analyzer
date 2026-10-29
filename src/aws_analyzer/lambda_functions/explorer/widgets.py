@@ -12,7 +12,7 @@ from ..._kit.text import _esc, _marked
 from ..._kit.window import _Picker, _class_if, _row_button
 
 from ..helpers import _pct, parse_function_ref
-from ..models import Function
+from ..models import CodeFrame, Function
 from ..analysis.logs import LogRun
 
 if TYPE_CHECKING:
@@ -142,7 +142,9 @@ class _Row:
 class _RunRow:
     """
     One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
-    memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again.
+    memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again. An open run
+    whose traceback names a line of the function's own code has a button under its lines that opens that line in
+    the Code tab (`frame`).
     """
 
     def __init__(self, app: LambdaExplorer):
@@ -152,5 +154,10 @@ class _RunRow:
                                                    app._safely(lambda _button: app._toggle_run(self)),
                                                    tooltip="Click to see its lines")
         self.body = w.HTML(layout=layout(width="100%", display="none"))
-        self.box = w.VBox([head, self.body], layout=layout(width="100%"))
+        self.frame: CodeFrame | None = None
+        self.code_button = w.Button(layout=layout(width="auto", display="none"))
+        self.code_button.add_class("lmx-small")
+        self.code_button.add_class("lmx-tocode")
+        self.code_button.on_click(app._safely(lambda _button: app._open_code_at(self.frame) if self.frame else None))
+        self.box = w.VBox([head, self.body, self.code_button], layout=layout(width="100%"))
         self.box.add_class("lmx-run")

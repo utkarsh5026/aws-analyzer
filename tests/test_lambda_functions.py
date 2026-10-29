@@ -44,6 +44,7 @@ from aws_analyzer.lambda_functions import (
     CodeFile,
     CodePackage,
     DailyUsage,
+    CodeFrame,
     ErrorGroup,
     ErrorReport,
     Function,
@@ -62,7 +63,9 @@ from aws_analyzer.lambda_functions import (
     Trigger,
     Version,
     account_findings,
+    cause_search,
     classify_error,
+    code_frames,
     code_graph,
     code_map_findings,
     diff_findings,
@@ -71,6 +74,7 @@ from aws_analyzer.lambda_functions import (
     find_symbol_in,
     function_findings,
     function_monthly_cost,
+    failing_frame,
     group_errors,
     handler_file,
     human_ms,
@@ -1600,7 +1604,9 @@ def seeded(role):
     put_logs("/aws/lambda/etl-nightly", [
         (started, f"START RequestId: {RID} Version: $LATEST"),
         (started + timedelta(milliseconds=5), "loading 1,204 orders"),
-        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):"),
+        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n"
+                                               '  File "/var/runtime/bootstrap.py", line 60, in run\n'
+                                               '  File "/var/task/app.py", line 2, in handler'),
         (started + timedelta(milliseconds=20), f"END RequestId: {RID}"),
         (started + timedelta(milliseconds=21), f"REPORT RequestId: {RID}\tDuration: 102.12 ms\tBilled Duration: 103 ms"
                                                "\tMemory Size: 1024 MB\tMax Memory Used: 88 MB\tInit Duration: 300.11 ms"),
@@ -2767,7 +2773,7 @@ def test_explorer_live_adds_new_runs(core, explorer):
 
 def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     x = explorer("etl-nightly", tab="errors")
-    errors = plain(x.errors_view.value)
+    errors = plain(x.errors_view.value) + " " + plain(x.errors_more.value)
     assert "Errors in etl-nightly" in errors and "The most common error happened once" in errors
     assert "KeyError: 'customer_id'" in errors
     assert f"Run {RID[:8]} in the Logs tab shows the whole run" in errors and "The newest error lines" not in errors
@@ -2816,6 +2822,59 @@ def test_explorer_list_draws_each_functions_last_two_weeks():
     assert html.count("<i") == 14 and html.count('class="z"') == 12
     assert '<i style="height:100.0%"></i>' in html and '<i style="height:40.0%"><b style="height:25.0%"></b></i>' in html
     assert functions_tab._trend_days(FunctionMetrics("etl", 1, 3600), now) == [] and functions_tab._trend_html([]) == "-"
+
+
+
+def test_tracebacks_name_the_line_of_the_package_they_failed_on():
+    python = ("[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n"
+              '  File "/var/runtime/bootstrap.py", line 60, in run\n'
+              '  File "/var/task/etl.py", line 23, in handler\n    rows = load(event)\n'
+              '  File "/var/task/botocore/client.py", line 553, in _api_call\n')
+    assert code_frames(python) == [CodeFrame("botocore/client.py", 553, "_api_call", library=True),
+                                   CodeFrame("etl.py", 23, "handler")]
+    assert failing_frame(python) == CodeFrame("etl.py", 23, "handler")
+    node = ("TypeError: x\n    at build (/var/task/lib/report.js:41:12)\n"
+            "    at Runtime.handler (file:///var/task/index.mjs:9:3)\n    at /var/runtime/index.mjs:1:1")
+    assert [(f.path, f.line) for f in code_frames(node)] == [("lib/report.js", 41), ("index.mjs", 9)]
+    assert failing_frame("[ERROR] KeyError: 'x'") is None
+    assert failing_frame('  File "/var/task/node_modules/x/a.js", line 1') == CodeFrame(
+        "node_modules/x/a.js", 1, library=True)
+
+
+def test_each_cause_searches_its_runs_by_what_stays_the_same():
+    def search(kind, message):
+        return cause_search(ErrorGroup(kind, message, 1, NOW, NOW, message))
+    assert search("KeyError", "KeyError: 'customer_id'") == "KeyError: 'customer_id'"
+    assert search("ValueError", "ValueError: order 1234 not found") == "ValueError: order"
+    assert search("Timeout", "Task timed out after 60.00 seconds") == "Task timed out"
+    assert search("Out of memory", "Runtime exited: out of memory") == '?Runtime.OutOfMemory ?"signal: killed"'
+    assert search("Logged error", "42 rows failed to load") == "rows failed to load"
+    assert search("Logged error", "7 bad") == "ERROR" and search("OSError", "OSError: 28") == "OSError"
+
+
+def test_explorer_errors_open_their_runs_and_their_code(core, explorer):
+    x = explorer("etl-nightly", tab="errors")
+    assert plain(x.cause_head.value).startswith("Errors by cause")
+    row = x._cause_rows[0]
+    assert plain(row.face.value).startswith("✕ ×1 KeyError KeyError: 'customer_id' 10m")
+    assert row.action.layout.display == "" and "Errors by cause" not in plain(x.errors_more.value)
+    row.button.click()
+    assert x._tab == "logs" and x.log_find.value == "KeyError: 'customer_id'"
+    assert [run.request_id for run in x._found_runs] == [RID] and x._range == "24h"
+    assert x._run_rows[0].body.layout.display == ""
+    code = x._run_rows[0].code_button
+    assert code.layout.display == "" and code.description == "Open app.py, line 2, in the Code tab ›"
+    code.click()
+    assert x._tab == "code" and x._code_file == "app.py"
+    source = x.source_view.value
+    assert "Line 2, in handler()" in plain(source) and "where the run failed" in plain(source)
+    assert source.count('class="src hit" style="--mark:1"') == 2
+    assert plain(x.status.value).startswith("app.py, line 2: where the run failed")
+    x._code_rows[[r.item.path for r in x._code_rows[:len(x.files_box.children)]].index("utils.py")].button.click()
+    assert "where the run failed" not in plain(x.source_view.value) and "hit" not in x.source_view.value
+    x.tab_buttons["errors"].click()
+    row.action.click()
+    assert x._tab == "code" and x._code_file == "app.py" and "where the run failed" in plain(x.source_view.value)
 
 
 NESTED = zipped({

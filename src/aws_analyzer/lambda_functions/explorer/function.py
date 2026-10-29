@@ -211,6 +211,7 @@ class _FunctionTab:
         self.function, self.detail = fn, None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
         self._how = False
+        self._code_target = None
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
