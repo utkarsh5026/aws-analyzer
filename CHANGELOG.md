@@ -21,7 +21,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda explorer: quicker to see what's wrong** ([#167](https://github.com/utkarsh5026/aws-analyzer/pull/167))
+- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
   - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
   - The Logs, Errors and Performance tabs share one time range, the last 24 hours at first.
   - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
