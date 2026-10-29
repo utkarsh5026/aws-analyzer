@@ -11,10 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧭 **S3 explorer: recent folders, one click away** ([#167](https://github.com/utkarsh5026/aws-analyzer/pull/167))
+- 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** row over your buckets; **↩** picks up where you left off.
   - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
-- ⚡ **Lambda explorer: your recent functions first** ([#167](https://github.com/utkarsh5026/aws-analyzer/pull/167))
+- ⚡ **Lambda explorer: your recent functions first** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** chip, and the function field lists the ones you've opened first.
   - `explore(history=False)` turns it off; `x.forget_recent()` clears it.
 
