@@ -2996,22 +2996,27 @@ def test_explorer_remembers_the_functions_opened(core, explorer, monkeypatch):
 
 
 
-def test_explorer_gives_the_code_that_reopens_it(core, explorer):
+def test_explorer_gives_the_call_that_reopens_it(core, explorer):
     x = explorer()
-    assert x._view_code() == "from aws_analyzer.lambda_functions import explore\nx = explore()"
+    assert x._view_code() == "explore()"
     x.open("etl-nightly")
-    assert x._view_code().endswith("x = explore('etl-nightly')")
+    assert x._view_code() == "explore('etl-nightly')"
     x.tab_buttons["logs"].click()
-    assert x._view_code().endswith("x = explore('etl-nightly', tab='logs')")
+    assert x._view_code() == "explore('etl-nightly', tab='logs')"
     x.log_find.value = "loading"
     x._log_search()
     x.range_pick.value = "3h"
-    assert x._view_code().endswith("x = explore('etl-nightly', tab='logs')\nx.logs(search='loading', since='3h')")
-    assert "x.logs(search=&#x27;loading&#x27;, since=&#x27;3h&#x27;)" in x.view_code.value
+    assert x._view_code() == "explore('etl-nightly', tab='logs', since='3h', search='loading')"
+    assert "explore(&#x27;etl-nightly&#x27;, tab=&#x27;logs&#x27;, since=&#x27;3h&#x27;" in x.view_code.value
     x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")
-    assert x._view_code().endswith("x.logs(search='loading', since='2026-10-27 09:00', until='2026-10-27 17:30')")
-    every = explorer(region="all")
-    assert every._view_code().endswith("x = explore(region='all')")
+    assert x._view_code() == ("explore('etl-nightly', tab='logs', since='2026-10-27 09:00', until='2026-10-27 17:30', "
+                              "search='loading')")
+    assert explorer(region="all")._view_code() == "explore(region='all')"
+    again = explorer("etl-nightly", since="3h", search="loading")
+    assert again._tab == "logs" and again._range == "3h" and again.errors_pick.value == "3h"
+    assert [run.request_id for run in again._found_runs] == [RID]
+    assert again._view_code() == "explore('etl-nightly', tab='logs', since='3h', search='loading')"
+
 
 
 NESTED = zipped({

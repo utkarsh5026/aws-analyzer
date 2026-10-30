@@ -10,6 +10,7 @@ from typing import Any
 from ..._kit.blocks import _Note
 from ..._kit.errors import _Hint
 from ..._kit.fmt import _in_zone, _plural
+from ..._kit.render import _call
 from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
 
@@ -61,7 +62,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
 
     name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
-    'errors', 'performance', 'code' or 'settings'). region: the region to list, or 'all' for every region your account
+    'errors', 'performance', 'code' or 'settings'). since / until: the time range of the Logs, Errors and Performance
+    tabs ('3h', '7d', '2026-10-27 09:00'; until is now when left out). search: text to find in the logs (opens the Logs
+    tab). region: the region to list, or 'all' for every region your account
     has turned on (the region field switches it). view / core: a LambdaView or LambdaAnalyzer to use (else one is made
     from region / profile). height: the height of the tabs' pages, which fill the browser window unless set (pixels, or
     CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports elsewhere), 'widgets' or 'text'.
@@ -80,6 +83,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         name: str | None = None,
         *,
         tab: str | None = None,
+        since: Any = None,
+        until: Any = None,
+        search: str | None = None,
         view: LambdaView | None = None,
         core: LambdaAnalyzer | None = None,
         region: str | None = None,
@@ -92,6 +98,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         if tab is not None and tab not in {key for key, *_ in _EXPLORER_TABS}:
             raise ValueError(f"tab= is one of {', '.join(repr(key) for key, *_ in _EXPLORER_TABS)}; got {tab!r}")
+        if since is not None or until is not None:
+            LambdaAnalyzer.time_range(since if since is not None else _FIRST_LOGS_RANGE, until)
         super().__init__()
         every = isinstance(region, str) and region.strip().lower() == "all"
         if view is None:
@@ -114,8 +122,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self.page_saved: SavedPage | None = None
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
-        self._want, self._want_tab = name, tab  # opened once the functions are listed...
-        self._want_search: str | None = None  # ...and searched for in its logs
+        self._want, self._want_tab = name, tab or ("logs" if search and name else None)  # opened once listed...
+        self._want_search: str | None = search or None  # ...and searched for in its logs
         self._tab = "functions"
         self._asked: set[str] = set()  # the function's tabs whose data was asked for
         self._listing_started = 0.0
@@ -159,11 +167,15 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self._run_chip_buttons: dict[str, Any] = {}
         self._empties: dict[str, Any] = {}  # list -> the line it shows when it's empty
         self._listing = False  # the functions are being listed
+        if since is not None or until is not None:
+            self._range, self._until, self._linked = since if since is not None else _FIRST_LOGS_RANGE, until, True
         note = self._load_widgets(mode)
         if self._w is None:
             self._reports(note, mode)
             return
         self._build()
+        if self._linked:
+            self._set_range(self._range, self._until)
         self._begin()
         self._display()
 
@@ -286,9 +298,14 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         A function's tab, as a report (without the window).
         """
         region = None if self.region in (None, "all") else self.region
-        command = {"logs": self.ui.logs, "errors": self.ui.errors, "performance": self.ui.performance,
-                   "code": self.ui.code}.get(tab or "", self.ui.function_info)
-        command(name, region=region)
+        picked = {"since": self._range} if self._linked else {}
+        if tab == "logs":
+            self.ui.logs(name, region=region, search=self._want_search, **picked)
+        elif tab in ("errors", "performance"):
+            {"errors": self.ui.errors, "performance": self.ui.performance}[tab](name, region=region, **picked)
+        else:
+            command = {"code": self.ui.code}.get(tab or "", self.ui.function_info)
+            command(name, region=region)
 
     @property
     def multi(self) -> bool:
@@ -307,33 +324,32 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
 
     def _view_code(self) -> str:
         """
-        The code that opens the window as it is now, to run in another cell or send to someone: the function, its
-        tab, the region, and on the Logs tab the time range and the search.
+        The one call that opens the window as it is now, to run in another cell or send to someone: the function,
+        its tab, the region, and on the Logs tab the time range and the search.
         """
         fn = self.function
-        args = [repr(fn.name)] if fn is not None else []
+        args = [fn.name] if fn is not None else []
+        kwargs: dict[str, Any] = {}
         if fn is not None and self._tab in _FUNCTION_TABS and self._tab != "overview":
-            args.append(f"tab={self._tab!r}")
+            kwargs["tab"] = self._tab
         region = self.region if self.region == "all" or fn is None else fn.region or self.region
         if region and (region == "all" or region != self._session_region()):
-            args.append(f"region={region!r}")
-        lines = ["from aws_analyzer.lambda_functions import explore", f"x = explore({', '.join(args)})"]
-        logs_args = self._logs_code_args() if fn is not None and self._tab == "logs" else []
-        if logs_args:
-            lines.append(f"x.logs({', '.join(logs_args)})")
-        return "\n".join(lines)
+            kwargs["region"] = region
+        if fn is not None and self._tab == "logs":
+            kwargs.update(self._logs_code_args())
+        return _call("explore", *args, **kwargs)
 
-    def _logs_code_args(self) -> list[str]:
+    def _logs_code_args(self) -> dict[str, str]:
         """
-        The Logs tab's time range and search, as x.logs()'s arguments; none when they're as it opens.
+        The Logs tab's time range and search, as explore()'s arguments; none when they're as it opens.
         """
-        args = []
-        if self.found is not None and self._searched:
-            args.append(f"search={self._searched!r}")
+        args = {}
         if self._until is not None or self._range != _FIRST_LOGS_RANGE:
-            args.append(f"since={_time_arg(self._range)}")
+            args["since"] = _time_text(self._range)
         if self._until is not None:
-            args.append(f"until={_time_arg(self._until)}")
+            args["until"] = _time_text(self._until)
+        if self.found is not None and self._searched:
+            args["search"] = self._searched
         return args
 
     def _session_region(self) -> str | None:
@@ -559,14 +575,14 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self._fill_regions()
         self._load_list()
 
-def _time_arg(value: Any) -> str:
+def _time_text(value: Any) -> str:
     """
-    A time range's end as code: '24h' as it is, a moment as text in the reports' time zone ('2026-10-27 09:00'),
-    which is how logs() reads it back.
+    A time range's end as explore() reads it: '24h' as it is, a moment as text in the reports' time zone
+    ('2026-10-27 09:00').
     """
     if isinstance(value, datetime):
-        return repr(f"{_in_zone(value):%Y-%m-%d %H:%M}")
-    return repr(str(value))
+        return f"{_in_zone(value):%Y-%m-%d %H:%M}"
+    return str(value)
 
 
 def _view_code_html(code: str) -> str:
@@ -575,14 +591,18 @@ def _view_code_html(code: str) -> str:
     Ctrl+C copies it, with no JavaScript (the window has none).
     """
     return (f'<span class="cpy" tabindex="0" role="button" aria-label="Copy this view as code" title="{_esc(code)}'
-            '\n\nClick, then press Ctrl+C (⌘C on a Mac) to copy it, and run it in a cell to open the window as it is '
-            f'now"><span class="cpt">{_esc(code)}</span></span>')
+            '\n\nClick, then press Ctrl+C (⌘C on a Mac) to copy it, and run it in a cell (after from '
+            'aws_analyzer.lambda_functions import explore) to open the window as it is now">'
+            f'<span class="cpt">{_esc(code)}</span></span>')
 
 
 def explore(
     name: str | None = None,
     *,
     tab: str | None = None,
+    since: Any = None,
+    until: Any = None,
+    search: str | None = None,
     region: str | None = None,
     profile: str | None = None,
     height: int | str | None = None,
@@ -595,10 +615,14 @@ def explore(
         explore()                                   # every function in the notebook's region
         explore("orders-etl")                       # straight to one function (a name, an ARN or a console link)
         explore("orders-etl", tab="logs")           # ...on its logs ('errors', 'performance', 'code', 'settings')
+        explore("orders-etl", tab="logs", since="3h", search="KeyError")  # ...its last 3 hours, searched
         explore(region="all")                       # every region your account has turned on
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 
-    The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only
-    reads: where a change would help, it shows the command to run.
+    since= and until= pick the time range of the Logs, Errors and Performance tabs ('3h', '7d', '2026-10-27 09:00'),
+    and search= finds the runs whose lines have the text (on the Logs tab). The window's ⧉ Copy as code gives this
+    call for what it shows. The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS
+    such as '70vh'). It only reads: where a change would help, it shows the command to run.
     """
-    return LambdaExplorer(name, tab=tab, region=region, profile=profile, height=height)
+    return LambdaExplorer(name, tab=tab, since=since, until=until, search=search, region=region, profile=profile,
+                          height=height)
