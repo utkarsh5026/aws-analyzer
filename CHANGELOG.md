@@ -27,6 +27,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A **Changed** chip: functions whose code or settings changed, or whose errors went up, since you last opened them.
   - The Overview says what changed; the Errors tab names errors it hadn't seen on your last look.
 
+### Changed
+
+- ⚡ **Lambda explorer: the chat windows' terminal look** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - The same monospace font and code-editor colours as `chat()` and the S3 explorer, with flat outlined buttons and underlined tabs.
+  - Reports in its tabs follow `set_theme()`, so the Overview or Errors tab looks like the same command run in a cell.
+
+### Fixed
+
+- 🧭 **S3 explorer: the terminal colours in dark mode** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - In a dark JupyterLab or VS Code, the keyboard focus outline and link buttons kept the old blue; they now follow the terminal look.
+
 ## [0.38.0] - 2026-10-30
 
 ### Added

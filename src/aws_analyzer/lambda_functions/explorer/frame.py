@@ -13,7 +13,7 @@ from typing import Any
 from ..._kit.blocks import _Cards, _Findings
 from ..._kit.fmt import _in_zone, _utcnow, parse_time
 from ..._kit.render import _CALL_RE
-from ..._kit.window import _icon_url
+from ..._kit.window import _icon_url, _terminal_theme
 
 
 # ----------------------------------------------------------------------------- the explorer window
@@ -80,6 +80,83 @@ _EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,1
                   ".38);--lx-raised:rgba(255,255,255,.11);--lx-shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,"
                   ".28);--lx-ink-bad:#f87171;--lx-ink-warn:#fbbf24;--lx-ink-ok:#34d399;--lx-code:rgba(255,255,255,.035);"
                   "--lx-tok-k:#c792ea;--lx-tok-s:#a5d6a7;--lx-tok-n:#f78c6c;--lx-tok-f:#82aaff;--lx-tok-c:#7f8c98")
+
+_TERMINAL_TOKENS = ("--lx-accent:var(--lmt-accent);--lx-button:var(--lmt-accent);--lx-accent-2:var(--lmt-prompt);"
+                    "--lx-soft:var(--lmt-hover);--lx-ring:var(--lmt-accent);--lx-line:var(--lmt-line);"
+                    "--lx-line-2:var(--lmt-line);--lx-tint:transparent;--lx-tint-2:var(--lmt-hover);--lx-bg:var(--lmt-bg);"
+                    "--lx-surface:transparent;--lx-raised:var(--lmt-hover);--lx-shadow:none;--lx-ok:var(--lmt-ok);"
+                    "--lx-warn:var(--lmt-warn);--lx-bad:var(--lmt-bad);--lx-ink-ok:var(--lmt-ok);"
+                    "--lx-ink-warn:var(--lmt-warn);--lx-ink-bad:var(--lmt-bad);--lx-mono:var(--lmt-mono);"
+                    "--lx-code:transparent;--lx-tok-k:var(--lmt-k);--lx-tok-s:var(--lmt-s);--lx-tok-n:var(--lmt-n);"
+                    "--lx-tok-f:var(--lmt-f);--lx-tok-c:var(--lmt-comment)")
+
+_TERMINAL_CSS = _terminal_theme((".lmx-app",), "lmt") + """
+.lmx-app.lmx-app.lmx-app.lmx-app{""" + _TERMINAL_TOKENS + """}
+.lmx-app.lmx-app{font-family:var(--lmt-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
+.lmx-app.lmx-app .widget-html-content,.lmx-app.lmx-app .widget-label,.lmx-app.lmx-app input,.lmx-app.lmx-app select{font-family:var(--lmt-mono)}
+.lmx-app.lmx-app button.jupyter-button{font-family:var(--lmt-mono);font-size:12px;border-radius:6px;background:transparent;font-weight:400}
+.lmx-app.lmx-app button.jupyter-button:hover:enabled{background:transparent;border-color:var(--lmt-accent);color:var(--lmt-accent)}
+.lmx-app.lmx-app button.jupyter-button.mod-primary,.lmx-app.lmx-app button.jupyter-button.mod-primary:hover:enabled{background:transparent;border-color:var(--lmt-accent);color:var(--lmt-accent);font-weight:700;filter:none}
+.lmx-app.lmx-app .widget-text input,.lmx-app.lmx-app .jupyter-widget-text input,.lmx-app.lmx-app .widget-dropdown>select,.lmx-app.lmx-app .jupyter-widget-dropdown>select{height:28px;border-radius:6px;font-size:12.5px}
+.lmx-app.lmx-app .widget-text input:focus,.lmx-app.lmx-app .jupyter-widget-text input:focus,.lmx-app.lmx-app .widget-dropdown>select:focus,.lmx-app.lmx-app .jupyter-widget-dropdown>select:focus{box-shadow:none}
+.lmx-app .lmx-logo{width:30px;height:30px;border-radius:7px;color:#ea580c;background:transparent;box-shadow:inset 0 0 0 1px var(--lmt-line)}
+.lmx-app .lmx-name{font-size:14px;font-weight:700}
+.lmx-app .lmx-name::before{content:"\\276F  ";color:var(--lmt-prompt)}
+.lmx-app .lmx-name span{color:var(--lmt-comment);opacity:1;font-size:12px}
+.lmx-app .lmx-sub{color:var(--lmt-comment);opacity:1;font-size:11.5px}
+.lmx-app .lmx-stat{border-radius:6px;background:transparent;padding:4px 10px}
+.lmx-app .lmx-stat .l{font-size:10.5px;letter-spacing:0;text-transform:none;color:var(--lmt-comment);opacity:1}
+.lmx-app .lmx-stat .l::before{content:"# "}
+.lmx-app .lmx-stat b{font-size:14px}
+.lmx-app .lmx-stat.warn{border-color:var(--lmt-warn);background:transparent}
+.lmx-app .lmx-stat.warn b{color:var(--lmt-warn)}
+.lmx-app .lmx-stat.bad{border-color:var(--lmt-bad);background:transparent}
+.lmx-app .lmx-stat.bad b{color:var(--lmt-bad)}
+.lmx-app .lmx-stat.ok{border-color:var(--lmt-line)}
+.lmx-app .lmx-stat.ok b{color:var(--lmt-ok)}
+.lmx-app.lmx-app .lmx-trig>.lmx-trig-b{border-radius:6px;box-shadow:none}
+.lmx-app.lmx-app .lmx-open .lmx-trig>.lmx-trig-b{box-shadow:none}
+.lmx-app .fxl{font-size:10.5px;letter-spacing:0;text-transform:none;color:var(--lmt-comment);opacity:1}
+.lmx-app .fxl::before{content:"# "}
+.lmx-app.lmx-app .lmx-pop{border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18)}
+.lmx-app.lmx-app .lmx-opt>.lmx-opt-b,.lmx-app.lmx-app .lmx-row>.lmx-row-b{border-radius:5px}
+.lmx-app.lmx-app .lmx-opt.lmx-on>.lmx-opt-b{border-color:transparent;box-shadow:inset 2px 0 0 var(--lmt-accent)}
+.lmx-app.lmx-app .lmx-tabs{gap:4px;padding:0 0 0;border-radius:0;background:transparent;border-bottom:1px solid var(--lmt-line)}
+.lmx-app.lmx-app button.lmx-tab{height:30px;border-radius:0;border:0;opacity:.7;color:var(--lmt-dim)}
+.lmx-app.lmx-app button.lmx-tab:hover:enabled{background:transparent;color:var(--lmt-accent);opacity:1}
+.lmx-app.lmx-app button.lmx-tab.lmx-on,.lmx-app.lmx-app button.lmx-tab.lmx-on:hover:enabled{background:transparent;box-shadow:inset 0 -2px 0 var(--lmt-accent);color:var(--lmt-accent);font-weight:700}
+.lmx-app.lmx-app button.lmx-small,.lmx-app.lmx-app button.lmx-chip,.lmx-app.lmx-app button.lmx-live,.lmx-app.lmx-app button.lmx-act{border-radius:6px}
+.lmx-app.lmx-app button.lmx-chip.lmx-on,.lmx-app.lmx-app button.lmx-chip.lmx-on:hover:enabled{background:transparent;border-color:var(--lmt-accent);font-weight:700}
+.lmx-app.lmx-app button.lmx-act{background:var(--lmt-bg);box-shadow:none}
+.lmx-app.lmx-app .lmx-rows,.lmx-app.lmx-app .lmx-runs,.lmx-app.lmx-app .lmx-left{border-radius:8px}
+.lmx-app.lmx-app .lmx-lhead{background:var(--lmt-bg)}
+.lmx-app.lmx-app button.lmx-col{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--lmt-comment);opacity:1}
+.lmx-app.lmx-app button.lmx-col.lmx-c-name::before{content:"# "}
+.lmx-app.lmx-app button.lmx-col:hover:enabled{background:transparent;color:var(--lmt-accent)}
+.lmx-app.lmx-app button.lmx-col.lmx-on{color:var(--lmt-accent);font-weight:700}
+.lmx-app.lmx-app .lmx-row.lmx-on>.lmx-row-b,.lmx-app.lmx-app .lmx-row.lmx-on>.lmx-row-b:hover:enabled{border-color:transparent;box-shadow:inset 2px 0 0 var(--lmt-accent)}
+.lmx-app .rt,.lmx-app .fc .pill,.lmx-app .wb{border-radius:4px}
+.lmx-app .rg,.lmx-app .rr .rq,.lmx-app .er .eq{color:var(--lmt-comment);opacity:1}
+.lmx-app .rr .rc{color:var(--lmt-prompt)}
+.lmx-app .rr .rb i{background:var(--lmt-accent)}
+.lmx-app.lmx-app .lmx-ask{border-radius:6px}
+.lmx-app.lmx-app .lmx-ask:focus-within{box-shadow:none}
+.lmx-app.lmx-app .lmx-ask::before{content:"\\203A";padding:0 2px 0 4px;font-size:15px;font-weight:700;color:var(--lmt-prompt)}
+.lmx-app .rbody{border-top-style:dashed}
+.lmx-app .rl .lt{color:var(--lmt-comment);opacity:1}
+.lmx-app .rl .lv{border-radius:3px}
+.lmx-app .rl .jf{border-radius:5px;color:inherit}
+.lmx-app .rf code,.lmx-app .cbs code,.lmx-app .lmx-status code,.lmx-app .lmx-hint code{border-radius:4px;color:var(--lmt-s)}
+.lmx-app .ct{border-radius:3px}
+.lmx-app .srch .cpy{border-radius:6px;background:transparent}
+.lmx-app .src{border-radius:6px;background:var(--lmt-bg)}
+.lmx-app .src pre.gut{color:var(--lmt-comment);opacity:.8}
+.lmx-app .lmx-status{color:var(--lmt-dim)}
+.lmx-app .lmx-status .st{opacity:1}
+.lmx-app .lmx-status .st:not(.warn):not(.ok):not(.live):not(:has(.spin))::before{content:"\\25CF  ";color:var(--lmt-ok)}
+.lmx-app .lmx-hint{border-radius:6px}
+.lmx-app .lmx-h::before{content:"## ";color:var(--lmt-comment);font-weight:400}
+.lmx-app .spin{border-top-color:var(--lmt-accent)}"""
 
 _EXPLORER_CSS = """<style>
 .lmx-app{--lx-accent:#2563eb;--lx-button:#2563eb;--lx-accent-2:#7c3aed;--lx-soft:rgba(37,99,235,.10);--lx-ring:rgba(37,99,235,.28);--lx-line:rgba(127,127,127,.22);--lx-line-2:rgba(127,127,127,.36);--lx-tint:rgba(127,127,127,.06);--lx-tint-2:rgba(127,127,127,.11);--lx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--lx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--lx-raised:var(--lx-surface);--lx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--lx-ok:#10b981;--lx-warn:#f59e0b;--lx-bad:#ef4444;--lx-ink-bad:#dc2626;--lx-ink-warn:#b45309;--lx-ink-ok:#047857;--lx-mono:"Cascadia Mono","Cascadia Code",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--lx-code:rgba(127,127,127,.05);--lx-tok-k:#7c3aed;--lx-tok-s:#047857;--lx-tok-n:#c2410c;--lx-tok-f:#2563eb;--lx-tok-c:#64748b}
@@ -419,7 +496,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .lmb pre,.lmx-app .lmb .jt{border-radius:10px}
 .lmx-app .lmb .wire .wn,.lmx-app .lmb .wire .wf{border-radius:12px;background-color:var(--lx-surface)}
 @media (prefers-reduced-motion:reduce){.lmx-app *,.lmx-app *::before{transition:none!important;animation-duration:2.5s!important}}
-""" + _explorer_rules() + "\n</style>"
+""" + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
 
 
 _IN_WINDOW = {  # a command a report names -> where the explorer window shows the same
