@@ -11,14 +11,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- ⚡ **Lambda explorer: logs between any two times** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
-  - The Logs tab's time range has **Custom range…**: pick From and To on a calendar, then **Show runs**.
-  - Leave To empty to read up to now; times are in the reports' time zone.
-  - From code: `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")`.
-
-- ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
-  - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
-
 - 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** row over your buckets; **↩** picks up where you left off.
   - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
@@ -26,6 +18,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - ⚡ **Lambda explorer: your recent functions first** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** chip, and the function field lists the ones you've opened first.
   - `explore(history=False)` turns it off; `x.forget_recent()` clears it.
+
+## [0.38.0] - 2026-10-30
+
+### Added
+
+- ⚡ **Lambda explorer: logs between any two times** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - The Logs tab's time range has **Custom range…**: pick From and To on a calendar, then **Show runs**.
+  - Leave To empty to read up to now; times are in the reports' time zone.
+  - From code: `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")`.
+
+- ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
+  - An empty range says so: "Nothing logged in … · pick another time range above" ([#171](https://github.com/utkarsh5026/aws-analyzer/pull/171)).
+
+### Changed
+
+- 🧭 **S3 explorer: the chat windows' terminal look** ([#169](https://github.com/utkarsh5026/aws-analyzer/pull/169))
+  - The same monospace font and code-editor colours as `chat()`, with an `s3://` path that highlights the open folder.
+  - Reports in its right pane follow `set_theme()`, so a preview looks like the same command run in a cell.
 
 ## [0.37.0] - 2026-10-28
 
@@ -1028,7 +1039,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...v0.35.0
