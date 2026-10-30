@@ -38,6 +38,7 @@ import tempfile
 import time
 import urllib.request
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -67,6 +68,7 @@ class Figure:
 
 
 START = 'x = S3Explorer(core=core, height=500)'
+ZIP_FOLDER_DAY = shots.NOW - timedelta(days=20)
 FIGURES = [
     Figure("explorer", 'x = S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet", core=core, height=500)',
            "First 20 rows"),
@@ -77,7 +79,8 @@ FIGURES = [
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
     Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'
            'x.filter(".tar", subfolders=True)', "Files below"),
-    Figure("explorer-zip", 'x = S3Explorer("s3://acme-ml-data/raw/events/dt=2025-10-10/", core=core, height=500)',
+    Figure("explorer-zip",
+           f'x = S3Explorer("s3://acme-ml-data/raw/events/dt={ZIP_FOLDER_DAY:%Y-%m-%d}/", core=core, height=500)',
            "Click a folder", (
                *(Step(f"check:part-{n:04d}.json.gz", f"{i} selected", where=".s3x-picks")
                  for i, n in enumerate((1, 2, 4, 5, 7), 1)),
