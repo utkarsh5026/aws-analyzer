@@ -9,9 +9,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-30
+
 ### Added
 
-- ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+- ⚡ **Lambda explorer: from an error to its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
   - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
   - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
   - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
@@ -21,12 +23,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
   - `change_effect()` compares a function's days before and after a change.
 
-- ⚡ **Lambda explorer: a timeline, the slowest runs and code to reopen it** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+- ⚡ **Lambda explorer: timeline, slowest runs, code to reopen** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
   - The Logs tab draws its runs over time, red where they failed; click a bar for only those runs. **Slowest 10%** picks out the slow ones.
   - **⧉ Copy as code** holds the one call that opens it as it is now: `explore('orders-etl', tab='logs', since='3h', search='KeyError')`.
   - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
 
-- ⚡ **Lambda explorer: a run's links, a slim header, the first problem read ahead** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+- ⚡ **Lambda explorer: run links, slim header, quicker opening** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
   - An open run has its request ID and a Logs Insights query to copy, and opens in the AWS console.
   - With a function picked, the header is one line of its numbers, so the tabs get the height.
   - The function at the top of the problems is read in the background, so it opens at once.
@@ -1091,7 +1093,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...v0.38.0
