@@ -86,6 +86,10 @@ from .analysis.package import (
 )
 from .analysis.source import find_symbol_in, read_sources, search_package, source_files
 from .analysis.versions import diff_findings, diff_packages, diff_settings, version_before
+from .analysis.changes import (
+    FunctionChanges, FunctionLook, cause_key, change_findings, function_changes, function_look, new_causes_finding,
+    new_error_causes,
+)
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
 from .analysis.codemap.findings import code_map_findings
@@ -136,7 +140,9 @@ __all__ = [
     "FileChange",
     "Function",
     "FunctionDetail",
+    "FunctionChanges",
     "FunctionMetrics",
+    "FunctionLook",
     "FunctionUrl",
     "GraphEdge",
     "GraphNode",
@@ -167,6 +173,8 @@ __all__ = [
     "VersionDiff",
     "account_findings",
     "cause_search",
+    "cause_key",
+    "change_findings",
     "classify_error",
     "code_frames",
     "code_graph",
@@ -178,6 +186,8 @@ __all__ = [
     "explore",
     "function_findings",
     "change_effect",
+    "function_changes",
+    "function_look",
     "function_monthly_cost",
     "failing_frame",
     "group_errors",
@@ -195,6 +205,8 @@ __all__ = [
     "search_package",
     "source_files",
     "masked_config",
+    "new_causes_finding",
+    "new_error_causes",
     "package_file_name",
     "package_findings",
     "page_file_name",

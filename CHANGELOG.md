@@ -26,6 +26,22 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - **⧉ Copy as code** holds the code that opens the window as it is now, to run in another cell or send to someone.
   - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
 
+- 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Recent** row over your buckets; **↩** picks up where you left off.
+  - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
+
+- ⚡ **Lambda explorer: your recent functions first** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Recent** chip, and the function field lists the ones you've opened first.
+  - `explore(history=False)` turns it off; `x.forget_recent()` clears it.
+
+- 🧭 **S3 explorer: what's new since your last visit** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A folder's overview counts the files new or changed since you were last there, and how its file count moved.
+  - **●** marks those files in the list.
+
+- ⚡ **Lambda explorer: what changed since your last look** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Changed** chip: functions whose code or settings changed, or whose errors went up, since you last opened them.
+  - The Overview says what changed; the Errors tab names errors it hadn't seen on your last look.
+
 ### Changed
 
 - ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))

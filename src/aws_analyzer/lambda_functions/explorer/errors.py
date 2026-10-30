@@ -13,8 +13,9 @@ from ..._kit.window import _skeleton
 
 from ..models import ErrorGroup, ErrorReport, LogEvent
 from ..analysis.errors import cause_search, classify_error, failing_frame
+from ..analysis.changes import cause_key, new_causes_finding, new_error_causes
 from ..view import _stamp
-from .frame import _run_clock
+from .frame import _run_clock, _with_findings
 from .widgets import _Row
 
 
@@ -61,13 +62,25 @@ class _ErrorsTab:
         self._set(self.errors_view, self._html([_Note(text, "warn")]))
         self._status(text, "warn")
 
+    def _new_causes(self, report: ErrorReport) -> list[tuple[str, str]]:
+        """
+        The causes the Errors tab hadn't seen on your last look, as a finding, when it was opened then.
+        """
+        before, since = self._look_before(self.function)
+        if before is None or since is None or before.error_causes is None:
+            return []
+        new = new_error_causes(report.groups, before.error_causes)
+        return [new_causes_finding(new, since)] if new else []
+
     def _got_errors(self, report: ErrorReport) -> None:
         self.error_report = report
         blocks = self.ui._errors_blocks(report, since=self._tab_range()[0], for_window=True)
+        blocks = _with_findings(blocks, self._new_causes(report))
         split = next((i for i, block in enumerate(blocks) if isinstance(block, _Findings)), len(blocks))
         self._draw("errors", self.errors_view, blocks[:split])
         self._set(self.errors_more, self._html(blocks[split:]))
         self._draw_causes(report)
+        self._save_look(self.function, error_causes=[cause_key(group) for group in report.groups])
         failed = [e for e in report.newest]
         today = _in_zone(_utcnow()).date()
         while len(self._error_rows) < len(failed):

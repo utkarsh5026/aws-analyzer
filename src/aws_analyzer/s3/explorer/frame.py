@@ -164,6 +164,12 @@ body[class*=vscode-] .s3x .s3x-body{height:560px}
 .s3x button.s3x-chip.s3x-on{background:var(--s3x-tint);border-color:var(--s3x-tint-line);color:var(--s3x-accent-fg);
  font-weight:600}
 .s3x button.s3x-more{border-style:dashed;opacity:.75}
+.s3x .s3x-recent{flex-wrap:wrap;gap:6px;align-items:center}
+.s3x .s3x-recent>*{margin:0}
+.s3x .s3x-recent-l{font-size:11px;color:var(--s3t-comment);margin-right:2px}
+.s3x .s3x-r .widget-label.s3x-new{color:var(--s3t-ok);opacity:1;font-weight:700}
+.s3x .s3x-r .widget-label.s3x-new::before{content:"●";margin-right:5px}
+.s3x button.s3x-place{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .s3x button.s3x-deep{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
 .s3x button.s3x-deep::before{width:13px;height:13px}
 .s3x .s3x-list>*{margin:0}

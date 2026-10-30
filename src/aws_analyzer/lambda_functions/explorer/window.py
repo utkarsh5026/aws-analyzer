@@ -10,6 +10,7 @@ from typing import Any
 from ..._kit.blocks import _Note
 from ..._kit.errors import _Hint
 from ..._kit.fmt import _in_zone, _plural
+from ..._kit.history import Place, PlaceHistory, Snapshot
 from ..._kit.render import _call
 from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
@@ -21,6 +22,7 @@ from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
 from ..analysis.logs import LogPage, LogRun, TimeBucket
 from ..analysis.codemap.model import CodeMap
+from ..analysis.changes import FunctionChanges
 from ..analyzer import LambdaAnalyzer
 from ..._kit.themes import _theme_css, _theme_name
 from ..style import _CSS, _ROOT, _render_html
@@ -29,8 +31,8 @@ from .frame import (
     _CODE_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _FUNCTION_PAGE, _FUNCTION_TABS, _RUN_PAGE, _seconds, _window_text,
 )
 from .widgets import _FunctionField, _Row, _RunRow
-from .functions import _Facts, _FunctionsTab
-from .function import _FunctionTab, _Remembered
+from .functions import _Facts, _FunctionsTab, _arn_account
+from .function import _FunctionTab, _KeptReads
 from .logs import _FIRST_LOGS_RANGE, _LogsTab, _Reading
 from .timeline import _Timeline
 from .errors import _ErrorsTab
@@ -68,11 +70,15 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
     has turned on (the region field switches it). view / core: a LambdaView or LambdaAnalyzer to use (else one is made
     from region / profile). height: the height of the tabs' pages, which fill the browser window unless set (pixels, or
     CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports elsewhere), 'widgets' or 'text'.
+    history: whether to remember the functions you open, between sessions, so the function field lists them first and
+    the Recent chip shows only them: True (in aws-analyzer's cache folder, ~/.cache/aws-analyzer/history/, per AWS
+    account; only the ARNs and when), False, or a file to keep them in. AWS_ANALYZER_HISTORY=off turns it off
+    everywhere. x.recent lists them and x.forget_recent() clears them.
 
     Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
-    command. The one file it writes is the package Download .zip saves, on the notebook's disk. x.ui is a LambdaView
-    for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
-    hold the data behind what's shown.
+    command. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
+    functions (history=). x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function,
+    x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown.
     """
 
     _PREFIX, _THREADS = "lmx", "lambda-explorer"
@@ -93,6 +99,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         height: int | str | None = None,
         mode: str = "auto",
         progress: str = "auto",
+        history: bool | str = True,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
@@ -121,6 +128,10 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
         self.page_saved: SavedPage | None = None
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
+        self._history = PlaceHistory.from_setting(history, "lambda")
+        self._recent: dict[str, Place] = {}
+        self._looks: dict[str, Snapshot] = {}
+        self._news: dict[str, FunctionChanges] = {}
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
         self._want, self._want_tab = name, tab or ("logs" if search and name else None)  # opened once listed...
         self._want_search: str | None = search or None  # ...and searched for in its logs
@@ -145,7 +156,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self._error_rows: list[_Row] = []
         self._cause_rows: list[_Row] = []
         self._run_window: tuple[datetime, datetime] | None = None
-        self._remembered: dict[str, _Remembered] = {}
+        self._kept: dict[str, _KeptReads] = {}
         self.view_code: Any = None
         self._rereading = False
         self._slow_cutoff: float | None = None
@@ -184,6 +195,36 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
     def __repr__(self) -> str:
         name = self.function.name if self.function is not None else "no function picked"
         return f"LambdaExplorer({name}) · help(LambdaExplorer) says what it shows"
+
+    @property
+    def recent(self) -> list[str]:
+        """
+        The functions listed here that you've opened before (their ARNs), the ones you open most and most lately
+        first: x.open(x.recent[0]) opens the first. [] when recent places are off (history=False).
+        """
+        return list(self._recent)
+
+    @_window_errors
+    def forget_recent(self, name: str = "") -> None:
+        """
+        Forget a function you opened (its name or ARN), or with nothing every function this explorer remembers in this
+        account, so the Recent chip and the function field's order start over. Nothing in Lambda changes.
+        """
+        functions = self.overview.functions if self.overview is not None else []
+        if self._history is None or not functions:
+            self._status("Recent places are off (history=False or AWS_ANALYZER_HISTORY=off)." if self._history is None
+                         else "Nothing to forget until the functions are listed.")
+            return
+        arns = [arn for arn, place in self._recent.items() if name in (arn, place.label)] if name else [""]
+        account = _arn_account(functions[0].arn)
+        removed = sum(self._history.forget(account, arn) for arn in arns)
+        self._load_recent()
+        if self._chip == "recent" and not self._recent:
+            self._chip = ""
+        self._draw_chips()
+        self._refilter()
+        what = name or "every function"
+        self._status(f"Forgot {what}." if removed else f"Nothing to forget: {what} isn't among the recent functions.")
 
     @_window_errors
     def open(self, name: str, *, tab: str | None = None) -> None:
@@ -606,6 +647,7 @@ def explore(
     region: str | None = None,
     profile: str | None = None,
     height: int | str | None = None,
+    history: bool | str = True,
 ) -> LambdaExplorer:
     """
     Opens the Lambda explorer window and returns it: every function in the region, and for the one you click, how
@@ -622,7 +664,8 @@ def explore(
     since= and until= pick the time range of the Logs, Errors and Performance tabs ('3h', '7d', '2026-10-27 09:00'),
     and search= finds the runs whose lines have the text (on the Logs tab). The window's ⧉ Copy as code gives this
     call for what it shows. The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS
-    such as '70vh'). It only reads: where a change would help, it shows the command to run.
+    such as '70vh'). It only reads: where a change would help, it shows the command to run. It remembers the functions
+    you open, for its Recent chip (history=False: it doesn't).
     """
     return LambdaExplorer(name, tab=tab, since=since, until=until, search=search, region=region, profile=profile,
-                          height=height)
+                          height=height, history=history)

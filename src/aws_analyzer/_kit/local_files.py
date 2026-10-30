@@ -5,7 +5,7 @@ and clean_up() in _kit/housekeeping.py draw these as reports.
 
 Only what aws-analyzer made is ever removed: a downloads folder whose .gitignore it wrote (_made_by_aws_analyzer),
 the chart pictures in the charts folder (never another file there), and its own cache folder, but for the agent's
-memory and saved chats in it (KEPT_IN_CACHE), which don't come back. The notebook's
+memory and saved chats and the explorers' recent places in it (KEPT_IN_CACHE), which don't come back. The notebook's
 folder, the home folder and the ones above them never are (_protected_folder), even when marked.
 """
 
@@ -20,7 +20,7 @@ S3_DOWNLOADS = "s3-downloads"
 LAMBDA_DOWNLOADS = "lambda-downloads"
 AGENT_CHARTS = "agent-charts"
 CACHE_NAME = "aws-analyzer"
-KEPT_IN_CACHE = ("agent",)
+KEPT_IN_CACHE = ("agent", "history")
 
 KINDS = ("s3", "lambda", "sandbox", "charts")
 COMES_BACK = ("s3", "lambda", "sandbox")
@@ -193,7 +193,8 @@ def _charts_folder(path: str) -> LocalFolder:
 
 def _sandbox_folder(path: str) -> LocalFolder:
     """
-    The cache folder: the sandbox's downloads, without the agent's memory and saved chats (KEPT_IN_CACHE).
+    The cache folder: the sandbox's downloads, without the agent's memory, saved chats and the explorers' recent places
+    (KEPT_IN_CACHE).
     """
     folder = LocalFolder("sandbox", path)
     _measure(folder, skip=KEPT_IN_CACHE)

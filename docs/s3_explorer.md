@@ -116,6 +116,42 @@ The folder on the left, the file you clicked on the right. One click on the path
 - **Page through** a long list with **«** **‹** **›** **»** under it. The list shows 100 rows at a time, and the bar says which ones, of how many: `2,401–2,500 of 3,000`.
 - **The bar at the bottom** counts the folders and files listed and adds up their size. On the right it shows the path of the folder you're in, or of the file you clicked; one click selects it, ready to copy.
 
+### Go back to where you were { #recent }
+
+The explorer remembers the folders you open, so your list of buckets starts with them: **↩** picks up where you left off.
+{ .gist }
+
+![S3Explorer on the list of buckets: over the search box a # recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-light.webp#only-light){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: over the search box a # recent row of chips, ↩ acme-ml-data/…/churn/ first, then acme-ml-data/training/, acme-ml-data/…/dt=2025-10-10/ and acme-ml-data/docs/; under it the buckets](images/explorer-recent-dark.webp#only-dark){ width="984" height="579" loading=lazy }
+/// caption
+`S3Explorer()`: the folder you were in last, then the ones you open most. Point at a chip for its whole path.
+///
+
+The **Recent** row shows over your list of buckets, and over any folder while the **✎** path box is open. After ↩, the chips are the folders you open most *and* most lately: a folder you open every day beats one you opened thirty times in March. One click opens it. `x.recent` lists them as `s3://` paths.
+
+??? more "What it keeps, where, and how to turn it off"
+
+    Only the folders' paths and when you opened them, per AWS account, and each folder's count of files and their size when you were last there ([below](#since)), never what's in a file. They're in one file, `~/.cache/aws-analyzer/history/places.sqlite`, which `clean_up()` keeps. Each explorer keeps its newest 500 visits.
+
+    `x.forget_recent("s3://bucket/folder/")` forgets one folder, and `x.forget_recent()` every folder. `S3Explorer(history=False)` remembers nothing, `history="path/to/file.sqlite"` keeps them in another file, and the environment variable `AWS_ANALYZER_HISTORY=off` turns it off for every explorer.
+
+### What's new since your last visit { #since }
+
+Open a folder you've been in before, and its overview says what arrived since: how many files are new or changed, and ● marks them in the list.
+{ .gist }
+
+![S3Explorer on the churn folder: holdout.parquet and train.parquet marked with a green ● just now in the Modified column; on the right the cards Files 4, Size 1.3 GB, Newest file just now and New since 2d ago 2, then the note: Since your last visit 2d ago: 2 files are new or changed (73.2 KB), marked ● in the list; the folder went from 3 to 4 files](images/explorer-changes-light.webp#only-light){ width="984" height="581" loading=lazy }
+![S3Explorer on the churn folder: holdout.parquet and train.parquet marked with a green ● just now in the Modified column; on the right the cards Files 4, Size 1.3 GB, Newest file just now and New since 2d ago 2, then the note: Since your last visit 2d ago: 2 files are new or changed (73.2 KB), marked ● in the list; the folder went from 3 to 4 files](images/explorer-changes-dark.webp#only-dark){ width="984" height="581" loading=lazy }
+/// caption
+A folder you were in two days ago: one file replaced, one added.
+///
+
+It's read from the listing the explorer makes anyway, so it costs nothing extra. A visit is everything within an hour, so the comparison is with your visit before this one, not with a minute ago.
+
+??? more "How it decides what's new"
+
+    A file is new or changed when S3 says it was modified after your last visit. S3 doesn't tell a new file from a replaced one, so they're counted together. The count of files is compared with your last visit's only when both listings were whole: in a folder bigger than what's listed, it says "listed so far". With **Include subfolders**, the files below are marked the same way, but the counts aren't compared.
+
 ??? more "What the icons mean, and what the right shows before you click a file"
 
     Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
@@ -397,7 +433,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ## Reference { #reference }
 
-`S3Explorer(uri="", core=None, *, profile=None, region=None, height=560, page_size=100, zip_max_size="100MB", downloads=None, mode="auto", progress="auto")` opens the explorer and returns it.
+`S3Explorer(uri="", core=None, *, profile=None, region=None, height=560, page_size=100, zip_max_size="100MB", downloads=None, mode="auto", progress="auto", history=True)` opens the explorer and returns it.
 
 <div class="ref" markdown>
 
@@ -412,6 +448,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `downloads` | The folder **⬇ Download** and the zips save into: `s3-downloads`, next to the notebook, unless set; **⚙** changes it |
 | `mode` | `"auto"`: the clickable explorer in Jupyter, a text listing elsewhere. `"widgets"` or `"text"` to choose |
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
+| `history` | Remember the folders you open, for the [Recent row](#recent): `True`, `False`, or a file to keep them in |
 
 | Command | What it does |
 | --- | --- |
@@ -419,6 +456,8 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `back()`, `forward()` | **←** and **→** |
 | `up()` | **↑**: the folder above |
 | `refresh()` | **↻**: lists this folder again |
+| `recent` | The folders you've opened in this account, as `s3://` paths, the [Recent row](#recent)'s order |
+| `forget_recent(uri="")` | Forgets one folder in the Recent row, or every one |
 | `filter(text="", kind="all", subfolders=False)` | The search box and its buttons: names or file types (`".csv .json"`), `kind="folders"` or `"files"`, and everything below with `subfolders=True`. It searches the whole folder, up to its first 10,000 entries, and in a bigger one also asks S3 for the names that start with `text`. `filter()` shows everything again |
 | `location` | The folder you're in, or `""` on your buckets |
 | `selected` | The file shown on the right, or `""` |

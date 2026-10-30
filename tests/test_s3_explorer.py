@@ -1168,3 +1168,113 @@ def test_explorer_zips_selected_files_and_folders(explorer, tmp_path, monkeypatc
     out = text(x)
     assert "Can't zip this here yet" in out and "untick some files, or raise the limits with ⚙" in out
     assert "click ⬇ Download selected again" in out and not (tmp_path / "s3-downloads" / "again.zip").exists()
+
+
+
+def recent_chips(x):
+    return [chip.description for chip in x._recent_box.children[1:]]
+
+
+def test_short_place():
+    from aws_analyzer.s3.explorer.recent import _short_place
+
+    assert _short_place("s3://lake/") == "lake"
+    assert _short_place("s3://lake/raw/") == "lake/raw/"
+    assert _short_place("s3://lake/raw/events/2026/") == "lake/…/2026/"
+
+
+def test_recent_row_takes_you_back_to_the_folders_you_opened(explorer, tmp_path):
+    places = tmp_path / "places.sqlite"
+    x = explorer(history=str(places))
+    assert x.recent == [] and x._recent_box.layout.display == "none"
+
+    x.open("s3://lake/raw/events/")
+    x.open("s3://lake/curated/")
+    x.open("s3://lake/raw/events/")
+    assert x.recent == ["s3://lake/raw/events/", "s3://lake/curated/"]
+    assert x._recent_box.layout.display == "none"
+
+    again = explorer(history=str(places))
+    assert again._recent_box.layout.display is None
+    assert recent_chips(again) == ["↩ lake/…/events/", "lake/curated/"]
+    assert "Pick up where you left off: s3://lake/raw/events/" in again._recent_box.children[1].tooltip
+
+    again._recent_box.children[2].click()
+    assert again.location == "s3://lake/curated/"
+    assert "📋  table.json" in rows(again)
+
+    again._edit_btn.click()
+    assert recent_chips(again) == ["↩ lake/…/events/"]
+    again._recent_box.children[1].click()
+    assert again.location == "s3://lake/raw/events/" and again._path.layout.display == "none"
+
+
+def test_refresh_is_not_a_visit_and_forget_recent_clears(explorer, tmp_path):
+    x = explorer("s3://lake/raw/", history=str(tmp_path / "places.sqlite"))
+    x.refresh()
+    assert [place.visits for place in x._recent_places()] == [1]
+    x.open("s3://lake/curated/")
+
+    x.forget_recent("lake/raw")
+    assert x.recent == ["s3://lake/curated/"]
+    x.forget_recent()
+    assert x.recent == [] and "Forgot every folder" in str(x.shown)
+
+
+def test_history_off_remembers_nothing(explorer, tmp_path):
+    x = explorer("s3://lake/raw/", history=False)
+    assert x.recent == []
+    x.forget_recent()
+    assert "Recent places are off" in str(x.shown)
+
+
+def test_folder_changes_and_their_sentence():
+    from aws_analyzer._kit.fmt import human_age
+    from aws_analyzer.s3.explorer.changes import FolderLook, changes_card, changes_sentence, folder_changes, folder_look
+
+    since = NOW - timedelta(days=2)
+    entries = [file("raw/a.csv", 10, days=5), file("raw/b.csv", 2048, days=1), file("raw/c.csv", 1024, days=0),
+               folder("raw/events/")]
+    before = FolderLook(files=4, folders=1, size=99, complete=True)
+    assert folder_look(entries, complete=True) == FolderLook(3, 1, 3082, True)
+    assert FolderLook.from_data(before.to_data()) == before and FolderLook.from_data({"files": 1}) is None
+
+    changes = folder_changes(since, entries, before=before, complete=True)
+    assert (changes.new_files, changes.new_bytes, changes.files_before, changes.files_now) == (2, 3072, 4, 3)
+    assert changes_sentence(changes, marked=True) == (
+        f"Since your last visit {human_age(since)}: 2 files are new or changed (3.0 KB), marked ● in the list; "
+        "the folder went from 4 to 3 files.")
+    assert changes_card(changes) == (f"New since {human_age(since)}", "2")
+
+    partial = folder_changes(since, entries, before=before, complete=False)
+    assert partial.files_before is None and "2 files listed so far are new" in changes_sentence(partial, marked=False)
+    quiet = folder_changes(NOW, entries[:1], before=FolderLook(1, 0, 10, True), complete=True)
+    assert changes_sentence(quiet, marked=True) == f"Nothing new here since your last visit {human_age(NOW)}."
+
+
+def notes(x):
+    return [block.text for block in x.shown if type(block).__name__ == "_Note"]
+
+
+def test_overview_says_whats_new_since_your_last_visit(explorer, aws, tmp_path, monkeypatch):
+    import time
+
+    from aws_analyzer._kit import history
+
+    places = str(tmp_path / "places.sqlite")
+    monkeypatch.setattr(history, "VISIT_GAP_MINUTES", 0)
+    first = explorer("s3://lake/raw/", history=places)
+    assert not any("last visit" in note for note in notes(first))
+
+    time.sleep(1.1)
+    aws.put_object(Bucket=LAKE, Key="raw/fresh.csv", Body=b"a,b\n1,2\n")
+    again = explorer("s3://lake/raw/", history=places)
+    said = next(note for note in notes(again) if "last visit" in note)
+    assert "1 file is new or changed (8 B), marked ● in the list; the folder went from 1 to 2 files." in said
+    fresh = next(row for row in again._pool if row.entry is not None and row.entry.name == "fresh.csv")
+    old = next(row for row in again._pool if row.entry is not None and row.entry.name == "readme.md")
+    assert fresh.age._dom_classes == ("s3x-new",) and old.age._dom_classes == ()
+    assert "new or changed since your last visit" in fresh.button.tooltip
+
+    later = explorer("s3://lake/raw/", history=places)
+    assert any(note.startswith("Nothing new here since your last visit") for note in notes(later))

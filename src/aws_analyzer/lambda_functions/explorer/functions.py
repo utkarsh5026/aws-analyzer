@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _why
-from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money
+from ..._kit.fmt import _count, _plural, _total, _utcnow, human_age, human_money
 from ..._kit.render import _split_lead
 from ..._kit.text import _esc, _marked, search_rank
 from ..._kit.window import _class_if
@@ -25,6 +25,7 @@ from ..analysis.overview import Overview
 from ..analysis.findings import (
     RECENT_DAYS, _day_age, _errors_level, _recent, _runtime_findings, account_findings, function_findings,
 )
+from ..analysis.changes import FunctionChanges, FunctionLook, function_changes, function_look
 from ..view import _unread
 from .frame import _FUNCTION_PAGE, _FUNCTION_TABS, _window_text
 from .widgets import _Row
@@ -43,13 +44,28 @@ _COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width);
 )
 
 _FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it names; again shows every function
-    ("", "All", "all"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
+    ("", "All", "all"), ("recent", "Recent", "all"), ("changed", "Changed", "new"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
     ("runtime", "Old runtime", "warn"), ("public", "Public", "warn"), ("idle", "Not called", "idle"),
 )
 
 _TREND_DAYS = 14
 
 _SHORTEST_BAR = 12
+
+_CHIP_TIPS = {
+    "": "Show every function",
+    "recent": "Show only the functions you've opened here before, the ones you open most first (click again for all)",
+    "changed": ("Show only the functions whose code or settings changed, or whose errors went up, since you last "
+                "opened them (click again for all)"),
+}
+
+
+def _arn_account(arn: str) -> str:
+    """
+    The account in a function's ARN ('arn:aws:lambda:us-east-1:123456789012:function:etl' -> '123456789012').
+    """
+    parts = arn.split(":")
+    return parts[4] if len(parts) > 4 else ""
 
 
 @dataclass
@@ -68,6 +84,7 @@ class _Facts:
     cost: float | None
     tone: str
     headline: str = ""
+    changed: bool = False
 
     @property
     def warnings(self) -> list[str]:
@@ -180,9 +197,10 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     warnings = len(f.warnings)
     badge = f'<span class="wb">{warnings}</span>' if warnings else ""
     region = f'<span class="rg">{_esc(fn.region)}</span>' if multi else ""
+    changed = '<span class="ch">changed</span>' if f.changed else ""
     return (f'<div class="fr"><span class="dot {f.tone}"></span><div class="fm"><div class="fn">'
             f"<b>{_marked(fn.name, words)}</b>"
-            f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}</div>'
+            f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}{changed}</div>'
             f'{about}</div>{cells}<div class="fc">{badge}</div><div></div></div>')
 
 
@@ -293,6 +311,7 @@ class _FunctionsTab:
     def _listed(self, ov: Overview, reopen: Function | None = None, elsewhere: bool = True) -> None:
         self.overview = ov
         self._listing = False
+        self._load_recent()
         self._compute_facts()
         denied = sorted({code for key, code in ov.errors.items() if key.endswith(":list")})
         self.field.problem = (f"Couldn't list the functions ({', '.join(denied)}; needs lambda:ListFunctions). Type "
@@ -383,6 +402,22 @@ class _FunctionsTab:
         ov = self.overview
         now = _utcnow()
         self._facts = {fn.arn: _function_facts(fn, ov, self.core.prices, now) for fn in ov.functions} if ov else {}
+        self._compute_news(now)
+
+    def _compute_news(self, now: datetime) -> None:
+        """
+        What changed in each listed function you've opened before, since your last look, from the snapshots noted
+        then and what the list has read (code and settings at once, failed calls once CloudWatch's numbers are in).
+        """
+        self._news: dict[str, FunctionChanges] = {}
+        for arn, facts in self._facts.items():
+            snapshot = self._looks.get(arn)
+            before = FunctionLook.from_data(snapshot.data) if snapshot is not None else None
+            if before is None:
+                continue
+            changes = function_changes(facts.fn, before=before, since=snapshot.at, now=now, metrics=facts.metrics)
+            self._news[arn] = changes
+            facts.changed = changes.has_news
 
     def _draw_list_note(self) -> None:
         """
@@ -436,9 +471,55 @@ class _FunctionsTab:
         self._offset = 0
         self._refilter(renew=True)
 
+    def _load_recent(self) -> None:
+        """
+        The listed functions you've opened before (in this account), the ones you open most and most lately first.
+        """
+        functions = self.overview.functions if self.overview is not None else []
+        if self._history is None or not functions:
+            self._recent, self._looks = {}, {}
+            return
+        listed = {fn.arn for fn in functions}
+        account = _arn_account(functions[0].arn)
+        places = self._history.places(account)
+        self._recent = {place.key: place for place in places if place.key in listed}
+        self._looks = self._history.snapshots_before(account)
+
+    def _look_before(self, fn: Function) -> tuple[FunctionLook | None, datetime | None]:
+        """
+        How fn looked on your last look before this one, and when (None, None on a first look).
+        """
+        snapshot = self._looks.get(fn.arn)
+        if snapshot is None:
+            return None, None
+        return FunctionLook.from_data(snapshot.data), snapshot.at
+
+    def _save_look(self, fn: Function, *, error_causes: list[str] | None = None) -> None:
+        """
+        Notes how fn looks now (with its Errors tab's causes when they were read), for your next look.
+        """
+        if self._history is not None:
+            look = function_look(fn, error_causes=error_causes)
+            self._history.save_snapshot(_arn_account(fn.arn), fn.arn, look.to_data())
+
+    def _remember(self, fn: Function) -> None:
+        """
+        Adds a visit to fn, and redraws the Recent chip and the function field's order.
+        """
+        if self._history is None:
+            return
+        self._history.record(_arn_account(fn.arn), fn.arn, fn.name)
+        self._load_recent()
+        if self._facts:
+            self._draw_chips()
+
+    def _recent_note(self, fn: Function) -> str:
+        place = self._recent.get(fn.arn)
+        return f"opened {human_age(place.last)}" if place is not None else ""
+
     def _in_chip(self, f: _Facts, key: str) -> bool:
         m = f.metrics
-        return {"": True, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
+        return {"": True, "recent": f.fn.arn in self._recent, "changed": f.changed, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
                 "runtime": f.status.state in ("deprecated", "blocked", "ending"),
                 "public": any(t.public for t in f.triggers), "idle": bool(m is not None and not m.invocations)}[key]
 
@@ -479,8 +560,7 @@ class _FunctionsTab:
             n = sum(1 for f in facts if self._in_chip(f, key))
             if key and not n:
                 continue
-            tip = ("Show every function" if not key
-                   else f"Show only the functions that are {label.lower()} (click again for all)")
+            tip = _CHIP_TIPS.get(key, f"Show only the functions that are {label.lower()} (click again for all)")
             chips.append((self._chip_button(self._function_chips, key, tone, self._pick_chip), f"{label} {n:,}", tip,
                           key == self._chip))
         self._show_chips(self.chips, chips if facts else [])
@@ -506,6 +586,13 @@ class _FunctionsTab:
             return ((m.last_invoked.timestamp() if m is not None and m.last_invoked else 0.0),)
         return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
 
+    def _most_yours_first(self, facts: list[_Facts]) -> list[_Facts]:
+        """
+        The Recent chip's order, unless a column sorts: the functions you open most and most lately first.
+        """
+        rank = {arn: i for i, arn in enumerate(self._recent)}
+        return sorted(facts, key=lambda f: rank.get(f.fn.arn, len(rank)))
+
     def _refilter(self, renew: bool = False) -> None:
         facts = [f for f in self._facts.values() if self._in_chip(f, self._chip)] if self._chip else list(
             self._facts.values())
@@ -522,6 +609,8 @@ class _FunctionsTab:
         if not self._query or self._sort != "problems":  # a search ranks its best match first, unless a column sorts
             facts = sorted(facts, key=lambda f: (f.fn.name.lower(), f.fn.region))
             facts = sorted(facts, key=self._sort_key, reverse=self._descending)
+        if self._chip == "recent" and self._sort == "problems":
+            facts = self._most_yours_first(facts)
         self._visible = facts
         self._offset = min(self._offset, max(0, (len(facts) - 1) // _FUNCTION_PAGE * _FUNCTION_PAGE))
         for key, button in self.column_buttons.items():

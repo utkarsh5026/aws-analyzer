@@ -142,6 +142,7 @@ class _ListPane:
         and the folder's overview on the right again, if they still show that folder. The overview changes in place,
         where the reader has scrolled it to.
         """
+        self._save_look(folder)
         if folder is not self._folder or self._widgets is None:
             return
         self._draw_filters(folder)
@@ -359,6 +360,10 @@ class _ListPane:
             row.button._dom_classes = self._row_classes(entry)
         row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())
         row.size.value, row.age.value = size, age
+        is_new = self._is_new(entry)
+        row.age._dom_classes = ("s3x-new",) if is_new else ()
+        if is_new:
+            row.button.tooltip = f"{tip}\nnew or changed since your last visit"
         if base is not None:
             where = _parent_prefix(entry.key[:-1] if entry.kind == "folder" else entry.key)[len(base):]
             row.where.value = where.rstrip("/") or "in this folder"
@@ -594,6 +599,7 @@ class _ListPane:
         self._edit_btn.description = "✎" if editing else "✕"
         self._edit_btn.tooltip = "Type or paste a path" if editing else "Cancel"
         self._edit_btn._dom_classes = ("s3x-nav", "s3x-ic", "s3x-i-edit" if editing else "s3x-i-close")
+        self._draw_recent()
 
     def _on_path(self) -> None:
         value = self._path.value.strip()

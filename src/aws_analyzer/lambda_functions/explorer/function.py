@@ -24,8 +24,9 @@ from ..analysis.logs import LogPage
 from ..analysis.functions import _source_name
 from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
+from ..analysis.changes import change_findings, function_changes
 from ..blocks.wiring import _Columns, _Wiring
-from .frame import _FUNCTION_TABS, _short_day
+from .frame import _FUNCTION_TABS, _short_day, _with_findings
 
 
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
@@ -33,15 +34,15 @@ _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="cu
          '<path d="M12.3 10.6 6.4 19.5"/></svg>')
 
 
-_REMEMBER_SECONDS = 300
+_KEEP_SECONDS = 300
 
-_REMEMBERED_FUNCTIONS = 5
+_KEPT_FUNCTIONS = 5
 
 
 @dataclasses.dataclass
-class _Remembered:
+class _KeptReads:
     """
-    What the window had read about a function when another one was opened, kept for _REMEMBER_SECONDS so going
+    What the window had read about a function when another one was opened, kept for _KEEP_SECONDS so going
     back to it shows it at once: its describe(), its logs, errors and run times (with the time ranges they were read
     for) and its package.
     """
@@ -239,14 +240,14 @@ class _FunctionTab:
         self._stop_live()
         rereading, self._rereading = self._rereading, False
         if rereading:
-            self._remembered.clear()
+            self._kept.clear()
         else:
-            self._remember()
+            self._keep_reads()
         self._reset_pages(fn)
         name = fn.name
-        kept = None if rereading else self._recall(fn)
+        kept = None if rereading else self._kept_reads(fn)
         if kept is not None:
-            self._restore(kept)
+            self._draw_kept(kept)
         target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
         self._show_tab(target, load=not search)
         if search:
@@ -283,6 +284,7 @@ class _FunctionTab:
         self._asked = set()
         self._quietly(self.log_find, value="")
         self._quietly(self.code_find, value="")
+        self._remember(fn)
         self.field.value = fn.arn
         self.field.draw()
         self._draw_title()
@@ -304,34 +306,34 @@ class _FunctionTab:
         for key in ("overview", "settings", "errors", "performance"):
             self._renew(key)
 
-    def _remember(self) -> None:
+    def _keep_reads(self) -> None:
         """
-        Keeps what was read about the function on show, before another is opened (at most _REMEMBERED_FUNCTIONS,
+        Keeps what was read about the function on show, before another is opened (at most _KEPT_FUNCTIONS,
         the oldest dropped first). Search results aren't kept: they're one question, not the function's logs.
         """
         fn = self.function
         if fn is None:
             return
         code = (self._code_fn, self._package_data) if self._code_fn is not None else None
-        kept = _Remembered(time.monotonic(), (self._range, self._until), self._tab_range(), self.detail,
+        kept = _KeptReads(time.monotonic(), (self._range, self._until), self._tab_range(), self.detail,
                            self.logs_page, self.error_report, self.perf, code)
-        self._remembered.pop(fn.arn, None)
+        self._kept.pop(fn.arn, None)
         if not kept.held:
             return
-        self._remembered[fn.arn] = kept
-        while len(self._remembered) > _REMEMBERED_FUNCTIONS:
-            self._remembered.pop(next(iter(self._remembered)))
+        self._kept[fn.arn] = kept
+        while len(self._kept) > _KEPT_FUNCTIONS:
+            self._kept.pop(next(iter(self._kept)))
 
-    def _recall(self, fn: Function) -> _Remembered | None:
+    def _kept_reads(self, fn: Function) -> _KeptReads | None:
         """
-        What was kept about a function, if it was read less than _REMEMBER_SECONDS ago.
+        What was kept about a function, if it was read less than _KEEP_SECONDS ago.
         """
-        kept = self._remembered.pop(fn.arn, None)
-        if kept is None or time.monotonic() - kept.read_at > _REMEMBER_SECONDS:
+        kept = self._kept.pop(fn.arn, None)
+        if kept is None or time.monotonic() - kept.read_at > _KEEP_SECONDS:
             return None
         return kept
 
-    def _restore(self, kept: _Remembered) -> None:
+    def _draw_kept(self, kept: _KeptReads) -> None:
         """
         Draws the tabs from what was kept, each only when it was read for the time range picked now; the rest read
         when they're opened, as usual.
@@ -362,6 +364,7 @@ class _FunctionTab:
         self._draw_alerts()
         self._draw_overview()
         self._draw_settings()
+        self._save_look(dataclasses.replace(detail.function, arn=self.function.arn))
         self._finish("describe", self._tab_line(self._tab), tabs=("overview", "settings"))
 
     def _draw_overview(self) -> None:
@@ -371,8 +374,19 @@ class _FunctionTab:
         sections = self.ui._function_sections(detail, days=30)
         head = [dataclasses.replace(block, items=[item for item in block.items if item[0] in _SETUP_CARDS])
                 if isinstance(block, _Cards) else block for block in sections["head"]]  # the header has the numbers
-        blocks = [*head, self._wiring(detail), *self._charts(detail), *sections["cost"]]
+        blocks = [*_with_findings(head, self._since_last_look(detail)), self._wiring(detail), *self._charts(detail),
+                  *sections["cost"]]
         self._draw("overview", self.overview_view, blocks)
+
+    def _since_last_look(self, detail: FunctionDetail) -> list[tuple[str, str]]:
+        """
+        What changed in the function since your last look, as findings, when you've looked before.
+        """
+        before, since = self._look_before(self.function)
+        if before is None or since is None:
+            return []
+        changes = function_changes(detail.function, before=before, since=since, now=_utcnow(), metrics=detail.metrics)
+        return change_findings(changes)
 
     def _wiring(self, detail: FunctionDetail) -> _Wiring:
         """
