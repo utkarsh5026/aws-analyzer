@@ -22,7 +22,7 @@ from ..._kit.window import _class_if, _running_loop
 from ..helpers import _pct, human_ms
 from ..models import LogEvent
 from ..analysis.errors import _phrase, failing_frame
-from ..analysis.logs import LogPage, LogRun, _marker, line_level
+from ..analysis.logs import LogPage, LogRun, _marker, line_level, slow_cutoff
 from ..analysis.performance import percentile
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
 from ..view import _LINE_PREFIX_RE, _stamp
@@ -39,6 +39,8 @@ _RANGE_CHOICES = (*_RANGES, ("Custom range…", _CUSTOM_RANGE))
 
 _FIRST_TAB_RANGE = "24h"
 
+_FIRST_LOGS_RANGE = "1h"
+
 
 _RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
 
@@ -50,7 +52,7 @@ _LIVE_MINUTES = 15  # ...and for how long, before it stops by itself
 
 
 _RUN_CHIPS = (("", "All runs", "all"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
-              ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"))
+              ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"), ("slow", "Slowest 10%", "warn"))
 
 
 @dataclasses.dataclass
@@ -329,7 +331,8 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, self.custom_bar, self.run_chips, self.run_head, self.jump_button, self.runs_box, pager])
+        page = w.VBox([bar, self.custom_bar, self.run_chips, self._timeline_strip(), self.run_head, self.jump_button,
+                       self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
 
@@ -517,6 +520,7 @@ class _LogsTab:
         self._stop_live()
         start, end = self._range_window()
         self.logs_page, self._runs, self._run_offset = None, [], 0
+        self._run_window = None
         self.jump_button.layout.display = self.older_button.layout.display = "none"
         self.runs_box.children = []
         self._draw_run_chips()
@@ -565,6 +569,7 @@ class _LogsTab:
         self._done_reading("logs")
         self.logs_page = page
         self._runs = page.runs
+        self._run_window = None
         self._run_offset = 0
         self._draw_run_chips()
         self._draw_runs(renew=True)
@@ -603,6 +608,7 @@ class _LogsTab:
         self._log_query = str(self.log_find.value or "").strip()
         if self.found is not None and self._log_query != self._searched:
             self.found, self._found_runs = None, []
+            self._run_window = None
             self._draw_run_chips()
             if self.logs_page is None and "logs" not in self._tasks:  # it opened on a search: read the range now
                 self._load_logs()
@@ -631,6 +637,7 @@ class _LogsTab:
             return
         if not text:
             self.found, self._found_runs, self._searched = None, [], ""
+            self._run_window = None
             self._draw_run_chips()
             if self.logs_page is None and "logs" not in self._tasks:
                 self._load_logs()
@@ -658,6 +665,7 @@ class _LogsTab:
         self._done_reading("search")
         self.found = page
         self._found_runs = page.runs
+        self._run_window = None
         self._run_offset = 0
         if len(self._found_runs) <= 3:
             self._open_runs |= {run.key for run in self._found_runs}
@@ -688,6 +696,7 @@ class _LogsTab:
             self._searched = self._log_query = run.request_id or self._log_query
             self._quietly(self.log_find, value=self._searched)
             self._found_runs = [run]
+            self._run_window = None
             self._open_runs.add(run.key)
             self._run_offset = 0
             self._draw_run_chips()
@@ -702,11 +711,17 @@ class _LogsTab:
         return self._found_runs if self.found is not None else self._runs
 
     def _in_run_chip(self, run: LogRun, key: str) -> bool:
+        if key == "slow":
+            cutoff = self._slow_cutoff
+            return cutoff is not None and run.duration is not None and run.duration >= cutoff
         return {"": True, "failed": run.status in ("failed", "timeout"), "timeout": run.status == "timeout",
                 "logged": run.status == "logged", "cold": run.cold}[key]
 
     def _visible_runs(self) -> list[LogRun]:
         runs = self._source_runs()
+        if self._run_window is not None:
+            start, end = self._run_window
+            runs = [r for r in runs if start <= r.start < end]
         if self._run_chip:
             runs = [r for r in runs if self._in_run_chip(r, self._run_chip)]
         if self._log_query and self.found is None:
@@ -725,15 +740,19 @@ class _LogsTab:
 
     def _draw_run_chips(self) -> None:
         runs = self._source_runs()
+        self._slow_cutoff = slow_cutoff(runs)
         chips = []
         for key, label, tone in _RUN_CHIPS:
             n = sum(1 for r in runs if self._in_run_chip(r, key))
             if key and not n:
                 continue
-            tip = "Show every run" if not key else f"Show only the runs that {label.lower()} (click again for every run)"
+            tip = ("Show every run" if not key
+                   else f"Show only the slowest 10% of the runs read: {human_ms(self._slow_cutoff)} or longer"
+                   if key == "slow" else f"Show only the runs that {label.lower()} (click again for every run)")
             chips.append((self._chip_button(self._run_chip_buttons, key, tone, self._pick_run_chip), f"{label} {n:,}", tip,
                           key == self._run_chip))
         self._show_chips(self.run_chips, chips if runs else [])
+        self._draw_timeline()
 
     def _draw_runs(self, renew: bool = False) -> None:
         visible = self._visible_runs()
@@ -961,6 +980,7 @@ class _LogsTab:
         if self.found is not None:  # back to every run: Live adds to them
             self._quietly(self.log_find, value="")
             self.found, self._found_runs, self._searched, self._log_query = None, [], "", ""
+            self._run_window = None
             self._draw_run_chips()
             self._draw_runs(renew=True)
         self._live, self._live_new, self._live_started = True, 0, time.monotonic()

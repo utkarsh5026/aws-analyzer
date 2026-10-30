@@ -60,6 +60,7 @@ from aws_analyzer.lambda_functions import (
     LogEvent,
     LogGroup,
     LogRun,
+    TimeBucket,
     Performance,
     ProvisionedConcurrency,
     Trigger,
@@ -103,6 +104,8 @@ from aws_analyzer.lambda_functions import (
     search_rank,
     secret_like,
     source_files,
+    run_timeline,
+    slow_cutoff,
     split_runs,
     suggest_memory,
     version_before,
@@ -2933,6 +2936,84 @@ def test_explorer_logs_show_where_the_function_changed(core, explorer):
         x.change_line.value)
 
 
+
+def toy_run(start, duration=100.0, failed=False):
+    rid = f"{int(start.timestamp() * 1000) % 10**8:08x}-1111-4222-8333-444455556666"
+    events = [LogEvent(start, f"START RequestId: {rid} Version: $LATEST", "s", rid)]
+    if failed:
+        events.append(LogEvent(start, "[ERROR] KeyError: 'x'", "s", rid))
+    events.append(LogEvent(start, report_line(rid, duration), "s", rid))
+    return split_runs(events)[0]
+
+
+def test_runs_counted_by_time_and_the_slowest_picked_out():
+    start = NOW - timedelta(hours=1)
+    runs = [toy_run(start + timedelta(minutes=minute), failed=minute == 31) for minute in (1, 2, 31, 59)]
+    buckets = run_timeline(runs, start, NOW, buckets=6)
+    assert [(b.runs, b.failed) for b in buckets] == [(2, 0), (0, 0), (0, 0), (1, 1), (0, 0), (1, 0)]
+    assert buckets[0] == TimeBucket(start, start + timedelta(minutes=10), 2, 0)
+    assert run_timeline(runs, NOW, start) == [] and run_timeline([toy_run(NOW)], start, NOW, 3)[2].runs == 0
+    many = [toy_run(start + timedelta(minutes=i), duration=100.0 * (i + 1)) for i in range(20)]
+    assert slow_cutoff(many) == 1800.0 and slow_cutoff(many[:9]) is None
+
+
+def test_explorer_logs_timeline_and_slow_runs(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now, count=12)
+    x = explorer("etl-nightly", tab="logs")
+    assert x.timeline_box.layout.display == "" and len(x._buckets) == 30
+    assert sum(b.runs for b in x._buckets) == len(x._runs) == 13
+    labels = [c.description for c in x.run_chips.children]
+    assert "Slowest 10% 2" in labels
+    x._run_chip_buttons["slow"].click()
+    assert [r.run.request_id for r in x._run_rows[:len(x._visible_runs())]] == [ids[11], RID]
+    x._run_chip_buttons["slow"].click()
+    busy = next(i for i, b in enumerate(x._buckets) if any(r.request_id == RID for r in x._runs if b.start <= r.start < b.end))
+    x.timeline_bars[busy].click()
+    bucket = x._buckets[busy]
+    inside = [r.request_id for r in x._runs if bucket.start <= r.start < bucket.end]
+    assert [r.request_id for r in x._visible_runs()] == inside and RID in inside and len(inside) == bucket.runs
+    assert "lmx-on" in x.timeline_bars[busy]._dom_classes and "lmx-bad" in x.timeline_bars[busy]._dom_classes
+    assert "click the bar again for every run" in plain(x.status.value)
+    x.timeline_bars[busy].click()
+    assert x._run_window is None and len(x._visible_runs()) == 13
+
+
+def test_explorer_remembers_the_functions_opened(core, explorer, monkeypatch):
+    x = explorer("etl-nightly", tab="logs")
+    first = x.logs_page
+    reads = []
+    real = core.describe
+    monkeypatch.setattr(core, "describe", lambda *args, **kwargs: reads.append(args) or real(*args, **kwargs))
+    x.open("api-handler")
+    assert x.function.name == "api-handler" and len(reads) == 1
+    x.open("etl-nightly")
+    assert x.logs_page is first and len(reads) == 1 and x.detail is not None
+    assert "etl-nightly as the window read it less than a minute ago" in plain(x.status.value)
+    x.refresh()
+    assert x.function.name == "etl-nightly" and x.logs_page is not first and len(reads) == 2
+    assert x._remembered == {}
+
+
+
+def test_explorer_gives_the_code_that_reopens_it(core, explorer):
+    x = explorer()
+    assert x._view_code() == "from aws_analyzer.lambda_functions import explore\nx = explore()"
+    x.open("etl-nightly")
+    assert x._view_code().endswith("x = explore('etl-nightly')")
+    x.tab_buttons["logs"].click()
+    assert x._view_code().endswith("x = explore('etl-nightly', tab='logs')")
+    x.log_find.value = "loading"
+    x._log_search()
+    x.range_pick.value = "3h"
+    assert x._view_code().endswith("x = explore('etl-nightly', tab='logs')\nx.logs(search='loading', since='3h')")
+    assert "x.logs(search=&#x27;loading&#x27;, since=&#x27;3h&#x27;)" in x.view_code.value
+    x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")
+    assert x._view_code().endswith("x.logs(search='loading', since='2026-10-27 09:00', until='2026-10-27 17:30')")
+    every = explorer(region="all")
+    assert every._view_code().endswith("x = explore(region='all')")
+
+
 NESTED = zipped({
     "app.py": "def handler(event, context):\n    return 1\n",
     "lib/helpers.py": "def helper():\n    return 2\n",
@@ -3156,7 +3237,7 @@ def test_explorer_function_field_regions_and_commands(core, explorer):
     x.region_pick.value = REGION
     assert x.function is None and x._tab == "functions"
     x.logs("etl-nightly", search="loading")
-    assert x._tab == "logs" and [run.request_id for run in x._found_runs] == [RID] and x.logs_page is None
+    assert x._tab == "logs" and [run.request_id for run in x._found_runs] == [RID]
     x.log_find.value = ""  # it opened on a search: clearing it reads the time range
     assert x.logs_page is not None and [run.request_id for run in x._visible_runs()] == [RID]
     with pytest.raises(ValueError, match="tab= is one of"):

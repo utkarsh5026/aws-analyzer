@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import time
 from datetime import timedelta, timezone
 from typing import Any
 
@@ -18,7 +19,8 @@ from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _skeleton
 
 from ..helpers import MB, _midnight, _pct, human_ms, parse_function_ref
-from ..models import Function, FunctionDetail
+from ..models import ErrorReport, Function, FunctionDetail, Performance
+from ..analysis.logs import LogPage
 from ..analysis.functions import _source_name
 from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
@@ -29,6 +31,33 @@ from .frame import _FUNCTION_TABS, _short_day
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
          'stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h2.3c.9 0 1.6.5 2 1.3l6.7 13.7"/>'
          '<path d="M12.3 10.6 6.4 19.5"/></svg>')
+
+
+_REMEMBER_SECONDS = 300
+
+_REMEMBERED_FUNCTIONS = 5
+
+
+@dataclasses.dataclass
+class _Remembered:
+    """
+    What the window had read about a function when another one was opened, kept for _REMEMBER_SECONDS so going
+    back to it shows it at once: its describe(), its logs, errors and run times (with the time ranges they were read
+    for) and its package.
+    """
+
+    read_at: float
+    logs_range: tuple[Any, Any]
+    tab_range: tuple[Any, Any]
+    detail: FunctionDetail | None
+    logs_page: LogPage | None
+    error_report: ErrorReport | None
+    perf: Performance | None
+    code: tuple[Function, bytes | None] | None
+
+    @property
+    def held(self) -> bool:
+        return any(part is not None for part in (self.detail, self.logs_page, self.error_report, self.perf, self.code))
 
 
 _SETUP_CARDS = {"Runtime", "Memory", "Timeout", "Architecture", "Triggers"}  # function_info()'s cards the Overview
@@ -208,11 +237,46 @@ class _FunctionTab:
         """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
+        rereading, self._rereading = self._rereading, False
+        if rereading:
+            self._remembered.clear()
+        else:
+            self._remember()
+        self._reset_pages(fn)
+        name = fn.name
+        kept = None if rereading else self._recall(fn)
+        if kept is not None:
+            self._restore(kept)
+        target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
+        self._show_tab(target, load=not search)
+        if search:
+            self._quietly(self.log_find, value=search)
+            self._log_query = search
+            self._asked.add("logs")
+            self._log_search()
+        if kept is not None and kept.detail is not None:
+            self._described(kept.detail)
+            minutes = int((time.monotonic() - kept.read_at) // 60)
+            age = f"{_plural(minutes, 'minute')} ago" if minutes else "less than a minute ago"
+            self._status(f"{name} as the window read it {age} · ↻ Refresh reads it again")
+            return
+        if target in ("overview", "settings"):
+            self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
+                         owner="describe")
+        self._later("describe", lambda: self.core.describe(name, region=fn.region or None, days=30), self._described,
+                    self._describe_failed)
+
+    def _reset_pages(self, fn: Function) -> None:
+        """
+        Forgets what was read about the function shown before, and puts fn in the header with every tab blank or
+        waiting for its read.
+        """
         self.function, self.detail = fn, None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
         self._how = False
         self._code_target = None
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
+        self._run_window = None
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
         self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()
@@ -225,31 +289,66 @@ class _FunctionTab:
         self._draw_stats()
         self._draw_alerts()
         self._mark_rows()
-        name = fn.name
-        self._set(self.overview_view, _skeleton(f"Reading {name}: its settings, what calls it, its last 30 days…"))
-        self._set(self.settings_view, _skeleton(f"Reading {name}'s settings…"))
-        for widget in (self.errors_view, self.perf_view, self.code_view, self.source_view, self.error_head,
-                       self.slow_head, self.run_head):
+        self._set(self.overview_view, _skeleton(f"Reading {fn.name}: its settings, what calls it, its last 30 days…"))
+        self._set(self.settings_view, _skeleton(f"Reading {fn.name}'s settings…"))
+        for widget in (self.errors_view, self.cause_head, self.errors_more, self.perf_view, self.code_view,
+                       self.source_view, self.error_head, self.slow_head, self.run_head):
             self._set(widget, "")
         self.error_rows_box.children = self.slow_rows_box.children = self.files_box.children = []
+        self.cause_rows_box.children = []
+        self.timeline_box.layout.display = "none"
         self.runs_box.children = []
         self.run_chips.children = []
         self.code_split.layout.display = self.code_bar.layout.display = "none"
         self.code_more.layout.display = self.jump_button.layout.display = self.older_button.layout.display = "none"
         for key in ("overview", "settings", "errors", "performance"):
             self._renew(key)
-        target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
-        self._show_tab(target, load=not search)
-        if search:
-            self._quietly(self.log_find, value=search)
-            self._log_query = search
+
+    def _remember(self) -> None:
+        """
+        Keeps what was read about the function on show, before another is opened (at most _REMEMBERED_FUNCTIONS,
+        the oldest dropped first). Search results aren't kept: they're one question, not the function's logs.
+        """
+        fn = self.function
+        if fn is None:
+            return
+        code = (self._code_fn, self._package_data) if self._code_fn is not None else None
+        kept = _Remembered(time.monotonic(), (self._range, self._until), self._tab_range(), self.detail,
+                           self.logs_page, self.error_report, self.perf, code)
+        self._remembered.pop(fn.arn, None)
+        if not kept.held:
+            return
+        self._remembered[fn.arn] = kept
+        while len(self._remembered) > _REMEMBERED_FUNCTIONS:
+            self._remembered.pop(next(iter(self._remembered)))
+
+    def _recall(self, fn: Function) -> _Remembered | None:
+        """
+        What was kept about a function, if it was read less than _REMEMBER_SECONDS ago.
+        """
+        kept = self._remembered.pop(fn.arn, None)
+        if kept is None or time.monotonic() - kept.read_at > _REMEMBER_SECONDS:
+            return None
+        return kept
+
+    def _restore(self, kept: _Remembered) -> None:
+        """
+        Draws the tabs from what was kept, each only when it was read for the time range picked now; the rest read
+        when they're opened, as usual.
+        """
+        if kept.logs_page is not None and kept.logs_range == (self._range, self._until):
             self._asked.add("logs")
-            self._log_search()
-        if target in ("overview", "settings"):
-            self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
-                         owner="describe")
-        self._later("describe", lambda: self.core.describe(name, region=fn.region or None, days=30), self._described,
-                    self._describe_failed)
+            self._got_logs(kept.logs_page)
+        same_range = kept.tab_range == self._tab_range()
+        if same_range and kept.error_report is not None:
+            self._asked.add("errors")
+            self._got_errors(kept.error_report)
+        if same_range and kept.perf is not None:
+            self._asked.add("performance")
+            self._got_perf(kept.perf)
+        if kept.code is not None:
+            self._asked.add("code")
+            self._got_code(kept.code)
 
     def _describe_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)

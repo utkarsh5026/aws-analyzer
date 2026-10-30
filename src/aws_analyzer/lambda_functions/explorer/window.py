@@ -9,7 +9,7 @@ from typing import Any
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _Hint
-from ..._kit.fmt import _plural
+from ..._kit.fmt import _in_zone, _plural
 from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
 
@@ -18,7 +18,7 @@ from ..models import CodeFrame, CodePackage, ErrorReport, Function, FunctionDeta
 from ..analysis.text import _window
 from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
-from ..analysis.logs import LogPage, LogRun
+from ..analysis.logs import LogPage, LogRun, TimeBucket
 from ..analysis.codemap.model import CodeMap
 from ..analyzer import LambdaAnalyzer
 from ..style import _CSS, _render_html
@@ -28,14 +28,15 @@ from .frame import (
 )
 from .widgets import _FunctionField, _Row, _RunRow
 from .functions import _Facts, _FunctionsTab
-from .function import _FunctionTab
-from .logs import _LogsTab, _Reading
+from .function import _FunctionTab, _Remembered
+from .logs import _FIRST_LOGS_RANGE, _LogsTab, _Reading
+from .timeline import _Timeline
 from .errors import _ErrorsTab
 from .performance import _PerformanceTab
 from .code import _CodeTab
 
 
-class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
+class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -120,7 +121,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._query, self._chip, self._sort, self._descending, self._offset = "", "", "problems", True, 0
         self._rows: list[_Row] = []
         self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
-        self._range, self._log_query, self._run_chip, self._run_offset = "1h", "", "", 0
+        self._range, self._log_query, self._run_chip, self._run_offset = _FIRST_LOGS_RANGE, "", "", 0
         self._linked = False
         self._until: Any = None
         self._reading: _Reading | None = None
@@ -134,6 +135,12 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
         self._error_rows: list[_Row] = []
         self._cause_rows: list[_Row] = []
+        self._run_window: tuple[datetime, datetime] | None = None
+        self._remembered: dict[str, _Remembered] = {}
+        self.view_code: Any = None
+        self._rereading = False
+        self._slow_cutoff: float | None = None
+        self._buckets: list[TimeBucket] = []
         self.change_line: Any = None
         self._code_target: CodeFrame | None = None
         self._slow_rows: list[_Row] = []
@@ -248,9 +255,11 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
     @_window_errors
     def refresh(self) -> None:
         """
-        Reads everything again: the functions, and the picked function's tabs (the ↻ button).
+        Reads everything again: the functions, and the picked function's tabs (the ↻ button), forgetting what the
+        window kept about the functions opened before.
         """
         keep = self.function
+        self._rereading = True
         self._load_list(reopen=keep)
 
     # ------------------------------------------------------------------ plumbing
@@ -286,6 +295,51 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         Whether the list holds more than one region's functions.
         """
         return self.region == "all" or bool(self.overview is not None and len(self.overview.regions) > 1)
+
+    def _status(self, text: str, level: str = "", busy: bool = False, owner: str = "") -> None:
+        """
+        The line under the tabs, and with it the code that opens what the window shows (it changes with each).
+        """
+        super()._status(text, level, busy, owner)
+        if self.view_code is not None:
+            self._set(self.view_code, _view_code_html(self._view_code()))
+
+    def _view_code(self) -> str:
+        """
+        The code that opens the window as it is now, to run in another cell or send to someone: the function, its
+        tab, the region, and on the Logs tab the time range and the search.
+        """
+        fn = self.function
+        args = [repr(fn.name)] if fn is not None else []
+        if fn is not None and self._tab in _FUNCTION_TABS and self._tab != "overview":
+            args.append(f"tab={self._tab!r}")
+        region = self.region if self.region == "all" or fn is None else fn.region or self.region
+        if region and (region == "all" or region != self._session_region()):
+            args.append(f"region={region!r}")
+        lines = ["from aws_analyzer.lambda_functions import explore", f"x = explore({', '.join(args)})"]
+        logs_args = self._logs_code_args() if fn is not None and self._tab == "logs" else []
+        if logs_args:
+            lines.append(f"x.logs({', '.join(logs_args)})")
+        return "\n".join(lines)
+
+    def _logs_code_args(self) -> list[str]:
+        """
+        The Logs tab's time range and search, as x.logs()'s arguments; none when they're as it opens.
+        """
+        args = []
+        if self.found is not None and self._searched:
+            args.append(f"search={self._searched!r}")
+        if self._until is not None or self._range != _FIRST_LOGS_RANGE:
+            args.append(f"since={_time_arg(self._range)}")
+        if self._until is not None:
+            args.append(f"until={_time_arg(self._until)}")
+        return args
+
+    def _session_region(self) -> str | None:
+        try:
+            return self.core.region
+        except ValueError:
+            return None
 
     def _where(self) -> str:
         return "every region" if self.region == "all" else str(self.region or "this region")
@@ -328,7 +382,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
                                        "the picked function's tabs", layout=layout(width="auto"))
         self.refresh_button.add_class("lmx-small")
         self.refresh_button.on_click(self._safely(lambda _button: self.refresh()))
-        top = w.HBox([self.title, self.region_pick, self.refresh_button], layout=layout(width="100%"))
+        self.view_code = w.HTML(layout=layout(width="auto"))
+        self.view_code.add_class("lmx-vc")
+        top = w.HBox([self.title, self.view_code, self.region_pick, self.refresh_button], layout=layout(width="100%"))
         top.add_class("lmx-top")
         self.field = _FunctionField(self, on_pick=self._picked, on_text=self._typed)
         self.stats = w.HTML(layout=layout(flex="1 1 360px", min_width="0"))
@@ -496,6 +552,26 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
             return
         self._fill_regions()
         self._load_list()
+
+def _time_arg(value: Any) -> str:
+    """
+    A time range's end as code: '24h' as it is, a moment as text in the reports' time zone ('2026-10-27 09:00'),
+    which is how logs() reads it back.
+    """
+    if isinstance(value, datetime):
+        return repr(f"{_in_zone(value):%Y-%m-%d %H:%M}")
+    return repr(str(value))
+
+
+def _view_code_html(code: str) -> str:
+    """
+    The header's Copy as code: a click selects the code it holds (hidden: the button shows only its label), so
+    Ctrl+C copies it, with no JavaScript (the window has none).
+    """
+    return (f'<span class="cpy" tabindex="0" role="button" aria-label="Copy this view as code" title="{_esc(code)}'
+            '\n\nClick, then press Ctrl+C (⌘C on a Mac) to copy it, and run it in a cell to open the window as it is '
+            f'now"><span class="cpt">{_esc(code)}</span></span>')
+
 
 def explore(
     name: str | None = None,

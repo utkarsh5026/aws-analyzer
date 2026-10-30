@@ -391,6 +391,21 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .src pre.txt{flex:1 1 auto;user-select:text}
 .lmx-app .src.hit pre{background:linear-gradient(var(--lx-hit),var(--lx-hit)) no-repeat 0 calc(8px + var(--mark) * 1.55em)/100% 1.55em}
 .lmx-app .srcx{margin:0 0 12px}
+.lmx-app .lmx-vc{align-self:center;margin:0 8px 0 0}
+.lmx-app .lmx-vc .cpy{position:relative;display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--lx-line-2);background:var(--lx-tint);color:var(--lx-accent);font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;user-select:all;-webkit-user-select:all}
+.lmx-app .lmx-vc .cpy::before{content:"\\29C9\\2002 Copy as code"}
+.lmx-app .lmx-vc .cpy:hover{background:var(--lx-tint-2)}
+.lmx-app .lmx-vc .cpy:focus{border-color:var(--lx-accent);background:var(--lx-soft);outline:none}
+.lmx-app .lmx-vc .cpy:focus::before{content:"\\2713\\2002Selected: press Ctrl+C or \\2318 C"}
+.lmx-app .lmx-vc .cpy .cpt{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:pre}
+.lmx-app .lmx-vc .cpy ::selection,.lmx-app .lmx-vc .cpy::selection{background:transparent}
+.lmx-app.lmx-app .lmx-timeline{height:38px;align-items:flex-end;gap:2px;margin:6px 0 0;padding:0 2px;border-bottom:1px solid var(--lx-line)}
+.lmx-app.lmx-app button.lmx-tbar{min-width:3px;padding:0;margin:0;border:0;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--lx-accent) 45%,transparent);box-shadow:none}
+.lmx-app.lmx-app button.lmx-tbar.lmx-bad{background:color-mix(in srgb,var(--lx-bad) 70%,transparent)}
+.lmx-app.lmx-app button.lmx-tbar:hover:enabled{filter:brightness(.85)}
+.lmx-app.lmx-app button.lmx-tbar:disabled{background:var(--lx-line);opacity:1;cursor:default}
+.lmx-app.lmx-app button.lmx-tbar.lmx-on{outline:2px solid var(--lx-accent);outline-offset:1px}
+.lmx-app .lmx-taxis{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:2px 2px 4px}
 .lmx-app .lmx-changed{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:11.5px;color:var(--lx-accent-2)}
 .lmx-app .lmx-changed::before,.lmx-app .lmx-changed::after{content:"";flex:1 1 auto;border-top:1.5px dashed var(--lx-accent-2);opacity:.55}
 .lmx-app .lmx-changed span{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

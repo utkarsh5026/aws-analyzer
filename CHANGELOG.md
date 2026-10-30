@@ -21,6 +21,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
   - `change_effect()` compares a function's days before and after a change.
 
+- ⚡ **Lambda explorer: a timeline, the slowest runs and code to reopen it** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The Logs tab draws its runs over time, red where they failed; click a bar for only those runs. **Slowest 10%** picks out the slow ones.
+  - **⧉ Copy as code** holds the code that opens the window as it is now, to run in another cell or send to someone.
+  - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
+
 ### Changed
 
 - ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
