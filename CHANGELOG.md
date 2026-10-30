@@ -9,8 +9,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
-## [0.40.0] - 2026-10-30
-
 ### Added
 
 - ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
@@ -28,6 +26,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - **⧉ Copy as code** holds the code that opens the window as it is now, to run in another cell or send to someone.
   - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
 
+### Changed
+
+- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
+  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
+  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
+
+## [0.40.0] - 2026-10-30
+
+### Added
+
 - 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Recent** row over your buckets; **↩** picks up where you left off.
   - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
@@ -43,13 +52,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - ⚡ **Lambda explorer: what changed since your last look** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
   - A **Changed** chip: functions whose code or settings changed, or whose errors went up, since you last opened them.
   - The Overview says what changed; the Errors tab names errors it hadn't seen on your last look.
-
-### Changed
-
-- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
-  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
-  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
-  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
 
 ## [0.39.0] - 2026-10-30
 
