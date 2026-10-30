@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable
+from urllib.parse import quote
 
 from ..._kit.deps import _require
 
@@ -159,6 +160,35 @@ def slow_cutoff(runs: Iterable[LogRun]) -> float | None:
     if len(durations) < _SLOW_MIN_RUNS:
         return None
     return percentile(durations, 100 * (1 - SLOW_SHARE))
+
+
+_CONSOLE_HOSTS = (("cn-", "console.amazonaws.cn"), ("us-gov-", "console.amazonaws-us-gov.com"))
+
+
+def _console_part(text: str) -> str:
+    """
+    A name or value in a CloudWatch console address, the way the console writes them after its #: escaped as a URL
+    twice, then each % written as $ ('/aws/lambda/x' -> '$252Faws$252Flambda$252Fx').
+    """
+    return quote(quote(text, safe=""), safe="").replace("%", "$")
+
+
+def run_console_url(region: str, log_group: str, stream: str, request_id: str) -> str:
+    """
+    The AWS console's page of one run: its log stream in CloudWatch, filtered to the lines that name its request ID.
+    """
+    host = next((host for prefix, host in _CONSOLE_HOSTS if region.startswith(prefix)), "console.aws.amazon.com")
+    return (f"https://{region}.{host}/cloudwatch/home?region={region}#logsV2:log-groups/log-group/"
+            f"{_console_part(log_group)}/log-events/{_console_part(stream)}"
+            f"$3FfilterPattern$3D{_console_part(chr(34) + request_id + chr(34))}")
+
+
+def run_insights_query(request_id: str) -> str:
+    """
+    A CloudWatch Logs Insights query for every line of one run, oldest first: run it on the function's log group.
+    """
+    return (f'fields @timestamp, @message\n| filter @requestId = "{request_id}" or @message like "{request_id}"\n'
+            "| sort @timestamp asc")
 
 
 @dataclass

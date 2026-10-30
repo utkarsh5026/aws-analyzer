@@ -76,7 +76,10 @@ from .analysis.findings import RECENT_DAYS, account_findings, change_effect, fun
 from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
 )
-from .analysis.logs import LogPage, LogRun, TimeBucket, line_level, parse_report, run_timeline, slow_cutoff, split_runs
+from .analysis.logs import (
+    LogPage, LogRun, TimeBucket, line_level, parse_report, run_console_url, run_insights_query, run_timeline,
+    slow_cutoff, split_runs,
+)
 from .analysis.performance import percentile, performance_findings, suggest_memory
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
@@ -213,6 +216,8 @@ __all__ = [
     "runtime_status",
     "search_rank",
     "secret_like",
+    "run_console_url",
+    "run_insights_query",
     "run_timeline",
     "slow_cutoff",
     "split_runs",

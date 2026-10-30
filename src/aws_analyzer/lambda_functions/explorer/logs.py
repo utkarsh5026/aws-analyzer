@@ -22,7 +22,9 @@ from ..._kit.window import _class_if, _running_loop
 from ..helpers import _pct, human_ms
 from ..models import LogEvent
 from ..analysis.errors import _phrase, failing_frame
-from ..analysis.logs import LogPage, LogRun, _marker, line_level, slow_cutoff
+from ..analysis.logs import (
+    LogPage, LogRun, _marker, line_level, run_console_url, run_insights_query, slow_cutoff,
+)
 from ..analysis.performance import percentile
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
 from ..view import _LINE_PREFIX_RE, _stamp
@@ -237,7 +239,36 @@ def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
             f'<span class="rq">{_esc(request[:8])}</span></div>')
 
 
-def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
+def _copy_chip(kind: str, text: str, title: str) -> str:
+    """
+    A chip that holds text to copy: a click selects it (hidden: the chip shows only its label, which the
+    stylesheet gives each kind), so Ctrl+C copies it, with no JavaScript.
+    """
+    return (f'<span class="cpy {kind}" tabindex="0" role="button" aria-label="{_esc(title)}" title="{_esc(title)}">'
+            f'<span class="cpt">{_esc(text)}</span></span>')
+
+
+def _run_actions(run: LogRun, region: str, log_group: str) -> str:
+    """
+    Under an open run: its request ID and a Logs Insights query for it to copy, and its page in the AWS console.
+    All of them only read.
+    """
+    if not run.request_id or not region:
+        return ""
+    rid = run.request_id
+    parts = [_copy_chip("rid", rid, f"Copy the request ID {rid}: click, then Ctrl+C (⌘C on a Mac)"),
+             _copy_chip("rq", run_insights_query(rid), f"Copy a CloudWatch Logs Insights query for every line of this "
+                                                         f"run, to run on {log_group}: click, then Ctrl+C")]
+    if run.stream:
+        url = run_console_url(region, log_group, run.stream, rid)
+        parts.append(f'<a class="ra" href="{_esc(url)}" target="_blank" rel="noopener noreferrer" title="Its log '
+                     'stream in the CloudWatch console, filtered to this run (opens a new tab)">↗ Open in the AWS '
+                     "console</a>")
+    return f'<div class="ract">{"".join(parts)}</div>'
+
+
+def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES, *, region: str = "",
+              log_group: str = "") -> str:
     """
     An open run's lines: how far into the run each came, its level, and its text (JSON lines as their message, with
     their other fields a click away), then what its REPORT line says and its request ID to copy.
@@ -283,7 +314,8 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
         facts.append(f'<span>request <code title="Click to select, then copy">{_esc(run.request_id)}</code></span>')
     if run.stream:
         facts.append(f'<span title="The log stream: one execution environment">{_esc(_clip(run.stream, 70))}</span>')
-    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div></div>'
+    actions = _run_actions(run, region, log_group)
+    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div>{actions}</div>'
 
 
 class _LogsTab:
@@ -772,7 +804,7 @@ class _LogsTab:
             if row.button.tooltip != tip:
                 row.button.tooltip = tip
             if opened:
-                self._set(row.body, _run_body(run, words))
+                self._set(row.body, self._run_body_html(run, words))
             row.body.layout.display = "" if opened else "none"
             self._draw_run_code(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
@@ -900,6 +932,10 @@ class _LogsTab:
         if target:
             self.range_pick.value = target  # its observer reads the logs again
 
+    def _run_body_html(self, run: LogRun, words: list[str]) -> str:
+        fn = self._full()
+        return _run_body(run, words, region=fn.region or self._session_region() or "", log_group=fn.log_group)
+
     def _draw_run_code(self, row: _RunRow, opened: bool) -> None:
         """
         The button under an open run's lines that opens, in the Code tab, the line of its own code its traceback
@@ -925,7 +961,7 @@ class _LogsTab:
             row.body.layout.display = "none"
         else:
             self._open_runs.add(run.key)
-            self._set(row.body, _run_body(run, self._words()))
+            self._set(row.body, self._run_body_html(run, self._words()))
             row.body.layout.display = ""
         opened = run.key in self._open_runs
         self._draw_run_code(row, opened)
