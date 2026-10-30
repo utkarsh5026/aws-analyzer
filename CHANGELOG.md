@@ -19,6 +19,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A **Recent** chip, and the function field lists the ones you've opened first.
   - `explore(history=False)` turns it off; `x.forget_recent()` clears it.
 
+- 🧭 **S3 explorer: what's new since your last visit** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A folder's overview counts the files new or changed since you were last there, and how its file count moved.
+  - **●** marks those files in the list.
+
+- ⚡ **Lambda explorer: what changed since your last look** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Changed** chip: functions whose code or settings changed, or whose errors went up, since you last opened them.
+  - The Overview says what changed; the Errors tab names errors it hadn't seen on your last look.
+
 ## [0.38.0] - 2026-10-30
 
 ### Added

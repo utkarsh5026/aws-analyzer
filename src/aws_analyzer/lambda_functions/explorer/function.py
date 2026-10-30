@@ -22,8 +22,9 @@ from ..models import Function, FunctionDetail
 from ..analysis.functions import _source_name
 from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
+from ..analysis.changes import change_findings, function_changes
 from ..blocks.wiring import _Columns, _Wiring
-from .frame import _FUNCTION_TABS, _short_day
+from .frame import _FUNCTION_TABS, _short_day, _with_findings
 
 
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
@@ -263,6 +264,7 @@ class _FunctionTab:
         self._draw_alerts()
         self._draw_overview()
         self._draw_settings()
+        self._save_look(dataclasses.replace(detail.function, arn=self.function.arn))
         self._finish("describe", self._tab_line(self._tab), tabs=("overview", "settings"))
 
     def _draw_overview(self) -> None:
@@ -272,8 +274,19 @@ class _FunctionTab:
         sections = self.ui._function_sections(detail, days=30)
         head = [dataclasses.replace(block, items=[item for item in block.items if item[0] in _SETUP_CARDS])
                 if isinstance(block, _Cards) else block for block in sections["head"]]  # the header has the numbers
-        blocks = [*head, self._wiring(detail), *self._charts(detail), *sections["cost"]]
+        blocks = [*_with_findings(head, self._since_last_look(detail)), self._wiring(detail), *self._charts(detail),
+                  *sections["cost"]]
         self._draw("overview", self.overview_view, blocks)
+
+    def _since_last_look(self, detail: FunctionDetail) -> list[tuple[str, str]]:
+        """
+        What changed in the function since your last look, as findings, when you've looked before.
+        """
+        before, since = self._look_before(self.function)
+        if before is None or since is None:
+            return []
+        changes = function_changes(detail.function, before=before, since=since, now=_utcnow(), metrics=detail.metrics)
+        return change_findings(changes)
 
     def _wiring(self, detail: FunctionDetail) -> _Wiring:
         """

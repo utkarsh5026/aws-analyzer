@@ -131,9 +131,26 @@ The **Recent** row shows over your list of buckets, and over any folder while th
 
 ??? more "What it keeps, where, and how to turn it off"
 
-    Only the folders' paths and when you opened them, per AWS account, never what's in a file. They're in one file, `~/.cache/aws-analyzer/history/places.sqlite`, which `clean_up()` keeps. Each explorer keeps its newest 500 visits.
+    Only the folders' paths and when you opened them, per AWS account, and each folder's count of files and their size when you were last there ([below](#since)), never what's in a file. They're in one file, `~/.cache/aws-analyzer/history/places.sqlite`, which `clean_up()` keeps. Each explorer keeps its newest 500 visits.
 
     `x.forget_recent("s3://bucket/folder/")` forgets one folder, and `x.forget_recent()` every folder. `S3Explorer(history=False)` remembers nothing, `history="path/to/file.sqlite"` keeps them in another file, and the environment variable `AWS_ANALYZER_HISTORY=off` turns it off for every explorer.
+
+### What's new since your last visit { #since }
+
+Open a folder you've been in before, and its overview says what arrived since: how many files are new or changed, and ● marks them in the list.
+{ .gist }
+
+![S3Explorer on the churn folder: holdout.parquet and train.parquet marked with a green ● just now in the Modified column; on the right the cards Files 4, Size 1.3 GB, Newest file just now and New since 2d ago 2, then the note: Since your last visit 2d ago: 2 files are new or changed (73.2 KB), marked ● in the list; the folder went from 3 to 4 files](images/explorer-changes-light.webp#only-light){ width="984" height="581" loading=lazy }
+![S3Explorer on the churn folder: holdout.parquet and train.parquet marked with a green ● just now in the Modified column; on the right the cards Files 4, Size 1.3 GB, Newest file just now and New since 2d ago 2, then the note: Since your last visit 2d ago: 2 files are new or changed (73.2 KB), marked ● in the list; the folder went from 3 to 4 files](images/explorer-changes-dark.webp#only-dark){ width="984" height="581" loading=lazy }
+/// caption
+A folder you were in two days ago: one file replaced, one added.
+///
+
+It's read from the listing the explorer makes anyway, so it costs nothing extra. A visit is everything within an hour, so the comparison is with your visit before this one, not with a minute ago.
+
+??? more "How it decides what's new"
+
+    A file is new or changed when S3 says it was modified after your last visit. S3 doesn't tell a new file from a replaced one, so they're counted together. The count of files is compared with your last visit's only when both listings were whole: in a folder bigger than what's listed, it says "listed so far". With **Include subfolders**, the files below are marked the same way, but the counts aren't compared.
 
 ??? more "What the icons mean, and what the right shows before you click a file"
 

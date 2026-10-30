@@ -1,21 +1,27 @@
 """
 The places you opened in the explorers, remembered between sessions: the S3 folders you went to and the Lambda
-functions you picked, so a window can offer them again, the ones you use most first.
+functions you picked, so a window can offer them again, the ones you use most first, and a snapshot of what each one
+looked like when you were last there, so a window can say what changed since.
 
 One SQLite file (stdlib sqlite3), history/places.sqlite in aws-analyzer's cache folder ($XDG_CACHE_HOME, else
 ~/.cache), kept by clean_up(). It holds where you went (an s3:// path, a function's ARN), its name and when, per
 AWS account and per explorer, never what a file or a log said. Each explorer keeps its newest KEPT_VISITS visits.
+A snapshot is what an explorer chose to note about a place (counts, sizes, a code hash), as JSON; looks within
+VISIT_GAP_MINUTES of each other are one visit, so a snapshot_before() is from an earlier visit, never this one, and
+each place keeps its two newest snapshots.
 history=False on an explorer, or AWS_ANALYZER_HISTORY=off, turns it off; AWS_ANALYZER_HISTORY=<path> puts the file
 elsewhere. Nothing here raises: a file that can't be read or written turns the history off and says why (problem).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from .local_files import sandbox_cache
 
@@ -24,6 +30,8 @@ HISTORY_FOLDER = "history"
 HISTORY_FILE = "places.sqlite"
 HALF_LIFE_DAYS = 7.0
 KEPT_VISITS = 500
+VISIT_GAP_MINUTES = 60
+SNAPSHOTS_KEPT = 2
 
 _OFF = ("off", "0", "false", "no", "none")
 _SECONDS_PER_DAY = 86_400.0
@@ -31,6 +39,9 @@ _TABLES = (
     "CREATE TABLE IF NOT EXISTS visits (account TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, "
     "label TEXT NOT NULL, at REAL NOT NULL)",
     "CREATE INDEX IF NOT EXISTS visits_by_place ON visits (account, kind, at)",
+    "CREATE TABLE IF NOT EXISTS snapshots (account TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, "
+    "at REAL NOT NULL, data TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS snapshots_by_place ON snapshots (account, kind, key, at)",
 )
 
 
@@ -57,6 +68,17 @@ class Place:
     last: datetime
     visits: int
     score: float
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """
+    What a place looked like on one visit: its key, when, and what the explorer noted (data, from JSON).
+    """
+
+    key: str
+    at: datetime
+    data: dict[str, Any]
 
 
 def frecency(moments: list[datetime], now: datetime, *, half_life_days: float = HALF_LIFE_DAYS) -> float:
@@ -150,7 +172,8 @@ class PlaceHistory:
 
     def record(self, account: str, key: str, label: str = "", *, at: datetime | None = None) -> None:
         """
-        Adds a visit to `key`, and forgets this explorer's visits beyond its newest KEPT_VISITS.
+        Adds a visit to `key`, and forgets this explorer's visits beyond its newest KEPT_VISITS, with the snapshots of
+        the places that leaves without a visit.
         """
         if not key or not self.is_on:
             return
@@ -163,6 +186,9 @@ class PlaceHistory:
                     "DELETE FROM visits WHERE account = ? AND kind = ? AND rowid NOT IN (SELECT rowid FROM visits "
                     "WHERE account = ? AND kind = ? ORDER BY at DESC LIMIT ?)",
                     (account, self.kind, account, self.kind, KEPT_VISITS))
+                connection.execute(
+                    "DELETE FROM snapshots WHERE account = ? AND kind = ? AND key NOT IN (SELECT key FROM visits "
+                    "WHERE account = ? AND kind = ?)", (account, self.kind, account, self.kind))
         except (sqlite3.Error, OSError) as exc:
             self._failed(exc)
 
@@ -194,20 +220,85 @@ class PlaceHistory:
         places = self.places(account)
         return max(places, key=lambda place: place.last) if places else None
 
+    def _newest_snapshot(self, connection: sqlite3.Connection, account: str, key: str) -> tuple[int, float, str] | None:
+        return connection.execute("SELECT rowid, at, data FROM snapshots WHERE account = ? AND kind = ? AND key = ? "
+                                  "ORDER BY at DESC LIMIT 1", (account, self.kind, key)).fetchone()
+
+    def save_snapshot(self, account: str, key: str, data: dict[str, Any], *, at: datetime | None = None) -> None:
+        """
+        Notes what `key` looks like now. Within VISIT_GAP_MINUTES of the last snapshot it's the same visit, so data
+        is merged into that one; otherwise it's a new one, and only the newest SNAPSHOTS_KEPT are kept.
+        """
+        if not key or not self.is_on:
+            return
+        moment = at or datetime.now(timezone.utc)
+        gap = timedelta(minutes=VISIT_GAP_MINUTES).total_seconds()
+        try:
+            with closing(self._connect()) as connection, connection:
+                newest = self._newest_snapshot(connection, account, key)
+                is_same_visit = newest is not None and moment.timestamp() - newest[1] < gap
+                if is_same_visit:
+                    merged = {**json.loads(newest[2]), **data}
+                    connection.execute("UPDATE snapshots SET at = ?, data = ? WHERE rowid = ?",
+                                       (moment.timestamp(), json.dumps(merged), newest[0]))
+                    return
+                connection.execute("INSERT INTO snapshots VALUES (?, ?, ?, ?, ?)",
+                                   (account, self.kind, key, moment.timestamp(), json.dumps(data)))
+                connection.execute(
+                    "DELETE FROM snapshots WHERE account = ? AND kind = ? AND key = ? AND rowid NOT IN (SELECT rowid "
+                    "FROM snapshots WHERE account = ? AND kind = ? AND key = ? ORDER BY at DESC LIMIT ?)",
+                    (account, self.kind, key, account, self.kind, key, SNAPSHOTS_KEPT))
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            self._failed(exc)
+
+    def _snapshots(self, query: str, params: tuple[Any, ...]) -> dict[str, Snapshot]:
+        """
+        The snapshots a query finds (key, at, data; oldest first), the newest per key.
+        """
+        if not self.is_on or not os.path.exists(self.path):
+            return {}
+        try:
+            with closing(self._connect()) as connection, connection:
+                rows = connection.execute(query, params).fetchall()
+            found = {key: Snapshot(key, _utc(at), json.loads(data)) for key, at, data in rows}
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            self._failed(exc)
+            return {}
+        return found
+
+    def snapshots_before(self, account: str, *, now: datetime | None = None) -> dict[str, Snapshot]:
+        """
+        Each place's snapshot from your last visit before this one (at least VISIT_GAP_MINUTES ago), by key.
+        """
+        cutoff = (now or datetime.now(timezone.utc)) - timedelta(minutes=VISIT_GAP_MINUTES)
+        return self._snapshots("SELECT key, at, data FROM snapshots WHERE account = ? AND kind = ? AND at <= ? "
+                               "ORDER BY at", (account, self.kind, cutoff.timestamp()))
+
+    def snapshot_before(self, account: str, key: str, *, now: datetime | None = None) -> Snapshot | None:
+        """
+        What `key` looked like on your last visit before this one, or None (a first visit, or history off).
+        """
+        cutoff = (now or datetime.now(timezone.utc)) - timedelta(minutes=VISIT_GAP_MINUTES)
+        found = self._snapshots("SELECT key, at, data FROM snapshots WHERE account = ? AND kind = ? AND key = ? "
+                                "AND at <= ? ORDER BY at", (account, self.kind, key, cutoff.timestamp()))
+        return found.get(key)
+
     def forget(self, account: str, key: str = "") -> int:
         """
-        Forgets the visits to `key` in `account`, or every place this explorer remembers there; how many went.
+        Forgets the visits to `key` in `account` and its snapshots, or every place this explorer remembers there; how
+        many visits went.
         """
         if not self.is_on or not os.path.exists(self.path):
             return 0
-        query = "DELETE FROM visits WHERE account = ? AND kind = ?"
+        where = "account = ? AND kind = ?"
         params: tuple[str, ...] = (account, self.kind)
         if key:
-            query += " AND key = ?"
+            where += " AND key = ?"
             params += (key,)
         try:
             with closing(self._connect()) as connection, connection:
-                removed = connection.execute(query, params).rowcount
+                removed = connection.execute(f"DELETE FROM visits WHERE {where}", params).rowcount
+                connection.execute(f"DELETE FROM snapshots WHERE {where}", params)
         except (sqlite3.Error, OSError) as exc:
             self._failed(exc)
             return 0

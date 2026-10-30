@@ -81,6 +81,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         self._history = PlaceHistory.from_setting(history, "s3")
+        self._baseline = None
         self.height = height
         self.page_size = max(10, int(page_size))
         self.zip_max_size = zip_max_size  # "Download .zip" zips a folder up to this size (⚙ Settings changes it)
@@ -352,6 +353,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         move()
         self.selected, self._offset, self._action = "", 0, ""
         if not same:
+            self._load_baseline()
             self._query, self._deep, self._all_types = "", False, False
             self._picked.clear()  # another folder: start a new selection
         if self.nav.focus and not same:
@@ -381,6 +383,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         self._draw_picks()
         if not same:
             self._remember()
+        self._save_look(self.nav.folder())
         self._draw_recent()
 
     def _select(self, uri: str) -> None:

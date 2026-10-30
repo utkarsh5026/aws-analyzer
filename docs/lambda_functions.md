@@ -188,6 +188,24 @@ Search by name, description, runtime, region or trigger (`sqs`), click a chip fo
 **Recent**: the functions you've opened, in this session or an earlier one.
 ///
 
+**Changed** shows the functions you've opened before whose code or settings changed since, or whose errors went up, each tagged *changed* in the list. Open one, and its Overview says what: when the new code was deployed, which settings moved, and its failed calls a day against the days before your last look. Its Errors tab names the errors it hadn't seen when you last opened it.
+
+![The Functions tab with the Changed chip picked: only orders-etl, tagged changed beside its runtime](images/lambda-explorer-changed-light.webp#only-light){ width="984" height="861" loading=lazy }
+![The Functions tab with the Changed chip picked: only orders-etl, tagged changed beside its runtime](images/lambda-explorer-changed-dark.webp#only-dark){ width="984" height="861" loading=lazy }
+/// caption
+**Changed**: the functions that are different from when you last looked.
+///
+
+![orders-etl's Overview, its findings led by: Errors went up since your last look 3d ago, 96 failed calls since 28 Oct (UTC days), about 32 a day, against about 4.9 a day before; further down, the code changed since your last look 3d ago and its settings changed, memory 512 → 1,024 MB](images/lambda-explorer-changes-light.webp#only-light){ width="984" height="861" loading=lazy }
+![orders-etl's Overview, its findings led by: Errors went up since your last look 3d ago, 96 failed calls since 28 Oct (UTC days), about 32 a day, against about 4.9 a day before; further down, the code changed since your last look 3d ago and its settings changed, memory 512 → 1,024 MB](images/lambda-explorer-changes-dark.webp#only-dark){ width="984" height="861" loading=lazy }
+/// caption
+What changed in orders-etl since three days ago, among its findings.
+///
+
+??? more "How it decides what changed"
+
+    When you open a function, the window notes its code's SHA-256, when it was deployed, its runtime, handler, memory and timeout, and, once you open its Errors tab, a hash of each error's cause (never the message). Next time, it compares. Looks within an hour of each other are one visit. Failed calls come from CloudWatch, which counts whole UTC days, so they're counted from the day after your last look, and not until a whole day has passed; they've gone up when there are at least 3 and twice as many a day as before.
+
 ### Logs, run by run { #explorer-logs }
 
 The **Logs** tab is CloudWatch grouped the way you think about it: one line per run, ✓ or ✕, newest first. Click a run to read every line it logged.

@@ -1,6 +1,7 @@
 """
 The explorer's recent places: the folders you opened, remembered between sessions (_kit/history.py), offered as
-chips over the list of buckets and while you type a path, so a click takes you back.
+chips over the list of buckets and while you type a path, so a click takes you back; and what each folder held then,
+so its overview says what's new since your last visit (changes.py) and the list marks the new files.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from ..._kit.fmt import human_age
 from ..._kit.history import Place
 from ..._kit.window import _window_errors
 
-from .navigator import folder_uri, parse_location
+from .changes import FolderChanges, FolderLook, folder_changes, folder_look, is_new
+from .navigator import Entry, Folder, folder_uri, parse_location
 
 _RECENT_CHIPS = 6
 _PICK_UP = "↩ "
@@ -62,6 +64,38 @@ class _RecentPane:
         location = self.nav.location
         if self._history is not None and location:
             self._history.record(self._account(), location, _short_place(location))
+
+    def _load_baseline(self) -> None:
+        """
+        The snapshot from your last visit to the folder the list shows, read before this visit's is saved.
+        """
+        self._baseline = None
+        location = self.nav.location
+        if self._history is not None and location:
+            self._baseline = self._history.snapshot_before(self._account(), location)
+
+    def _save_look(self, folder: Folder) -> None:
+        """
+        Notes what the folder the list shows holds, once its listing is done (a deep listing isn't its first level).
+        """
+        is_shown_level = bool(folder.uri) and folder.uri == self.nav.location and not folder.deep
+        if self._history is None or not is_shown_level or folder.error or self._lister is folder:
+            return
+        look = folder_look(folder.entries, complete=not folder.more)
+        self._history.save_snapshot(self._account(), folder.uri, look.to_data())
+
+    def _changes(self, folder: Folder) -> FolderChanges | None:
+        """
+        What's new in `folder` since your last visit, or None on a first visit (or with history off).
+        """
+        baseline = self._baseline
+        if baseline is None or folder.error or folder.uri != baseline.key:
+            return None
+        before = None if folder.deep else FolderLook.from_data(baseline.data)
+        return folder_changes(baseline.at, folder.entries, before=before, complete=not folder.more)
+
+    def _is_new(self, entry: Entry) -> bool:
+        return self._baseline is not None and is_new(entry, self._baseline.at)
 
     def _build_recent(self) -> Any:
         w = self._widgets

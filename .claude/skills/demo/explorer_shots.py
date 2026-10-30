@@ -76,6 +76,20 @@ for uri, hours_ago in [("s3://acme-ml-data/training/", 50), ("s3://acme-ml-data/
                        ("s3://acme-ml-data/training/", 4), ("s3://acme-ml-data/curated/features/churn/", 1)]:
     recent.record(core.account_id() or "", uri, at=now - datetime.timedelta(hours=hours_ago))
 x = S3Explorer(core=core, height=500, history=recent.path)"""
+CHANGES = """import datetime, random, tempfile
+import boto3
+from aws_analyzer._kit.history import PlaceHistory
+from aws_analyzer.s3.explorer import S3Navigator, folder_look
+uri = "s3://acme-ml-data/curated/features/churn/"
+history = PlaceHistory(tempfile.mktemp(suffix=".sqlite"), "s3")
+then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=2)
+before = S3Navigator(core).open(uri)
+history.record(core.account_id() or "", uri, at=then)
+history.save_snapshot(core.account_id() or "", uri, folder_look(before.entries, complete=True).to_data(), at=then)
+s3 = boto3.client("s3", region_name="us-east-1")
+for key, size in (("train.parquet", 61_000), ("holdout.parquet", 14_000)):
+    s3.put_object(Bucket="acme-ml-data", Key=f"curated/features/churn/{key}", Body=random.Random(key).randbytes(size))
+x = S3Explorer(uri, core=core, height=500, history=history.path)"""
 FIGURES = [
     Figure("explorer", 'x = S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet", core=core, height=500)',
            "First 20 rows"),
@@ -85,6 +99,7 @@ FIGURES = [
            "Text of page 1", (Step("act:Text", "Left out what repeats"),)),
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
     Figure("explorer-recent", RECENT, "Your buckets"),
+    Figure("explorer-changes", CHANGES, "Since your last visit"),
     Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'
            'x.filter(".tar", subfolders=True)', "Files below"),
     Figure("explorer-zip", 'x = S3Explorer("s3://acme-ml-data/raw/events/dt=2025-10-10/", core=core, height=500)',

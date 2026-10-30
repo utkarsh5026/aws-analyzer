@@ -3163,3 +3163,75 @@ def test_explorer_without_history_remembers_nothing(explorer):
     assert x.recent == []
     x.forget_recent()
     assert "Recent places are off" in plain(x.status.value)
+
+
+def test_function_changes_since_your_last_look():
+    import dataclasses
+
+    from aws_analyzer._kit.fmt import human_age
+    from aws_analyzer.lambda_functions.analysis.changes import (
+        FunctionLook, cause_key, change_findings, function_changes, function_look, new_causes_finding,
+        new_error_causes,
+    )
+
+    before_fn = Function("etl", arn="arn:aws:lambda:us-east-1:1:function:etl", runtime="python3.9", handler="app.h",
+                         memory=512, timeout=30, raw={"CodeSha256": "old"})
+    look = function_look(before_fn)
+    assert FunctionLook.from_data(look.to_data()) == look and FunctionLook.from_data({"memory": 1}) is None
+    assert "error_causes" not in look.to_data()
+
+    since = NOW - timedelta(days=3)
+    deployed = NOW - timedelta(days=1)
+    now_fn = dataclasses.replace(before_fn, memory=1024, last_modified=deployed, raw={"CodeSha256": "new"})
+    daily = [DailyUsage(helpers._midnight(NOW - timedelta(days=d)), 100, 20 if d < 3 else 1) for d in range(10)]
+    metrics = FunctionMetrics("etl", days=30, daily=daily)
+    changes = function_changes(now_fn, before=look, since=since, now=NOW, metrics=metrics)
+    assert changes.code_changed and changes.settings == ["memory 512 → 1,024 MB"]
+    assert changes.errors_since == 60 and changes.errors_a_day == 20 and changes.errors_rose
+    found = change_findings(changes)
+    assert [level for level, _ in found] == ["warn", "info", "info"]
+    assert found[0][1].startswith(f"Errors went up since your last look {human_age(since)}: 60 failed calls since 04 Oct (UTC days),"
+                                  " about 20 a day, against about 0.2 a day before.")
+    assert found[1][1].startswith(f"The code changed since your last look {human_age(since)}: deployed 2026-10-05 12:00 UTC.")
+
+    same_day = function_changes(before_fn, before=look, since=NOW - timedelta(hours=2), now=NOW, metrics=metrics)
+    assert same_day.errors_since is None and not same_day.has_news
+    assert change_findings(same_day) == [("info", f"Nothing changed since your last look {human_age(NOW - timedelta(hours=2))}"
+                                                  ": the same code and settings.")]
+
+    old = ErrorGroup("Timeout", "Task timed out after # seconds", 3, NOW, NOW, "Task timed out after 30.0 seconds")
+    new = ErrorGroup("KeyError", "KeyError: 'customer_id'", 2, NOW - timedelta(hours=6), NOW, "KeyError: 'customer_id'")
+    assert len(cause_key(old)) == 16 and cause_key(old) != cause_key(new)
+    assert new_error_causes([new, old], [cause_key(old)]) == [new]
+    assert new_causes_finding([new], since) == (
+        "warn", f"A new error since your last look {human_age(since)}: KeyError (2 times, first "
+                f"{human_age(new.first)}). They're in the table below.")
+
+
+def test_explorer_says_what_changed_since_your_last_look(explorer, tmp_path, monkeypatch):
+    from aws_analyzer._kit import history
+
+    monkeypatch.setattr(history, "VISIT_GAP_MINUTES", 0)
+    places = str(tmp_path / "places.sqlite")
+    first = explorer(history=places)
+    row_of(first, "etl-nightly").button.click()
+    first.tab_buttons["errors"].click()
+    assert "last look" not in plain(first.overview_view.value) + plain(first.errors_view.value)
+
+    boto3.client("lambda", region_name=REGION).update_function_configuration(FunctionName="etl-nightly",
+                                                                             MemorySize=2048)
+    put_logs("/aws/lambda/etl-nightly", [(datetime.now(timezone.utc) - timedelta(minutes=2),
+                                          "[ERROR] ValueError: bad order date")], stream="2026/10/06/[$LATEST]new")
+    again = explorer(history=places)
+    assert "Changed 1" in [chip.description for chip in again.chips.children]
+    assert '<span class="ch">changed</span>' in row_of(again, "etl-nightly").face.value
+    assert 'class="ch"' not in row_of(again, "api-handler").face.value
+
+    row_of(again, "etl-nightly").button.click()
+    overview = plain(again.overview_view.value)
+    assert "Its settings changed since your last look" in overview and "Memory 1,024 → 2,048 MB" in overview
+    assert overview.index("⚡ Lambda Function") < overview.index("Its settings changed")
+    again.tab_buttons["errors"].click()
+    errors = plain(again.errors_view.value)
+    assert "A new error since your last look" in errors and "ValueError (1 time" in errors
+    assert "KeyError (" not in errors.split("They're in the table below")[0]

@@ -10,7 +10,7 @@ from typing import Any
 from ..._kit.blocks import _Note
 from ..._kit.errors import _Hint
 from ..._kit.fmt import _plural
-from ..._kit.history import Place, PlaceHistory
+from ..._kit.history import Place, PlaceHistory, Snapshot
 from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
 
@@ -21,6 +21,7 @@ from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
 from ..analysis.logs import LogPage, LogRun
 from ..analysis.codemap.model import CodeMap
+from ..analysis.changes import FunctionChanges
 from ..analyzer import LambdaAnalyzer
 from ..style import _CSS, _render_html
 from ..view import LambdaView
@@ -119,6 +120,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._history = PlaceHistory.from_setting(history, "lambda")
         self._recent: dict[str, Place] = {}
+        self._looks: dict[str, Snapshot] = {}
+        self._news: dict[str, FunctionChanges] = {}
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
         self._want, self._want_tab = name, tab  # opened once the functions are listed...
         self._want_search: str | None = None  # ...and searched for in its logs
