@@ -204,7 +204,9 @@ clean_up("charts")                # the agent's charts too ("s3", "lambda", "san
 
 It removes only what aws-analyzer made: a downloads folder without the `.gitignore` aws-analyzer writes in one, or
 one that holds the notebook, stays (the report says why), and only chart pictures leave `agent-charts/`. It never
-touches Python environments `new_env()` made, the agent's notes and saved chats (`~/.cache/aws-analyzer/agent/`), or
+touches Python environments `new_env()` made, the agent's notes and saved chats (`~/.cache/aws-analyzer/agent/`), the
+explorers' recent folders and functions and what each looked like then (`~/.cache/aws-analyzer/history/`, which their
+`forget_recent()` clears), or
 files you saved to a path of your own. `downloads=["~/scratch/s3"]`
 adds a downloads folder you moved elsewhere.
 
@@ -348,6 +350,8 @@ S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file 
 | Read a PDF           | Click **📖 Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
 | Read a PDF's text    | Click **📄 Text**: its words, 50 pages at a time, laid out to read like a web page: headings, paragraphs joined back up from the PDF's lines, bullet and numbered lists, and a line where each page starts. The running headers, footers and page numbers are left out (a note says which), and a page with no text (a scan) says so; **📖 Read all** shows it as a picture |
 | Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
+| Go back to a folder  | Click its chip in the **Recent** row over your list of buckets (or under **✎**): **↩** is the folder you were in last, then the ones you open most and most lately, remembered between sessions |
+| See what's new       | Open a folder you've been in before: its overview counts the files new or changed since your last visit and how its file count moved, and **●** marks them in the list |
 | Find files           | Type part of a name, or a file type such as `.csv` (`.csv .json` for either; it also finds `.csv.gz`), in the search box over the list, or click a type's chip under it. **Folders** and **Files** show only one kind, and **Include subfolders** searches everything below the folder, not only its first level. Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first |
 | Add up a folder      | Open it and click **📊 What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
 | Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` in `s3-downloads` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder downloads go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
@@ -372,6 +376,7 @@ S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View 
 S3Explorer(height=720, page_size=200)                 # 720px panes (else they fill the window), 200 rows a page
 S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (x.zip_max_files too)
 S3Explorer(downloads="~/scratch/s3")                  # where ⬇ Download and the zips save (x.downloads)
+S3Explorer(history=False)                             # remember no folders for the Recent row (x.recent lists them)
 
 x = S3Explorer("s3://my-bucket/")
 x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, from code
@@ -1841,7 +1846,7 @@ other reports for one function.
 
 | To                         | Do this                                                                                                                                                                                                                                                                                                                                                  |
 | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Find a function            | **Functions**: every function with its runtime, triggers, calls, error rate, run time, monthly cost, when it was last called and its warnings, problems first. Search by name, description, runtime, region or trigger, click a chip (**Needs attention**, **With errors**, **Old runtime**, **Public**, **Not called**), or a column's header to sort. Or click the function field at the top, which searches as you type and takes an ARN too. The region field switches to another region, or every region |
+| Find a function            | **Functions**: every function with its runtime, triggers, calls, error rate, run time, monthly cost, when it was last called and its warnings, problems first. Search by name, description, runtime, region or trigger, click a chip (**Recent**, the ones you've opened, **Changed**, the ones whose code, settings or errors changed since you last opened them, which their Overview spells out, **Needs attention**, **With errors**, **Old runtime**, **Public**, **Not called**), or a column's header to sort. Or click the function field at the top, which searches as you type and takes an ARN too. The region field switches to another region, or every region |
 | See what's wrong           | **Overview**: the findings, each with what to do; how it's wired (what calls it, and where its results, failed events and logs go); its calls and run time a day for 30 days; and what it costs                                                                                                                                                          |
 | Read its logs              | **Logs**: a line per run, newest first, with its status, run time, memory, cold start and what failed; click one for every line it logged, its REPORT line summed up. Pick the time range (15 minutes to 30 days, or a custom From and To on a calendar), type to find runs with some text, **Enter** to search CloudWatch for the whole range (each run found comes back whole), or click a chip for the failed runs, timeouts or cold starts. JSON logs show each line's message, its other fields a click away |
 | Watch it while you test it | **Live**, on the Logs tab: new lines every 5 seconds, new runs at the top (it stops when you leave the tab, and after 15 minutes)                                                                                                                                                                                                                       |
@@ -1860,7 +1865,7 @@ Grouped the way `ui.help()` lists them.
 
 | Command                                                   | Shows                                                                                                                                                                                                 |
 | :-------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(name=None, tab=None, region=None, height=None)`  | The [explorer window](#explore-functions-and-logs-by-clicking): every function, and for the one you click its health, logs run by run, errors, run times, code and settings. `view.explorer` is the window |
+| `explore(name=None, tab=None, region=None, height=None, history=True)` | The [explorer window](#explore-functions-and-logs-by-clicking): every function, and for the one you click its health, logs run by run, errors, run times, code and settings. `view.explorer` is the window |
 
 #### Functions
 

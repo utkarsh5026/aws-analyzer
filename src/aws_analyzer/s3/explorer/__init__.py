@@ -47,21 +47,29 @@ from .navigator import (
     filter_entries, folder_stats, folder_uri, parent_uri, parse_filter, parse_location, sort_entries,
 )
 from .window import S3Explorer
+from .changes import FolderChanges, FolderLook, changes_card, changes_sentence, folder_changes, folder_look, is_new
 
 __all__ = [
     "Entry",
     "Filter",
     "Folder",
+    "FolderChanges",
+    "FolderLook",
     "FolderStats",
     "S3Explorer",
     "S3Navigator",
     "breadcrumbs",
+    "changes_card",
+    "changes_sentence",
     "count_types",
     "entry_icon",
     "explain_list_error",
     "filter_entries",
+    "folder_changes",
+    "folder_look",
     "folder_stats",
     "folder_uri",
+    "is_new",
     "parent_uri",
     "parse_filter",
     "parse_location",

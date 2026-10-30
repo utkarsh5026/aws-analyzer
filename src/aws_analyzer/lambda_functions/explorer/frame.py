@@ -5,9 +5,12 @@ report's sentences are reworded for the window, and times as the lines show them
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from datetime import date, datetime
+from typing import Any
 
+from ..._kit.blocks import _Cards, _Findings
 from ..._kit.fmt import _in_zone, _utcnow, parse_time
 from ..._kit.render import _CALL_RE
 from ..._kit.window import _icon_url, _terminal_theme
@@ -267,6 +270,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app button.lmx-chip.lmx-t-warn::before{background:var(--lx-warn)}
 .lmx-app.lmx-app button.lmx-chip.lmx-t-ok::before{background:var(--lx-ok)}
 .lmx-app.lmx-app button.lmx-chip.lmx-t-cold::before{background:#38bdf8}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-new::before{background:var(--lx-accent)}
 .lmx-app.lmx-app button.lmx-chip.lmx-t-idle::before{background:transparent;box-shadow:inset 0 0 0 1.5px rgba(127,127,127,.6)}
 .lmx-app.lmx-app button.lmx-chip.lmx-on,.lmx-app.lmx-app button.lmx-chip.lmx-on:hover:enabled{background:var(--lx-soft);border-color:var(--lx-ring);color:var(--lx-accent);font-weight:650}
 .lmx-app.lmx-app .lmx-rows,.lmx-app.lmx-app .lmx-runs{overflow:hidden auto;padding:0 4px 4px 0;border:1px solid var(--lx-line);border-radius:14px;background:var(--lx-surface)}
@@ -292,6 +296,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .rt{flex:0 0 auto;font-size:11px;padding:0 7px;border-radius:999px;background:var(--lx-tint-2);font-weight:500}
 .lmx-app .rt.warn{background:rgba(245,158,11,.16);color:var(--lx-ink-warn)}
 .lmx-app .rt.bad{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
+.lmx-app .ch{flex:0 0 auto;font-size:11px;padding:0 7px;border-radius:999px;background:var(--lx-soft);color:var(--lx-accent);font-weight:600}
 .lmx-app .rg{flex:0 0 auto;font-size:11px;opacity:.6;font-family:var(--lx-mono)}
 .lmx-app .ff{font-size:11.5px;opacity:.68;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .lmx-app .fc{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -557,3 +562,18 @@ def _run_clock(moment: datetime, today: date) -> str:
     """
     moment = _in_zone(moment)
     return moment.strftime("%H:%M:%S") if moment.date() == today else f"{_short_day(moment)} {moment:%H:%M}"
+
+
+def _with_findings(blocks: list[Any], extra: list[tuple[str, str]]) -> list[Any]:
+    """
+    Blocks with more findings in their one findings panel (warnings first), or a panel after the cards when they had
+    none.
+    """
+    if not extra:
+        return blocks
+    panel = next((block for block in blocks if isinstance(block, _Findings)), None)
+    if panel is not None:
+        items = sorted([*extra, *panel.items], key=lambda item: item[0] != "warn")
+        return [dataclasses.replace(block, items=items) if block is panel else block for block in blocks]
+    after_cards = next((i + 1 for i, block in enumerate(blocks) if isinstance(block, _Cards)), len(blocks))
+    return [*blocks[:after_cards], _Findings(extra), *blocks[after_cards:]]

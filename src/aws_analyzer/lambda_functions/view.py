@@ -1349,13 +1349,14 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def explore(self, name: str | None = None, *, tab: str | None = None, region: str | None = None,
-                height: int | str | None = None) -> None:
+                height: int | str | None = None, history: bool | str = True) -> None:
         """
         The explorer window: every function in the region to click through, and for the one you pick, how it's
         doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
         in), its errors grouped by cause, its run times, the code in its package and every setting. Needs Jupyter and
         ipywidgets; view.explorer is the window. name opens one function, on tab= 'logs', 'errors', 'performance',
-        'code' or 'settings'; region='all' lists every region.
+        'code' or 'settings'; region='all' lists every region. history=False: don't remember the functions you open
+        (the Recent chip).
         """
         if not self.use_html:
             raise _Hint(
@@ -1365,4 +1366,5 @@ class LambdaView(_BaseView):
         _require("ipywidgets", "The explorer window")
         from .explorer.window import LambdaExplorer
 
-        self.explorer = LambdaExplorer(name, tab=tab, region=region, view=self, height=height, mode="widgets")
+        self.explorer = LambdaExplorer(name, tab=tab, region=region, view=self, height=height, mode="widgets",
+                                      history=history)

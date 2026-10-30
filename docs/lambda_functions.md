@@ -180,6 +180,32 @@ The **Functions** tab puts the functions that need attention first. A dot says h
 
 Search by name, description, runtime, region or trigger (`sqs`), click a chip for only the failing, old or public ones, and click **Logs** on a line to go straight to its logs.
 
+**Recent** shows only the functions you've opened before, the ones you open most and most lately first, and the function field lists them first, each saying when you last opened it. The window remembers them between sessions, per AWS account: only their ARNs and when, in `~/.cache/aws-analyzer/history/places.sqlite`, which `clean_up()` keeps. `x.recent` lists them, `x.forget_recent("orders-etl")` forgets one and `x.forget_recent()` every one. `explore(history=False)` remembers nothing, and `AWS_ANALYZER_HISTORY=off` turns it off for every explorer.
+
+![The Functions tab with the Recent chip picked: All 5, Recent 2, and only orders-etl and report-api in the list, the two functions opened before](images/lambda-explorer-recent-light.webp#only-light){ width="984" height="846" loading=lazy }
+![The Functions tab with the Recent chip picked: All 5, Recent 2, and only orders-etl and report-api in the list, the two functions opened before](images/lambda-explorer-recent-dark.webp#only-dark){ width="984" height="846" loading=lazy }
+/// caption
+**Recent**: the functions you've opened, in this session or an earlier one.
+///
+
+**Changed** shows the functions you've opened before whose code or settings changed since, or whose errors went up, each tagged *changed* in the list. Open one, and its Overview says what: when the new code was deployed, which settings moved, and its failed calls a day against the days before your last look. Its Errors tab names the errors it hadn't seen when you last opened it.
+
+![The Functions tab with the Changed chip picked: only orders-etl, tagged changed beside its runtime](images/lambda-explorer-changed-light.webp#only-light){ width="984" height="863" loading=lazy }
+![The Functions tab with the Changed chip picked: only orders-etl, tagged changed beside its runtime](images/lambda-explorer-changed-dark.webp#only-dark){ width="984" height="863" loading=lazy }
+/// caption
+**Changed**: the functions that are different from when you last looked.
+///
+
+![orders-etl's Overview, its findings led by: Errors went up since your last look 3d ago, 96 failed calls since 28 Oct (UTC days), about 32 a day, against about 4.9 a day before; further down, the code changed since your last look 3d ago and its settings changed, memory 512 → 1,024 MB](images/lambda-explorer-changes-light.webp#only-light){ width="984" height="846" loading=lazy }
+![orders-etl's Overview, its findings led by: Errors went up since your last look 3d ago, 96 failed calls since 28 Oct (UTC days), about 32 a day, against about 4.9 a day before; further down, the code changed since your last look 3d ago and its settings changed, memory 512 → 1,024 MB](images/lambda-explorer-changes-dark.webp#only-dark){ width="984" height="846" loading=lazy }
+/// caption
+What changed in orders-etl since three days ago, among its findings.
+///
+
+??? more "How it decides what changed"
+
+    When you open a function, the window notes its code's SHA-256, when it was deployed, its runtime, handler, memory and timeout, and, once you open its Errors tab, a hash of each error's cause (never the message). Next time, it compares. Looks within an hour of each other are one visit. Failed calls come from CloudWatch, which counts whole UTC days, so they're counted from the day after your last look, and not until a whole day has passed; they've gone up when there are at least 3 and twice as many a day as before.
+
 ### Logs, run by run { #explorer-logs }
 
 The **Logs** tab is CloudWatch grouped the way you think about it: one line per run, ✓ or ✕, newest first. Click a run to read every line it logged.
@@ -740,7 +766,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 
 | Command | What it shows |
 |---|---|
-| `explore(name=None, tab=None, region=None, height=None)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
+| `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |

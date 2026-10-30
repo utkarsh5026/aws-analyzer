@@ -23,6 +23,7 @@ from ..style import _render_html
 from ..._kit.themes import _theme_name
 from ..view.s3_view import S3View
 
+from .changes import changes_card, changes_sentence
 from .navigator import Entry, Folder, _extension, breadcrumbs, entry_icon, explain_list_error, parse_location
 
 
@@ -219,8 +220,13 @@ class _ReportPane:
                 cards.append(("Newest file", human_age(stats.newest)))
             if stats.archived:
                 cards.append(("Archived", f"{stats.archived:,}", "warn"))
+            changes = self._changes(folder)
+            if changes is not None and changes.new_files:
+                cards.append(changes_card(changes))
             if cards:
                 blocks.append(_Cards(cards))
+            if changes is not None:
+                blocks.append(_Note(changes_sentence(changes, marked=self._widgets is not None)))
             if self._lister is folder:
                 what = (f"everything below this folder: these numbers cover the {_plural(stats.files, 'file')}"
                         if folder.deep else f"this folder: these numbers cover the {len(folder.entries):,} entries")
