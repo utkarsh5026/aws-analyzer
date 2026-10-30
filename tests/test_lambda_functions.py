@@ -2666,6 +2666,7 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     quiet.range_pick.value = "1h"
     quiet._reload_logs()
     assert "Nothing logged in the last hour. Its newest line is from 5h ago." in plain(quiet.runs_box.children[0].value)
+    assert plain(quiet.status.value) == "Nothing logged in the last hour · pick another time range above"
     assert quiet.jump_button.layout.display == "" and quiet.jump_button.description == "Show last 12 hours ›"
     quiet.jump_button.click()
     assert quiet._range == "12h" and quiet.range_pick.value == "12h" and len(quiet._runs) == 1
