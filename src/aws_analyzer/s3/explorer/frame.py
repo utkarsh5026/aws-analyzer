@@ -40,9 +40,10 @@ def _icon_rules() -> str:
     return "\n".join(f".s3x .s3x-i-{name}{{--s3x-icon:{_icon_url(paths)}}}" for name, paths in _ICON_PATHS.items())
 
 _TERMINAL_CSS = _terminal_theme((".s3x",), "s3t") + """
-.s3x.s3x{--s3x-accent:var(--s3t-accent);--s3x-accent-fg:var(--s3t-accent);--s3x-tint:var(--s3t-hover);
+.s3x.s3x.s3x{--s3x-accent:var(--s3t-accent);--s3x-accent-fg:var(--s3t-accent);--s3x-tint:var(--s3t-hover);
  --s3x-tint-line:var(--s3t-line);--s3x-line:var(--s3t-line);--s3x-fill:transparent;--s3x-hover:var(--s3t-hover);
- --s3x-bg:var(--s3t-bg);font-family:var(--s3t-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
+ --s3x-bg:var(--s3t-bg)}
+.s3x.s3x{font-family:var(--s3t-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
 .s3x .jupyter-button,.s3x .widget-label,.s3x input{font-family:var(--s3t-mono);font-size:12.5px}
 .s3x .s3x-bar{padding:7px 12px}
 .s3x .s3x-navs{gap:0;padding:0;background:none}

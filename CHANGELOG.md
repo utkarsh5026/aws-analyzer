@@ -33,6 +33,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A time range picked in the Logs, Errors or Performance tab is the range all three read.
   - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
 
+## [0.39.0] - 2026-10-30
+
+### Changed
+
+- ⚡ **Lambda explorer: the chat windows' terminal look** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - The same monospace font and code-editor colours as `chat()` and the S3 explorer, with flat outlined buttons and underlined tabs.
+  - Reports in its tabs follow `set_theme()`, so the Overview or Errors tab looks like the same command run in a cell.
+
+### Fixed
+
+- 🧭 **S3 explorer: the terminal colours in dark mode** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - In a dark JupyterLab or VS Code, the keyboard focus outline and link buttons kept the old blue; they now follow the terminal look.
+
 ## [0.38.0] - 2026-10-30
 
 ### Added
@@ -1053,7 +1066,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...v0.36.0

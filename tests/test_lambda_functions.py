@@ -2586,7 +2586,7 @@ def test_explorer_holds_the_report_css_once(explorer):
     panes = html_widgets(x.root)
     [style] = [pane for pane in panes if stylemod._CSS in pane.value]
     assert style.layout.display == "none"
-    pages = [pane for pane in panes if '<div class="lmb">' in pane.value]
+    pages = [pane for pane in panes if '<div class="lmb theme-console">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
              for rule in style.split("</style>")[0].split("\n")]
     assert len(pages) >= 2 and all(rule.startswith(".lmb form.tbl:has(") for rule in rules)

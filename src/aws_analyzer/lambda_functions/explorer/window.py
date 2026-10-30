@@ -21,7 +21,8 @@ from ..analysis.findings import function_findings
 from ..analysis.logs import LogPage, LogRun, TimeBucket
 from ..analysis.codemap.model import CodeMap
 from ..analyzer import LambdaAnalyzer
-from ..style import _CSS, _render_html
+from ..._kit.themes import _theme_css, _theme_name
+from ..style import _CSS, _ROOT, _render_html
 from ..view import LambdaView
 from .frame import (
     _CODE_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _FUNCTION_PAGE, _FUNCTION_TABS, _RUN_PAGE, _seconds, _window_text,
@@ -353,10 +354,13 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
 
     def _html(self, blocks: list[Any]) -> str:
         """
-        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it).
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, drawn in the report
+        theme the window opened with, and without the report and theme CSS each one carries (the window's style holds
+        them).
         """
-        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
+        blocks = _for_window(blocks, _window_text)
+        html = _render_html(blocks, self.ui.max_rows, theme=self._theme)
+        return html.replace(_CSS, "", 1).replace(self._theme_style, "", 1)
 
     def _empty(self, key: str, text: str) -> Any:
         """
@@ -397,7 +401,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
 
         self.overview_view = w.HTML(layout=layout(width="100%"))
         self.settings_view = w.HTML(layout=layout(width="100%"))
-        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
+        self._theme = _theme_name()
+        self._theme_style = _theme_css(_ROOT, self._theme)
+        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
             "overview": self._scroll_page([self.overview_view]),
             "logs": self._logs_page(),
