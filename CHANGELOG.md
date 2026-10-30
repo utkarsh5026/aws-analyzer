@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-30
+
 ### Changed
 
 - ⚡ **Lambda explorer: the chat windows' terminal look** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
@@ -1040,7 +1042,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...v0.36.0
