@@ -23,8 +23,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - ⚡ **Lambda explorer: a timeline, the slowest runs and code to reopen it** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
   - The Logs tab draws its runs over time, red where they failed; click a bar for only those runs. **Slowest 10%** picks out the slow ones.
-  - **⧉ Copy as code** holds the code that opens the window as it is now, to run in another cell or send to someone.
+  - **⧉ Copy as code** holds the one call that opens it as it is now: `explore('orders-etl', tab='logs', since='3h', search='KeyError')`.
   - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
+
+- ⚡ **Lambda explorer: a run's links, a slim header, the first problem read ahead** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - An open run has its request ID and a Logs Insights query to copy, and opens in the AWS console.
+  - With a function picked, the header is one line of its numbers, so the tabs get the height.
+  - The function at the top of the problems is read in the background, so it opens at once.
 
 ### Changed
 

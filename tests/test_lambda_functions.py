@@ -104,6 +104,8 @@ from aws_analyzer.lambda_functions import (
     search_rank,
     secret_like,
     source_files,
+    run_console_url,
+    run_insights_query,
     run_timeline,
     slow_cutoff,
     split_runs,
@@ -2543,8 +2545,8 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     row_of(x, "etl-nightly").button.click()
     assert x.function.name == "etl-nightly" and x._tab == "overview" and x.detail.function.tags == {"team": "ml"}
     assert "etl-nightly python3.9" in plain(x.field.face.value) and "lmx-on" in row_of(x, "etl-nightly").box._dom_classes
-    assert plain(x.stats.value) == ("Calls · 30d 1,000 Error rate · 30d 4.0% Avg / longest · 30d 250 ms / 4m 10s "
-                                    "Est. $ / month <$0.01 Warnings 3")
+    assert plain(x.stats.value) == "1,000 calls · 4.0% failed · 250 ms avg · 4m 10s max · <$0.01/mo · 3 warnings · 30 days"
+    assert "lmx-slim" in x.head_box._dom_classes
     overview = plain(x.overview_view.value)
     assert "Runtime python3.9 (ended) Memory 1,024 MB Timeout 900 s Architecture x86_64 Triggers 2" in overview
     assert "Calls (30d)" not in overview  # the header shows the numbers
@@ -3032,6 +3034,27 @@ def test_explorer_gives_the_call_that_reopens_it(core, explorer):
     assert [run.request_id for run in again._found_runs] == [RID]
     assert again._view_code() == "explore('etl-nightly', tab='logs', since='3h', search='loading')"
 
+
+
+
+def test_a_run_in_the_console_and_in_logs_insights():
+    url = run_console_url("us-east-1", "/aws/lambda/etl", "2026/10/06/[$LATEST]abc", RID)
+    assert url == ("https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/"
+                   "log-group/$252Faws$252Flambda$252Fetl/log-events/2026$252F10$252F06$252F$255B$2524LATEST$255Dabc"
+                   f"$3FfilterPattern$3D$2522{RID}$2522")
+    assert run_console_url("cn-north-1", "g", "s", "r").startswith("https://cn-north-1.console.amazonaws.cn/")
+    assert run_insights_query(RID) == (f'fields @timestamp, @message\n| filter @requestId = "{RID}" or @message like '
+                                       f'"{RID}"\n| sort @timestamp asc')
+
+
+def test_explorer_open_run_has_its_actions(core, explorer):
+    x = explorer("etl-nightly", tab="logs")
+    x._run_rows[0].button.click()
+    body = x._run_rows[0].body.value
+    assert f'<span class="cpt">{RID}</span>' in body and "filter @requestId" in body
+    stream = x._run_rows[0].run.stream
+    assert html.escape(run_console_url(REGION, "/aws/lambda/etl-nightly", stream, RID)) in body
+    assert 'target="_blank"' in body and "Open in the AWS console" in body
 
 
 NESTED = zipped({

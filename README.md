@@ -1924,7 +1924,7 @@ lam.diff("orders-etl", 3).files                        # FileChange per changed 
 
 The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
 already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
-`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect`, `cause_search`, `code_frames`, `failing_frame`, `parse_report`, `split_runs`, `run_timeline`, `slow_cutoff`
+`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect`, `cause_search`, `code_frames`, `failing_frame`, `parse_report`, `split_runs`, `run_timeline`, `slow_cutoff`, `run_console_url`, `run_insights_query`
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
 `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
 `read_sources` (sources(): the text of a .zip's own source files), `search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},

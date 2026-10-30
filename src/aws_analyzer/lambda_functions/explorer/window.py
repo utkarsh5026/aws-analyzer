@@ -453,6 +453,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         meta.add_class("lmx-meta")
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("lmx-head")
+        self.head_box = head
 
         tabs = self._tab_bar(_EXPLORER_TABS)
 

@@ -83,6 +83,12 @@ def _destination(arn: str | None) -> tuple[str, str]:
     return kind or "destination", _source_name(arn)[0] or (arn or "-")
 
 
+def _stat_cards_html(cards: list[tuple[str, str, str]]) -> str:
+    items = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b></div>'
+                    for label, value, tone in cards)
+    return f'<div class="lmx-stats">{items}</div>'
+
+
 class _FunctionTab:
     """
     The picked function in LambdaExplorer: opening it, its header (title, cards and alerts), and its Overview
@@ -106,59 +112,79 @@ class _FunctionTab:
 
     def _draw_stats(self) -> None:
         """
-        The cards beside the function field: the region at a glance, or the picked function.
+        Beside the function field: the region at a glance as cards, or, with a function picked, its numbers as one
+        line, so the header stays slim (no subtitle either) and its tabs get the height.
         """
-        now = _utcnow()
-        cards: list[tuple[str, str, str]] = []
-        loading = self._numbers_pending or (self.overview is None and self._listing)
+        _class_if(self.head_box, "lmx-slim", self.function is not None)
         if self.function is None:
-            facts = list(self._facts.values())
-            if self.overview is None:
-                cards = [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate · 30d", "…", "sk-on")]
-            else:
-                read = [f.metrics for f in facts if f.metrics is not None]
-                calls = sum(m.invocations for m in read)
-                failed = sum(m.errors for m in read)
-                costs = [f.cost for f in facts if f.cost is not None]
-                warn = any(_errors_level(f.metrics, now) == "warn" for f in facts)
-                attention = sum(1 for f in facts if f.warnings)
-                cards.append(("Functions", f"{len(facts):,}", ""))
-                cards.append(("Calls · 30d", "…" if loading else _count(round(calls)), "sk-on" if loading else ""))
-                cards.append(("Error rate · 30d", "…" if loading else (_pct(failed / calls) if calls else "-"),
-                              "sk-on" if loading else "warn" if warn else ""))
-                cards.append(("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"),
-                              "sk-on" if loading else ""))
-                cards.append(("Need attention", f"{attention:,}", "warn" if attention else "ok" if facts else ""))
+            self._set(self.stats, _stat_cards_html(self._region_cards()))
         else:
-            fn = self._full()
-            f = self._facts.get(self.function.arn)
-            m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
-                f.metrics if f is not None else None)
-            if m is None:
-                waiting = loading or self.detail is None
-                cards += [(label, "…" if waiting else "-", "sk-on" if waiting else "")
-                          for label in ("Calls · 30d", "Error rate · 30d", "Avg / longest · 30d")]
-            else:
-                level = _errors_level(m, now)
-                near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
-                cards.append(("Calls · 30d", _count(round(m.invocations)), ""))
-                cards.append(("Error rate · 30d", _pct(m.error_rate) if m.invocations else "-",
-                              "bad" if level == "warn" else "warn" if level else ""))
-                cards.append(("Avg / longest · 30d", f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}"
-                              if m.invocations else "not called in 30 days", "warn" if near else ""))
-            if self.detail is not None:
-                cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,
-                                                    self.detail.log_group, prices=self.core.prices))
-                warnings = sum(level == "warn" for level, _ in function_findings(
-                    fn, self.detail.metrics, self.detail, prices=self.core.prices, now=now))
-            else:
-                cost = f.cost if f is not None else None
-                warnings = len(f.warnings) if f is not None else 0
-            cards.append(("Est. $ / month", human_money(cost) if cost is not None else "-", ""))
-            cards.append(("Warnings", f"{warnings:,}", "warn" if warnings else "ok"))
-        html_cards = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b>'
-                             "</div>" for label, value, tone in cards)
-        self._set(self.stats, f'<div class="lmx-stats">{html_cards}</div>')
+            self._set(self.stats, self._function_line())
+
+    def _region_cards(self) -> list[tuple[str, str, str]]:
+        """
+        The region's cards: its functions, their calls and error rate over 30 days, the cost and how many need
+        attention.
+        """
+        if self.overview is None:
+            return [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate · 30d", "…", "sk-on")]
+        loading = self._numbers_pending or self._listing
+        facts = list(self._facts.values())
+        read = [f.metrics for f in facts if f.metrics is not None]
+        calls = sum(m.invocations for m in read)
+        failed = sum(m.errors for m in read)
+        costs = [f.cost for f in facts if f.cost is not None]
+        warn = any(_errors_level(f.metrics, _utcnow()) == "warn" for f in facts)
+        attention = sum(1 for f in facts if f.warnings)
+        waiting = "sk-on" if loading else ""
+        return [
+            ("Functions", f"{len(facts):,}", ""),
+            ("Calls · 30d", "…" if loading else _count(round(calls)), waiting),
+            ("Error rate · 30d", "…" if loading else (_pct(failed / calls) if calls else "-"),
+             waiting or ("warn" if warn else "")),
+            ("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"), waiting),
+            ("Need attention", f"{attention:,}", "warn" if attention else "ok" if facts else ""),
+        ]
+
+    def _function_numbers(self) -> list[tuple[str, str, str]]:
+        """
+        The picked function's numbers, (value, what it is, tone): its calls, failed share and run times over 30
+        days, its cost and its warnings.
+        """
+        fn, now = self._full(), _utcnow()
+        f = self._facts.get(fn.arn)
+        m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
+            f.metrics if f is not None else None)
+        if m is None:
+            waiting = self._numbers_pending or self.detail is None
+            parts = [("…" if waiting else "-", "calls", "sk-on" if waiting else "")]
+        elif not m.invocations:
+            parts = [("0", "calls", "")]
+        else:
+            level = _errors_level(m, now)
+            near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
+            parts = [(_count(round(m.invocations)), "calls", ""),
+                     (_pct(m.error_rate), "failed", "bad" if level == "warn" else "warn" if level else ""),
+                     (human_ms(m.avg_duration), "avg", ""),
+                     (human_ms(m.duration_max), "max", "warn" if near else "")]
+        if self.detail is not None:
+            cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,
+                                                self.detail.log_group, prices=self.core.prices))
+            warnings = sum(level == "warn" for level, _ in function_findings(
+                fn, self.detail.metrics, self.detail, prices=self.core.prices, now=now))
+        else:
+            cost = f.cost if f is not None else None
+            warnings = len(f.warnings) if f is not None else 0
+        parts.append((f"{human_money(cost)}/mo" if cost is not None else "-", "", ""))
+        parts.append((f"{warnings:,}", "warning" if warnings == 1 else "warnings", "warn" if warnings else "ok"))
+        return parts
+
+    def _function_line(self) -> str:
+        pieces = " · ".join(f'<span class="{tone}"><b>{_esc(value)}</b>{" " if words else ""}{_esc(words)}</span>'
+                            for value, words, tone in self._function_numbers())
+        return (f'<div class="lmx-line" title="CloudWatch, the last 30 days: calls, the share that failed, the '
+                'average and longest run time; the monthly cost is estimated at list prices">'
+                f'{pieces}<span class="w"> · 30 days</span></div>')
 
     def _draw_alerts(self) -> None:
         """
