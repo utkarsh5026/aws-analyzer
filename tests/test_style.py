@@ -112,7 +112,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/lambda_functions/explorer/errors.py": 1,
     "src/aws_analyzer/lambda_functions/explorer/frame.py": 13,
     "src/aws_analyzer/lambda_functions/explorer/function.py": 6,
-    "src/aws_analyzer/lambda_functions/explorer/functions.py": 5,
+    "src/aws_analyzer/lambda_functions/explorer/functions.py": 4,
     "src/aws_analyzer/lambda_functions/explorer/logs.py": 16,
     "src/aws_analyzer/lambda_functions/explorer/widgets.py": 1,
     "src/aws_analyzer/lambda_functions/explorer/window.py": 38,

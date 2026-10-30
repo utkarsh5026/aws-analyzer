@@ -21,8 +21,10 @@ from ..._kit.window import _class_if, _running_loop
 
 from ..helpers import _pct, human_ms
 from ..models import LogEvent
-from ..analysis.errors import _phrase
-from ..analysis.logs import LogPage, LogRun, _marker, line_level
+from ..analysis.errors import _phrase, failing_frame
+from ..analysis.logs import (
+    LogPage, LogRun, _marker, line_level, run_console_url, run_insights_query, slow_cutoff,
+)
 from ..analysis.performance import percentile
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
 from ..view import _LINE_PREFIX_RE, _stamp
@@ -37,6 +39,10 @@ _CUSTOM_RANGE = "custom"
 
 _RANGE_CHOICES = (*_RANGES, ("Custom range…", _CUSTOM_RANGE))
 
+_FIRST_TAB_RANGE = "24h"
+
+_FIRST_LOGS_RANGE = "1h"
+
 
 _RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
 
@@ -48,7 +54,7 @@ _LIVE_MINUTES = 15  # ...and for how long, before it stops by itself
 
 
 _RUN_CHIPS = (("", "All runs", "all"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
-              ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"))
+              ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"), ("slow", "Slowest 10%", "warn"))
 
 
 @dataclasses.dataclass
@@ -233,7 +239,36 @@ def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
             f'<span class="rq">{_esc(request[:8])}</span></div>')
 
 
-def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
+def _copy_chip(kind: str, text: str, title: str) -> str:
+    """
+    A chip that holds text to copy: a click selects it (hidden: the chip shows only its label, which the
+    stylesheet gives each kind), so Ctrl+C copies it, with no JavaScript.
+    """
+    return (f'<span class="cpy {kind}" tabindex="0" role="button" aria-label="{_esc(title)}" title="{_esc(title)}">'
+            f'<span class="cpt">{_esc(text)}</span></span>')
+
+
+def _run_actions(run: LogRun, region: str, log_group: str) -> str:
+    """
+    Under an open run: its request ID and a Logs Insights query for it to copy, and its page in the AWS console.
+    All of them only read.
+    """
+    if not run.request_id or not region:
+        return ""
+    rid = run.request_id
+    parts = [_copy_chip("rid", rid, f"Copy the request ID {rid}: click, then Ctrl+C (⌘C on a Mac)"),
+             _copy_chip("rq", run_insights_query(rid), f"Copy a CloudWatch Logs Insights query for every line of this "
+                                                         f"run, to run on {log_group}: click, then Ctrl+C")]
+    if run.stream:
+        url = run_console_url(region, log_group, run.stream, rid)
+        parts.append(f'<a class="ra" href="{_esc(url)}" target="_blank" rel="noopener noreferrer" title="Its log '
+                     'stream in the CloudWatch console, filtered to this run (opens a new tab)">↗ Open in the AWS '
+                     "console</a>")
+    return f'<div class="ract">{"".join(parts)}</div>'
+
+
+def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES, *, region: str = "",
+              log_group: str = "") -> str:
     """
     An open run's lines: how far into the run each came, its level, and its text (JSON lines as their message, with
     their other fields a click away), then what its REPORT line says and its request ID to copy.
@@ -279,7 +314,8 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
         facts.append(f'<span>request <code title="Click to select, then copy">{_esc(run.request_id)}</code></span>')
     if run.stream:
         facts.append(f'<span title="The log stream: one execution environment">{_esc(_clip(run.stream, 70))}</span>')
-    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div></div>'
+    actions = _run_actions(run, region, log_group)
+    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div>{actions}</div>'
 
 
 class _LogsTab:
@@ -290,9 +326,7 @@ class _LogsTab:
 
     def _logs_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        self.range_pick = w.Dropdown(options=list(_RANGE_CHOICES), value="1h", layout=layout(width="auto"))
-        self.range_pick.add_class("lmx-range")
-        self.range_pick.observe(self._safely(self._range_changed), names="value")
+        self.range_pick = self._range_pick(_RANGE_CHOICES)
         self.log_find = w.Text(placeholder="Find runs with: an order ID, KeyError, a request ID… (Enter searches "
                                            "CloudWatch)", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
@@ -329,7 +363,8 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, self.custom_bar, self.run_chips, self.run_head, self.jump_button, self.runs_box, pager])
+        page = w.VBox([bar, self.custom_bar, self.run_chips, self._timeline_strip(), self.run_head, self.jump_button,
+                       self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
 
@@ -354,15 +389,30 @@ class _LogsTab:
             bar.add_class(name)
         return bar
 
-    def _range_bar(self, value: str, on_change: Callable[[dict[str, Any]], None], label: str) -> tuple[Any, Any]:
+    def _range_pick(self, choices: tuple[tuple[str, str], ...] | None = None) -> Any:
         """
-        A time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs.
+        A time range dropdown. The Logs, Errors and Performance tabs each have one. Logs starts at the last hour, and
+        Errors and Performance at _FIRST_TAB_RANGE; once a range is picked in any of them, the three share it, so the
+        tabs show the same stretch of time. The Logs tab's `choices` end in Custom range…; the others list the
+        presets and the custom range picked there, if any.
+        """
+        w = self._w
+        if choices is not None:
+            options, value = list(choices), self._range_value()
+        else:
+            options, value = self._shared_options(), self._range_value() if self._linked else _FIRST_TAB_RANGE
+        pick = w.Dropdown(options=options, value=value, layout=w.Layout(width="auto"))
+        pick.add_class("lmx-range")
+        pick.observe(self._safely(self._range_changed), names="value")
+        self.range_picks.append(pick)
+        return pick
+
+    def _range_bar(self, label: str) -> tuple[Any, Any]:
+        """
+        The time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs.
         """
         w, layout = self._w, self._w.Layout
-        pick = w.Dropdown(options=[option for option in _RANGES if option[1] != "15m"], value=value,
-                          layout=layout(width="auto"))
-        pick.add_class("lmx-range")
-        pick.observe(self._safely(on_change), names="value")
+        pick = self._range_pick()
         again = w.Button(description="↻", tooltip=f"Read {label} again", layout=layout(width="auto"))
         again.add_class("lmx-small")
         bar = w.HBox([pick, again], layout=layout(width="100%"))
@@ -371,18 +421,55 @@ class _LogsTab:
 
     # ------------------------------------------------------------------ logs
 
+    def _range_value(self) -> str:
+        """
+        What the range fields show: a preset's value, or _CUSTOM_RANGE for any other range.
+        """
+        is_preset = self._until is None and self._range in {value for _, value in _RANGES}
+        return self._range if is_preset else _CUSTOM_RANGE
+
+    def _shared_options(self) -> list[tuple[str, str]]:
+        """
+        The Errors and Performance tabs' range field: the presets, and the custom range the Logs tab picked
+        ('Since 2026-10-01 00:00', '2026-10-28 09:00 – 17:30').
+        """
+        options = list(_RANGES)
+        if self._range_value() == _CUSTOM_RANGE:
+            text = self._range_text()
+            options.append((text[:1].upper() + text[1:], _CUSTOM_RANGE))
+        return options
+
     def _set_range(self, since: Any, until: Any = None) -> None:
         """
-        Picks a time range in the Logs tab's field: one of the presets, or a custom range (since= and until= as
-        LambdaAnalyzer.time_range reads them) shown in the From and To fields.
+        Picks a time range in every tab's field, which from then on share it: one of the presets, or a custom range (since= and until= as
+        LambdaAnalyzer.time_range reads them), shown in the Logs tab's From and To fields. The tabs that read the
+        old range read again when they're opened.
         """
-        self._range, self._until = since, until
-        if until is None and since in {value for _, value in _RANGES}:
+        if (since, until) != (self._range, self._until) or not self._linked:
+            self._asked -= {"logs", "errors", "performance"}
+        self._range, self._until, self._linked = since, until, True
+        for pick in self.range_picks:
+            if pick is not self.range_pick:
+                self._quietly(pick, options=self._shared_options(), value=self._range_value())
+        if self._range_value() != _CUSTOM_RANGE:
             self._quietly(self.range_pick, value=since)
             self.custom_bar.layout.display = "none"
             return
         self._quietly(self.range_pick, value=_CUSTOM_RANGE)
         self._fill_custom_range()
+
+    def _tab_range(self) -> tuple[Any, Any]:
+        """
+        The Errors and Performance tabs' range, (since, until): _FIRST_TAB_RANGE until a range is picked, then the
+        one the three tabs share.
+        """
+        return (self._range, self._until) if self._linked else (_FIRST_TAB_RANGE, None)
+
+    def _tab_window(self) -> tuple[datetime, datetime]:
+        return LambdaAnalyzer.time_range(*self._tab_range())
+
+    def _tab_range_text(self) -> str:
+        return self._range_text() if self._linked else self._range_text(_FIRST_TAB_RANGE)
 
     def _range_window(self) -> tuple[datetime, datetime]:
         """
@@ -430,22 +517,23 @@ class _LogsTab:
             end = "To" if until is not None else "now"
             self._status(f"From ({_fmt_dt(since)}) has to be before {end}: pick an earlier From.", "warn")
             return
-        self._range, self._until = since, until
+        self._set_range(since, until)
         self._reload_logs()
 
     def _range_changed(self, change: dict[str, Any]) -> None:
+        """
+        A time range picked in one tab's field: every tab's field shows it, and the tab on show reads it.
+        """
         if self.quiet or not change.get("new"):
             return
         if change["new"] == _CUSTOM_RANGE:
-            self._fill_custom_range()
-            self._status("Pick From and To (To empty means up to now), then Show runs.")
+            if change.get("owner") is self.range_pick:
+                self._fill_custom_range()
+                self._status("Pick From and To (To empty means up to now), then Show runs.")
             return
-        self.custom_bar.layout.display = "none"
-        self._range, self._until = str(change["new"]), None
-        if self.found is not None and self._searched and self._searched == self._log_query:
-            self._log_search()
-        else:
-            self._load_logs()
+        self._set_range(str(change["new"]))
+        reload = {"logs": self._reload_logs, "errors": self._load_errors, "performance": self._load_perf}
+        reload.get(self._tab, self._reload_logs)()
 
     def _reload_logs(self) -> None:
         if self.found is not None and self._searched and self._searched == self._log_query:
@@ -464,6 +552,7 @@ class _LogsTab:
         self._stop_live()
         start, end = self._range_window()
         self.logs_page, self._runs, self._run_offset = None, [], 0
+        self._run_window = None
         self.jump_button.layout.display = self.older_button.layout.display = "none"
         self.runs_box.children = []
         self._draw_run_chips()
@@ -512,6 +601,7 @@ class _LogsTab:
         self._done_reading("logs")
         self.logs_page = page
         self._runs = page.runs
+        self._run_window = None
         self._run_offset = 0
         self._draw_run_chips()
         self._draw_runs(renew=True)
@@ -535,7 +625,9 @@ class _LogsTab:
                     + (f", {failed:,} failed" if failed else "") + " · ✕ shows every run again")
         if not runs:
             return f"Nothing logged in {self._range_text()} · pick another time range above"
-        return (f"{_plural(len(runs), 'run')} in {self._range_text()}" + (f", {failed:,} failed" if failed else "")
+        counted = (f"The newest {_plural(len(runs), 'run')} of {self._range_text()}" if page.truncated
+                   else f"{_plural(len(runs), 'run')} in {self._range_text()}")
+        return (counted + (f", {failed:,} failed" if failed else "")
                 + " · click a run to see its lines" + (" · Older runs reads further back" if page.truncated else ""))
 
     def _words(self) -> list[str]:
@@ -548,6 +640,7 @@ class _LogsTab:
         self._log_query = str(self.log_find.value or "").strip()
         if self.found is not None and self._log_query != self._searched:
             self.found, self._found_runs = None, []
+            self._run_window = None
             self._draw_run_chips()
             if self.logs_page is None and "logs" not in self._tasks:  # it opened on a search: read the range now
                 self._load_logs()
@@ -576,6 +669,7 @@ class _LogsTab:
             return
         if not text:
             self.found, self._found_runs, self._searched = None, [], ""
+            self._run_window = None
             self._draw_run_chips()
             if self.logs_page is None and "logs" not in self._tasks:
                 self._load_logs()
@@ -603,6 +697,7 @@ class _LogsTab:
         self._done_reading("search")
         self.found = page
         self._found_runs = page.runs
+        self._run_window = None
         self._run_offset = 0
         if len(self._found_runs) <= 3:
             self._open_runs |= {run.key for run in self._found_runs}
@@ -633,6 +728,7 @@ class _LogsTab:
             self._searched = self._log_query = run.request_id or self._log_query
             self._quietly(self.log_find, value=self._searched)
             self._found_runs = [run]
+            self._run_window = None
             self._open_runs.add(run.key)
             self._run_offset = 0
             self._draw_run_chips()
@@ -647,11 +743,17 @@ class _LogsTab:
         return self._found_runs if self.found is not None else self._runs
 
     def _in_run_chip(self, run: LogRun, key: str) -> bool:
+        if key == "slow":
+            cutoff = self._slow_cutoff
+            return cutoff is not None and run.duration is not None and run.duration >= cutoff
         return {"": True, "failed": run.status in ("failed", "timeout"), "timeout": run.status == "timeout",
                 "logged": run.status == "logged", "cold": run.cold}[key]
 
     def _visible_runs(self) -> list[LogRun]:
         runs = self._source_runs()
+        if self._run_window is not None:
+            start, end = self._run_window
+            runs = [r for r in runs if start <= r.start < end]
         if self._run_chip:
             runs = [r for r in runs if self._in_run_chip(r, self._run_chip)]
         if self._log_query and self.found is None:
@@ -670,15 +772,19 @@ class _LogsTab:
 
     def _draw_run_chips(self) -> None:
         runs = self._source_runs()
+        self._slow_cutoff = slow_cutoff(runs)
         chips = []
         for key, label, tone in _RUN_CHIPS:
             n = sum(1 for r in runs if self._in_run_chip(r, key))
             if key and not n:
                 continue
-            tip = "Show every run" if not key else f"Show only the runs that {label.lower()} (click again for every run)"
+            tip = ("Show every run" if not key
+                   else f"Show only the slowest 10% of the runs read: {human_ms(self._slow_cutoff)} or longer"
+                   if key == "slow" else f"Show only the runs that {label.lower()} (click again for every run)")
             chips.append((self._chip_button(self._run_chip_buttons, key, tone, self._pick_run_chip), f"{label} {n:,}", tip,
                           key == self._run_chip))
         self._show_chips(self.run_chips, chips if runs else [])
+        self._draw_timeline()
 
     def _draw_runs(self, renew: bool = False) -> None:
         visible = self._visible_runs()
@@ -698,9 +804,13 @@ class _LogsTab:
             if row.button.tooltip != tip:
                 row.button.tooltip = tip
             if opened:
-                self._set(row.body, _run_body(run, words))
+                self._set(row.body, self._run_body_html(run, words))
             row.body.layout.display = "" if opened else "none"
+            self._draw_run_code(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
+        changed_at = self._changed_at(visible)
+        if changed_at is not None and self._run_offset < changed_at < self._run_offset + len(page):
+            children.insert(changed_at - self._run_offset, self._change_line())
         if not page:
             children = [self._empty("runs", self._no_runs_text())]
         if renew:
@@ -717,6 +827,28 @@ class _LogsTab:
         self.older_button.layout.display = "" if (self.found is None and page_read is not None
                                                   and page_read.truncated) else "none"
         self._draw_run_head(visible)
+
+    def _changed_at(self, visible: list[LogRun]) -> int | None:
+        """
+        Where in the runs (newest first) the function was last changed (its code or settings): the place of the
+        first run that started before it, when a run after it is there too.
+        """
+        changed = self._full().last_modified if self.function is not None else None
+        if changed is None:
+            return None
+        place = next((i for i, run in enumerate(visible) if run.start < changed), None)
+        return place if place else None
+
+    def _change_line(self) -> Any:
+        """
+        The line between the runs after the function was last changed and the ones before, one widget, kept.
+        """
+        if self.change_line is None:
+            self.change_line = self._w.HTML(layout=self._w.Layout(width="100%"))
+        changed = self._full().last_modified
+        self._set(self.change_line, f'<div class="lmx-changed"><span>Changed {_esc(_stamp(changed, zone=True))} (its '
+                                    "code or settings): the runs below ran it as it was before</span></div>")
+        return self.change_line
 
     def _no_runs_text(self) -> str:
         page = self.found if self.found is not None else self.logs_page
@@ -760,7 +892,9 @@ class _LogsTab:
             durations = [r.duration for r in runs if r.duration is not None]
             used = [(r.report.max_memory, r.report.memory) for r in runs if r.report is not None and r.report.memory]
             cold = sum(1 for r in runs if r.cold)
-            bits.append(f"<span><b>{len(runs):,}</b> {'run' if len(runs) == 1 else 'runs'}</span>")
+            sampled = self.found is None and page.truncated
+            newest = "the newest " if sampled else ""
+            bits.append(f"<span>{newest}<b>{len(runs):,}</b> {'run' if len(runs) == 1 else 'runs'}</span>")
             if failed:
                 bits.append(f'<span class="bad"><b>{failed:,}</b> failed ({_pct(failed / len(runs))})</span>')
             if durations:
@@ -798,6 +932,26 @@ class _LogsTab:
         if target:
             self.range_pick.value = target  # its observer reads the logs again
 
+    def _run_body_html(self, run: LogRun, words: list[str]) -> str:
+        fn = self._full()
+        return _run_body(run, words, region=fn.region or self._session_region() or "", log_group=fn.log_group)
+
+    def _draw_run_code(self, row: _RunRow, opened: bool) -> None:
+        """
+        The button under an open run's lines that opens, in the Code tab, the line of its own code its traceback
+        names; hidden when the run is folded or names none.
+        """
+        run = row.run
+        frame = failing_frame("\n".join(e.message for e in run.events)) if opened and run is not None else None
+        row.frame = frame
+        row.code_button.layout.display = "" if frame is not None else "none"
+        if frame is None:
+            return
+        label = f"Open {frame.path}, line {frame.line}, in the Code tab ›"
+        if row.code_button.description != label:
+            row.code_button.description = label
+            row.code_button.tooltip = "Where this run failed: the file from its deployment package, that line shaded"
+
     def _toggle_run(self, row: _RunRow) -> None:
         run = row.run
         if run is None:
@@ -807,9 +961,10 @@ class _LogsTab:
             row.body.layout.display = "none"
         else:
             self._open_runs.add(run.key)
-            self._set(row.body, _run_body(run, self._words()))
+            self._set(row.body, self._run_body_html(run, self._words()))
             row.body.layout.display = ""
         opened = run.key in self._open_runs
+        self._draw_run_code(row, opened)
         _class_if(row.box, "lmx-open", opened)
         row.button.tooltip = _run_tip(run, opened)
 
@@ -861,6 +1016,7 @@ class _LogsTab:
         if self.found is not None:  # back to every run: Live adds to them
             self._quietly(self.log_find, value="")
             self.found, self._found_runs, self._searched, self._log_query = None, [], "", ""
+            self._run_window = None
             self._draw_run_chips()
             self._draw_runs(renew=True)
         self._live, self._live_new, self._live_started = True, 0, time.monotonic()

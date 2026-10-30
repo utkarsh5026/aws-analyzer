@@ -9,6 +9,35 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
+  - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
+  - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
+
+- ⚡ **Lambda: errors put down to the last change** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - A warning when calls began to fail after the function was last changed, with the error rate before and since.
+  - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
+  - `change_effect()` compares a function's days before and after a change.
+
+- ⚡ **Lambda explorer: a timeline, the slowest runs and code to reopen it** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The Logs tab draws its runs over time, red where they failed; click a bar for only those runs. **Slowest 10%** picks out the slow ones.
+  - **⧉ Copy as code** holds the one call that opens it as it is now: `explore('orders-etl', tab='logs', since='3h', search='KeyError')`.
+  - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
+
+- ⚡ **Lambda explorer: a run's links, a slim header, the first problem read ahead** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - An open run has its request ID and a Logs Insights query to copy, and opens in the AWS console.
+  - With a function picked, the header is one line of its numbers, so the tabs get the height.
+  - The function at the top of the problems is read in the background, so it opens at once.
+
+### Changed
+
+- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
+  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
+  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
+
 ## [0.40.0] - 2026-10-30
 
 ### Added

@@ -62,7 +62,7 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
+    AccountLimits, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
     LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
@@ -72,9 +72,14 @@ from .analysis.functions import (
 )
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .analysis.overview import Overview
-from .analysis.findings import RECENT_DAYS, account_findings, function_findings, secret_like
-from .analysis.errors import classify_error, error_findings, group_errors, request_id_of
-from .analysis.logs import LogPage, LogRun, line_level, parse_report, split_runs
+from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
+from .analysis.errors import (
+    cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
+)
+from .analysis.logs import (
+    LogPage, LogRun, TimeBucket, line_level, parse_report, run_console_url, run_insights_query, run_timeline,
+    slow_cutoff, split_runs,
+)
 from .analysis.performance import percentile, performance_findings, suggest_memory
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
@@ -127,6 +132,8 @@ __all__ = [
     "CodeStep",
     "DailyUsage",
     "EnvRead",
+    "ChangeEffect",
+    "CodeFrame",
     "ErrorGroup",
     "ErrorReport",
     "EventField",
@@ -150,6 +157,7 @@ __all__ = [
     "LogGroup",
     "LogPage",
     "LogRun",
+    "TimeBucket",
     "Overview",
     "PackageDownload",
     "PackageSources",
@@ -164,9 +172,11 @@ __all__ = [
     "Version",
     "VersionDiff",
     "account_findings",
+    "cause_search",
     "cause_key",
     "change_findings",
     "classify_error",
+    "code_frames",
     "code_graph",
     "code_map_findings",
     "diff_findings",
@@ -175,9 +185,11 @@ __all__ = [
     "error_findings",
     "explore",
     "function_findings",
+    "change_effect",
     "function_changes",
     "function_look",
     "function_monthly_cost",
+    "failing_frame",
     "group_errors",
     "handler_file",
     "human_age",
@@ -216,6 +228,10 @@ __all__ = [
     "runtime_status",
     "search_rank",
     "secret_like",
+    "run_console_url",
+    "run_insights_query",
+    "run_timeline",
+    "slow_cutoff",
     "split_runs",
     "stream_version",
     "suggest_memory",

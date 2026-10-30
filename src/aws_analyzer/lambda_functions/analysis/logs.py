@@ -12,12 +12,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable
+from urllib.parse import quote
 
 from ..._kit.deps import _require
 
 from ..helpers import _lambda_time
 from ..models import Function, Invocation, LogEvent
 from .errors import _REPORT_FIELD_RE, _REPORT_RE, _TIMESTAMP_RE, classify_error
+from .performance import percentile
 
 
 @dataclass
@@ -109,6 +111,84 @@ class LogRun:
     @property
     def matched(self) -> bool:
         return any(e.matched for e in self.events)
+
+
+TIMELINE_BUCKETS = 30
+
+SLOW_SHARE = 0.10
+
+_SLOW_MIN_RUNS = 10
+
+
+@dataclass
+class TimeBucket:
+    """
+    A slice of a time range: how many runs started in it, and how many of them failed or timed out.
+    """
+
+    start: datetime
+    end: datetime
+    runs: int = 0
+    failed: int = 0
+
+
+def run_timeline(runs: Iterable[LogRun], start: datetime, end: datetime, buckets: int = TIMELINE_BUCKETS
+                 ) -> list[TimeBucket]:
+    """
+    The runs that started from start to end, counted in `buckets` equal slices, oldest first: when they ran, and
+    when they failed, at a glance. Runs outside the range are left out.
+    """
+    if end <= start or buckets < 1:
+        return []
+    step = (end - start) / buckets
+    slices = [TimeBucket(start + step * i, start + step * (i + 1)) for i in range(buckets)]
+    for run in runs:
+        if not start <= run.start < end:
+            continue
+        bucket = slices[min(buckets - 1, int((run.start - start) / step))]
+        bucket.runs += 1
+        bucket.failed += run.status in ("failed", "timeout")
+    return slices
+
+
+def slow_cutoff(runs: Iterable[LogRun]) -> float | None:
+    """
+    The run time (ms) from which a run is among the slowest SLOW_SHARE of the runs; None with fewer than
+    _SLOW_MIN_RUNS runs that have a run time, too few to call any of them slow.
+    """
+    durations = [run.duration for run in runs if run.duration is not None]
+    if len(durations) < _SLOW_MIN_RUNS:
+        return None
+    return percentile(durations, 100 * (1 - SLOW_SHARE))
+
+
+_CONSOLE_HOSTS = (("cn-", "console.amazonaws.cn"), ("us-gov-", "console.amazonaws-us-gov.com"))
+
+
+def _console_part(text: str) -> str:
+    """
+    A name or value in a CloudWatch console address, the way the console writes them after its #: escaped as a URL
+    twice, then each % written as $ ('/aws/lambda/x' -> '$252Faws$252Flambda$252Fx').
+    """
+    return quote(quote(text, safe=""), safe="").replace("%", "$")
+
+
+def run_console_url(region: str, log_group: str, stream: str, request_id: str) -> str:
+    """
+    The AWS console's page of one run: its log stream in CloudWatch, filtered to the lines that name its request ID.
+    """
+    host = next((host for prefix, host in _CONSOLE_HOSTS if region.startswith(prefix)), "console.aws.amazon.com")
+    return (f"https://{region}.{host}/cloudwatch/home?region={region}#logsV2:log-groups/log-group/"
+            f"{_console_part(log_group)}/log-events/{_console_part(stream)}"
+            f"$3FfilterPattern$3D{_console_part(chr(34) + request_id + chr(34))}")
+
+
+def run_insights_query(request_id: str) -> str:
+    """
+    A CloudWatch Logs Insights query for every line of one run, oldest first: run it on the function's log group.
+    """
+    return (f'fields @timestamp, @message\n| filter @requestId = "{request_id}" or @message like "{request_id}"\n'
+            "| sort @timestamp asc")
 
 
 @dataclass

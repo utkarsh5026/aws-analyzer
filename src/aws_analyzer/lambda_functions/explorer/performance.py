@@ -13,7 +13,6 @@ from ..._kit.window import _skeleton
 
 from ..helpers import human_ms
 from ..models import Invocation, Performance
-from ..analyzer import LambdaAnalyzer
 from .frame import _run_clock
 from .widgets import _Row
 
@@ -25,27 +24,21 @@ class _PerformanceTab:
 
     def _performance_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        bar, (self.perf_pick, again) = self._range_bar("24h", self._perf_range_changed, "its runs")
+        bar, (self.perf_pick, again) = self._range_bar("its runs")
         again.on_click(self._safely(lambda _button: self._load_perf()))
         self.perf_view = w.HTML(layout=layout(width="100%"))
         self.slow_head = w.HTML(layout=layout(width="100%"))
         self.slow_rows_box = w.VBox(layout=layout(width="100%"))
         return self._scroll_page([self.perf_view, self.slow_head, self.slow_rows_box], above=[bar])
 
-    def _perf_range_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or not change.get("new"):
-            return
-        self._perf_range = str(change["new"])
-        self._load_perf()
-
     def _load_perf(self) -> None:
         if self.function is None:
             return
         self._asked.add("performance")
         fn = self._full()
-        start, end = LambdaAnalyzer.time_range(self._perf_range)
+        start, end = self._tab_window()
         self.perf = None
-        self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._range_text(self._perf_range)}…"))
+        self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._tab_range_text()}…"))
         self._set(self.slow_head, "")
         self.slow_rows_box.children = []
         self._counted = 0
@@ -63,7 +56,7 @@ class _PerformanceTab:
     def _got_perf(self, perf: Performance) -> None:
         self.perf = perf
         fn = perf.function
-        self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._perf_range,
+        self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._tab_range()[0],
                                                                               for_window=True))
         slowest = sorted(perf.invocations, key=lambda r: r.duration, reverse=True)[:10]
         today = _in_zone(_utcnow()).date()

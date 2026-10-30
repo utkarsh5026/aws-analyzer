@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import time
 from datetime import timedelta, timezone
 from typing import Any
 
@@ -18,18 +19,47 @@ from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _skeleton
 
 from ..helpers import MB, _midnight, _pct, human_ms, parse_function_ref
-from ..models import Function, FunctionDetail
+from ..models import ErrorReport, Function, FunctionDetail, Performance
+from ..analysis.logs import LogPage
 from ..analysis.functions import _source_name
 from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
 from ..analysis.changes import change_findings, function_changes
 from ..blocks.wiring import _Columns, _Wiring
 from .frame import _FUNCTION_TABS, _short_day, _with_findings
+from .functions import _problem_rank
 
 
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
          'stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h2.3c.9 0 1.6.5 2 1.3l6.7 13.7"/>'
          '<path d="M12.3 10.6 6.4 19.5"/></svg>')
+
+
+_KEEP_SECONDS = 300
+
+_KEPT_FUNCTIONS = 5
+
+
+@dataclasses.dataclass
+class _KeptReads:
+    """
+    What the window had read about a function when another one was opened, kept for _KEEP_SECONDS so going
+    back to it shows it at once: its describe(), its logs, errors and run times (with the time ranges they were read
+    for) and its package.
+    """
+
+    read_at: float
+    logs_range: tuple[Any, Any]
+    tab_range: tuple[Any, Any]
+    detail: FunctionDetail | None
+    logs_page: LogPage | None
+    error_report: ErrorReport | None
+    perf: Performance | None
+    code: tuple[Function, bytes | None] | None
+
+    @property
+    def held(self) -> bool:
+        return any(part is not None for part in (self.detail, self.logs_page, self.error_report, self.perf, self.code))
 
 
 _SETUP_CARDS = {"Runtime", "Memory", "Timeout", "Architecture", "Triggers"}  # function_info()'s cards the Overview
@@ -51,6 +81,12 @@ def _destination(arn: str | None) -> tuple[str, str]:
     parts = (arn or "").split(":")
     kind = _DESTINATIONS.get(parts[2], parts[2]) if len(parts) > 5 else ""
     return kind or "destination", _source_name(arn)[0] or (arn or "-")
+
+
+def _stat_cards_html(cards: list[tuple[str, str, str]]) -> str:
+    items = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b></div>'
+                    for label, value, tone in cards)
+    return f'<div class="lmx-stats">{items}</div>'
 
 
 class _FunctionTab:
@@ -76,59 +112,79 @@ class _FunctionTab:
 
     def _draw_stats(self) -> None:
         """
-        The cards beside the function field: the region at a glance, or the picked function.
+        Beside the function field: the region at a glance as cards, or, with a function picked, its numbers as one
+        line, so the header stays slim (no subtitle either) and its tabs get the height.
         """
-        now = _utcnow()
-        cards: list[tuple[str, str, str]] = []
-        loading = self._numbers_pending or (self.overview is None and self._listing)
+        _class_if(self.head_box, "lmx-slim", self.function is not None)
         if self.function is None:
-            facts = list(self._facts.values())
-            if self.overview is None:
-                cards = [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate", "…", "sk-on")]
-            else:
-                read = [f.metrics for f in facts if f.metrics is not None]
-                calls = sum(m.invocations for m in read)
-                failed = sum(m.errors for m in read)
-                costs = [f.cost for f in facts if f.cost is not None]
-                warn = any(_errors_level(f.metrics, now) == "warn" for f in facts)
-                attention = sum(1 for f in facts if f.warnings)
-                cards.append(("Functions", f"{len(facts):,}", ""))
-                cards.append(("Calls · 30d", "…" if loading else _count(round(calls)), "sk-on" if loading else ""))
-                cards.append(("Error rate", "…" if loading else (_pct(failed / calls) if calls else "-"),
-                              "sk-on" if loading else "warn" if warn else ""))
-                cards.append(("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"),
-                              "sk-on" if loading else ""))
-                cards.append(("Need attention", f"{attention:,}", "warn" if attention else "ok" if facts else ""))
+            self._set(self.stats, _stat_cards_html(self._region_cards()))
         else:
-            fn = self._full()
-            f = self._facts.get(self.function.arn)
-            m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
-                f.metrics if f is not None else None)
-            if m is None:
-                waiting = loading or self.detail is None
-                cards += [(label, "…" if waiting else "-", "sk-on" if waiting else "")
-                          for label in ("Calls · 30d", "Error rate", "Avg / longest run")]
-            else:
-                level = _errors_level(m, now)
-                near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
-                cards.append(("Calls · 30d", _count(round(m.invocations)), ""))
-                cards.append(("Error rate", _pct(m.error_rate) if m.invocations else "-",
-                              "bad" if level == "warn" else "warn" if level else ""))
-                cards.append(("Avg / longest run", f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}"
-                              if m.invocations else "not called in 30 days", "warn" if near else ""))
-            if self.detail is not None:
-                cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,
-                                                    self.detail.log_group, prices=self.core.prices))
-                warnings = sum(level == "warn" for level, _ in function_findings(
-                    fn, self.detail.metrics, self.detail, prices=self.core.prices, now=now))
-            else:
-                cost = f.cost if f is not None else None
-                warnings = len(f.warnings) if f is not None else 0
-            cards.append(("Est. $ / month", human_money(cost) if cost is not None else "-", ""))
-            cards.append(("Warnings", f"{warnings:,}", "warn" if warnings else "ok"))
-        html_cards = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b>'
-                             "</div>" for label, value, tone in cards)
-        self._set(self.stats, f'<div class="lmx-stats">{html_cards}</div>')
+            self._set(self.stats, self._function_line())
+
+    def _region_cards(self) -> list[tuple[str, str, str]]:
+        """
+        The region's cards: its functions, their calls and error rate over 30 days, the cost and how many need
+        attention.
+        """
+        if self.overview is None:
+            return [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate · 30d", "…", "sk-on")]
+        loading = self._numbers_pending or self._listing
+        facts = list(self._facts.values())
+        read = [f.metrics for f in facts if f.metrics is not None]
+        calls = sum(m.invocations for m in read)
+        failed = sum(m.errors for m in read)
+        costs = [f.cost for f in facts if f.cost is not None]
+        warn = any(_errors_level(f.metrics, _utcnow()) == "warn" for f in facts)
+        attention = sum(1 for f in facts if f.warnings)
+        waiting = "sk-on" if loading else ""
+        return [
+            ("Functions", f"{len(facts):,}", ""),
+            ("Calls · 30d", "…" if loading else _count(round(calls)), waiting),
+            ("Error rate · 30d", "…" if loading else (_pct(failed / calls) if calls else "-"),
+             waiting or ("warn" if warn else "")),
+            ("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"), waiting),
+            ("Need attention", f"{attention:,}", "warn" if attention else "ok" if facts else ""),
+        ]
+
+    def _function_numbers(self) -> list[tuple[str, str, str]]:
+        """
+        The picked function's numbers, (value, what it is, tone): its calls, failed share and run times over 30
+        days, its cost and its warnings.
+        """
+        fn, now = self._full(), _utcnow()
+        f = self._facts.get(fn.arn)
+        m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
+            f.metrics if f is not None else None)
+        if m is None:
+            waiting = self._numbers_pending or self.detail is None
+            parts = [("…" if waiting else "-", "calls", "sk-on" if waiting else "")]
+        elif not m.invocations:
+            parts = [("0", "calls", "")]
+        else:
+            level = _errors_level(m, now)
+            near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
+            parts = [(_count(round(m.invocations)), "calls", ""),
+                     (_pct(m.error_rate), "failed", "bad" if level == "warn" else "warn" if level else ""),
+                     (human_ms(m.avg_duration), "avg", ""),
+                     (human_ms(m.duration_max), "max", "warn" if near else "")]
+        if self.detail is not None:
+            cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,
+                                                self.detail.log_group, prices=self.core.prices))
+            warnings = sum(level == "warn" for level, _ in function_findings(
+                fn, self.detail.metrics, self.detail, prices=self.core.prices, now=now))
+        else:
+            cost = f.cost if f is not None else None
+            warnings = len(f.warnings) if f is not None else 0
+        parts.append((f"{human_money(cost)}/mo" if cost is not None else "-", "", ""))
+        parts.append((f"{warnings:,}", "warning" if warnings == 1 else "warnings", "warn" if warnings else "ok"))
+        return parts
+
+    def _function_line(self) -> str:
+        pieces = " · ".join(f'<span class="{tone}"><b>{_esc(value)}</b>{" " if words else ""}{_esc(words)}</span>'
+                            for value, words, tone in self._function_numbers())
+        return (f'<div class="lmx-line" title="CloudWatch, the last 30 days: calls, the share that failed, the '
+                'average and longest run time; the monthly cost is estimated at list prices">'
+                f'{pieces}<span class="w"> · 30 days</span></div>')
 
     def _draw_alerts(self) -> None:
         """
@@ -209,10 +265,48 @@ class _FunctionTab:
         """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
+        rereading, self._rereading = self._rereading, False
+        if rereading:
+            self._kept.clear()
+        else:
+            self._keep_reads()
+        self._reset_pages(fn)
+        name = fn.name
+        kept = None if rereading else self._kept_reads(fn)
+        if kept is not None:
+            self._draw_kept(kept)
+        target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
+        self._show_tab(target, load=not search)
+        if search:
+            self._quietly(self.log_find, value=search)
+            self._log_query = search
+            self._asked.add("logs")
+            self._log_search()
+        if kept is not None and kept.detail is not None:
+            self._described(kept.detail)
+            minutes = int((time.monotonic() - kept.read_at) // 60)
+            if minutes:
+                self._status(f"{name} as the window read it {_plural(minutes, 'minute')} ago · ↻ Refresh reads it again")
+            else:
+                self._status(self._tab_line(self._tab))
+            return
+        if target in ("overview", "settings"):
+            self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
+                         owner="describe")
+        self._later("describe", lambda: self.core.describe(name, region=fn.region or None, days=30), self._described,
+                    self._describe_failed)
+
+    def _reset_pages(self, fn: Function) -> None:
+        """
+        Forgets what was read about the function shown before, and puts fn in the header with every tab blank or
+        waiting for its read.
+        """
         self.function, self.detail = fn, None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
         self._how = False
+        self._code_target = None
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
+        self._run_window = None
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
         self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()
@@ -226,31 +320,92 @@ class _FunctionTab:
         self._draw_stats()
         self._draw_alerts()
         self._mark_rows()
-        name = fn.name
-        self._set(self.overview_view, _skeleton(f"Reading {name}: its settings, what calls it, its last 30 days…"))
-        self._set(self.settings_view, _skeleton(f"Reading {name}'s settings…"))
-        for widget in (self.errors_view, self.perf_view, self.code_view, self.source_view, self.error_head,
-                       self.slow_head, self.run_head):
+        self._set(self.overview_view, _skeleton(f"Reading {fn.name}: its settings, what calls it, its last 30 days…"))
+        self._set(self.settings_view, _skeleton(f"Reading {fn.name}'s settings…"))
+        for widget in (self.errors_view, self.cause_head, self.errors_more, self.perf_view, self.code_view,
+                       self.source_view, self.error_head, self.slow_head, self.run_head):
             self._set(widget, "")
         self.error_rows_box.children = self.slow_rows_box.children = self.files_box.children = []
+        self.cause_rows_box.children = []
+        self.timeline_box.layout.display = "none"
         self.runs_box.children = []
         self.run_chips.children = []
         self.code_split.layout.display = self.code_bar.layout.display = "none"
         self.code_more.layout.display = self.jump_button.layout.display = self.older_button.layout.display = "none"
         for key in ("overview", "settings", "errors", "performance"):
             self._renew(key)
-        target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
-        self._show_tab(target, load=not search)
-        if search:
-            self._quietly(self.log_find, value=search)
-            self._log_query = search
+
+    def _read_ahead(self) -> None:
+        """
+        Reads, in the background, the function most people click first: the top of the list's problems, when it has
+        a warning or is failing. Its Overview then shows at once when it's opened. Nothing when a function is open
+        or asked for already.
+        """
+        if self.function is not None or self._want or not self._facts:
+            return
+        top = max(self._facts.values(), key=_problem_rank)
+        if top.tone not in ("bad", "warn"):
+            return
+        fn = top.fn
+        self._later("ahead", lambda: self.core.describe(fn.name, region=fn.region or None, days=30),
+                    lambda detail: self._read_ahead_done(fn, detail), lambda _exc: None)
+
+    def _read_ahead_done(self, fn: Function, detail: FunctionDetail) -> None:
+        """
+        A function read ahead: drawn when it's the one open and still waiting for its read, else kept for when it is.
+        """
+        if self.function is not None and self.function.arn == fn.arn:
+            if self.detail is None:
+                self._described(detail)
+            return
+        self._kept[fn.arn] = _KeptReads(time.monotonic(), (self._range, self._until), self._tab_range(), detail, None,
+                                        None, None, None)
+
+    def _keep_reads(self) -> None:
+        """
+        Keeps what was read about the function on show, before another is opened (at most _KEPT_FUNCTIONS,
+        the oldest dropped first). Search results aren't kept: they're one question, not the function's logs.
+        """
+        fn = self.function
+        if fn is None:
+            return
+        code = (self._code_fn, self._package_data) if self._code_fn is not None else None
+        kept = _KeptReads(time.monotonic(), (self._range, self._until), self._tab_range(), self.detail,
+                           self.logs_page, self.error_report, self.perf, code)
+        self._kept.pop(fn.arn, None)
+        if not kept.held:
+            return
+        self._kept[fn.arn] = kept
+        while len(self._kept) > _KEPT_FUNCTIONS:
+            self._kept.pop(next(iter(self._kept)))
+
+    def _kept_reads(self, fn: Function) -> _KeptReads | None:
+        """
+        What was kept about a function, if it was read less than _KEEP_SECONDS ago.
+        """
+        kept = self._kept.pop(fn.arn, None)
+        if kept is None or time.monotonic() - kept.read_at > _KEEP_SECONDS:
+            return None
+        return kept
+
+    def _draw_kept(self, kept: _KeptReads) -> None:
+        """
+        Draws the tabs from what was kept, each only when it was read for the time range picked now; the rest read
+        when they're opened, as usual.
+        """
+        if kept.logs_page is not None and kept.logs_range == (self._range, self._until):
             self._asked.add("logs")
-            self._log_search()
-        if target in ("overview", "settings"):
-            self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
-                         owner="describe")
-        self._later("describe", lambda: self.core.describe(name, region=fn.region or None, days=30), self._described,
-                    self._describe_failed)
+            self._got_logs(kept.logs_page)
+        same_range = kept.tab_range == self._tab_range()
+        if same_range and kept.error_report is not None:
+            self._asked.add("errors")
+            self._got_errors(kept.error_report)
+        if same_range and kept.perf is not None:
+            self._asked.add("performance")
+            self._got_perf(kept.perf)
+        if kept.code is not None:
+            self._asked.add("code")
+            self._got_code(kept.code)
 
     def _describe_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)
@@ -333,7 +488,8 @@ class _FunctionTab:
 
     def _charts(self, detail: FunctionDetail) -> list[Any]:
         """
-        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days.
+        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days, a
+        dashed line through the day it was last changed (its code or settings), when that's one of them.
         """
         m, fn = detail.metrics, detail.function
         if m is None or not m.invocations or m.period < 86400:
@@ -355,11 +511,15 @@ class _FunctionTab:
                           + failed + (f", {_count(round(d.throttles))} throttled" if d.throttles else "")))
             times.append((label, d.duration_max or d.avg_duration or 0.0, d.avg_duration or 0.0,
                           f"{day:%a} {label}: average {human_ms(d.avg_duration)}, longest {human_ms(d.duration_max)}"))
+        changed = fn.last_modified
+        mark = (days.index(_midnight(changed)) if changed is not None and _midnight(changed) in days else None)
+        label = f"changed {_short_day(changed)}" if mark is not None else ""
         return [
-            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)"),
+            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)",
+                     mark=mark, mark_label=label),
             _Columns(times, title=f"Run time a day: the average (dark) under the longest (light), against its "
                                   f"{fn.timeout} s timeout", part="dim", limit=fn.timeout * 1000,
-                     limit_label=f"timeout {fn.timeout} s", unit="ms"),
+                     limit_label=f"timeout {fn.timeout} s", unit="ms", mark=mark, mark_label=label),
         ]
 
     def _draw_settings(self) -> None:

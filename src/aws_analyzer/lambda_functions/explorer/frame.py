@@ -78,7 +78,7 @@ def _explorer_rules() -> str:
 
 _EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,165,250,.15);--lx-ring:rgba(96,165,250,"
                   ".38);--lx-raised:rgba(255,255,255,.11);--lx-shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,"
-                  ".28);--lx-ink-bad:#f87171;--lx-ink-warn:#fbbf24;--lx-ink-ok:#34d399;--lx-code:rgba(255,255,255,.035);"
+                  ".28);--lx-ink-bad:#f87171;--lx-hit:rgba(248,113,113,.2);--lx-ink-warn:#fbbf24;--lx-ink-ok:#34d399;--lx-code:rgba(255,255,255,.035);"
                   "--lx-tok-k:#c792ea;--lx-tok-s:#a5d6a7;--lx-tok-n:#f78c6c;--lx-tok-f:#82aaff;--lx-tok-c:#7f8c98")
 
 _TERMINAL_TOKENS = ("--lx-accent:var(--lmt-accent);--lx-button:var(--lmt-accent);--lx-accent-2:var(--lmt-prompt);"
@@ -159,7 +159,7 @@ _TERMINAL_CSS = _terminal_theme((".lmx-app",), "lmt") + """
 .lmx-app .spin{border-top-color:var(--lmt-accent)}"""
 
 _EXPLORER_CSS = """<style>
-.lmx-app{--lx-accent:#2563eb;--lx-button:#2563eb;--lx-accent-2:#7c3aed;--lx-soft:rgba(37,99,235,.10);--lx-ring:rgba(37,99,235,.28);--lx-line:rgba(127,127,127,.22);--lx-line-2:rgba(127,127,127,.36);--lx-tint:rgba(127,127,127,.06);--lx-tint-2:rgba(127,127,127,.11);--lx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--lx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--lx-raised:var(--lx-surface);--lx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--lx-ok:#10b981;--lx-warn:#f59e0b;--lx-bad:#ef4444;--lx-ink-bad:#dc2626;--lx-ink-warn:#b45309;--lx-ink-ok:#047857;--lx-mono:"Cascadia Mono","Cascadia Code",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--lx-code:rgba(127,127,127,.05);--lx-tok-k:#7c3aed;--lx-tok-s:#047857;--lx-tok-n:#c2410c;--lx-tok-f:#2563eb;--lx-tok-c:#64748b}
+.lmx-app{--lx-accent:#2563eb;--lx-button:#2563eb;--lx-accent-2:#7c3aed;--lx-soft:rgba(37,99,235,.10);--lx-ring:rgba(37,99,235,.28);--lx-line:rgba(127,127,127,.22);--lx-line-2:rgba(127,127,127,.36);--lx-tint:rgba(127,127,127,.06);--lx-tint-2:rgba(127,127,127,.11);--lx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--lx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--lx-raised:var(--lx-surface);--lx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--lx-ok:#10b981;--lx-warn:#f59e0b;--lx-bad:#ef4444;--lx-ink-bad:#dc2626;--lx-hit:rgba(239,68,68,.14);--lx-ink-warn:#b45309;--lx-ink-ok:#047857;--lx-mono:"Cascadia Mono","Cascadia Code",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--lx-code:rgba(127,127,127,.05);--lx-tok-k:#7c3aed;--lx-tok-s:#047857;--lx-tok-n:#c2410c;--lx-tok-f:#2563eb;--lx-tok-c:#64748b}
 body[data-jp-theme-light="false"] .lmx-app,body.vscode-dark .lmx-app,body.vscode-high-contrast .lmx-app{""" + _EXPLORER_DARK + """}
 @media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .lmx-app{""" + _EXPLORER_DARK + """}}
 .lmx-app{position:relative;isolation:isolate;box-sizing:border-box;border:1px solid var(--lx-line);border-radius:18px;padding:14px 16px 10px;background:var(--lx-bg);box-shadow:var(--lx-shadow);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
@@ -289,7 +289,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app button.lmx-act{position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:2;display:none;width:auto;height:26px;padding:0 11px;border-radius:999px;font-size:12px;background:var(--lx-raised);border-color:var(--lx-line-2);color:var(--lx-accent);box-shadow:0 1px 3px rgba(15,23,42,.12)}
 .lmx-app.lmx-app .lmx-row:hover>button.lmx-act,.lmx-app.lmx-app .lmx-row.lmx-on>button.lmx-act{display:inline-flex;align-items:center}
 .lmx-app.lmx-app button.lmx-act:active:enabled{transform:translateY(-50%)}
-.lmx-app .fr{display:grid;grid-template-columns:8px minmax(0,1fr) 86px 64px 72px 76px 92px 38px 52px;align-items:center;gap:0 10px;height:54px;padding:0 10px 0 12px;min-width:0}
+.lmx-app .fr{display:grid;grid-template-columns:8px minmax(0,1fr) 96px 86px 64px 72px 76px 92px 38px 52px;align-items:center;gap:0 10px;height:54px;padding:0 10px 0 12px;min-width:0}
 .lmx-app .fm{min-width:0;line-height:1.3}
 .lmx-app .fn{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}
 .lmx-app .fn b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
@@ -301,12 +301,18 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .ff{font-size:11.5px;opacity:.68;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .lmx-app .fc{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .lmx-app .fc.dim{opacity:.55}
+.lmx-app .ff.hl{opacity:1;color:var(--lx-ink-warn)}
+.lmx-app .ff.hl.bad{color:var(--lx-ink-bad)}
+.lmx-app .tr{display:inline-flex;align-items:flex-end;gap:1px;height:22px;vertical-align:middle}
+.lmx-app .tr i{width:5px;display:flex;flex-direction:column;background:color-mix(in srgb,var(--lx-accent) 55%,transparent);border-radius:1px 1px 0 0;overflow:hidden}
+.lmx-app .tr i b{flex:0 0 auto;min-height:1px;background:var(--lx-ink-bad)}
+.lmx-app .tr i.z{height:1px;background:currentColor;opacity:.25;border-radius:0}
 .lmx-app .fc .pill{display:inline-block;padding:0 7px;border-radius:999px;font-weight:600;font-size:11.5px}
 .lmx-app .fc .pill.warn{background:rgba(245,158,11,.18);color:var(--lx-ink-warn)}
 .lmx-app .fc .pill.bad{background:rgba(239,68,68,.15);color:var(--lx-ink-bad)}
 .lmx-app .wb{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 6px;border-radius:999px;font-size:11.5px;font-weight:700;background:rgba(245,158,11,.18);color:var(--lx-ink-warn)}
 .lmx-app .sk{display:inline-block;width:42px;height:10px;border-radius:5px;vertical-align:middle;background-size:300% 100%;background-image:linear-gradient(90deg,var(--lx-tint) 30%,var(--lx-tint-2) 50%,var(--lx-tint) 70%);animation:lmx-glow 1.3s ease-in-out infinite}
-@container (max-width:900px){.lmx-app .fr{grid-template-columns:8px minmax(0,1fr) 80px 60px 70px 38px 52px}.lmx-app .fr .c-dur,.lmx-app .fr .c-called{display:none}.lmx-app.lmx-app .lmx-lhead .lmx-c-duration,.lmx-app.lmx-app .lmx-lhead .lmx-c-called{display:none}}
+@container (max-width:900px){.lmx-app .fr{grid-template-columns:8px minmax(0,1fr) 96px 80px 60px 70px 38px 52px}.lmx-app .fr .c-dur,.lmx-app .fr .c-called{display:none}.lmx-app.lmx-app .lmx-lhead .lmx-c-duration,.lmx-app.lmx-app .lmx-lhead .lmx-c-called{display:none}}
 .lmx-app.lmx-app .lmx-listpage{container-type:inline-size}
 .lmx-app .lmx-empty{padding:26px 10px;text-align:center;opacity:.62;font-size:12.5px;line-height:1.5}
 .lmx-app.lmx-app .lmx-pager{align-items:center;gap:2px;padding:6px 2px 0;margin-top:2px}
@@ -405,6 +411,10 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .er .ek{font-weight:600;overflow:hidden;text-overflow:ellipsis}
 .lmx-app .er .es{overflow:hidden;text-overflow:ellipsis;opacity:.8}
 .lmx-app .er .eq{font-family:var(--lx-mono);font-size:11px;opacity:.5;text-align:right}
+.lmx-app .er.cause{grid-template-columns:18px 52px 130px minmax(0,1fr) 64px 72px 84px}
+.lmx-app .er .ec{font-weight:700;font-variant-numeric:tabular-nums}
+.lmx-app .er .esh{height:6px;border-radius:3px;background:var(--lx-tint-2);overflow:hidden}
+.lmx-app .er .esh i{display:block;height:100%;background:var(--lx-accent)}
 .lmx-app .er .eo{color:var(--lx-accent);font-size:12px;text-align:right;opacity:0;transition:opacity .15s}
 .lmx-app .lmx-row:hover .er .eo{opacity:1}
 .lmx-app .lmx-h{font-size:13px;font-weight:650;margin:14px 0 6px}
@@ -461,6 +471,51 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .src pre{margin:0;padding:8px 12px;border:0;background:transparent;white-space:pre;overflow:visible;max-height:none;font-size:inherit;line-height:inherit;font-family:inherit}
 .lmx-app .src pre.gut{flex:0 0 auto;text-align:right;opacity:.38;user-select:none;-webkit-user-select:none;border-right:1px solid var(--lx-line);padding-right:10px}
 .lmx-app .src pre.txt{flex:1 1 auto;user-select:text}
+.lmx-app .src.hit pre{background:linear-gradient(var(--lx-hit),var(--lx-hit)) no-repeat 0 calc(8px + var(--mark) * 1.55em)/100% 1.55em}
+.lmx-app .srcx{margin:0 0 12px}
+.lmx-app.lmx-app .lmx-head.lmx-slim{gap:6px;padding-bottom:8px;margin-bottom:8px}
+.lmx-app.lmx-app .lmx-head.lmx-slim .lmx-sub{display:none}
+.lmx-app.lmx-app .lmx-head.lmx-slim .lmx-logo{width:26px;height:26px}
+.lmx-app.lmx-app .lmx-head.lmx-slim .lmx-meta{align-items:center;flex-wrap:nowrap}
+.lmx-app.lmx-app .lmx-head.lmx-slim .lmx-trig{min-height:32px}
+.lmx-app.lmx-app .lmx-head.lmx-slim .lmx-field{flex:0 0 300px;width:300px}
+.lmx-app.lmx-app .lmx-head.lmx-slim .fx{padding:6px 34px 6px 12px}
+.lmx-app.lmx-app .lmx-head.lmx-slim .fxl{display:none}
+.lmx-app.lmx-app .lmx-head.lmx-slim .fxv{margin-top:0}
+.lmx-app .lmx-line{font-size:12.5px;line-height:32px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lmx-app .lmx-line b{font-weight:650}
+.lmx-app .lmx-line .bad b{color:var(--lx-ink-bad)}
+.lmx-app .lmx-line .warn b{color:var(--lx-ink-warn)}
+.lmx-app .lmx-line .ok b{color:var(--lx-ink-ok)}
+.lmx-app .lmx-line .sk-on b{opacity:.5}
+.lmx-app .lmx-line .w{opacity:.6}
+.lmx-app .lmx-vc{align-self:center;margin:0 8px 0 0}
+.lmx-app .lmx-vc .cpy,.lmx-app .ract .cpy{position:relative;display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--lx-line-2);background:var(--lx-tint);color:var(--lx-accent);font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;user-select:all;-webkit-user-select:all}
+.lmx-app .lmx-vc .cpy::before{content:"\\29C9\\2002 Copy as code"}
+.lmx-app .ract .cpy.rid::before{content:"\\29C9\\2002 Request ID"}
+.lmx-app .ract .cpy.rq::before{content:"\\29C9\\2002 Logs Insights query"}
+.lmx-app .ract{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px 2px 40px}
+.lmx-app .ract .cpy{height:26px;font-size:12px}
+.lmx-app .ract .ra{display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:999px;border:1px solid var(--lx-line-2);color:var(--lx-accent);font-size:12px;font-weight:600;text-decoration:none;background:var(--lx-tint)}
+.lmx-app .ract .ra:hover{background:var(--lx-tint-2)}
+.lmx-app .ract .cpy.cpy:focus::before{content:"\\2713\\2002Selected: press Ctrl+C or \\2318 C"}
+.lmx-app .lmx-vc .cpy:hover,.lmx-app .ract .cpy:hover{background:var(--lx-tint-2)}
+.lmx-app .lmx-vc .cpy:focus,.lmx-app .ract .cpy:focus{border-color:var(--lx-accent);background:var(--lx-soft);outline:none}
+.lmx-app .lmx-vc .cpy:focus::before{content:"\\2713\\2002Selected: press Ctrl+C or \\2318 C"}
+.lmx-app .lmx-vc .cpy .cpt,.lmx-app .ract .cpy .cpt{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:pre}
+.lmx-app .lmx-vc .cpy ::selection,.lmx-app .lmx-vc .cpy::selection,.lmx-app .ract .cpy ::selection,.lmx-app .ract .cpy::selection{background:transparent}
+.lmx-app.lmx-app .lmx-timeline{height:38px;align-items:flex-end;gap:2px;margin:6px 0 0;padding:0 2px;border-bottom:1px solid var(--lx-line)}
+.lmx-app.lmx-app button.lmx-tbar.lmx-tbar{min-width:3px;padding:0;margin:0;border:0;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--lx-accent) 45%,transparent);box-shadow:none}
+.lmx-app.lmx-app button.lmx-tbar.lmx-tbar.lmx-bad{background:color-mix(in srgb,var(--lx-bad) 70%,transparent)}
+.lmx-app.lmx-app button.lmx-tbar.lmx-tbar:hover:enabled{filter:brightness(.85)}
+.lmx-app.lmx-app button.lmx-tbar.lmx-tbar:disabled{background:var(--lx-line);opacity:1;cursor:default}
+.lmx-app.lmx-app button.lmx-tbar.lmx-tbar.lmx-on{outline:2px solid var(--lx-accent);outline-offset:1px}
+.lmx-app .lmx-taxis{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:2px 2px 4px}
+.lmx-app .lmx-changed{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:11.5px;color:var(--lx-accent-2)}
+.lmx-app .lmx-changed::before,.lmx-app .lmx-changed::after{content:"";flex:1 1 auto;border-top:1.5px dashed var(--lx-accent-2);opacity:.55}
+.lmx-app .lmx-changed span{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .srcxh{font-size:12.5px;margin:0 0 6px;color:var(--lx-ink-bad)}
+.lmx-app.lmx-app button.lmx-tocode{margin:4px 0 8px 34px;color:var(--lx-accent)}
 .lmx-app .src .pk{color:var(--lx-tok-k)}
 .lmx-app .src .js,.lmx-app .src .jk{color:var(--lx-tok-s)}
 .lmx-app .src .jk{font-weight:600}

@@ -6,15 +6,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..._kit.blocks import _Note
-from ..._kit.fmt import _in_zone, _utcnow
+from ..._kit.blocks import _Findings, _Note
+from ..._kit.fmt import _count, _in_zone, _utcnow, human_age
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _skeleton
 
-from ..models import ErrorReport, LogEvent
-from ..analysis.errors import classify_error
+from ..models import ErrorGroup, ErrorReport, LogEvent
+from ..analysis.errors import cause_search, classify_error, failing_frame
 from ..analysis.changes import cause_key, new_causes_finding, new_error_causes
-from ..analyzer import LambdaAnalyzer
 from ..view import _stamp
 from .frame import _run_clock, _with_findings
 from .widgets import _Row
@@ -27,32 +26,30 @@ class _ErrorsTab:
 
     def _errors_page(self) -> Any:
         w, layout = self._w, self._w.Layout
-        bar, (self.errors_pick, again) = self._range_bar("24h", self._errors_range_changed, "its errors")
+        bar, (self.errors_pick, again) = self._range_bar("its errors")
         again.on_click(self._safely(lambda _button: self._load_errors()))
         self.errors_view = w.HTML(layout=layout(width="100%"))
+        self.cause_head = w.HTML(layout=layout(width="100%"))
+        self.cause_rows_box = w.VBox(layout=layout(width="100%"))
+        self.errors_more = w.HTML(layout=layout(width="100%"))
         self.error_head = w.HTML(layout=layout(width="100%"))
         self.error_rows_box = w.VBox(layout=layout(width="100%"))
-        return self._scroll_page([self.errors_view, self.error_head, self.error_rows_box], above=[bar])
+        return self._scroll_page([self.errors_view, self.cause_head, self.cause_rows_box, self.errors_more,
+                                  self.error_head, self.error_rows_box], above=[bar])
 
     # ------------------------------------------------------------------ errors and performance
-
-    def _errors_range_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or not change.get("new"):
-            return
-        self._errors_range = str(change["new"])
-        self._load_errors()
 
     def _load_errors(self) -> None:
         if self.function is None:
             return
         self._asked.add("errors")
         fn = self._full()
-        start, end = LambdaAnalyzer.time_range(self._errors_range)
+        start, end = self._tab_window()
         self.error_report = None
-        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text(self._errors_range)}"
-                                              "…"))
-        self._set(self.error_head, "")
-        self.error_rows_box.children = []
+        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._tab_range_text()}…"))
+        for widget in (self.cause_head, self.errors_more, self.error_head):
+            self._set(widget, "")
+        self.cause_rows_box.children = self.error_rows_box.children = []
         self._counted = 0
         self._status(f"Reading {fn.name}'s error lines…", busy=True, owner="errors")
         self._later("errors", lambda: self.core._errors(fn, start, end, progress=lambda n: setattr(self, "_counted",
@@ -77,8 +74,12 @@ class _ErrorsTab:
 
     def _got_errors(self, report: ErrorReport) -> None:
         self.error_report = report
-        blocks = self.ui._errors_blocks(report, since=self._errors_range, for_window=True)
-        self._draw("errors", self.errors_view, _with_findings(blocks, self._new_causes(report)))
+        blocks = self.ui._errors_blocks(report, since=self._tab_range()[0], for_window=True)
+        blocks = _with_findings(blocks, self._new_causes(report))
+        split = next((i for i, block in enumerate(blocks) if isinstance(block, _Findings)), len(blocks))
+        self._draw("errors", self.errors_view, blocks[:split])
+        self._set(self.errors_more, self._html(blocks[split:]))
+        self._draw_causes(report)
         self._save_look(self.function, error_causes=[cause_key(group) for group in report.groups])
         failed = [e for e in report.newest]
         today = _in_zone(_utcnow()).date()
@@ -99,6 +100,52 @@ class _ErrorsTab:
         self._set(self.error_head, '<div class="lmx-h">The newest failed runs<span>click one to read every line of '
                                    "it in the Logs tab</span></div>" if failed else "")
         self._finish("errors", self._tab_line("errors"), tabs=("errors",))
+
+    def _draw_causes(self, report: ErrorReport) -> None:
+        """
+        The errors by cause, the most frequent first, each a line to click for the runs it failed in (in the Logs
+        tab), with Code on it when its traceback names a line of the function's own code.
+        """
+        groups = report.groups
+        lines = sum(g.count for g in groups) or 1
+        while len(self._cause_rows) < len(groups):
+            self._cause_rows.append(_Row(self, self._clicked_cause, short=True,
+                                         action=("Code ›", "Open the line it failed on in the Code tab",
+                                                 self._clicked_cause_code)))
+        for row, group in zip(self._cause_rows, groups):
+            row.item = group
+            share = group.count / lines
+            self._set(row.face, f'<div class="er cause"><span class="ri">✕</span><span class="ec">×{_count(group.count)}'
+                                f'</span><span class="ek">{_esc(group.kind)}</span><span class="es">'
+                                f"{_esc(_clip(group.message, 300))}</span><span class=\"ew\">"
+                                f"{_esc(human_age(group.last, report.until))}</span><span class=\"esh\"><i style=\""
+                                f'width:{max(share * 100, 2):.1f}%"></i></span><span class="eo">Its runs ›</span></div>')
+            frame = failing_frame(group.example)
+            row.action.layout.display = "" if frame is not None else "none"
+            tip = (f"{group.kind}: {group.count:,} of {lines:,} error lines ({share:.0%}), the last "
+                   f"{human_age(group.last, report.until)} ago · click for the runs it failed in")
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+        self.cause_rows_box.children = [row.box for row in self._cause_rows[:len(groups)]]
+        self._set(self.cause_head, '<div class="lmx-h">Errors by cause<span>click one for the runs it failed in, '
+                                   "in the Logs tab</span></div>" if groups else "")
+
+    def _clicked_cause(self, group: ErrorGroup) -> None:
+        """
+        A cause clicked: the Logs tab, searched over the Errors tab's time range for the runs it failed in.
+        """
+        text = cause_search(group)
+        self._set_range(*self._tab_range())
+        self._show_tab("logs", load=False)
+        self._quietly(self.log_find, value=text)
+        self._log_query = text
+        self._asked.add("logs")
+        self._log_search()
+
+    def _clicked_cause_code(self, group: ErrorGroup) -> None:
+        frame = failing_frame(group.example)
+        if frame is not None:
+            self._open_code_at(frame)
 
     def _clicked_failure(self, event: LogEvent) -> None:
         self._show_run(event.time, event.stream, event.request_id)

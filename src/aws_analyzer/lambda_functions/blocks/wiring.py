@@ -31,7 +31,8 @@ class _Wiring:
 class _Columns:
     """
     Numbers over time, a column each (a day, or an hour), with part of each column in a second colour: errors in
-    red, or a column's average under its longest. A row of columns in HTML, a sparkline in text.
+    red, or a column's average under its longest. A row of columns in HTML, a sparkline in text. `mark` is the index
+    of a column to draw a dashed line through, labelled `mark_label` (when the function was last changed).
     """
 
     items: list[tuple[str, float, float, str]]  # (label, the column's value, the part in the second colour, tooltip)
@@ -40,6 +41,8 @@ class _Columns:
     limit: float | None = None  # a dashed line at this value (a timeout), drawn when the columns come near it
     limit_label: str = ""
     unit: str = ""  # 'ms' shows the scale as run times; '' as counts
+    mark: int | None = None
+    mark_label: str = ""
 
 
 @_draws(_Wiring, "html")
@@ -67,10 +70,13 @@ def _columns_html(block: _Columns, report: _Report) -> str:
     shown_limit = block.limit is not None and tallest >= 0.5 * block.limit
     top = max(tallest, block.limit or 0) if shown_limit else tallest
     top = top or 1
+    late = block.mark is not None and block.mark >= len(block.items) / 2
+    marker = f'<u class="mk{" late" if late else ""}"><span>{_esc(block.mark_label)}</span></u>'
     bars = "".join(
         f'<i style="height:{max(value / top * 100, 1.5 if value else 0):.1f}%" title="{_esc(tip)}">'
-        + (f'<b style="height:{min(100.0, part / value * 100):.1f}%"></b>' if value and part else "") + "</i>"
-        for _, value, part, tip in block.items
+        + (f'<b style="height:{min(100.0, part / value * 100):.1f}%"></b>' if value and part else "")
+        + (marker if index == block.mark else "") + "</i>"
+        for index, (_, value, part, tip) in enumerate(block.items)
     )
     scale = human_ms(tallest) if block.unit == "ms" else f"{tallest:,.0f}"
     limit = ""
@@ -103,4 +109,7 @@ def _columns_lines(block: _Columns, report: _Report) -> list[str]:
     spark = "".join(" ▁▂▃▄▅▆▇█"[min(8, round(value / tallest * 8))] for _, value, _, _ in block.items)
     label, value = max(((label, value) for label, value, _, _ in block.items), key=lambda lv: lv[1])
     most = human_ms(value) if block.unit == "ms" else f"{value:,.0f}"
-    return out + [f"  {block.items[0][0]} {spark} {block.items[-1][0]}   (the most: {most}, {label})"]
+    lines = [f"  {block.items[0][0]} {spark} {block.items[-1][0]}   (the most: {most}, {label})"]
+    if block.mark is not None and 0 <= block.mark < len(block.items):
+        lines.append(f"  {' ' * len(block.items[0][0])} {' ' * block.mark}^ {block.mark_label}")
+    return out + lines

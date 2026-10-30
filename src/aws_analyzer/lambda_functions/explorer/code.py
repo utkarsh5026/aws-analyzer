@@ -17,7 +17,7 @@ from ..._kit.text import _esc, _marked, search_rank
 from ..._kit.window import _class_if, _skeleton
 
 from ..helpers import runtime_family
-from ..models import CodeFile, CodePackage, Function
+from ..models import CodeFile, CodeFrame, CodePackage, Function
 from ..analysis.package import _JUNK_RE, _SECRET_FILE_RE, _SOURCE_LIMIT, _local_path, read_package
 from ..analysis.codemap.model import CodeMap
 from ..analysis.codemap.mapping import map_package
@@ -27,6 +27,8 @@ from ..style import _CSS, _render_html
 from .frame import _CODE_PAGE
 from .widgets import _Row
 
+
+_AROUND_FAILED_LINE = 6
 
 _TOGGLE_GRACE = 0.4  # seconds: a second click on a folder this soon is a double click's, not a fold
 
@@ -151,15 +153,35 @@ def _copy_html(name: str, text: str, part: bool = False) -> str:
             "</span>")
 
 
-def _source_html(path: str, text: str) -> str:
+def _source_html(path: str, text: str, *, first: int = 1, mark: int | None = None) -> str:
     """
-    A file's text with line numbers, Python and JSON in colour (every piece escaped).
+    A file's text with line numbers from `first`, Python and JSON in colour (every piece escaped), and line `mark`
+    (a number in the file) shaded across the gutter and the text.
     """
     lines = text.count("\n") + (0 if text.endswith("\n") else 1)
     body = (_python_html(text) if path.endswith(".py") else _json_source_html(text) if path.endswith(".json")
             else _esc(text))
-    gutter = "\n".join(str(i) for i in range(1, lines + 1))
-    return f'<div class="src"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
+    gutter = "\n".join(str(i) for i in range(first, first + lines))
+    shaded = mark is not None and first <= mark < first + lines
+    hit = f' hit" style="--mark:{mark - first}' if shaded else ""
+    return f'<div class="src{hit}"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
+
+
+def _failed_line_html(path: str, text: str, frame: CodeFrame) -> str:
+    """
+    The lines around the one a traceback names, that line shaded, over the whole file: where the run failed, in
+    sight without scrolling (the window can't scroll for you).
+    """
+    lines = text.splitlines()
+    where = f"Line {frame.line}" + (f", in {frame.function}()" if frame.function else "")
+    if frame.line > len(lines):
+        return (f'<div class="srcx"><div class="srcxh"><b>{_esc(where)}</b> is past the end of the file: the code '
+                "may have changed since that run.</div></div>")
+    start = max(1, frame.line - _AROUND_FAILED_LINE)
+    end = min(len(lines), frame.line + _AROUND_FAILED_LINE)
+    excerpt = "\n".join(lines[start - 1:end])
+    return (f'<div class="srcx"><div class="srcxh"><b>{_esc(where)}</b>: where the run failed. The whole file is '
+            f"below, the line shaded.</div>{_source_html(path, excerpt, first=start, mark=frame.line)}</div>")
 
 
 class _CodeTab:
@@ -276,6 +298,32 @@ class _CodeTab:
         self._draw_code_rows(renew=True)
         self._draw_source(package)
         self._finish("code", self._tab_line("code"), tabs=("code",))
+        if self._code_target is not None:
+            self._go_to_target()
+
+    def _open_code_at(self, frame: CodeFrame) -> None:
+        """
+        The Code tab, open at the line a traceback names (its package downloaded first, if it isn't yet).
+        """
+        self._code_target = frame
+        self._show_tab("code")
+        if self.package is not None and self._code_fn is not None:
+            self._go_to_target()
+
+    def _go_to_target(self) -> None:
+        """
+        Opens the file the traceback named, its failing line shaded; says so when the package hasn't got it.
+        """
+        frame, package = self._code_target, self.package
+        if frame is None or package is None:
+            return
+        found = next((f for f in package.files if f.path == frame.path), None)
+        if found is None:
+            self._status(f"{frame.path} isn't in the package downloaded: the function may have been deployed again "
+                         "since that run.", "warn")
+            return
+        self._open_code_file(found)
+        self._status(f"{frame.path}, line {frame.line}: where the run failed · click another file to read it")
 
     def _draw_saved(self) -> None:
         """
@@ -528,6 +576,9 @@ class _CodeTab:
         if package.source is not None:
             more = (self._html([_Note(f"Only the first {human_size(_SOURCE_LIMIT)} of it is shown.")])
                     if package.source_truncated else "")
-            self._set(self.source_view, head + _source_html(path, package.source) + more)
+            target = self._code_target if self._code_target is not None and self._code_target.path == path else None
+            failed = _failed_line_html(path, package.source, target) if target is not None else ""
+            mark = target.line if target is not None else None
+            self._set(self.source_view, head + failed + _source_html(path, package.source, mark=mark) + more)
         else:
             self._set(self.source_view, head + self._html([_Note(package.note or "Nothing to show.")]))

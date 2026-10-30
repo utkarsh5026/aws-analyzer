@@ -769,8 +769,8 @@ class LambdaView(_BaseView):
     def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
                        for_window: bool = False) -> list[Any]:
         """
-        errors()'s report, as blocks; for_window=True leaves out the newest error lines (the explorer lists them as
-        runs to click).
+        errors()'s report, as blocks; for_window=True leaves out the errors by cause and the newest error lines (the
+        explorer lists them as lines to click).
         """
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
@@ -805,7 +805,7 @@ class LambdaView(_BaseView):
         empty = (f"No errors in the last {window}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
         blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
-        if report.groups:
+        if report.groups and not for_window:
             lines = sum(g.count for g in report.groups)
             blocks.append(_Table(
                 ["Cause", "Times", "Last", "First", "Example"],
@@ -814,13 +814,12 @@ class LambdaView(_BaseView):
                 bars=[_share(g.count, lines) for g in report.groups], bar_label="Share",
                 title="Errors by cause (from its log lines: a failed call can log more than one)",
             ))
-            if not for_window:
-                blocks.append(_Table(
-                    [f"Time ({_tz_label()})", "Request ID", "Line"],
-                    [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
-                     for e in report.newest],
-                    title="The newest error lines", max_rows=0,
-                ))
+            blocks.append(_Table(
+                [f"Time ({_tz_label()})", "Request ID", "Line"],
+                [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
+                 for e in report.newest],
+                title="The newest error lines", max_rows=0,
+            ))
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)
         if newest is not None:

@@ -1676,6 +1676,17 @@ def _report_api_logs(logs) -> None:
                             logEvents=sorted(batch, key=lambda e: e["timestamp"]))
 
 
+def _backdate_function(name: str, when: datetime) -> None:
+    """
+    moto stamps a function with the time it's changed; orders-etl's DynamoDB copy went out 3 days ago, when its
+    errors began to rise.
+    """
+    from moto.awslambda.models import lambda_backends
+
+    function = lambda_backends[ACCOUNT][REGION].get_function(name)
+    function.last_modified = when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+
+
 def seed_lambda_functions() -> dict:
     """
     moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
@@ -1731,6 +1742,7 @@ def seed_lambda_functions() -> dict:
     etl.update_function_code(FunctionName="orders-etl", ZipFile=packages["orders-etl"])
     etl.update_function_configuration(FunctionName="orders-etl",
                                       Environment={"Variables": {**etl_settings, "ORDERS_TABLE": "orders"}})
+    _backdate_function("orders-etl", (NOW - timedelta(days=3)).replace(hour=14, minute=2, second=0, microsecond=0))
     create("churn-scoring", Handler="app.predict", Architectures=["arm64"], MemorySize=2048, Timeout=30,
            Description="Scores customers for churn with the model trained in SageMaker", Tags={"team": "ml"})
     create("report-api", Runtime="nodejs20.x", Handler="index.handler", MemorySize=512, Timeout=10,
@@ -1846,7 +1858,7 @@ def seed_lambda_functions() -> dict:
                                    "arn:aws:lambda:us-east-1::runtime:5ad8c1e3b3f0b7e2a1f9d4c6e8b0a2f4c6d8e0b2"))
         if kind == "key":
             lines.append((seconds - 0.01, "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n  "
-                                          "File \"/var/task/etl.py\", line 23, in handler\n    table.put_item(Item="
+                                          "File \"/var/task/etl.py\", line 22, in handler\n    table.put_item(Item="
                                           "{\"pk\": row[\"customer_id\"], \"sk\": row[\"order_id\"]})"))
         elif kind == "denied":
             lines.append((seconds - 0.01, "[ERROR] ClientError: An error occurred (AccessDeniedException) when calling "
