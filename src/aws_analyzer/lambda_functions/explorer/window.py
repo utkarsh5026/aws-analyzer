@@ -134,6 +134,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
         self._error_rows: list[_Row] = []
         self._cause_rows: list[_Row] = []
+        self.change_line: Any = None
         self._code_target: CodeFrame | None = None
         self._slow_rows: list[_Row] = []
         self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package

@@ -39,6 +39,9 @@ _EXTRA_CSS = """\
 .lmb .colbars.dim i b{background:rgba(59,130,246,.75);border-radius:0}
 .lmb .colbars .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
 .lmb .colbars .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
+.lmb .colbars .mk{position:absolute;left:50%;bottom:0;height:120px;border-left:1.5px dashed rgba(124,58,237,.75);pointer-events:none;text-decoration:none}
+.lmb .colbars .mk span{position:absolute;left:4px;top:-2px;font-size:10.5px;color:#7c3aed;white-space:nowrap;font-style:normal}
+.lmb .colbars .mk.late span{left:auto;right:4px}
 .lmb .colbars .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
 .lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}
 .lmb .pgw{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin:8px 0 10px}

@@ -31,6 +31,7 @@ from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, func
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.blocks import _Next, _Report
+from aws_analyzer._kit.fmt import _fmt_dt
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
@@ -44,6 +45,7 @@ from aws_analyzer.lambda_functions import (
     CodeFile,
     CodePackage,
     DailyUsage,
+    ChangeEffect,
     CodeFrame,
     ErrorGroup,
     ErrorReport,
@@ -64,6 +66,7 @@ from aws_analyzer.lambda_functions import (
     Version,
     account_findings,
     cause_search,
+    change_effect,
     classify_error,
     code_frames,
     code_graph,
@@ -2875,6 +2878,59 @@ def test_explorer_errors_open_their_runs_and_their_code(core, explorer):
     x.tab_buttons["errors"].click()
     row.action.click()
     assert x._tab == "code" and x._code_file == "app.py" and "where the run failed" in plain(x.source_view.value)
+
+
+
+def daily_metrics(days, now=NOW):
+    """
+    30 days of daily numbers ending today: days is (calls, errors) for each day, oldest first, the rest quiet.
+    """
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    daily = [DailyUsage(today - timedelta(days=len(days) - 1 - i), calls, errors) for i, (calls, errors) in
+             enumerate(days)]
+    return FunctionMetrics("etl", 30, 86400, sum(c for c, _ in days), sum(e for _, e in days), daily=daily)
+
+
+def test_errors_that_began_with_a_change_are_put_down_to_it():
+    m = daily_metrics([(1000, 1)] * 8 + [(1000, 60), (1000, 90), (1000, 80)])
+    changed = NOW.replace(hour=0, minute=0) - timedelta(days=2, hours=-9)
+    effect = change_effect(m, changed, NOW)
+    assert effect == ChangeEffect(changed, 7000, 7, 2000, 170, 7)
+    assert f"{effect.rate_before:.3f} {effect.rate_after:.3f}" == "0.001 0.085"
+    found = [message for level, message in function_findings(fn(last_modified=changed), m, now=NOW) if level == "warn"]
+    began = next(message for message in found if message.startswith("Its calls began to fail after it was last changed"))
+    assert "8.5% failed since (170 of 2,000), against 0.1% in the 7 days before" in began
+    assert began.startswith(f"Its calls began to fail after it was last changed ({_fmt_dt(changed, zone=True)}, 2d ago):")
+    assert "code('etl') shows the code it runs now" in began
+    same = daily_metrics([(1000, 30)] * 11)
+    assert not any("began to fail" in message for _, message in function_findings(fn(last_modified=changed), same,
+                                                                                    now=NOW))
+    assert change_effect(m, NOW - timedelta(days=40), NOW) is None and change_effect(m, None, NOW) is None
+    today = change_effect(daily_metrics([(1000, 0)] * 10 + [(500, 50)]), NOW - timedelta(hours=1), NOW)
+    assert (today.calls_after, today.errors_after) == (500, 50)
+
+
+def test_columns_mark_the_day_a_function_changed():
+    days = [(f"Oct {i}", float(i), 0.0, "") for i in range(1, 6)]
+    block = wiring_block._Columns(days, title="Calls", mark=2, mark_label="changed Oct 3")
+    html = stylemod._render_html([block], 30)
+    assert html.count('class="mk"') == 1 and "changed Oct 3" in html
+    lines = wiring_block._columns_lines(block, None)
+    assert lines[-1] == "          ^ changed Oct 3"
+
+
+def test_explorer_logs_show_where_the_function_changed(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    x = explorer("etl-nightly", tab="logs")
+    assert x.change_line is None or x.change_line not in x.runs_box.children
+    x.detail.function.last_modified = now - timedelta(minutes=2, seconds=30)
+    x._draw_runs()
+    children = list(x.runs_box.children)
+    place = children.index(x.change_line)
+    assert [r.run.request_id for r in x._run_rows[:place]] == [ids[3], ids[2]]
+    assert plain(x.change_line.value).startswith("Changed ") and "the runs below ran it as it was before" in plain(
+        x.change_line.value)
 
 
 NESTED = zipped({

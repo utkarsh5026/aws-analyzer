@@ -62,7 +62,7 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
+    AccountLimits, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
     LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
@@ -72,7 +72,7 @@ from .analysis.functions import (
 )
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .analysis.overview import Overview
-from .analysis.findings import RECENT_DAYS, account_findings, function_findings, secret_like
+from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
 from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
 )
@@ -125,6 +125,7 @@ __all__ = [
     "CodeStep",
     "DailyUsage",
     "EnvRead",
+    "ChangeEffect",
     "CodeFrame",
     "ErrorGroup",
     "ErrorReport",
@@ -172,6 +173,7 @@ __all__ = [
     "error_findings",
     "explore",
     "function_findings",
+    "change_effect",
     "function_monthly_cost",
     "failing_frame",
     "group_errors",

@@ -320,7 +320,8 @@ class _FunctionTab:
 
     def _charts(self, detail: FunctionDetail) -> list[Any]:
         """
-        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days.
+        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days, a
+        dashed line through the day it was last changed (its code or settings), when that's one of them.
         """
         m, fn = detail.metrics, detail.function
         if m is None or not m.invocations or m.period < 86400:
@@ -342,11 +343,15 @@ class _FunctionTab:
                           + failed + (f", {_count(round(d.throttles))} throttled" if d.throttles else "")))
             times.append((label, d.duration_max or d.avg_duration or 0.0, d.avg_duration or 0.0,
                           f"{day:%a} {label}: average {human_ms(d.avg_duration)}, longest {human_ms(d.duration_max)}"))
+        changed = fn.last_modified
+        mark = (days.index(_midnight(changed)) if changed is not None and _midnight(changed) in days else None)
+        label = f"changed {_short_day(changed)}" if mark is not None else ""
         return [
-            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)"),
+            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)",
+                     mark=mark, mark_label=label),
             _Columns(times, title=f"Run time a day: the average (dark) under the longest (light), against its "
                                   f"{fn.timeout} s timeout", part="dim", limit=fn.timeout * 1000,
-                     limit_label=f"timeout {fn.timeout} s", unit="ms"),
+                     limit_label=f"timeout {fn.timeout} s", unit="ms", mark=mark, mark_label=label),
         ]
 
     def _draw_settings(self) -> None:

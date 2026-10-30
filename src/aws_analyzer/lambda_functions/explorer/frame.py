@@ -391,6 +391,9 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .src pre.txt{flex:1 1 auto;user-select:text}
 .lmx-app .src.hit pre{background:linear-gradient(var(--lx-hit),var(--lx-hit)) no-repeat 0 calc(8px + var(--mark) * 1.55em)/100% 1.55em}
 .lmx-app .srcx{margin:0 0 12px}
+.lmx-app .lmx-changed{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:11.5px;color:var(--lx-accent-2)}
+.lmx-app .lmx-changed::before,.lmx-app .lmx-changed::after{content:"";flex:1 1 auto;border-top:1.5px dashed var(--lx-accent-2);opacity:.55}
+.lmx-app .lmx-changed span{flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmx-app .srcxh{font-size:12.5px;margin:0 0 6px;color:var(--lx-ink-bad)}
 .lmx-app.lmx-app button.lmx-tocode{margin:4px 0 8px 34px;color:var(--lx-accent)}
 .lmx-app .src .pk{color:var(--lx-tok-k)}

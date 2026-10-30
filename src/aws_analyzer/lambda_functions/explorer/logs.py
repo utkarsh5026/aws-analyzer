@@ -757,6 +757,9 @@ class _LogsTab:
             row.body.layout.display = "" if opened else "none"
             self._draw_run_code(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
+        changed_at = self._changed_at(visible)
+        if changed_at is not None and self._run_offset < changed_at < self._run_offset + len(page):
+            children.insert(changed_at - self._run_offset, self._change_line())
         if not page:
             children = [self._empty("runs", self._no_runs_text())]
         if renew:
@@ -773,6 +776,28 @@ class _LogsTab:
         self.older_button.layout.display = "" if (self.found is None and page_read is not None
                                                   and page_read.truncated) else "none"
         self._draw_run_head(visible)
+
+    def _changed_at(self, visible: list[LogRun]) -> int | None:
+        """
+        Where in the runs (newest first) the function was last changed (its code or settings): the place of the
+        first run that started before it, when a run after it is there too.
+        """
+        changed = self._full().last_modified if self.function is not None else None
+        if changed is None:
+            return None
+        place = next((i for i, run in enumerate(visible) if run.start < changed), None)
+        return place if place else None
+
+    def _change_line(self) -> Any:
+        """
+        The line between the runs after the function was last changed and the ones before, one widget, kept.
+        """
+        if self.change_line is None:
+            self.change_line = self._w.HTML(layout=self._w.Layout(width="100%"))
+        changed = self._full().last_modified
+        self._set(self.change_line, f'<div class="lmx-changed"><span>Changed {_esc(_stamp(changed, zone=True))} (its '
+                                    "code or settings): the runs below ran it as it was before</span></div>")
+        return self.change_line
 
     def _no_runs_text(self) -> str:
         page = self.found if self.found is not None else self.logs_page

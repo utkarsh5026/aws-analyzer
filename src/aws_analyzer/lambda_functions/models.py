@@ -186,6 +186,29 @@ class DailyUsage:
 
 
 @dataclass
+class ChangeEffect:
+    """
+    How a function's calls went before and after it was last changed (its code or settings, `Function.last_modified`),
+    from CloudWatch's daily numbers: the days before the change (at most a week), and the days since it.
+    """
+
+    changed: datetime
+    calls_before: float
+    errors_before: float
+    calls_after: float
+    errors_after: float
+    days_before: int
+
+    @property
+    def rate_before(self) -> float:
+        return self.errors_before / self.calls_before if self.calls_before else 0.0
+
+    @property
+    def rate_after(self) -> float:
+        return self.errors_after / self.calls_after if self.calls_after else 0.0
+
+
+@dataclass
 class FunctionMetrics:
     """
     What CloudWatch counted for a function over a window: runs, failures, throttles, run time, log volume.
