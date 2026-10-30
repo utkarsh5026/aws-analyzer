@@ -155,7 +155,7 @@ class _RunRow:
                                                    tooltip="Click to see its lines")
         self.body = w.HTML(layout=layout(width="100%", display="none"))
         self.frame: CodeFrame | None = None
-        self.code_button = w.Button(layout=layout(width="auto", display="none"))
+        self.code_button = w.Button(layout=layout(width="auto", display="none", align_self="flex-start"))
         self.code_button.add_class("lmx-small")
         self.code_button.add_class("lmx-tocode")
         self.code_button.on_click(app._safely(lambda _button: app._open_code_at(self.frame) if self.frame else None))

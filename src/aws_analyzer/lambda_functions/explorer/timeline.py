@@ -5,7 +5,7 @@ when some failed; a click shows only that slice's runs.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..._kit.fmt import _in_zone, _plural, _utcnow
@@ -14,10 +14,12 @@ from ..._kit.window import _class_if
 
 from ..analysis.logs import TIMELINE_BUCKETS, TimeBucket, run_timeline
 from ..view import _stamp
-from .frame import _run_clock
+from .frame import _short_day
 
 
 _SHORTEST_BAR = 12
+
+_ONE_DAY_SPAN = timedelta(hours=20)
 
 
 def _bar_height(bucket: TimeBucket, busiest: int) -> str:
@@ -28,6 +30,16 @@ def _bar_height(bucket: TimeBucket, busiest: int) -> str:
     if not bucket.runs:
         return "3px"
     return f"{max(_SHORTEST_BAR, round(100 * bucket.runs / busiest))}%"
+
+
+def _axis_label(moment: datetime, span: timedelta) -> str:
+    """
+    A time under the strip, in the reports' time zone: its clock time over a span within a day ('14:05'), with the
+    day too over a longer one ('Oct 29 14:05'), the same for all three labels.
+    """
+    local = _in_zone(moment)
+    clock = f"{local:%H:%M}"
+    return f"{_short_day(local)} {clock}" if span > _ONE_DAY_SPAN else clock
 
 
 def _bar_tip(bucket: TimeBucket) -> str:
@@ -98,9 +110,8 @@ class _Timeline:
             tip = _bar_tip(bucket)
             if bar.tooltip != tip:
                 bar.tooltip = tip
-        today = _in_zone(_utcnow()).date()
         middle = start + (end - start) / 2
-        labels = "".join(f"<span>{_esc(_run_clock(moment, today))}</span>" for moment in (start, middle, end))
+        labels = "".join(f"<span>{_esc(_axis_label(moment, end - start))}</span>" for moment in (start, middle, end))
         self._set(self.timeline_axis, f'<div class="lmx-taxis">{labels}</div>')
         self.timeline_box.layout.display = ""
 
