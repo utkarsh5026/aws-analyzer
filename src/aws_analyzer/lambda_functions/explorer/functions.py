@@ -204,6 +204,16 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
             f'{about}</div>{cells}<div class="fc">{badge}</div><div></div></div>')
 
 
+def _problem_rank(f: _Facts) -> tuple[float, ...]:
+    """
+    How far up the list's "problems first" order puts a function: failing, then warned, then the most warnings,
+    failed calls and calls.
+    """
+    m = f.metrics
+    calls = m.invocations if m is not None else -1.0
+    return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
+
+
 def _triggers_text(triggers: list[Trigger]) -> str:
     labels = list(dict.fromkeys(t.short for t in triggers))
     return ", ".join(labels[:3]) + (f" +{len(labels) - 3}" if len(labels) > 3 else "")
@@ -387,6 +397,7 @@ class _FunctionsTab:
         self._finish("list", f"{_plural(len(ov.functions), 'function')} in {self._where()}, read in {took:.1f}s{read}"
                      + (f" · {attention:,} need attention: the Functions tab lists them first" if attention
                         else " · none needs attention"), "" if attention else "ok", tabs=("functions",))
+        self._read_ahead()
 
     def _redraw_list(self) -> None:
         self._compute_facts()
@@ -584,7 +595,7 @@ class _FunctionsTab:
             return (f.cost if f.cost is not None else -1.0,)
         if self._sort == "called":
             return ((m.last_invoked.timestamp() if m is not None and m.last_invoked else 0.0),)
-        return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
+        return _problem_rank(f)
 
     def _most_yours_first(self, facts: list[_Facts]) -> list[_Facts]:
         """

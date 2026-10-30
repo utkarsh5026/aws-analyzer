@@ -27,6 +27,7 @@ from ..analysis.findings import _errors_level, function_findings
 from ..analysis.changes import change_findings, function_changes
 from ..blocks.wiring import _Columns, _Wiring
 from .frame import _FUNCTION_TABS, _short_day, _with_findings
+from .functions import _problem_rank
 
 
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
@@ -258,8 +259,10 @@ class _FunctionTab:
         if kept is not None and kept.detail is not None:
             self._described(kept.detail)
             minutes = int((time.monotonic() - kept.read_at) // 60)
-            age = f"{_plural(minutes, 'minute')} ago" if minutes else "less than a minute ago"
-            self._status(f"{name} as the window read it {age} · ↻ Refresh reads it again")
+            if minutes:
+                self._status(f"{name} as the window read it {_plural(minutes, 'minute')} ago · ↻ Refresh reads it again")
+            else:
+                self._status(self._tab_line(self._tab))
             return
         if target in ("overview", "settings"):
             self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
@@ -305,6 +308,32 @@ class _FunctionTab:
         self.code_more.layout.display = self.jump_button.layout.display = self.older_button.layout.display = "none"
         for key in ("overview", "settings", "errors", "performance"):
             self._renew(key)
+
+    def _read_ahead(self) -> None:
+        """
+        Reads, in the background, the function most people click first: the top of the list's problems, when it has
+        a warning or is failing. Its Overview then shows at once when it's opened. Nothing when a function is open
+        or asked for already.
+        """
+        if self.function is not None or self._want or not self._facts:
+            return
+        top = max(self._facts.values(), key=_problem_rank)
+        if top.tone not in ("bad", "warn"):
+            return
+        fn = top.fn
+        self._later("ahead", lambda: self.core.describe(fn.name, region=fn.region or None, days=30),
+                    lambda detail: self._read_ahead_done(fn, detail), lambda _exc: None)
+
+    def _read_ahead_done(self, fn: Function, detail: FunctionDetail) -> None:
+        """
+        A function read ahead: drawn when it's the one open and still waiting for its read, else kept for when it is.
+        """
+        if self.function is not None and self.function.arn == fn.arn:
+            if self.detail is None:
+                self._described(detail)
+            return
+        self._kept[fn.arn] = _KeptReads(time.monotonic(), (self._range, self._until), self._tab_range(), detail, None,
+                                        None, None, None)
 
     def _keep_reads(self) -> None:
         """

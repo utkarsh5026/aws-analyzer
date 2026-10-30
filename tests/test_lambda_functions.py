@@ -2989,10 +2989,25 @@ def test_explorer_remembers_the_functions_opened(core, explorer, monkeypatch):
     assert x.function.name == "api-handler" and len(reads) == 1
     x.open("etl-nightly")
     assert x.logs_page is first and len(reads) == 1 and x.detail is not None
-    assert "etl-nightly as the window read it less than a minute ago" in plain(x.status.value)
+    assert plain(x.status.value) == "1 run in the last hour, 1 failed · click a run to see its lines"
+    api = next(arn for arn in x._kept if arn.endswith(":api-handler"))
+    x._kept[api].read_at -= 180
+    x.open("api-handler")
+    assert len(reads) == 1 and "api-handler as the window read it 3 minutes ago" in plain(x.status.value)
     x.refresh()
-    assert x.function.name == "etl-nightly" and x.logs_page is not first and len(reads) == 2
-    assert x._kept == {}
+    assert x.function.name == "api-handler" and len(reads) == 2 and x._kept == {}
+
+
+def test_explorer_reads_the_top_problem_ahead(core, explorer, monkeypatch):
+    reads = []
+    real = core.describe
+    monkeypatch.setattr(core, "describe", lambda *args, **kwargs: reads.append(args[0]) or real(*args, **kwargs))
+    x = explorer()
+    assert reads == ["etl-nightly"] and x.function is None
+    row_of(x, "etl-nightly").button.click()
+    assert reads == ["etl-nightly"] and x.detail is not None and "Calls a day" in plain(x.overview_view.value)
+    explorer("api-handler")
+    assert reads[1:] == ["api-handler"]
 
 
 
