@@ -9,6 +9,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
+  - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
+  - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
+
+- ⚡ **Lambda: errors put down to the last change** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - A warning when calls began to fail after the function was last changed, with the error rate before and since.
+  - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
+  - `change_effect()` compares a function's days before and after a change.
+
+### Changed
+
+- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
+  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
+  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
+
 ## [0.38.0] - 2026-10-30
 
 ### Added
@@ -27,23 +46,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🧭 **S3 explorer: the chat windows' terminal look** ([#169](https://github.com/utkarsh5026/aws-analyzer/pull/169))
   - The same monospace font and code-editor colours as `chat()`, with an `s3://` path that highlights the open folder.
   - Reports in its right pane follow `set_theme()`, so a preview looks like the same command run in a cell.
-
-- ⚡ **Lambda explorer: from an error to its runs and its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
-  - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
-  - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
-  - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
-
-- ⚡ **Lambda: errors put down to the last change** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
-  - A warning when calls began to fail after the function was last changed, with the error rate before and since.
-  - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
-  - `change_effect()` compares a function's days before and after a change.
-
-### Changed
-
-- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
-  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
-  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
-  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
 
 ## [0.37.0] - 2026-10-28
 
