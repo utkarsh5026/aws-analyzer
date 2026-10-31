@@ -255,6 +255,13 @@ def _installed(module: str) -> bool:
         return False
 
 
+def _python_version() -> tuple[int, int]:
+    """
+    This kernel's Python as (major, minor).
+    """
+    return sys.version_info[:2]
+
+
 def _variable_rows(setup: ProviderSetup, environ: Mapping[str, str]) -> list[list[Any]]:
     """
     The Settings table: each variable the provider reads, what it is, and whether this kernel sets it (never its
@@ -979,10 +986,10 @@ class AgentView(_BaseView):
         What this kernel has for a provider: its Python, which of the packages it needs are missing, the environment
         (read only for whether each variable is set) and the provider the agent answers with now.
         """
-        version = sys.version_info
+        major, minor = _python_version()
         modules = (*AGENT_MODULES, *setup.modules)
         missing = tuple(module for module in modules if not _installed(module))
-        return KernelState(python_ok=version >= (3, 11), python=f"{version.major}.{version.minor}",
+        return KernelState(python_ok=(major, minor) >= (3, 11), python=f"{major}.{minor}",
                            missing_modules=missing, environ=os.environ, current=self.core.provider)
 
     def _zone_key(self) -> str:

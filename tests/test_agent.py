@@ -3830,7 +3830,13 @@ def test_setup_report_shows_the_cells_and_never_a_key(monkeypatch, capsys):
     for name in (*AZURE_KEYS, "OPENAI_API_KEY", "AWS_ANALYZER_AGENT_MODEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-shown")
+    monkeypatch.setattr(viewmod, "_python_version", lambda: (3, 10))
     view = AgentView(mode="text")
+    out = run(capsys, view.setup)
+    assert "0 of 12 providers ready here" in out and "needs Python 3.11+" in out
+
+    monkeypatch.setattr(viewmod, "_python_version", lambda: (3, 12))
+    monkeypatch.setattr(viewmod, "_installed", lambda module: True)
     out = run(capsys, view.setup)
     assert "Set up the agent's model" in out and "providers ready here; the steps for Amazon Bedrock below" in out
     assert any(line.startswith("Anthropic") and " ready " in line for line in out.splitlines())
