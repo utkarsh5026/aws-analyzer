@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧭 **S3 explorer: from a file to your code, and more reports** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🧭 **S3 explorer: from a file to your code, and more reports** ([#180](https://github.com/utkarsh5026/aws-analyzer/pull/180))
   - **🐍 Use in Python** writes the lines that load the file in a notebook cell, for its format; on ticked files, one DataFrame.
   - **‹ ›** beside ✕ show the file before and after in the list, the same way, without going back to it.
   - **More ▾** on a folder: largest, newest and oldest files, what's inside them, copies, unfinished uploads, and in a versioned bucket old versions, deleted files and a file's **🕘 Versions**.
