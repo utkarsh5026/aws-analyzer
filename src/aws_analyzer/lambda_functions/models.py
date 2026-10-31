@@ -254,6 +254,35 @@ class FunctionMetrics:
 
 
 @dataclass
+class Activity:
+    """
+    What CloudWatch counted for one function in its last few minutes, a value per minute, oldest first: calls,
+    failed calls, and the most runs at once. CloudWatch publishes each minute a minute or two late, so the newest
+    minutes can still read 0 while the function runs.
+    """
+
+    calls: list[float]
+    errors: list[float]
+    concurrency: list[float]
+
+    @property
+    def total_calls(self) -> int:
+        return round(sum(self.calls))
+
+    @property
+    def total_errors(self) -> int:
+        return round(sum(self.errors))
+
+    @property
+    def minutes_since_called(self) -> int | None:
+        """
+        How many minutes ago its newest minute with a call was (0: the newest minute), or None with no call.
+        """
+        called = [i for i, calls in enumerate(self.calls) if calls]
+        return len(self.calls) - 1 - called[-1] if called else None
+
+
+@dataclass
 class LogGroup:
     name: str
     retention_days: int | None = None  # None: logs are kept forever

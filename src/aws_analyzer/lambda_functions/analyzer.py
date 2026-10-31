@@ -29,6 +29,7 @@ from .._kit.errors import _Hint, _error_code
 from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 
 from .prices import LAMBDA_PRICES
+from .activity import _ActivityReads
 from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
@@ -191,7 +192,7 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer(_BaseAnalyzer):
+class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
     """
     Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
 

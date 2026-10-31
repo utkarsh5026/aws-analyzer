@@ -10,10 +10,11 @@ shots.py renders reports, which are plain HTML. The explorer is ipywidgets, whic
 a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's Lambda functions (moto, us-east-1),
 then uses it the way a person would: reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired),
 its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors tab and the
-Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError (the line it failed on), then picks report-api in the function field for its JSON logs, a failed run and a
-good one open. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
-docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/lambda_functions.md, by
-shots.py's set_height.
+Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError (the line it failed on), then picks
+report-api in the function field for its JSON logs, a failed run and a good one open; then seeds what's running now
+(demo.seed_lambda_live), opens the Live tab and follows orders-etl. Each figure is the window, 984 CSS px wide at
+1.5x like the other images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is
+set in docs/lambda_functions.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the
 one Playwright installs (playwright install chromium).
@@ -43,7 +44,9 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
-           "lambda-explorer-recent", "lambda-explorer-changed", "lambda-explorer-changes")
+           "lambda-explorer-recent", "lambda-explorer-live", "lambda-explorer-live-follow", "lambda-explorer-changed",
+           "lambda-explorer-changes")
+LIVE = ("lambda-explorer-live", "lambda-explorer-live-follow")
 SECOND_WINDOW = ("lambda-explorer-changed", "lambda-explorer-changes")
 
 NOTEBOOK_CODE = f"""import os, sys
@@ -75,6 +78,42 @@ for fn in core.overview(metrics=False, details=False).functions:
     looks.save_snapshot(account, fn.arn, function_look(fn).to_data(), at=then)
 y = lambda_functions.LambdaExplorer(core=core, height=620, history=looks.path)
 """
+
+
+LIVE_SEED = """demo.seed_lambda_live()
+"""
+
+
+def run_cell(page: Any, code: str) -> None:
+    """
+    Adds a cell under the first one and runs `code` in it.
+    """
+    page.locator(".jp-Cell .jp-InputArea-editor").first.click()
+    page.keyboard.press("Escape")
+    page.keyboard.press("b")
+    page.keyboard.press("Enter")
+    page.keyboard.type(code)
+    page.keyboard.press("Shift+Enter")
+
+
+def shoot_live(page: Any, app: Any, shot: Any) -> None:
+    """
+    Seeds what's running now (demo.seed_lambda_live, in a cell of its own), opens the first window's Live tab, then
+    follows orders-etl, whose run going is open.
+    """
+    run_cell(page, 'exec(open("live_seed.py").read())')
+    time.sleep(2)
+    app.scroll_into_view_if_needed()
+    app.locator("button.lmx-tab:has-text('Live')").first.click()
+    page.wait_for_function("[...document.querySelectorAll('.lmx-app .lvsum')].some(el => el.offsetParent && "
+                           "el.innerText.includes('running now'))", timeout=60_000)
+    page.mouse.move(1, 1)
+    shot("lambda-explorer-live")
+    app.locator(".lmx-livepage .lmx-row", has_text="orders-etl").locator("button.lmx-row-b").first.click()
+    page.wait_for_function("[...document.querySelectorAll('.lmx-app .lvwait')].some(el => el.offsetParent)",
+                           timeout=60_000)
+    page.mouse.move(1, 1)
+    shot("lambda-explorer-live-follow")
 
 
 def open_second_window(page: Any) -> Any:
@@ -214,6 +253,8 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         time.sleep(0.5)
         page.mouse.move(1, 1)
         shot("lambda-explorer-recent")
+    if set(LIVE) & set(wanted):
+        shoot_live(page, app, shot)
     if set(SECOND_WINDOW) & set(wanted):
         later = open_second_window(page)
         settled()
@@ -257,6 +298,7 @@ def main() -> int:
                     "nbformat": 4, "nbformat_minor": 5}
         Path(tmp, "explorer.ipynb").write_text(json.dumps(notebook), encoding="utf-8")
         Path(tmp, "changes_seed.py").write_text(CHANGES_SEED, encoding="utf-8")
+        Path(tmp, "live_seed.py").write_text(LIVE_SEED, encoding="utf-8")
         server = subprocess.Popen(
             [str(Path(sys.executable).parent / "jupyter"), "lab", "--no-browser", "--allow-root", f"--port={port}",
              f"--IdentityProvider.token={token}", "--ServerApp.ip=127.0.0.1", f"--ServerApp.root_dir={tmp}",

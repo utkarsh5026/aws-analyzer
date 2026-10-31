@@ -156,14 +156,16 @@ class _RunRow:
     One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
     memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again. An open run
     whose traceback names a line of the function's own code has a button under its lines that opens that line in
-    the Code tab (`frame`).
+    the Code tab (`frame`). on_toggle is what a click does (the Logs tab's _toggle_run unless given: the Live tab's
+    runs have their own).
     """
 
-    def __init__(self, app: LambdaExplorer):
+    def __init__(self, app: LambdaExplorer, on_toggle: Callable[[_RunRow], None] | None = None):
         w, layout = app._w, app._w.Layout
         self.run: LogRun | None = None
+        toggle = on_toggle or app._toggle_run
         head, self.button, self.face = _row_button(w, ("lmx-run-h", "lmx-run-b", "lmx-run-t"),
-                                                   app._safely(lambda _button: app._toggle_run(self)),
+                                                   app._safely(lambda _button: toggle(self)),
                                                    tooltip="Click to see its lines")
         self.body = w.HTML(layout=layout(width="100%", display="none"))
         self.frame: CodeFrame | None = None

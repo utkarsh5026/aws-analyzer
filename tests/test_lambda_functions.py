@@ -28,6 +28,9 @@ from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_grap
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
+from aws_analyzer.lambda_functions.explorer import live as live_tab
+from aws_analyzer.lambda_functions.analysis import live as live_mod
+from aws_analyzer.lambda_functions.models import Activity
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.blocks import _Next, _Report
@@ -3752,3 +3755,176 @@ def test_explorer_shows_the_event_a_run_logged(core, explorer):
     assert "Records" not in plain(row.face.value)
     row.button.click()
     assert '<details class="rev" open><summary>Event' in row.body.value and "orders/b1.json" in plain(row.body.value)
+
+
+
+
+def going_run(now, rid="77aa0000-1111-4222-8333-444455556666", seconds=45, stream="2026/10/31/[$LATEST]live"):
+    """
+    A run of etl-nightly that started `seconds` ago and hasn't ended (no REPORT line), in a stream of its own.
+    """
+    start = now - timedelta(seconds=seconds)
+    put_logs("/aws/lambda/etl-nightly", [
+        (start, f"START RequestId: {rid} Version: $LATEST"),
+        (start + timedelta(seconds=1), "reading s3://acme-uploads/orders/batch-118.json"),
+        (start + timedelta(seconds=seconds - 5), "wrote 9,000 of 18,400 orders"),
+    ], stream=stream)
+    return rid
+
+
+def called_now(name="etl-nightly", calls=12.0, errors=2.0, minutes_ago=1):
+    dims = [{"Name": "FunctionName", "Value": name}]
+    moment = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    boto3.client("cloudwatch", region_name=REGION).put_metric_data(Namespace="AWS/Lambda", MetricData=[
+        {"MetricName": "Invocations", "Dimensions": dims, "Timestamp": moment, "Value": calls},
+        {"MetricName": "Errors", "Dimensions": dims, "Timestamp": moment, "Value": errors},
+        {"MetricName": "ConcurrentExecutions", "Dimensions": dims, "Timestamp": moment, "Value": 1.0}])
+
+
+def test_minute_values_and_activity():
+    since = datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc)
+    series = {since + timedelta(minutes=2): 5.0, since + timedelta(minutes=2, seconds=30): 1.0,
+              since + timedelta(minutes=9): 3.0, since - timedelta(minutes=1): 99.0, since + timedelta(minutes=10): 7.0}
+    assert live_mod.minute_values(series, since, 10) == [0, 0, 6, 0, 0, 0, 0, 0, 0, 3]
+    act = Activity([0, 0, 6, 0, 1], [0, 0, 2, 0, 0], [0] * 5)
+    assert (act.total_calls, act.total_errors, act.minutes_since_called) == (7, 2, 0)
+    assert Activity([0, 4, 0], [0, 0, 0], [0] * 3).minutes_since_called == 1
+    assert Activity([0, 0], [0, 0], [0, 0]).minutes_since_called is None
+
+
+def test_live_function_tells_runs_going_from_runs_that_ended():
+    now = datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc)
+    item = live_mod.LiveFunction(fn(timeout=60))
+    done, going, stale = "aaaa0000-1111-4222-8333-444455556666", "bbbb0000-1111-4222-8333-444455556666", "cccc0000-1111-4222-8333-444455556666"
+    events = [LogEvent(now - timedelta(minutes=5), f"START RequestId: {stale} Version: $LATEST", "s0", stale),
+              LogEvent(now - timedelta(minutes=3), f"START RequestId: {done} Version: $LATEST", "s1", done),
+              LogEvent(now - timedelta(minutes=3) + timedelta(seconds=1), report_line(done, 900.0), "s1", done),
+              LogEvent(now - timedelta(seconds=50), f"START RequestId: {going} Version: $LATEST", "s2", going),
+              LogEvent(now - timedelta(seconds=40), "wrote 9,000 orders", "s2", None)]
+    assert item.add(events, now=now) == 5 and item.add(events[-2:], now=now) == 0
+    assert [run.request_id for run in item.runs] == [going, done, stale]
+    assert [run.request_id for run in item.running(now)] == [going]
+    assert item.last_line == now - timedelta(seconds=40)
+    assert live_mod.running_for(item.running(now)[0], now) == 50
+    warning = live_mod.timeout_warning(item.running(now)[0], item.function, now)
+    assert warning.startswith("Running for 50 s of its 60 s timeout: Lambda stops it at 60 s")
+    assert "aws lambda update-function-configuration --function-name etl --timeout 120" in warning
+    assert live_mod.timeout_warning(item.running(now)[0], item.function, now - timedelta(seconds=30)) == ""
+    item.add([], now=now + timedelta(minutes=12))
+    assert item.events == [] and item.read
+    quiet = live_mod.LiveFunction(fn(name="quiet"), activity=Activity([0] * 10, [0] * 10, [0] * 10))
+    busy = live_mod.LiveFunction(fn(name="busy"), activity=Activity([0] * 9 + [40], [0] * 10, [0] * 10))
+    assert not live_mod.ran_lately(quiet) and live_mod.ran_lately(busy)
+    item.add(events, now=now)
+    assert sorted([quiet, busy, item], key=lambda i: live_mod.live_rank(i, now))[0] is item
+
+
+def test_activity_reads_each_functions_last_minutes(core):
+    called_now()
+    functions = core.list_functions()
+    found, read, errors = core.activity(functions)
+    etl = next(f for f in functions if f.name == "etl-nightly")
+    api = next(f for f in functions if f.name == "api-handler")
+    assert read == 6 and not errors
+    assert found[etl.arn].total_calls == 12 and found[etl.arn].total_errors == 2
+    assert found[etl.arn].minutes_since_called == 1 and len(found[etl.arn].calls) == 10
+    assert found[api.arn].total_calls == 0
+
+
+def test_live_tab_shows_whats_running_and_follows_a_function(explorer):
+    now = datetime.now(timezone.utc)
+    called_now()
+    rid = going_run(now)
+    ended = seed_runs(now, count=2)
+    x = explorer(tab="live")
+    assert x._tab == "live" and x._watching and "lmx-onair" in x.tab_buttons["live"]._dom_classes
+    assert plain(x.live_summary.value) == ("1 of 2 functions ran · 1 running now · 12 calls, 2 failed in the last 10 "
+                                           "minutes")
+    face = plain(x._live_rows[0].face.value)
+    assert face.startswith("etl-nightly 45 s into a run · wrote 9,000 of 18,400 orders 1 running 12 calls 2 failed")
+    assert len(x.live_box.children) == 1 and plain(x.live_note.value) == "Not called in the last 10 minutes: api-handler."
+    status = plain(x.status.value)
+    assert status.startswith("Live · checked") and "(6 metrics a read, about <$0.01 for 15 minutes)" in status
+    assert plain(x.view_code.value) == "explore(tab='live')"
+    x._live_rows[0].button.click()
+    assert x._following and x.live_back.layout.display == "" and plain(x.view_code.value) == (
+        "explore('etl-nightly', tab='live')")
+    assert plain(x.live_summary.value).startswith("etl-nightly · 1 running now")
+    first = x._live_run_rows[0]
+    assert plain(first.face.value).startswith("• ") and "45 s of 15 min" in plain(first.face.value)
+    assert first.run.request_id == rid and first.body.layout.display == ""
+    body = plain(first.body.value)
+    assert "reading s3://acme-uploads/orders/batch-118.json" in body and "waiting for more lines" in body
+    assert "Running for" not in body
+    assert [row.run.request_id for row in x._live_run_rows[1:3]] == [ended[1], ended[0]]
+    assert plain(x._live_run_rows[1].face.value).startswith("✓") and x._live_run_rows[1].body.layout.display == "none"
+    first.button.click()
+    assert x._live_run_rows[0].body.layout.display == "none"
+    x._live_run_rows[1].button.click()
+    assert x._live_run_rows[1].body.layout.display == "" and "handling order" in plain(x._live_run_rows[1].body.value)
+    x.live_back.click()
+    assert not x._following and x.live_back.layout.display == "none" and x._live_rows[0].item.name == "etl-nightly"
+    x.tab_buttons["functions"].click()
+    assert not x._watching and "lmx-onair" not in x.tab_buttons["live"]._dom_classes
+    x.live("etl-nightly")
+    assert x._tab == "live" and x._watching and x.board[x._following].function.name == "etl-nightly"
+    x.live_logs_button.click()
+    assert x._tab == "logs" and x.function.name == "etl-nightly" and not x._watching
+
+
+def test_live_tab_says_when_nothing_ran_or_cant_be_read(core, explorer, capsys):
+    x = explorer("etl-nightly", tab="live")
+    assert x.board[x._following].function.name == "etl-nightly"
+    assert plain(x.live_summary.value) == "etl-nightly · 0 running now · 0 calls in the last 10 minutes"
+    assert plain(x.live_box.children[0].value) == ("etl-nightly logged nothing in the last 10 minutes. Its runs show "
+                                                   "here as they start.")
+    x._unfollow()
+    assert plain(x.live_box.children[0].value).startswith("Nothing ran in us-east-1 in the last 10 minutes.")
+    assert "api-handler, etl-nightly" in plain(x.live_note.value)
+    x._toggle_watch()
+    assert not x._watching and plain(x.status.value) == "Live is off: click Live to watch again."
+    with pytest.raises(_Hint, match="nope isn't among the functions listed in us-east-1"):
+        x._live_function("nope")
+    x.live("nope")
+    assert "nope isn't among the functions listed" in plain(x.status.value)
+    denied = LambdaAnalyzer(region=REGION, clients={"lambda": lambda_clients()})
+
+    def no_metrics(*args, **kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetMetricData")
+
+    denied._metric_data = no_metrics
+    y = LambdaExplorer(core=denied, mode="widgets", tab="live")
+    assert "Couldn't read CloudWatch's numbers in us-east-1" in plain(y.live_note.value)
+    assert "cloudwatch:GetMetricData" in plain(y.live_note.value)
+    z = LambdaExplorer(core=core, mode="text")
+    capsys.readouterr()
+    z.live()
+    assert "The Live tab is the explorer window's" in capsys.readouterr().out
+
+
+def test_live_tab_watches_in_the_background(core):
+    async def main():
+        x = LambdaExplorer(core=core, mode="widgets", tab="live")
+        while x._tasks:
+            await asyncio.gather(*[task for key, task in x._tasks.items() if key != "watch"])
+            if list(x._tasks) == ["watch"]:
+                break
+        assert x._watching and "watch" in x._tasks
+        rid = going_run(datetime.now(timezone.utc), seconds=8)
+        x._follow(next(f for f in x.overview.functions if f.name == "etl-nightly"))
+        for _ in range(400):
+            await asyncio.sleep(0.05)
+            if any(row.run is not None and row.run.request_id == rid for row in x._live_run_rows):
+                break
+        assert x._live_run_rows[0].run.request_id == rid
+        task = x._tasks["watch"]
+        x.watch_button.click()
+        await asyncio.wait_for(task, 20)
+        assert not x._watching and "watch" not in x._tasks
+
+    seconds = live_tab._WATCH_SECONDS
+    try:
+        live_tab._WATCH_SECONDS = 0.05
+        asyncio.run(main())
+    finally:
+        live_tab._WATCH_SECONDS = seconds

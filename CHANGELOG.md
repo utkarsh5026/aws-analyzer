@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda explorer: see what's running now** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - A **Live** tab: every function that ran in the last 10 minutes, the ones running now first, looked at every 5 s.
+  - Click one to follow its runs as their lines come; a run nearing its timeout says so, with the fix.
+  - `explore(tab="live")` or `x.live("orders-etl")`; CloudWatch's numbers cost about a cent per 15 minutes.
+
 ## [0.42.0] - 2026-10-31
 
 ### Added

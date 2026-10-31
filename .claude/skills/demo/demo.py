@@ -1973,6 +1973,75 @@ def seed_lambda_functions() -> dict:
     return {"clients": {"lambda": lambda_client, "logs": logs_client}}
 
 
+def seed_lambda_live() -> None:
+    """
+    What the Lambda explorer's Live tab shows, timed from now (call it after seed_lambda_functions, when the figure is
+    taken): orders-etl 44 s into a 60 s run that's still writing, with a failed and a good run before it in the last
+    minutes; report-api answering two requests; and CloudWatch's numbers minute by minute for the last ten minutes.
+    """
+    import boto3
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    logs = boto3.client("logs", region_name=REGION)
+    etl_stream = "2026/10/06/[$LATEST]" + f"{0xF7:032x}"
+    logs.create_log_stream(logGroupName="/aws/lambda/orders-etl", logStreamName=etl_stream)
+    going, failed, good = (f"{n:08x}-5e1d-4c3b-a2f1-0e9d8c7b6a5f" for n in (0x7C1E90AA, 0x5AD07E31, 0x3B91C4D2))
+    lines: list[tuple[datetime, str]] = []
+    for rid, start, kind in ((good, now - timedelta(minutes=6, seconds=12), "ok"),
+                             (failed, now - timedelta(minutes=2, seconds=40), "key")):
+        lines += [(start, f"START RequestId: {rid} Version: $LATEST"),
+                  (start + timedelta(seconds=0.05), "reading s3://acme-uploads/orders/2026-10-31/batch-11"
+                                                    f"{6 if kind == 'ok' else 7}.json")]
+        took = 5.7 if kind == "ok" else 1.73
+        if kind == "key":
+            lines.append((start + timedelta(seconds=took - 0.01), "[ERROR] KeyError: 'customer_id'\nTraceback (most "
+                          "recent call last):\n  File \"/var/task/etl.py\", line 22, in handler\n    table.put_item("
+                          "Item={\"pk\": row[\"customer_id\"], \"sk\": row[\"order_id\"]})"))
+        else:
+            lines.append((start + timedelta(seconds=took - 0.02), "loaded 1,184 orders"))
+        lines += [(start + timedelta(seconds=took), f"END RequestId: {rid}"),
+                  (start + timedelta(seconds=took + 0.001), f"REPORT RequestId: {rid}\tDuration: {took * 1000:.2f} ms"
+                   f"\tBilled Duration: {int(took * 1000) + 1} ms\tMemory Size: 1024 MB\tMax Memory Used: 151 MB")]
+    start = now - timedelta(seconds=44)
+    lines += [(start - timedelta(seconds=1.2), "INIT_START Runtime Version: python:3.9.v68\tRuntime Version ARN: "
+                                               "arn:aws:lambda:us-east-1::runtime:5ad8c1e3b3f0b7e2a1f9d4c6e8b0a2f4"),
+              (start, f"START RequestId: {going} Version: $LATEST"),
+              (start + timedelta(seconds=0.051), "reading s3://acme-uploads/orders/2026-10-31/batch-118.json (4.2 MB)"),
+              (start + timedelta(seconds=3.208), "parsed 18,400 orders"),
+              (start + timedelta(seconds=21.77), "wrote 9,000 of 18,400 orders to orders"),
+              (start + timedelta(seconds=33.9), "[WARNING] ProvisionedThroughputExceededException on orders: retrying "
+                                                "in 800 ms"),
+              (start + timedelta(seconds=40.62), "wrote 14,000 of 18,400 orders to orders")]
+    logs.put_log_events(logGroupName="/aws/lambda/orders-etl", logStreamName=etl_stream, logEvents=sorted(
+        ({"timestamp": _epoch_ms(moment), "message": message} for moment, message in lines),
+        key=lambda e: e["timestamp"]))
+    for n, (seconds, path) in enumerate(((1.2, "/reports/weekly?region=EMEA"), (0.4, "/reports/weekly?region=APAC"))):
+        stream = "2026/10/06/[$LATEST]" + f"{0xA0 + n:032x}"
+        logs.create_log_stream(logGroupName="/aws/lambda/report-api", logStreamName=stream)
+        rid = f"{0xA83F02C1 + n:08x}-77d2-4e0b-b9a1-3c5d7e9f1a2b"
+        begun = now - timedelta(seconds=seconds)
+        stamp = begun.strftime("%Y-%m-%dT%H:%M:%S.") + f"{begun.microsecond // 1000:03d}Z"
+        logs.put_log_events(logGroupName="/aws/lambda/report-api", logStreamName=stream, logEvents=[
+            {"timestamp": _epoch_ms(begun), "message": json.dumps({"time": stamp, "type": "platform.start", "record": {
+                "requestId": rid, "version": "$LATEST"}})},
+            {"timestamp": _epoch_ms(begun) + 4, "message": json.dumps({"timestamp": stamp, "level": "INFO",
+                                                                        "requestId": rid, "message": f"GET {path}"})}])
+    cloudwatch = boto3.client("cloudwatch", region_name=REGION)
+    busy = {"orders-etl": ([1, 0, 2, 1, 0, 1, 2, 1, 1, 1], [0, 0, 0, 0, 0, 0, 0, 1, 0, 0]),
+            "report-api": ([96, 104, 118, 101, 122, 131, 117, 109, 126, 119], [0, 1, 0, 0, 0, 1, 0, 0, 0, 0]),
+            "support-agent-actions": ([2, 0, 3, 1, 0, 2, 4, 1, 0, 0], [0] * 10)}
+    minute = now.replace(second=0, microsecond=0)
+    for name, (calls, errors) in busy.items():
+        dims = [{"Name": "FunctionName", "Value": name}]
+        data = []
+        for back, (count, failed_calls) in enumerate(zip(reversed(calls), reversed(errors))):
+            moment = minute - timedelta(minutes=back)
+            data += [{"MetricName": "Invocations", "Dimensions": dims, "Timestamp": moment, "Value": float(count)},
+                     {"MetricName": "Errors", "Dimensions": dims, "Timestamp": moment, "Value": float(failed_calls)}]
+        for begin in range(0, len(data), 20):
+            cloudwatch.put_metric_data(Namespace="AWS/Lambda", MetricData=data[begin:begin + 20])
+
+
 # ----------------------------------------------------------------------------- the agent
 
 

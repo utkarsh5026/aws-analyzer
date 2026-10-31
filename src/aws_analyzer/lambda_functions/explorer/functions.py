@@ -283,6 +283,7 @@ class _FunctionsTab:
         """
         self._drop("list", "numbers", "extras")
         self.overview, self._facts, self._numbers_pending = None, {}, False
+        self._reset_live()
         self._offset = 0
         self.field.problem = ""
         self.field.set_choices([])
@@ -347,6 +348,7 @@ class _FunctionsTab:
             self._finish("list", f"No Lambda functions in {self._where()}"
                          + ("." if self.region == "all" else ": pick every region in the region field to look in "
                                                               "all of them."), tabs=("functions",))
+        self._live_listed()
         same = next((f for f in ov.functions if f.arn == reopen.arn), None) if reopen is not None else None
         if reopen is not None and (same is not None or elsewhere):
             self._open_function(same or reopen, self._tab if self._tab in _FUNCTION_TABS else None)

@@ -64,7 +64,7 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
+    AccountLimits, Activity, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
     LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
@@ -81,6 +81,10 @@ from .analysis.errors import (
 from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, run_console_url, run_insights_query, run_timeline,
     slow_cutoff, split_runs,
+)
+from .analysis.live import (
+    LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, minute_values, ran_lately, running_for,
+    timeout_warning,
 )
 from .analysis.performance import percentile, performance_findings, suggest_memory
 from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
@@ -106,6 +110,15 @@ from .view import LambdaView
 from .explorer.window import LambdaExplorer, explore
 
 __all__ = [
+    "Activity",
+    "LIVE_WINDOW_MINUTES",
+    "LiveFunction",
+    "in_flight",
+    "live_rank",
+    "minute_values",
+    "ran_lately",
+    "running_for",
+    "timeout_warning",
     "runs_findings",
     "run_table",
     "run_fields",

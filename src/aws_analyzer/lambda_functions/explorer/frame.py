@@ -24,6 +24,10 @@ _EXPLORER_TABS = (
     ("functions", "Functions", "Every function in the region: search, filter, sort, and click one to open it",
      "<path d='M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5'/><path d='M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01' "
      "stroke-width='3.2'/>"),
+    ("live", "Live", "What's running now: the functions that ran in the last 10 minutes, their runs going, and "
+     "one function's lines as they come",
+     "<circle cx='12' cy='12' r='2.2'/><path d='M8.2 8.2a5.4 5.4 0 0 0 0 7.6M15.8 8.2a5.4 5.4 0 0 1 0 7.6'/>"
+     "<path d='M5.3 5.3a9.5 9.5 0 0 0 0 13.4M18.7 5.3a9.5 9.5 0 0 1 0 13.4'/>"),
     ("overview", "Overview", "How the function is doing: what to fix, what calls it, its last 30 days and its cost",
      "<path d='M3.5 12.5h3.8l2.4-6.5 4.6 12 2.4-5.5h3.8'/>"),
     ("logs", "Logs", "What it logged, run by run: click a run for its lines, search them, or watch new runs live",

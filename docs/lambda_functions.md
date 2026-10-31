@@ -163,6 +163,7 @@ from aws_analyzer.lambda_functions import explore
 explore()                                # every function in the notebook's region
 explore("orders-etl")                    # straight to one function: a name, an ARN or a console link
 explore("orders-etl", tab="logs")        # ...on its logs (or "errors", "performance", "code", "settings")
+explore(tab="live")                      # what's running now, looked at every few seconds
 explore(region="all")                    # every region your account has turned on
 explore(region="eu-west-1", profile="dev")   # another region or AWS profile
 explore(height=800)                      # 800px pages (else the browser's height)
@@ -215,6 +216,37 @@ What changed in orders-etl since three days ago, among its findings.
 ??? more "How it decides what changed"
 
     When you open a function, the window notes its code's SHA-256, when it was deployed, its runtime, handler, memory and timeout, and, once you open its Errors tab, a hash of each error's cause (never the message). Next time, it compares. Looks within an hour of each other are one visit. Failed calls come from CloudWatch, which counts whole UTC days, so they're counted from the day after your last look, and not until a whole day has passed; they've gone up when there are at least 3 and twice as many a day as before.
+
+### What's running now { #explorer-live }
+
+The **Live** tab shows what's running right now: every function that ran in the last 10 minutes, the ones with runs in progress first, looked at again every few seconds.
+{ .gist }
+
+Each line says how many runs are going and what the newest one is doing, its calls a minute (the failed part in red), and when it last logged. A run turns amber as it nears its timeout. Click a function to follow it: its runs, newest first, the ones still going open at the top with their lines added as they come. **‹ All functions** goes back, and **Its Logs tab ›** opens the function's Logs tab for a longer time range or a search.
+
+```python
+explore(tab="live")                     # what's running now
+explore("orders-etl", tab="live")       # ...following one function
+x.live("orders-etl")                    # the same, in a window that's open
+```
+
+![The Live tab of the explorer: the Live button on, and a line saying 3 of 5 functions ran, 3 running now and 1,166 calls, 3 failed in the last 10 minutes; then the functions that ran, running ones first: report-api, its newest run 2.6 s in on GET /reports/weekly?region=APAC, 2 running, its calls a minute as bars, 1,143 calls and 2 failed, seen just now; orders-etl, 47 s into a run that wrote 14,000 of 18,400 orders, in amber as it nears its timeout, 1 running, 10 calls and 1 failed; support-agent-actions idle, 13 calls, 2 min ago; and under the list, the functions not called in the last 10 minutes](images/lambda-explorer-live-light.webp#only-light){ width="984" height="828" loading=lazy }
+![The Live tab of the explorer: the Live button on, and a line saying 3 of 5 functions ran, 3 running now and 1,166 calls, 3 failed in the last 10 minutes; then the functions that ran, running ones first: report-api, its newest run 2.6 s in on GET /reports/weekly?region=APAC, 2 running, its calls a minute as bars, 1,143 calls and 2 failed, seen just now; orders-etl, 47 s into a run that wrote 14,000 of 18,400 orders, in amber as it nears its timeout, 1 running, 10 calls and 1 failed; support-agent-actions idle, 13 calls, 2 min ago; and under the list, the functions not called in the last 10 minutes](images/lambda-explorer-live-dark.webp#only-dark){ width="984" height="828" loading=lazy }
+/// caption
+`explore(tab="live")`: three functions ran in the last 10 minutes, two of them running now.
+///
+
+![orders-etl followed on the Live tab: a back button, a line saying 1 running now and 10 calls, 1 failed in the last 10 minutes, and a button to its Logs tab; its run going is open at the top, 48 s of its 60 s timeout with an amber bar and a cold start, a warning that Lambda stops it at 60 s with the command that gives it longer, its lines so far (reading the batch, parsed 18,400 orders, a WARN about ProvisionedThroughputExceededException, wrote 14,000 of 18,400 orders), Still running: no REPORT line yet, and waiting for more lines; under it the runs that ended, a good one, a failed KeyError and another good one](images/lambda-explorer-live-follow-light.webp#only-light){ width="984" height="811" loading=lazy }
+![orders-etl followed on the Live tab: a back button, a line saying 1 running now and 10 calls, 1 failed in the last 10 minutes, and a button to its Logs tab; its run going is open at the top, 48 s of its 60 s timeout with an amber bar and a cold start, a warning that Lambda stops it at 60 s with the command that gives it longer, its lines so far (reading the batch, parsed 18,400 orders, a WARN about ProvisionedThroughputExceededException, wrote 14,000 of 18,400 orders), Still running: no REPORT line yet, and waiting for more lines; under it the runs that ended, a good one, a failed KeyError and another good one](images/lambda-explorer-live-follow-dark.webp#only-dark){ width="984" height="811" loading=lazy }
+/// caption
+Following orders-etl: its run going, near its timeout, its lines as they come.
+///
+
+??? more "How it knows what's running"
+
+    Lambda has no call that lists the runs in progress, so the tab puts two reads together. Once a minute, CloudWatch's numbers (GetMetricData: calls, failed calls and runs at once, a value a minute) say which functions ran; they come a minute or two late. Every 5 seconds, the newest lines of the five busiest (FilterLogEvents) say which runs are going: Lambda writes a `START` line when a run begins and a `REPORT` line when it ends, so a run with a `START` and no `REPORT` yet, younger than its timeout, is running. A function you follow has its lines read whether CloudWatch counted it or not.
+
+    It watches while the tab is open, for 15 minutes at most; click **Live** to stop or start again. The status line says what the numbers cost: three metrics a function a minute, at $0.01 per 1,000 (a hundred functions for 15 minutes is about $0.05). Nothing is invoked or changed.
 
 ### Logs, run by run { #explorer-logs }
 
