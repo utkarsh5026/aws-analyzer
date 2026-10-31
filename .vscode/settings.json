@@ -46,10 +46,10 @@
   },
 
   // Look and feel. The theme is Bearded Surprising Blueberry (beardedbear.beardedtheme), recoloured
-  // below, and the icons VS Code's own Minimal set; without the theme VS Code falls back to its
-  // default, and to the next font in each list.
+  // below, and the icons Catppuccin's (catppuccin.catppuccin-vsc-icons); without them VS Code falls
+  // back to its defaults, and to the next font in each list.
   "workbench.colorTheme": "Bearded Theme Surprising Blueberry",
-  "workbench.iconTheme": "vs-minimal",
+  "workbench.iconTheme": "catppuccin-mocha",
   // Google Sans Code, set roomy: a bigger size, tall lines and a little air between
   // letters, so the long docstrings and dense calls are easier to read.
   "editor.fontFamily": "'Google Sans Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
@@ -59,7 +59,7 @@
   "editor.lineHeight": 1.85,
   "editor.letterSpacing": 0.4,
   "editor.padding.bottom": 16,
-  "editor.rulers": [],
+  "editor.rulers": [{ "column": 120, "color": "#e0a45826" }],
   "scm.inputFontFamily": "editor",
   "editor.cursorStyle": "line",
   "editor.cursorWidth": 2,
@@ -67,7 +67,7 @@
   "editor.bracketPairColorization.enabled": false,
   "workbench.activityBar.location": "top",
   "workbench.layoutControl.enabled": false,
-  "breadcrumbs.icons": false,
+  "breadcrumbs.icons": true,
   "terminal.integrated.fontFamily": "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono', monospace",
   "editor.semanticHighlighting.enabled": true,
   "editor.guides.bracketPairs": false,
@@ -79,14 +79,14 @@
   "workbench.list.smoothScrolling": true,
   "terminal.integrated.smoothScrolling": true,
   "workbench.tree.indent": 20,
-  "workbench.tree.renderIndentGuides": "none",
-  "breadcrumbs.enabled": false,
-  "editor.minimap.enabled": false,
+  "workbench.tree.renderIndentGuides": "always",
+  "breadcrumbs.enabled": true,
+  "editor.minimap.enabled": true,
   "editor.guides.indentation": false,
   "editor.overviewRulerBorder": false,
   "editor.hideCursorInOverviewRuler": true,
   "window.commandCenter": false,
-  "workbench.editor.highlightModifiedTabs": false,
+  "workbench.editor.highlightModifiedTabs": true,
 
   // Each analyzer is a few thousand lines split into numbered banners ("# 1. Helpers: ...")
   // and "# ------ tables" dividers inside the classes; the tests use the same dividers.
@@ -100,7 +100,8 @@
   "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeRepositoryBranchName}",
 
   // Minimal: one squid ink colour behind everything, no borders, one accent (AWS's orange, muted)
-  // for keywords and the cursor, and code otherwise a single grey, with strings and comments dimmer.
+  // for keywords, the cursor and the active tab, muted blue and purple for functions and classes,
+  // and the rest of the code one grey, with strings and comments dimmer.
   "workbench.colorCustomizations": {
     "[Bearded Theme Surprising Blueberry]": {
       "foreground": "#b4bdc9",
@@ -135,9 +136,9 @@
       "editorGroupHeader.tabsBorder": "#00000000",
       "tab.border": "#00000000",
       "tab.activeBorder": "#00000000",
-      "tab.activeBorderTop": "#00000000",
-      "tab.unfocusedActiveBorderTop": "#00000000",
-      "tab.activeModifiedBorder": "#00000000",
+      "tab.activeBorderTop": "#e0a458",
+      "tab.unfocusedActiveBorderTop": "#e0a45855",
+      "tab.activeModifiedBorder": "#e0a458",
       "sideBarSectionHeader.border": "#00000000",
       "input.border": "#00000000",
       "editor.lineHighlightBorder": "#00000000",
@@ -285,6 +286,30 @@
             "foreground": "#6f7b89",
             "fontStyle": ""
           }
+        },
+        {
+          "scope": [
+            "entity.name.function",
+            "support.function",
+            "meta.function-call.generic"
+          ],
+          "settings": {
+            "foreground": "#7fa8d1",
+            "fontStyle": ""
+          }
+        },
+        {
+          "scope": [
+            "entity.name.type",
+            "entity.name.class",
+            "support.class",
+            "support.type",
+            "entity.other.inherited-class"
+          ],
+          "settings": {
+            "foreground": "#a99bd6",
+            "fontStyle": ""
+          }
         }
       ]
     }
@@ -293,12 +318,12 @@
     "[Bearded Theme Surprising Blueberry]": {
       "enabled": true,
       "rules": {
-        "class": "#b4bdc9",
-        "class.declaration": "#b4bdc9",
-        "type": "#b4bdc9",
+        "class": "#a99bd6",
+        "class.declaration": "#a99bd6",
+        "type": "#a99bd6",
         "enumMember": "#b4bdc9",
-        "function": "#b4bdc9",
-        "method": "#b4bdc9",
+        "function": "#7fa8d1",
+        "method": "#7fa8d1",
         "decorator": "#b4bdc9",
         "class.decorator": "#b4bdc9",
         "meta.decorator": "#b4bdc9",
