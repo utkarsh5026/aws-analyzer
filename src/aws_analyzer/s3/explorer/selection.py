@@ -122,7 +122,9 @@ class _SelectionPane:
                                       f'<span class="s3x-picks-s">{human_size(size)}{more}</span>')
         self._picks_bar.layout.display = None if self._picked else "none"
         self._draw_check_all()
-        if self._picks_panel.layout.display != "none":
+        if self._action == "picks_code":
+            self._redraw_picks_code()
+        elif self._picks_panel.layout.display != "none":
             if self._picked:
                 self._open_picks(keep_name=True)
             else:
@@ -195,6 +197,24 @@ class _SelectionPane:
         self._picks_msg.value = ""
         self._picks_go.disabled = over  # the note above says what to do instead
         self._picks_panel.layout.display = None
+
+    def _open_picks_code(self) -> None:
+        """
+        🐍 Use in Python in the selection bar: on the right, the lines that load what's ticked in a notebook cell.
+        """
+        self._report("picks_code", self._use_picks_in_python, cache=False)
+
+    def _redraw_picks_code(self) -> None:
+        """
+        After the selection changed while its code is on the right: the code for the new selection, or the folder
+        or file that was shown once nothing's ticked.
+        """
+        if self._picked:
+            self._open_picks_code()
+        elif self.selected:
+            self._select(self.selected)
+        else:
+            self._show_folder(self._source())
 
     def _close_picks(self) -> None:
         """

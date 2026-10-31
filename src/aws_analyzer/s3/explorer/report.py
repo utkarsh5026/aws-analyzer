@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from ..._kit.blocks import _Cards, _Note, _Table, _Title
+from ..._kit.blocks import _Cards, _Note, _Table, _Text, _Title
 from ..._kit.fmt import _plural, human_age, human_size, parse_size
 from ..._kit.jsontree import _JsonTree
 from ..._kit.window import _cell_number, _running_loop
@@ -25,6 +25,7 @@ from ..view.s3_view import S3View
 
 from .changes import changes_card, changes_sentence
 from .navigator import Entry, Folder, _extension, breadcrumbs, entry_icon, explain_list_error, parse_location
+from .snippets import file_snippet, files_snippet
 
 
 _DOCUMENTS = ("pdf", "docx", "docm", "dotx", "pptx", "pptm", "potx", "ppsx")  # files "Read all" opens
@@ -35,6 +36,33 @@ _TEXT_PAGES = 50  # PDF pages one "Text" report shows (text is light, so more th
 _BACKGROUND = ("preview", "head")  # quick reports (no progress bar) that load on worker threads in a notebook
 
 _WORKERS = 4  # background reports loading at once, so a click doesn't wait for files clicked before it
+
+_TOP_FILES = 20
+
+_FOLDER_REPORTS = {
+    "largest": ("largest", {"n": _TOP_FILES}),
+    "newest": ("newest", {"n": _TOP_FILES}),
+    "oldest": ("oldest", {"n": _TOP_FILES}),
+    "details": ("file_details", {}),
+    "duplicates": ("duplicates", {"method": "etag"}),
+    "uploads": ("uploads", {}),
+    "versions": ("versions", {}),
+    "deleted": ("deleted", {}),
+}
+
+_STEPS = {"prev": -1, "next": 1}
+
+_KEPT_WHILE_STEPPING = ("preview", "head", "code", "history")
+
+_TAIL = ("prev", "next", "close")
+
+_ICON_ACTIONS = {
+    "prev": ("s3x-step", "s3x-ic", "s3x-i-previous"),
+    "next": ("s3x-step", "s3x-ic", "s3x-i-next"),
+    "close": ("s3x-close", "s3x-ic", "s3x-i-close"),
+}
+
+_UNMARKED = ("open", *_TAIL)
 
 
 class _ReportPane:
@@ -73,7 +101,13 @@ class _ReportPane:
                    "download": f"Downloading {name}…",
                    "summary": "Reading every file below this folder…",
                    "zip": "Listing every file below this folder, then zipping them…",
-                   "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
+                   "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…",
+                   "history": f"Listing the versions of {name}…",
+                   **dict.fromkeys(("largest", "newest", "oldest", "duplicates"), "Listing every file below this folder…"),
+                   "details": "Looking inside the files below this folder…",
+                   "uploads": "Looking for uploads that never finished…",
+                   "versions": "Listing the old versions below this folder…",
+                   "deleted": "Looking for deleted files below this folder…"}
         self._wait(waiting.get(action, "Working…"))
         loop = _running_loop() if isinstance(method, str) and action in _BACKGROUND else None
         if loop is not None:
@@ -281,6 +315,85 @@ class _ReportPane:
                                    "searches; in a Jupyter notebook with ipywidgets every row is clickable."))
         return blocks
 
+    def _file_actions(self) -> list[tuple[str, str, str]]:
+        """
+        The buttons for the chosen file: what you can see of it, take from it, and the files beside it.
+        """
+        name = Entry("file", *parse_location(self.selected)).name
+        actions = [("preview", "👁️ Preview", "What's inside the file"),
+                   ("head", "🏷️ Details", "Size, dates, storage class, metadata and tags")]
+        kind = _extension(name).split(".")[0]
+        if kind in _DOCUMENTS:
+            actions.append(("document", "📖 Read all", "Every page as it looks, 20 at a time (click a page to see it "
+                            "full size)" if kind == "pdf" else "The whole document, page by page"))
+        if kind == "pdf":
+            actions.append(("text", "📄 Text", f"The words of every page, {_TEXT_PAGES} at a time, laid out to read: "
+                            "headings, paragraphs and lists, without the running headers and footers"))
+        actions.append(("code", "🐍 Use in Python", "The lines that load this file in a notebook cell, written for "
+                        "its format, with the same AWS credentials as this explorer"))
+        if self._is_versioned(parse_location(self.selected)[0]):
+            actions.append(("history", "🕘 Versions", "Every version of this file kept by the bucket's versioning: "
+                            "when each was written, and its size"))
+        actions += [("download", "⬇ Download", f"Save a copy in {self._where()} (⚙ changes the folder)"),
+                    ("open", "↗ Open in new tab", "The file in a new browser tab: PDFs, pictures, sound, video "
+                     "and text show there, other files download. The link works for an hour after you click the "
+                     "file (right-click to copy it for someone without AWS access)")]
+        actions += self._step_actions()
+        actions.append(("close", "✕", "Close the file and show this folder"))
+        return actions
+
+    def _folder_actions(self, bucket: str, prefix: str) -> list[tuple[str, str, str]]:
+        """
+        The buttons for a folder: what's in it, its bucket's settings, the .zip, and More ▾, which opens a second
+        row of reports on it (the biggest, newest and oldest files, what's inside them, copies, unfinished uploads,
+        and in a versioned bucket old versions and deleted files).
+        """
+        actions = [("summary", "📊 What's in here", "Every file below this folder: sizes, types, cost and "
+                    "findings (reads the whole listing, so big folders take a while)")]
+        if not prefix:
+            actions.append(("bucket_info", "🛡️ Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
+        actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip in {self._where()}, "
+                        f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
+        if self._more_open:
+            actions.append(("more", "Fewer ▴", "Hide the other reports on this folder"))
+            return actions + self._more_actions(bucket)
+        actions.append(("more", "More ▾", "Other reports on this folder: its biggest, newest and oldest files, "
+                        "what's inside them, copies and unfinished uploads"))
+        return actions
+
+    def _more_actions(self, bucket: str) -> list[tuple[str, str, str]]:
+        """
+        The second row of folder reports that More ▾ opens. Each reads the whole listing below the folder.
+        """
+        actions = [
+            ("largest", "🐘 Largest files", f"The {_TOP_FILES} biggest files below this folder"),
+            ("newest", "🆕 Newest files", f"The {_TOP_FILES} files below this folder changed most recently"),
+            ("oldest", "🕰️ Oldest files", f"The {_TOP_FILES} files below this folder left alone the longest"),
+            ("details", "🔍 Inside the files", "What's inside each file: a table's rows and columns (and whether the "
+             "tables here agree on them), a PDF's pages, a picture's size; reads only the parts it needs"),
+            ("duplicates", "📑 Copies", "Files stored more than once below this folder, matched by size and ETag "
+             "(no file is read), and what the copies cost"),
+            ("uploads", "🧩 Unfinished uploads", "Uploads that never finished: billed, but not in any listing"),
+        ]
+        if self._is_versioned(bucket):
+            actions += [("versions", "🕘 Old versions", "Old versions and delete markers below this folder, kept by "
+                         "versioning, and what they cost"),
+                        ("deleted", "🗑️ Deleted files", "Files deleted below this folder that versioning can still "
+                         "bring back, with the call that does it (nothing is changed)")]
+        return actions
+
+    def _is_versioned(self, bucket: str) -> bool:
+        """
+        Whether the bucket keeps old versions (versioning on, or suspended with some kept), asked once per bucket.
+        A bucket whose versioning can't be read counts as not versioned: its buttons would only show an error.
+        """
+        if bucket not in self._versioning:
+            try:
+                self._versioning[bucket] = self.core.versioning_status(bucket) in ("Enabled", "Suspended")
+            except (ClientError, BotoCoreError):
+                self._versioning[bucket] = False
+        return self._versioning[bucket]
+
     def _draw_actions(self) -> None:
         """
         The buttons above the right pane: what you can do with the chosen file, or with this folder.
@@ -290,28 +403,9 @@ class _ReportPane:
             return
         bucket, prefix = parse_location(self.nav.location)
         if self.selected:
-            name = Entry("file", *parse_location(self.selected)).name
-            actions = [("preview", "👁️ Preview", "What's inside the file"),
-                       ("head", "🏷️ Details", "Size, dates, storage class, metadata and tags")]
-            kind = _extension(name).split(".")[0]
-            if kind in _DOCUMENTS:
-                actions.append(("document", "📖 Read all", "Every page as it looks, 20 at a time (click a page to see it "
-                                "full size)" if kind == "pdf" else "The whole document, page by page"))
-            if kind == "pdf":
-                actions.append(("text", "📄 Text", f"The words of every page, {_TEXT_PAGES} at a time, laid out to read: "
-                                "headings, paragraphs and lists, without the running headers and footers"))
-            actions += [("download", "⬇ Download", f"Save a copy in {self._where()} (⚙ changes the folder)"),
-                        ("open", "↗ Open in new tab", "The file in a new browser tab: PDFs, pictures, sound, video "
-                         "and text show there, other files download. The link works for an hour after you click the "
-                         "file (right-click to copy it for someone without AWS access)"),
-                        ("close", "✕", "Close the file and show this folder")]
+            actions = self._file_actions()
         elif bucket:
-            actions = [("summary", "📊 What's in here", "Every file below this folder: sizes, types, cost and "
-                        "findings (reads the whole listing, so big folders take a while)")]
-            if not prefix:
-                actions.append(("bucket_info", "🛡️ Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
-            actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip in {self._where()}, "
-                            f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
+            actions = self._folder_actions(bucket, prefix)
         else:
             actions = [("overview", "🪣 Every bucket", "Each bucket's size, cost and security warnings")]
         old = self._actions.children
@@ -324,17 +418,83 @@ class _ReportPane:
                 continue
             b = w.Button(description=label, tooltip=tip, layout=w.Layout(width="auto"))
             b.add_class("s3x-act")
-            if action == "close":
-                for name in ("s3x-close", "s3x-ic", "s3x-i-close"):
-                    b.add_class(name)
+            for name in _ICON_ACTIONS.get(action, ()):
+                b.add_class(name)
+            if action in _STEPS:
+                b.disabled = not self._neighbour(_STEPS[action])
             b.on_click(lambda _, action=action: self._guard(lambda: self._on_action(action)))
             self._act_buttons[action] = b
         self._draw_expand(False)
         for widget in old:
             if widget is not self._expand_btn:
                 widget.close()
-        self._action = "preview" if self.selected else ""
+        if self.selected and self._action not in _KEPT_WHILE_STEPPING:
+            self._action = "preview"
+        elif not self.selected:
+            self._action = ""
         self._mark_actions()
+
+    def _neighbour(self, step: int) -> Entry | None:
+        """
+        The file before (step -1) or after (+1) the chosen one in the list as it's sorted and searched now,
+        skipping folders; None at either end, or when the chosen file isn't in the list.
+        """
+        files = [entry for entry in self._visible if not entry.is_folder]
+        at = next((i for i, entry in enumerate(files) if entry.uri == self.selected), -1)
+        if at < 0 or not 0 <= at + step < len(files):
+            return None
+        return files[at + step]
+
+    def _step_actions(self) -> list[tuple[str, str, str]]:
+        """
+        ‹ and ›, with the name of the file each goes to.
+        """
+        actions = []
+        for action, step, word in (("prev", -1, "before"), ("next", 1, "after")):
+            neighbour = self._neighbour(step)
+            tip = f"The file {word} it in the list: {neighbour.name}" if neighbour else f"No file {word} it in the list"
+            actions.append((action, "‹" if step < 0 else "›", tip))
+        return actions
+
+    def _step(self, step: int) -> None:
+        """
+        ‹ ›: show the file before or after in the list, the same way as this one (its preview, details or code),
+        without going back to the list.
+        """
+        neighbour = self._neighbour(step)
+        if neighbour is not None:
+            self._select(neighbour.uri, self._action if self._action in _KEPT_WHILE_STEPPING else "preview")
+
+    def _profile(self) -> str:
+        return getattr(self.core.session, "profile_name", None) or ""
+
+    def _use_in_python(self, uri: str) -> None:
+        """
+        🐍 Use in Python, for the chosen file: the lines to copy into a cell, and its path for other tools.
+        """
+        name = Entry("file", *parse_location(uri)).name
+        snippet = file_snippet(uri, profile=self._profile())
+        blocks: list[Any] = [_Title(f"Use {name} in Python", "with the same AWS credentials as this explorer"),
+                             _Text(snippet.code, title="Copy this into a cell (one click selects it)", code=True)]
+        if snippet.note:
+            blocks.append(_Note(snippet.note))
+        blocks.append(_Note(f"Its path, for other tools: {uri}. pd.read_csv('s3://…') reads a path directly when "
+                            "s3fs is installed, and the explorer's .selected holds the path of the file shown here."))
+        self._captured.append(blocks)
+
+    def _use_picks_in_python(self) -> None:
+        """
+        🐍 Use in Python, for what's ticked in the list: one DataFrame when they're tables of one format.
+        """
+        uris = list(self._picked)
+        snippet = files_snippet(uris, profile=self._profile())
+        blocks: list[Any] = [_Title(f"Use the {_plural(len(uris), 'selected item')} in Python",
+                                    "with the same AWS credentials as this explorer"),
+                             _Text(snippet.code, title="Copy this into a cell (one click selects it)", code=True)]
+        if snippet.note:
+            blocks.append(_Note(snippet.note))
+        blocks.append(_Note("The explorer's .picked holds the same paths, in the order they were ticked."))
+        self._captured.append(blocks)
 
     def _open_link(self, label: str, tip: str) -> str:
         """
@@ -354,11 +514,16 @@ class _ReportPane:
         ▾ Expand all, at the end of the buttons above the right pane (beside ✕), while the pane shows a JSON file
         with something collapsed in it, or with every part expanded by it.
         """
-        acts = [b for action, b in self._act_buttons.items() if action != "close"]
-        close = [b for action, b in self._act_buttons.items() if action == "close"]
+        acts = [b for action, b in self._act_buttons.items() if action not in _TAIL]
+        tail = [self._act_buttons[action] for action in _TAIL if action in self._act_buttons]
         expand = show and any(tree.folded for tree in self._trees())
-        self._actions.children = tuple(acts + [self._expand_btn] * expand + close)
         self._expand_btn._dom_classes = ("s3x-act", "s3x-expand") + (("s3x-on",) if self._expand_all else ())
+        tail = [self._expand_btn] * expand + tail
+        for b in tail:
+            b.remove_class("s3x-push")
+        if tail:
+            tail[0].add_class("s3x-push")
+        self._actions.children = tuple(acts + tail)
         self._expand_btn.tooltip = (
             "Collapse the JSON back to its first levels, here and in the next files you open" if self._expand_all else
             "Expand every object and array in this JSON, and in the next files you open, instead of clicking them "
@@ -372,8 +537,9 @@ class _ReportPane:
 
     def _mark_actions(self) -> None:
         for action, b in getattr(self, "_act_buttons", {}).items():
-            if action not in ("open", "close"):
-                b._dom_classes = ("s3x-act", "s3x-on") if action == self._action else ("s3x-act",)
+            if action not in _UNMARKED:
+                lit = action == self._action or (action == "more" and self._more_open)
+                b._dom_classes = ("s3x-act", "s3x-on") if lit else ("s3x-act",)
 
     def _on_action(self, action: str) -> None:
         uri = self.selected or self.nav.location
@@ -399,6 +565,25 @@ class _ReportPane:
             self._report("overview", "overview")
         elif action == "zip":
             self._report("zip", self._zip, uri, cache=False)
+        elif action in _STEPS:
+            self._step(_STEPS[action])
+        elif action == "code":
+            self._report("code", self._use_in_python, uri)
+        elif action == "history":
+            self._report("history", "history", uri)
+        elif action == "more":
+            self._more_open = not self._more_open
+            self._draw_actions()
+            self._draw_expand()
+        elif action in _FOLDER_REPORTS:
+            self._report(action, self._folder_report, action, uri)
+
+    def _folder_report(self, action: str, uri: str) -> None:
+        """
+        One of More ▾'s reports on the folder: the pane's S3View command, with the options the explorer gives it.
+        """
+        command, options = _FOLDER_REPORTS[action]
+        getattr(self._pane, command)(uri, **options)
 
     # ------------------------------------------------------------------ a folder as a .zip, and ⚙ Settings
 
