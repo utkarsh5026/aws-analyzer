@@ -45,11 +45,11 @@
     "docs/images": true
   },
 
-  // Look and feel. The theme is Aura (daltonmenezes.aura-theme) and the icons Catppuccin's
-  // (catppuccin.catppuccin-vsc-icons); without them VS Code falls back to its defaults, and
-  // to the next font in each list.
-  "workbench.colorTheme": "Aura Dark (Soft Text)",
-  "workbench.iconTheme": "catppuccin-mocha",
+  // Look and feel. The theme is Bearded Surprising Blueberry (beardedbear.beardedtheme), recoloured
+  // below, and the icons VS Code's own Minimal set; without the theme VS Code falls back to its
+  // default, and to the next font in each list.
+  "workbench.colorTheme": "Bearded Theme Surprising Blueberry",
+  "workbench.iconTheme": "vs-minimal",
   // Google Sans Code, set roomy: a bigger size, tall lines and a little air between
   // letters, so the long docstrings and dense calls are easier to read.
   "editor.fontFamily": "'Google Sans Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
@@ -59,28 +59,34 @@
   "editor.lineHeight": 1.85,
   "editor.letterSpacing": 0.4,
   "editor.padding.bottom": 16,
-  "editor.rulers": [{ "column": 120, "color": "#a277ff22" }],
+  "editor.rulers": [],
   "scm.inputFontFamily": "editor",
   "editor.cursorStyle": "line",
   "editor.cursorWidth": 2,
-  "editor.renderLineHighlight": "all",
-  "editor.bracketPairColorization.enabled": true,
+  "editor.renderLineHighlight": "none",
+  "editor.bracketPairColorization.enabled": false,
   "workbench.activityBar.location": "top",
   "workbench.layoutControl.enabled": false,
-  "breadcrumbs.icons": true,
+  "breadcrumbs.icons": false,
   "terminal.integrated.fontFamily": "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono', monospace",
   "editor.semanticHighlighting.enabled": true,
-  "editor.guides.bracketPairs": "active",
-  "editor.stickyScroll.enabled": true,
+  "editor.guides.bracketPairs": false,
+  "editor.stickyScroll.enabled": false,
   "editor.padding.top": 16,
-  "editor.cursorBlinking": "smooth",
+  "editor.cursorBlinking": "solid",
   "editor.cursorSmoothCaretAnimation": "on",
   "editor.smoothScrolling": true,
   "workbench.list.smoothScrolling": true,
   "terminal.integrated.smoothScrolling": true,
   "workbench.tree.indent": 20,
-  "workbench.tree.renderIndentGuides": "always",
-  "workbench.editor.highlightModifiedTabs": true,
+  "workbench.tree.renderIndentGuides": "none",
+  "breadcrumbs.enabled": false,
+  "editor.minimap.enabled": false,
+  "editor.guides.indentation": false,
+  "editor.overviewRulerBorder": false,
+  "editor.hideCursorInOverviewRuler": true,
+  "window.commandCenter": false,
+  "workbench.editor.highlightModifiedTabs": false,
 
   // Each analyzer is a few thousand lines split into numbered banners ("# 1. Helpers: ...")
   // and "# ------ tables" dividers inside the classes; the tests use the same dividers.
@@ -93,36 +99,218 @@
   // Branch in the title bar, for when the status bar is hidden.
   "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeRepositoryBranchName}",
 
-  // Aura's violet on the title bar, and its mint for what's active, so this window is
-  // easy to pick out from other projects.
+  // Minimal: one squid ink colour behind everything, no borders, one accent (AWS's orange, muted)
+  // for keywords and the cursor, and code otherwise a single grey, with strings and comments dimmer.
   "workbench.colorCustomizations": {
-    "[Aura Dark (Soft Text)]": {
-      "titleBar.activeBackground": "#2a2140",
-      "titleBar.activeForeground": "#edecee",
-      "titleBar.inactiveBackground": "#15141b",
-      "titleBar.inactiveForeground": "#6d6d6d",
-      "titleBar.border": "#a277ff55",
-      "commandCenter.background": "#a277ff1f",
-      "commandCenter.activeBackground": "#a277ff33",
-      "commandCenter.border": "#a277ff66",
-      "commandCenter.foreground": "#edecee",
-      "commandCenter.activeForeground": "#ffffff",
-      "activityBarTop.activeBorder": "#61ffca",
-      "activityBar.activeBorder": "#61ffca",
-      "tab.activeBorderTop": "#a277ff",
+    "[Bearded Theme Surprising Blueberry]": {
+      "foreground": "#b4bdc9",
+      "descriptionForeground": "#6f7b89",
+      "focusBorder": "#00000000",
+      "widget.border": "#2a3544",
+      "contrastBorder": "#00000000",
+      "icon.foreground": "#6f7b89",
+      "editor.background": "#1a2330",
+      "sideBar.background": "#1a2330",
+      "activityBar.background": "#1a2330",
+      "titleBar.activeBackground": "#1a2330",
+      "titleBar.inactiveBackground": "#1a2330",
+      "statusBar.background": "#1a2330",
+      "statusBar.noFolderBackground": "#1a2330",
+      "panel.background": "#1a2330",
+      "terminal.background": "#1a2330",
+      "tab.activeBackground": "#1a2330",
+      "tab.inactiveBackground": "#1a2330",
+      "editorGroupHeader.tabsBackground": "#1a2330",
+      "sideBarSectionHeader.background": "#1a2330",
+      "breadcrumb.background": "#1a2330",
+      "input.background": "#1a2330",
+      "editorGutter.background": "#1a2330",
+      "editorStickyScroll.background": "#1a2330",
+      "sideBar.border": "#00000000",
+      "activityBar.border": "#00000000",
+      "titleBar.border": "#00000000",
+      "statusBar.border": "#00000000",
+      "panel.border": "#00000000",
+      "editorGroup.border": "#00000000",
+      "editorGroupHeader.tabsBorder": "#00000000",
+      "tab.border": "#00000000",
       "tab.activeBorder": "#00000000",
-      "editorCursor.foreground": "#61ffca",
-      "editor.lineHighlightBackground": "#a277ff10",
+      "tab.activeBorderTop": "#00000000",
+      "tab.unfocusedActiveBorderTop": "#00000000",
+      "tab.activeModifiedBorder": "#00000000",
+      "sideBarSectionHeader.border": "#00000000",
+      "input.border": "#00000000",
       "editor.lineHighlightBorder": "#00000000",
-      "editor.selectionBackground": "#a277ff40",
-      "statusBar.background": "#15141b",
-      "statusBar.border": "#a277ff33",
-      "statusBarItem.remoteBackground": "#a277ff",
-      "statusBarItem.remoteForeground": "#15141b",
-      "focusBorder": "#a277ff88",
-      "scrollbarSlider.background": "#a277ff22",
-      "scrollbarSlider.hoverBackground": "#a277ff44",
-      "scrollbarSlider.activeBackground": "#a277ff66"
+      "activityBar.activeBorder": "#00000000",
+      "activityBarTop.activeBorder": "#00000000",
+      "panelTitle.activeBorder": "#00000000",
+      "editorStickyScroll.border": "#00000000",
+      "statusBarItem.remoteBackground": "#00000000",
+      "editorWidget.background": "#222c3a",
+      "editorHoverWidget.background": "#222c3a",
+      "editorSuggestWidget.background": "#222c3a",
+      "menu.background": "#222c3a",
+      "quickInput.background": "#222c3a",
+      "dropdown.background": "#222c3a",
+      "editorWidget.border": "#2a3544",
+      "editorHoverWidget.border": "#2a3544",
+      "editorSuggestWidget.border": "#2a3544",
+      "menu.border": "#2a3544",
+      "dropdown.border": "#2a3544",
+      "tab.inactiveForeground": "#6f7b89",
+      "activityBar.inactiveForeground": "#6f7b89",
+      "activityBarTop.inactiveForeground": "#6f7b89",
+      "titleBar.inactiveForeground": "#6f7b89",
+      "statusBar.foreground": "#6f7b89",
+      "statusBarItem.remoteForeground": "#6f7b89",
+      "sideBarTitle.foreground": "#6f7b89",
+      "sideBarSectionHeader.foreground": "#6f7b89",
+      "editor.foreground": "#b4bdc9",
+      "sideBar.foreground": "#b4bdc9",
+      "menu.foreground": "#b4bdc9",
+      "terminal.foreground": "#b4bdc9",
+      "titleBar.activeForeground": "#b4bdc9",
+      "tab.activeForeground": "#b4bdc9",
+      "activityBar.foreground": "#b4bdc9",
+      "activityBarTop.foreground": "#b4bdc9",
+      "list.activeSelectionForeground": "#b4bdc9",
+      "statusBarItem.hoverForeground": "#b4bdc9",
+      "editorCursor.foreground": "#e0a458",
+      "terminalCursor.foreground": "#e0a458",
+      "editorLineNumber.foreground": "#465160",
+      "editorLineNumber.activeForeground": "#6f7b89",
+      "editor.selectionBackground": "#ffffff1c",
+      "editor.selectionHighlightBackground": "#ffffff0d",
+      "editor.wordHighlightBackground": "#ffffff0d",
+      "editor.findMatchBackground": "#e0a45840",
+      "editor.findMatchHighlightBackground": "#e0a45820",
+      "editor.lineHighlightBackground": "#00000000",
+      "list.activeSelectionBackground": "#ffffff12",
+      "list.inactiveSelectionBackground": "#ffffff0a",
+      "list.hoverBackground": "#ffffff08",
+      "list.highlightForeground": "#e0a458",
+      "editorSuggestWidget.selectedBackground": "#ffffff12",
+      "menu.selectionBackground": "#ffffff12",
+      "textLink.foreground": "#b4bdc9",
+      "textLink.activeForeground": "#e0a458",
+      "button.background": "#222c3a",
+      "button.foreground": "#b4bdc9",
+      "button.hoverBackground": "#2a3544",
+      "statusBarItem.hoverBackground": "#ffffff12",
+      "activityBarBadge.background": "#e0a458",
+      "activityBarBadge.foreground": "#1a2330",
+      "badge.background": "#2a3544",
+      "badge.foreground": "#b4bdc9",
+      "scrollbarSlider.background": "#ffffff0d",
+      "scrollbarSlider.hoverBackground": "#ffffff18",
+      "scrollbarSlider.activeBackground": "#ffffff22",
+      "scrollbar.shadow": "#00000000",
+      "widget.shadow": "#00000000",
+      "statusBar.debuggingBackground": "#1a2330",
+      "statusBar.debuggingForeground": "#e0a458"
+    }
+  },
+  "editor.tokenColorCustomizations": {
+    "[Bearded Theme Surprising Blueberry]": {
+      "textMateRules": [
+        {
+          "scope": [
+            "source",
+            "variable",
+            "variable.other",
+            "variable.parameter",
+            "variable.language",
+            "variable.other.object",
+            "entity.name",
+            "entity.name.function",
+            "entity.name.type",
+            "entity.name.class",
+            "entity.other.inherited-class",
+            "support",
+            "support.function",
+            "support.class",
+            "support.type",
+            "meta.function-call",
+            "meta.function-call.generic",
+            "meta.function-call.arguments",
+            "constant",
+            "constant.numeric",
+            "constant.language",
+            "entity.name.function.decorator",
+            "meta.decorator entity.name.function",
+            "meta.function.decorator",
+            "keyword.operator",
+            "punctuation"
+          ],
+          "settings": {
+            "foreground": "#b4bdc9",
+            "fontStyle": ""
+          }
+        },
+        {
+          "scope": [
+            "keyword",
+            "keyword.control",
+            "storage",
+            "storage.type",
+            "storage.type.function",
+            "storage.type.class",
+            "keyword.operator.logical.python"
+          ],
+          "settings": {
+            "foreground": "#e0a458",
+            "fontStyle": ""
+          }
+        },
+        {
+          "scope": [
+            "string",
+            "string.quoted.single",
+            "string.template",
+            "punctuation.definition.string"
+          ],
+          "settings": {
+            "foreground": "#8fa3b8",
+            "fontStyle": ""
+          }
+        },
+        {
+          "scope": [
+            "comment",
+            "punctuation.definition.comment",
+            "string.quoted.docstring.multi.python",
+            "string.quoted.double.block.python punctuation.definition.string"
+          ],
+          "settings": {
+            "foreground": "#6f7b89",
+            "fontStyle": ""
+          }
+        }
+      ]
+    }
+  },
+  "editor.semanticTokenColorCustomizations": {
+    "[Bearded Theme Surprising Blueberry]": {
+      "enabled": true,
+      "rules": {
+        "class": "#b4bdc9",
+        "class.declaration": "#b4bdc9",
+        "type": "#b4bdc9",
+        "enumMember": "#b4bdc9",
+        "function": "#b4bdc9",
+        "method": "#b4bdc9",
+        "decorator": "#b4bdc9",
+        "class.decorator": "#b4bdc9",
+        "meta.decorator": "#b4bdc9",
+        "namespace": "#b4bdc9",
+        "parameter": "#b4bdc9",
+        "selfParameter": "#b4bdc9",
+        "property": "#b4bdc9",
+        "property.declaration": "#b4bdc9",
+        "variable": "#b4bdc9",
+        "variable.defaultLibrary": "#b4bdc9",
+        "variable.readonly": "#b4bdc9"
+      }
     }
   },
   "cSpell.words": [
