@@ -68,6 +68,7 @@ report against these rules (the existing code follows them, so match it):
 ```bash
 pip install -r requirements-dev.txt            # pinned versions; moto, pytest, ruff, fastavro, openpyxl, pypdf, pypdfium2, pillow, tqdm
 python -m pytest                               # all tests (moto, no AWS account needed)
+python -m pytest -n auto --dist loadgroup      # the same on every CPU, as CI runs it (pytest-xdist)
 python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
 python -m pytest -k "policy"                   # by name

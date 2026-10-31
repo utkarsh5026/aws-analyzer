@@ -1950,9 +1950,10 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
         assert x.busy and "agc-stop" in x.send_button._dom_classes and x.new_button.disabled
         for _ in range(200):
             await asyncio.sleep(0.02)
-            if "functions had failed calls" in page(x):
+            if "functions had failed calls" in page(x) and len(model.prompts) == 2:
                 break
         shown = page(x)
+        assert len(model.prompts) == 2, "the model should be waiting on the gate for its second reply"
         assert "Checking health first." in shown and "1 of 2 functions had failed calls" in shown
         assert "# checked every function&#x27;s health" in shown and "ag-s-lambda" in shown
         assert "Thinking…" in shown and "stop ends it with what it found" in shown

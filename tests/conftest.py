@@ -47,3 +47,15 @@ def _one_copy_of_each_module():
     yield
     twins = sorted(name for name in MODULES if sys.modules.get(name) is not None)
     assert not twins, f"loaded outside the aws_analyzer package as well: {', '.join(twins)}"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """
+    Puts every test that uses the pyodide fixture in one xdist group, so with `pytest -n auto --dist loadgroup` they
+    run on one worker and Pyodide's files are prepared once, not once per worker. It runs before xdist's own hook,
+    which reads the groups into the tests' ids.
+    """
+    for item in items:
+        if "pyodide" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.xdist_group("pyodide"))

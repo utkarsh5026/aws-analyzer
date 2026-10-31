@@ -15,6 +15,8 @@ ipython==8.39.0; python_version < "3.11"
 # Tests
 moto[s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs]==5.2.4
 pytest==9.1.1
+# Runs the tests on every CPU (CI's `pytest -n auto`); the Pyodide tests share one worker (tests/conftest.py).
+pytest-xdist==3.8.0
 # Write the Avro and Excel test files. The analyzer doesn't need them: it reads Avro itself,
 # and Excel through pandas + openpyxl when they are installed.
 fastavro==1.12.2
@@ -35,7 +37,7 @@ langchain-openai==1.7.2; python_version >= "3.11"
 langchain-aws==1.9.0; python_version >= "3.11"
 langgraph-checkpoint-sqlite==3.1.2; python_version >= "3.11"
 # Optional for users (agent/sandboxes/: the local sandbox runs Python in Pyodide on Deno); installed here so it's
-# tested for real. Its tests download Pyodide's files once a run, and skip without the internet.
+# tested for real. Its tests download Pyodide's files once a run (CI caches them), and skip without the internet.
 deno==2.9.8
 
 # Package (CI's Package job and the release workflow): build the sdist and wheel, and check them
