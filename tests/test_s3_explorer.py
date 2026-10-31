@@ -1446,3 +1446,32 @@ def test_explorer_focus_says_what_you_are_looking_at(explorer):
     assert file.kind == "file" and file.value("file") == "s3://lake/raw/events/part-2.csv"
     assert file.chips() == ["part-2.csv", "lake/raw/events/", "2 ticked"]
     assert str(file.without("picked")) == "part-2.csv · lake/raw/events/"
+
+
+def test_explorer_ask_drawer_takes_the_lists_place(explorer, core):
+    import ipywidgets
+
+    told = []
+
+    class Drawer:
+        root = ipywidgets.HTML("drawer")
+
+        def focus_moved(self):
+            told.append(str(x.focus))
+
+    class Assistant:
+        def _ask_drawer_(self, window):
+            return Drawer()
+
+    x = explorer("s3://lake/raw/")
+    assert x.ask_button.layout.display == "none" and x.drawer_box.layout.display == "none"
+    x.attach(Assistant())
+    assert x.drawer_box.children == (x.drawer.root,) and x._side.layout.display == "none"
+    assert told[-1].startswith("lake/raw/")
+    x.open("s3://lake/raw/events/part-2.csv")
+    assert told[-1].startswith("part-2.csv · lake/raw/events/")
+    x.ask_button.click()
+    assert x._side.layout.display == "" and x.drawer_box.layout.display == "none"
+    text = S3Explorer("s3://lake/", core=core, mode="text")
+    text.attach(Assistant())
+    assert text.assistant is None

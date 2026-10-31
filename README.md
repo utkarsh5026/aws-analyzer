@@ -2024,6 +2024,7 @@ agent.ask("Which functions run close to their timeout?", new=True)   # a new con
 x = LambdaView().explore("orders-etl", tab="errors")
 agent.ask("Why does this fail?", focus=x)               # about what the explorer shows: the function, tab and window
 x.attach(agent)                                         # ✦ Ask in the explorer: the chat beside its tabs, asking about it
+S3Explorer("s3://acme-raw/incoming/", assistant=agent)  # the same in the S3 explorer, in the list's place
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
 agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations

@@ -29,7 +29,10 @@ from .._kit.fmt import _duration, _fmt_dt, _plural, _tz_label, _utcnow, _zone_na
 from .._kit.render import _base_css, _Look, _report_html
 from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
+from .._kit.focus import QueryDraft
 from .analyzer import AgentAnalyzer
+from .harness import _message_text
+from .prompt import asked_at, parse_query_reply, query_prompt
 from .chats import ChatSummary
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
@@ -327,6 +330,22 @@ class AgentView(_BaseView):
         drawer = _AgentChat(self, widgets, focus_from=window)
         self.drawers.append(drawer)
         return drawer
+
+    def _ask_query_(self, text: str, *, fields: dict[str, str], context: str = "") -> QueryDraft:
+        """
+        A Logs search written from plain English, for the Lambda explorer's ✦ search box: one call to the agent's
+        model, with no tools and no AWS reads, given the fields the runs have (fields: name -> what it holds) and
+        what they look like (context). The window checks the query before it uses it. An explorer calls it, as it
+        calls _ask_drawer_, so it never imports the agent. The model is asked through LangChain's batch() of one
+        question, the same as invoke(), which rules.py would read as Lambda's Invoke operation.
+        """
+        messages = _require("langchain_core.messages", "Plain-English search", "aws-analyzer[agent]")
+        asked = asked_at(_utcnow(), self.core.zone)
+        prompt = [messages.SystemMessage(query_prompt(fields, context=context)),
+                  messages.HumanMessage(f"{asked}\n\n{text}")]
+        model = self.core._chat()
+        reply = model.batch([prompt])[0]
+        return parse_query_reply(_message_text(reply))
 
     def _display(self, widget: Any) -> None:
         from IPython.display import display

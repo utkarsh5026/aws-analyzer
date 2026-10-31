@@ -28,9 +28,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `agent.ask("Why does this fail?", focus=x)` with an explorer window: "this" is the function, run, folder or file open.
   - The report says what the agent was told, under the question.
 
-- 🤖 **Agent: ✦ Ask in the Lambda and knowledge base explorers** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+- 🤖 **Agent: ✦ Ask in the explorers** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
   - `explore(..., assistant=agent)` or `x.attach(agent)`: **✦ Ask** opens the chat beside the tabs, about what's open.
   - It offers questions for the tab or file you're on, and `set_assistant(agent)` adds it to every explorer.
+  - Each answer ends in buttons that open what it points at: a run, a tab, a file.
+
+- 🧭 **S3 explorer: ✦ Ask about the folder you're in** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `S3Explorer(..., assistant=agent)` or `x.attach(agent)`: the agent's chat in the list's place, beside the preview.
+
+- ⚡ **Lambda explorer: search the logs in plain English** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - With an agent, **✦** beside the Logs search box: describe the runs, and it writes the query for you to use.
 
 ## [0.42.0] - 2026-10-31
 

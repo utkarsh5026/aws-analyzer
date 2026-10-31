@@ -69,6 +69,8 @@ from aws_analyzer.agent import (
     asked_at,
     focus_of,
     looking_at,
+    parse_query_reply,
+    query_prompt,
     clean_path,
     code_locations,
     count_arrivals,
@@ -1884,7 +1886,7 @@ def test_the_ask_drawer_asks_about_what_the_explorer_shows(seeded):
     x.ask_button.click()
     drawer = x.drawer
     assert drawer in agent.drawers and x.drawer_box.children == (drawer.root,) and x.drawer_box.layout.display == ""
-    assert "lmx-asking" in x.ask_button._dom_classes and "✦ Ask" in drawer.title.value
+    assert "lmx-assisting" in x.ask_button._dom_classes and "✦ Ask" in drawer.title.value
     assert drawer.chats_button.layout.display == "none" and drawer.memory_button.layout.display == "none"
     line = drawer.focus_line.value
     assert "looking at" in line and "etl-nightly" in line and "Errors tab" in line and "1 cause" in line
@@ -1909,9 +1911,128 @@ def test_the_ask_drawer_asks_about_what_the_explorer_shows(seeded):
     assert agent.core.history[-1].focus is None and agent.core.history[-2].focus.kind == "errors"
 
     x.ask_button.click()
-    assert x.drawer_box.layout.display == "none" and "lmx-asking" not in x.ask_button._dom_classes
+    assert x.drawer_box.layout.display == "none" and "lmx-assisting" not in x.ask_button._dom_classes
     x.attach(None)
     assert x.ask_button.layout.display == "none" and x.drawer is None and x.drawer_box.children == ()
+
+
+def test_an_answers_calls_are_places_in_the_explorer():
+    from aws_analyzer.agent.window.drawer import ViewCall, parse_call, target_for
+
+    assert parse_call("LambdaView().logs('etl', since='24h')") == ViewCall("LambdaView", "logs", ("etl",),
+                                                                           {"since": "24h"})
+    assert parse_call("LambdaView().logs(__import__('os').system('x'))") is None
+    assert parse_call("not a call(") is None and parse_call("print('x')") is None
+    run_place = target_for(f"LambdaView().logs('etl', request_id='{RID}')", "lambda")
+    assert run_place.label == f"Run {RID[:8]} in the Logs tab"
+    assert (run_place.command, run_place.args, run_place.kwargs) == ("logs", ("etl",), {"search": RID, "since": "24h"})
+    assert target_for("LambdaView().errors('etl', since='7d')", "lambda").kwargs == {"tab": "errors"}
+    assert target_for("LambdaView().function_info('etl')", "lambda").label == "etl's Overview tab"
+    assert target_for("LambdaView().logs('etl', search='KeyError')", "lambda").label == "etl's logs, searched for KeyError"
+    assert target_for("S3View().preview('s3://acme/raw/a.csv')", "s3").label == "a.csv in the explorer"
+    assert target_for("BedrockKBView().file('s3://b/p/faq.md')", "bedrock_kb").command == "file"
+    assert target_for("BedrockKBView().search('refunds')", "bedrock_kb").label == "Search: refunds"
+    assert target_for("S3View().ls('s3://a/')", "lambda") is None
+    assert target_for("LambdaView().diff('etl')", "lambda") is None
+
+
+def test_the_ask_drawer_points_at_the_evidence(seeded):
+    pytest.importorskip("ipywidgets")
+    from aws_analyzer.lambda_functions import LambdaExplorer
+
+    model = scripted(replies("It fails on `customer_id`.",
+                             ("warn", "Rows without customer_id fail the run: skip them.",
+                              f"LambdaView().logs('etl-nightly', request_id='{RID}')"),
+                             ("info", "Its errors over the day.", "LambdaView().errors('etl-nightly', since='24h')")))
+    agent = AgentView(make(model), mode="html", progress="off")
+    x = LambdaExplorer("etl-nightly", tab="errors", core=agent.core.toolkit("lambda").analyzer, mode="widgets",
+                       assistant=agent)
+    x.ask_button.click()
+    enter(x.drawer, "Why does this fail?")
+    turn = x.drawer.items[-1]
+    places = turn.children[1].children
+    assert [button.description for button in places] == [f"Run {RID[:8]} in the Logs tab ›",
+                                                         "etl-nightly's Errors tab ›"]
+    assert places[0].tooltip.startswith("Rows without customer_id")
+    places[0].click()
+    assert x._tab == "logs" and [run.request_id for run in x._found_runs] == [RID]
+    places[1].click()
+    assert x._tab == "errors"
+    assert x.drawer.focus_line.value.count("Errors tab") == 1
+
+
+def test_the_s3_explorer_asks_about_the_folder_open(buckets):
+    pytest.importorskip("ipywidgets")
+    from aws_analyzer.s3 import S3Explorer
+
+    model = scripted(replies("Two of the three files ran etl-nightly; `orders-2.CSV` didn't match the `.csv` filter.",
+                             ("warn", "orders-2.CSV wasn't processed: S3 compares endings case-sensitively.",
+                              "S3View().head('s3://acme-raw/incoming/orders-2.CSV')")))
+    agent = AgentView(make(model), mode="html", progress="off")
+    x = S3Explorer("s3://acme-raw/incoming/", mode="widgets", progress="off", assistant=agent,
+                   core=agent.core.toolkit("s3").analyzer)
+    assert x.ask_button.layout.display == "" and x.drawer is None
+    x.ask_button.click()
+    drawer = x.drawer
+    assert x.drawer_box.layout.display == "" and x._side.layout.display == "none"
+    assert "acme-raw/incoming/" in drawer.focus_line.value and "3 files" in drawer.focus_line.value
+    assert drawer.offered == ["What's in acme-raw/incoming/, and what changed lately?",
+                              "Were the files that arrived here processed?"]
+    drawer.empty.children[2].children[0].click()
+    assert "[Looking at the S3 explorer (folder)" in model.prompts[0][-1].content
+    places = drawer.items[-1].children[1].children
+    assert [button.description for button in places] == ["orders-2.CSV in the explorer ›"]
+    places[0].click()
+    assert x.selected == "s3://acme-raw/incoming/orders-2.CSV" and "orders-2.CSV" in drawer.focus_line.value
+    x.ask_button.click()
+    assert x.drawer_box.layout.display == "none" and x._side.layout.display == ""
+
+
+def test_a_query_written_from_plain_english():
+    reply = 'Here: ```json\n{"query": "duration > 5s and cold", "since": "24h", "note": "slow as over 5 s"}\n```'
+    draft = parse_query_reply(reply)
+    assert (draft.query, draft.since, draft.until, draft.note) == ("duration > 5s and cold", "24h", "", "slow as over 5 s")
+    assert parse_query_reply("`failed`").query == "failed"
+    prompt = query_prompt({"duration": "how long it ran", "order_id": "a field its logs carry"},
+                          context="The runs read: 70, median 4.9s.")
+    assert "- duration: how long it ran\n- order_id: a field its logs carry" in prompt
+    assert "The runs read: 70, median 4.9s." in prompt and '{"query": "...", "since": "", "until": "", "note": "..."}' in prompt
+
+
+def test_the_logs_tab_searches_in_plain_english(seeded):
+    pytest.importorskip("ipywidgets")
+    from aws_analyzer.lambda_functions import LambdaExplorer
+
+    model = scripted(says('{"query": "failed", "since": "", "note": "\'broken\' as failed"}'),
+                     says('{"query": "duration >>> 5", "note": "?"}'))
+    agent = AgentView(make(model), mode="html", progress="off")
+    x = LambdaExplorer("etl-nightly", tab="logs", core=agent.core.toolkit("lambda").analyzer, mode="widgets")
+    assert x.plain_button.layout.display == "none"
+    x.attach(agent)
+    assert x.plain_button.layout.display == ""
+    x.attach(None)
+    x.attach(agent)
+    x.ask_button.click()
+    every = len(x._visible_runs())
+    x.plain_button.click()
+    assert x._plain and x.log_find.placeholder.startswith("Describe the runs you want")
+    x.log_find.value = "the broken runs"
+    assert len(x._visible_runs()) == every
+    x.log_find._handle_custom_msg({"event": "submit"}, [])
+    sent = model.prompts[0]
+    assert "- duration: how long it ran" in sent[0].content and "The runs read:" in sent[0].content
+    assert sent[-1].content.startswith("[Asked") and sent[-1].content.endswith("the broken runs")
+    assert x.draft_row.layout.display == "" and "<code>failed</code>" in x.draft_view.value
+    assert "'broken' as failed · one model call, no tools" in html.unescape(x.draft_view.value)
+    x.draft_use.click()
+    assert x.log_find.value == "failed" and not x._plain and x.draft_row.layout.display == "none"
+    assert [run.request_id for run in x._visible_runs()] == [RID]
+
+    x.plain_button.click()
+    x.log_find.value = "something odd"
+    x.log_find._handle_custom_msg({"event": "submit"}, [])
+    assert "Couldn" in x.draft_view.value and x.draft_use.layout.display == "none"
+    assert "can't be used" in html.unescape(x.status.value)
 
 
 def test_the_report_shows_windows_in_the_chosen_zone(view, capsys):

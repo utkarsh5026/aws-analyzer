@@ -505,6 +505,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `mode` | `"auto"`: the clickable explorer in Jupyter, a text listing elsewhere. `"widgets"` or `"text"` to choose |
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
 | `history` | Remember the folders you open, for the [Recent row](#recent): `True`, `False`, or a file to keep them in |
+| `assistant` | An `AgentView`: **✦ Ask** at the end of the top bar opens its chat in the list's place, asking about the folder or file you have open ([the agent's guide](agent.md#ask-drawer)); `x.attach(agent)` does it later |
 
 | Command | What it does |
 | --- | --- |

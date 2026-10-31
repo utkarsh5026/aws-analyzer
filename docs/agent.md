@@ -221,9 +221,12 @@ set_assistant(agent)                                                   # ✦ Ask
 - **Looking at**, under the drawer's head, is what the window shows as chips: the function, the tab, its time range, the run or file you opened. It follows as you click. Untick **use it** to ask about your whole account instead.
 - An empty drawer offers two or three questions for what's open: on an Errors tab "Why does orders-etl fail, and what should I change?", on a failed run "Why did this run fail, and what should I change?", on a file that failed to index "Why does scanned.pdf show as Failed, and how do I fix it?". They're picked by rules, so they cost nothing until you click one.
 - Each question shows what it was asked about under it, and runs like any other: its plan, its tool calls as they happen, stop, and the read-only guard.
+- Under each answer, a button for each place it points at in the window: **Run 8f5ce35b in the Logs tab ›**, **orders-etl's Errors tab ›**, **orders-2.CSV in the explorer ›**, **faq.md in the Files tab ›**. A click moves the window there, so you see the evidence the answer is about.
 - The drawer shares the conversation with `agent.chat()`'s window and `agent.ask()`: an answer in one shows in the others, and the agent answers one question at a time.
 
-The Lambda and knowledge base explorers have it; the S3 explorer's comes later. In a cell, `agent.ask("Why does this fail?", focus=x)` asks the same way.
+The Lambda and knowledge base explorers put it beside their tabs. The S3 explorer has **✦ Ask** at the end of its top bar, and its drawer takes the list's place, so the file you open from an answer shows beside it: `S3Explorer("s3://acme-raw/incoming/", assistant=agent)`. In a cell, `agent.ask("Why does this fail?", focus=x)` asks the same way.
+
+**Search the logs in plain English.** With an agent, the Lambda explorer's Logs tab gets **✦** beside its search box. Switch it on, describe the runs ("slow runs yesterday afternoon that started cold") and press Enter: the agent writes the query the box reads (`duration > 5s and cold`, and the time range when your words name one) with one model call and no tools. It shows under the box with how it read your words, the window checks it can read it, and **Use it** puts it in the box.
 
 ## How it answers { #how-it-works }
 

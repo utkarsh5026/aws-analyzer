@@ -5,7 +5,8 @@ A window knows what the user is looking at (the function and tab, the run opened
 state); Focus writes it down so something else can start from it without the user typing it again. It's pure (no
 AWS, no widgets), so a window builds one from its own state and anything can read it: x.focus.chips() is what a
 row of chips would show, x.focus.value('request_id') one part's value, and x.focus.without('range') the same focus
-without one part, as removing a chip would leave it.
+without one part, as removing a chip would leave it. QueryDraft is a search a window asked an assistant to write
+from plain English (the Lambda explorer's ✦ in its Logs search box).
 """
 
 from __future__ import annotations
@@ -71,3 +72,17 @@ class Focus:
 
     def __str__(self) -> str:
         return " · ".join(self.chips())
+
+
+@dataclass(frozen=True)
+class QueryDraft:
+    """
+    A search a window asked an assistant to write from plain English: the query in the window's own language
+    ('duration > 5s and cold'), the time range it names, as the window reads one (since and until: '24h',
+    '2026-10-30T12:00Z'; '' when the words name none), and a note on how it read them ('slow' as over 5 s).
+    """
+
+    query: str
+    since: str = ""
+    until: str = ""
+    note: str = ""

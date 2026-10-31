@@ -523,11 +523,19 @@ How the View layer works:
   first), `_load_widgets`, the status line (`_status` with the `owner` a busy line belongs to, `_finish`, `_said`),
   `_tab_bar` and `_frame` (CSS classes from `_PREFIX`), `_draw` (with the explorer's `_html`), `_workers` (threads
   named by `_THREADS`), `_later`, `_drop`, and the window shown once per cell (`_display`, `_ipython_display_`).
-  It also holds the ✦ Ask drawer slot: `_frame` puts `ask_button` at the end of the tab bar and `drawer_box` beside
-  the pages, shown while the window has an `assistant` (`assistant=`, `attach()`, or `set_assistant()`'s default,
-  `_assistant`). The explorer never imports the agent: it calls the assistant's `_ask_drawer_(window)` (`_ASK_DRAWER`,
-  the way IPython calls `_ipython_display_`; `_check_assistant` refuses anything without it) once, and tells the
-  drawer `focus_moved()` from `_status` while it's open (`_focus_moved`), so its Looking at line follows each click.
+  It also holds the ✦ Ask drawer slot, `_AskSlot` (a mixin the S3 explorer shares): `_frame` puts `ask_button` at the
+  end of the tab bar and `drawer_box` beside the pages, shown while the window has an `assistant` (`assistant=`,
+  `attach()`, or `set_assistant()`'s default, `_assistant`); a window says how it gets widgets (`_ask_widgets`), guards a
+  click (`_ask_click`) and shows the drawer (`_show_drawer`: the S3 explorer's takes the list's place, so the report
+  stays beside it), and hears another assistant in `_assistant_changed`. The explorer never imports the agent: it
+  calls the assistant's `_ask_drawer_(window)` (`_ASK_DRAWER`, the way IPython calls `_ipython_display_`;
+  `_check_assistant` refuses anything without it) once, and tells the drawer `focus_moved()` from `_status` (the S3
+  explorer's from `_guard` and `_navigate`) while it's open (`_focus_moved`), so its Looking at line follows each
+  click. Its classes are `<prefix>-assist` / `-assisting` / `-drawer` (`_drawer_css`), never `-ask`, which the
+  explorers' search boxes use. The Lambda explorer's Logs tab also asks it `_ask_query_(text, fields=, context=)` for
+  its ✦ plain-English search (`explorer/plain.py`'s `_PlainSearch`: Enter in ✦ mode, `_log_entered`, sends the words;
+  the `QueryDraft` that comes back, from `_kit/focus.py`, is checked by `_check_draft` with `parse_query` and
+  `time_range` and shown under the box, and Use it puts it there).
   `@_window_errors` guards a window's own commands through its `_ready` and `_command_failed` (the S3 explorer's
   too). `_Picker` is a field that opens a searchable list over the window, which the KB explorer's `_Chooser`, the
   Lambda explorer's `_FunctionField` and the chat's `_ChoicePicker` subclass: the button under its face, the panel
@@ -1021,7 +1029,12 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   window's focus (`window/drawer.py`'s `_focus_html`) with a "use it" box (`use_focus`), the empty conversation offers
   `focus_questions(focus)` (rules by `(service, kind)`, `_QUESTIONS`, no model call; redrawn by `focus_moved()` when
   they change, `offered`), and `_ask` asks with `focus=` (`_asked_focus`, read on the loop before the work starts),
-  the question showing it under the bubble (`_question_html(about=)`). Every window shares one conversation:
+  the question showing it under the bubble (`_question_html(about=)`). Under each answer, `_targets_row` puts a button
+  per place its calls point at in the window (`answer_next`'s calls through `window/drawer.py`'s `target_for`:
+  `parse_call` reads a View call with `ast`, literals only, and `_lambda_target`, `_s3_target` or `_kb_target` maps
+  it to the explorer's own command, `x.logs(name, search=request_id)`, `x.open(name, tab=)`, `x.open(path)`, `x.file(path)`; `_go_to` runs it).
+  `AgentView._ask_query_` writes the Logs tab's ✦ query: `prompt.py`'s `query_prompt` and `parse_query_reply`, one
+  call through LangChain's `batch()` (not `invoke()`, which `rules.py` would read as Lambda's Invoke). Every window shares one conversation:
   `AgentView._windows()` (the chat's and each drawer), `_busy_window()` (one question at a time, whichever window asks;
   a window refuses while another answers) and `_tell_windows(what, ...)`, which passes `added` (an answer, also from a
   window's `_answered` to the others), `cleared`, `opened`, `renamed` and `model_changed` to each.

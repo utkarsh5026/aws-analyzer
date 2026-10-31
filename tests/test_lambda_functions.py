@@ -29,6 +29,8 @@ from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as gr
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
+from aws_analyzer.lambda_functions.explorer import plain as plain_search
+from aws_analyzer._kit.focus import QueryDraft
 from aws_analyzer import set_assistant
 from aws_analyzer.lambda_functions.analysis import live as live_mod
 from aws_analyzer.lambda_functions.models import Activity
@@ -3973,6 +3975,21 @@ def test_explorer_ask_drawer_slot(core, explorer, monkeypatch):
     text = LambdaExplorer(core=core, mode="text")
     text.attach(helper)
     assert text.assistant is None
+
+
+def test_a_written_query_is_checked_before_it_is_used(core, explorer):
+    assert plain_search._check_draft(QueryDraft("duration > 5s and cold", since="24h")) == ""
+    assert "duration" in plain_search._check_draft(QueryDraft("duration >>> 5"))
+    assert plain_search._check_draft(QueryDraft("")) == "It wrote no query."
+    assert plain_search._check_draft(QueryDraft("failed", since="whenever")).startswith("Its time range can't be read")
+    shown = plain_search._draft_html(QueryDraft("cold", since="24h", note="as asked"), "")
+    assert "<code>cold</code>" in shown and "from 24h" in shown and "as asked · one model call, no tools" in shown
+    assert "Couldn" in plain_search._draft_html(QueryDraft("x >"), "The query ends too soon")
+    assert plain_search._runs_context([], 60) == ""
+    seed_runs(datetime.now(timezone.utc))
+    x = explorer("etl-nightly", tab="logs")
+    assert re.fullmatch(r"The runs read: 5, median \S+, slowest \S+; the function's timeout is 900 s\.",
+                        plain_search._runs_context(x._runs, 900))
 
 
 def test_live_tab_says_when_nothing_ran_or_cant_be_read(core, explorer, capsys):

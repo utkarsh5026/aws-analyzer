@@ -51,12 +51,12 @@ from ..._kit.jsontree import _json_tree_css, _JsonTree
 from ..._kit.render import _blocks_html, _copyable, _prose
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
-from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, services_of
+from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, answer_next, services_of
 from ..llm import provider_info
 from ..prompt import focus_of
 from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
 from .chats_panel import _CHATS_CSS, _ChatsPanel
-from .drawer import _DRAWER_CSS, _focus_html, focus_questions
+from .drawer import _DRAWER_CSS, Target, _focus_html, focus_questions, target_for
 from .memory_panel import _MEMORY_CSS, _MemoryPanel
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
@@ -120,6 +120,8 @@ _DRAWINGS = {
     "search": "<circle cx='11' cy='11' r='6'/><path d='M20 20l-4.5-4.5'/>",
 }
 
+
+_MOST_PLACES = 3
 
 _FOCUS_SERVICES = {"lambda": ("lambda", "logs"), "s3": ("s3",), "bedrock_kb": ("bedrock", "s3")}
 
@@ -708,6 +710,7 @@ class _AgentChat(_Window):
         focus_row = self._focus_row()
         if self.is_drawer:
             self.chats_button.layout.display = self.memory_button.layout.display = "none"
+            self.title.layout.overflow = "hidden"
         self.panel = _ModelPanel(self, w, os.environ)
         self.memory_panel = _MemoryPanel(self, w)
         self.chats_panel = _ChatsPanel(self, w)
@@ -726,6 +729,8 @@ class _AgentChat(_Window):
         root = w.VBox([style, head, focus_row, self.panel.root, self.memory_panel.root, self.chats_panel.root, self.log,
                        composer, self.status], layout=layout(width="100%"))
         root.add_class("agc-app")
+        if self.is_drawer:
+            root.add_class("agc-drawer")
         self._fill_log()
         self._say_ready()
         if not self._has_model():
@@ -781,6 +786,45 @@ class _AgentChat(_Window):
             self.items.remove(self.empty)
             self.empty = self._empty_state()
             self._show_empty()
+
+    def _targets(self, answer: AgentAnswer) -> list[tuple[Target, str]]:
+        """
+        Where the explorer shows what an answer's calls do (its findings' calls first, then its tools' next ones), as
+        (place, what it shows), at most _MOST_PLACES and one per label; none outside a drawer.
+        """
+        focus = self._window_focus()
+        if focus is None:
+            return []
+        places: dict[str, tuple[Target, str]] = {}
+        for call, what in answer_next(answer, n=len(answer.findings) + len(answer.calls) + _MOST_PLACES):
+            place = target_for(call, focus.service)
+            if place is not None:
+                places.setdefault(place.label, (place, what))
+        return list(places.values())[:_MOST_PLACES]
+
+    def _targets_row(self, answer: AgentAnswer) -> list[Any]:
+        """
+        A button for each place an answer points at in the explorer ("Run 8f5ce35b in the Logs tab ›"), under it.
+        """
+        buttons = []
+        for place, what in self._targets(answer):
+            button = self.w.Button(description=f"{place.label} ›", tooltip=what,
+                                   layout=self.w.Layout(width="auto", flex="0 0 auto"))
+            button.add_class("agc-place")
+            button.on_click(self._safely(lambda _button, place=place: self._go_to(place)))
+            buttons.append(button)
+        if not buttons:
+            return []
+        row = self.w.HBox(buttons, layout=self.w.Layout(width="100%", flex="0 0 auto"))
+        row.add_class("agc-places")
+        return [row]
+
+    def _go_to(self, place: Target) -> None:
+        """
+        Moves the explorer to a place an answer points at, with the window's own command (x.logs(...), x.open(...)),
+        which says in the window what it couldn't do.
+        """
+        getattr(self.focus_from, place.command)(*place.args, **place.kwargs)
 
     def _button(self, label: str, tooltip: str, on_click: Callable[[], None], css: str) -> Any:
         button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto",
@@ -1329,7 +1373,7 @@ class _AgentChat(_Window):
             for call in answer.calls:
                 if id(call) not in turn.lines:
                     turn.trail.append(call)
-            turn.box.children = (turn.pulse,)
+            turn.box.children = (turn.pulse, *self._targets_row(answer))
             self._set(turn.pulse, self._reply_html(answer, turn.trail))
         self._done()
         self.view._tell_windows("added", answer, other_than=self)

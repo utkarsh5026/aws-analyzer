@@ -214,11 +214,11 @@ def _drawer_css(prefix: str) -> str:
     win over those.
     """
     app = f".{prefix}-app.{prefix}-app"
-    ask = f"{app} button.{prefix}-ask"
+    ask = f"{app} button.{prefix}-assist"
     return (f"<style>{ask}{{flex:0 0 auto;margin:0 0 0 auto;padding:0 12px;height:30px;font-weight:600;"
             f"color:#0d7a6f;border:1px solid #9fd3ca;background:#e3f3f0;border-radius:8px;opacity:1}}"
             f"{ask}::before{{content:none;display:none}}"
-            f"{ask}.{prefix}-asking,{ask}.{prefix}-asking:hover:enabled{{color:#fff;background:#0d7a6f;"
+            f"{ask}.{prefix}-assisting,{ask}.{prefix}-assisting:hover:enabled{{color:#fff;background:#0d7a6f;"
             f"border-color:#0d7a6f}}{app} .{prefix}-drawer{{border-left:1px solid rgba(127,127,127,.3);"
             f"padding-left:10px;margin-left:10px;box-sizing:border-box}}</style>")
 
@@ -348,6 +348,119 @@ class _Window:
             picker.close()
 
 
+class _AskSlot:
+    """
+    The ✦ Ask button and drawer an explorer window gets from an assistant (an AgentView): attach(), the assistant=
+    argument, or set_assistant()'s default. The window never imports the agent: it calls the assistant's
+    _ask_drawer_(window) once, the way IPython calls _ipython_display_, and tells the drawer focus_moved() while it's
+    open, so it follows what the window shows.
+
+    A window calls _init_ask() first, puts _make_ask_button() and _make_drawer_box() in its layout, and says how it
+    gets ipywidgets (_ask_widgets), how a click is guarded (_ask_click) and, when the drawer doesn't simply show
+    beside its pages, where it goes (_show_drawer). _PREFIX starts the CSS class names (.<prefix>-ask,
+    .<prefix>-drawer, .<prefix>-asking); _drawer_css(prefix) styles them under .<prefix>-app.
+    """
+
+    _PREFIX = "explorer"
+
+    def _init_ask(self) -> None:
+        self.assistant: Any = _assistant
+        self.drawer: Any = None
+        self.ask_button: Any = None
+        self.drawer_box: Any = None
+
+    def _ask_widgets(self) -> Any:
+        raise NotImplementedError
+
+    def _ask_click(self, handler: Callable[[], None]) -> Callable[[Any], None]:
+        raise NotImplementedError
+
+    def _make_drawer_box(self) -> Any:
+        """
+        The drawer's box, hidden until ✦ Ask opens it, _DRAWER_WIDTH wide.
+        """
+        w = self._ask_widgets()
+        self.drawer_box = w.Box(layout=w.Layout(display="none", width=_DRAWER_WIDTH, flex="0 0 auto", min_width="0"))
+        self.drawer_box.add_class(f"{self._PREFIX}-drawer")
+        return self.drawer_box
+
+    def _show_drawer(self, shown: bool) -> None:
+        self.drawer_box.layout.display = "" if shown else "none"
+
+    def _assistant_changed(self) -> None:
+        """
+        attach() gave the window another assistant (or none): a window that offers more than the drawer (the Lambda
+        explorer's ✦ search) shows or hides it here.
+        """
+
+    @property
+    def _drawer_shown(self) -> bool:
+        return self.drawer_box is not None and self.drawer_box.layout.display != "none"
+
+    def _make_ask_button(self) -> Any:
+        """
+        ✦ Ask, at the end of the tab bar: shown while the window has an assistant, it opens and closes the drawer.
+        """
+        w, prefix = self._ask_widgets(), self._PREFIX
+        button = w.Button(description="✦ Ask", tooltip="Ask the agent about what this window shows",
+                          layout=w.Layout(width="auto", flex="0 0 auto",
+                                          display="" if self.assistant is not None else "none"))
+        button.add_class(f"{prefix}-assist")
+        button.on_click(self._ask_click(self._toggle_drawer))
+        self.ask_button = button
+        return button
+
+    @_window_errors
+    def attach(self, assistant: Any) -> None:
+        """
+        Puts the ✦ Ask drawer beside the tabs and opens it: x.attach(AgentView(provider="bedrock")). There you ask
+        the agent about what the window shows (x.focus), so "why does this fail?" means the function, run or file
+        you have open. x.attach(None) takes it away.
+        """
+        _check_assistant(assistant)
+        if self._ask_widgets() is None:
+            raise _Hint("The ✦ Ask drawer needs the window (Jupyter and ipywidgets). Here, ask the agent in a cell: "
+                        "agent.ask('Why does this fail?', focus=x).")
+        self._close_drawer()
+        self.assistant, self.drawer = assistant, None
+        self.drawer_box.children = ()
+        self.ask_button.layout.display = "" if assistant is not None else "none"
+        self._assistant_changed()
+        if assistant is not None:
+            self._open_drawer()
+
+    def _toggle_drawer(self) -> None:
+        if self._drawer_shown:
+            self._close_drawer()
+        else:
+            self._open_drawer()
+
+    def _open_drawer(self) -> None:
+        """
+        Shows the drawer, made by the assistant the first time (the chat, narrow, asking about this window).
+        """
+        if self.drawer is None:
+            self.drawer = getattr(self.assistant, _ASK_DRAWER)(self)
+            self.drawer_box.children = (self.drawer.root,)
+        self._show_drawer(True)
+        _class_if(self.ask_button, f"{self._PREFIX}-assisting", True)
+        self.drawer.focus_moved()
+
+    def _close_drawer(self) -> None:
+        if self.drawer_box is None:
+            return
+        self._show_drawer(False)
+        _class_if(self.ask_button, f"{self._PREFIX}-assisting", False)
+
+    def _focus_moved(self) -> None:
+        """
+        Tells an open drawer that what the window shows may have changed (another tab, function, run or file), so
+        its Looking at line follows.
+        """
+        if self.drawer is not None and self._drawer_shown:
+            self.drawer.focus_moved()
+
+
 @dataclasses.dataclass
 class _Job:
     """
@@ -365,7 +478,7 @@ class _Job:
     ticking: Callable[[], None] | None = None
 
 
-class _Explorer(_Window):
+class _Explorer(_AskSlot, _Window):
     """
     What the knowledge base and Lambda explorers share on top of _Window: the status line under the tabs, AWS read
     off the notebook's event loop (_later), report blocks drawn into a page (_draw), their commands' errors said in
@@ -406,10 +519,7 @@ class _Explorer(_Window):
         self._said: tuple[str, str, bool, str] = ("", "", False, "")
         self._shown_at: Any = object()
         self.pickers: list[_Picker] = []
-        self.assistant: Any = _assistant
-        self.drawer: Any = None
-        self.ask_button: Any = None
-        self.drawer_box: Any = None
+        self._init_ask()
 
     def _load_widgets(self, mode: str) -> str:
         """
@@ -479,74 +589,17 @@ class _Explorer(_Window):
         self.status = w.HTML(layout=layout(width="100%"))
         self.status.add_class(f"{prefix}-status")
         tabs.children = (*tabs.children, self._make_ask_button())
-        self.drawer_box = w.Box(layout=layout(display="none", width=_DRAWER_WIDTH, flex="0 0 auto", min_width="0"))
-        self.drawer_box.add_class(f"{prefix}-drawer")
+        self._make_drawer_box()
         main = w.VBox([tabs, *pages.values()], layout=layout(flex="1 1 auto", width="auto", min_width="0"))
         body = w.HBox([main, self.drawer_box], layout=layout(width="100%", align_items="stretch"))
         self.root = w.VBox([style, head, body, self.status, self.backdrop], layout=layout(width="100%"))
         self.root.add_class(f"{prefix}-app")
 
-    def _make_ask_button(self) -> Any:
-        """
-        ✦ Ask, at the end of the tab bar: shown while the window has an assistant, it opens and closes the drawer.
-        """
-        w, prefix = self._w, self._PREFIX
-        button = w.Button(description="✦ Ask", tooltip="Ask the agent about what this window shows",
-                          layout=w.Layout(width="auto", flex="0 0 auto",
-                                          display="" if self.assistant is not None else "none"))
-        button.add_class(f"{prefix}-ask")
-        button.on_click(self._safely(lambda _button: self._toggle_drawer()))
-        self.ask_button = button
-        return button
+    def _ask_widgets(self) -> Any:
+        return self._w
 
-    @_window_errors
-    def attach(self, assistant: Any) -> None:
-        """
-        Puts the ✦ Ask drawer beside the tabs and opens it: x.attach(AgentView(provider="bedrock")). There you ask
-        the agent about what the window shows (x.focus), so "why does this fail?" means the function, run or file
-        you have open. x.attach(None) takes it away.
-        """
-        _check_assistant(assistant)
-        if self._w is None:
-            raise _Hint("The ✦ Ask drawer needs the window (Jupyter and ipywidgets). Here, ask the agent in a cell: "
-                        "agent.ask('Why does this fail?', focus=x).")
-        self._close_drawer()
-        self.assistant, self.drawer = assistant, None
-        self.drawer_box.children = ()
-        self.ask_button.layout.display = "" if assistant is not None else "none"
-        if assistant is not None:
-            self._open_drawer()
-
-    def _toggle_drawer(self) -> None:
-        if self.drawer_box.layout.display == "none":
-            self._open_drawer()
-        else:
-            self._close_drawer()
-
-    def _open_drawer(self) -> None:
-        """
-        Shows the drawer, made by the assistant the first time (the chat, narrow, asking about this window).
-        """
-        if self.drawer is None:
-            self.drawer = getattr(self.assistant, _ASK_DRAWER)(self)
-            self.drawer_box.children = (self.drawer.root,)
-        self.drawer_box.layout.display = ""
-        _class_if(self.ask_button, f"{self._PREFIX}-asking", True)
-        self.drawer.focus_moved()
-
-    def _close_drawer(self) -> None:
-        if self.drawer_box is None:
-            return
-        self.drawer_box.layout.display = "none"
-        _class_if(self.ask_button, f"{self._PREFIX}-asking", False)
-
-    def _focus_moved(self) -> None:
-        """
-        Tells an open drawer that what the window shows may have changed (another tab, function, run or file), so
-        its Looking at line follows.
-        """
-        if self.drawer is not None and self.drawer_box.layout.display != "none":
-            self.drawer.focus_moved()
+    def _ask_click(self, handler: Callable[[], None]) -> Callable[[Any], None]:
+        return self._safely(lambda _button: handler())
 
     def _show_tab(self, key: str) -> None:
         raise NotImplementedError

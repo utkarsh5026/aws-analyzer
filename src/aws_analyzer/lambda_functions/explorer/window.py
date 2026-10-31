@@ -40,10 +40,11 @@ from .errors import _ErrorsTab
 from .performance import _PerformanceTab
 from .code import _CodeTab
 from .focus import _FocusReads
+from .plain import _PLAIN_CSS, _PlainSearch
 
 
 class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab,
-                     _FocusReads, _Explorer):
+                     _PlainSearch, _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -496,7 +497,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         self.settings_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
-        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + self._theme_style, head, tabs, {
+        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
             "live": self._live_page(),
             "overview": self._scroll_page([self.overview_view]),
