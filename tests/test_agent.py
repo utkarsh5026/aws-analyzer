@@ -1848,6 +1848,19 @@ def test_looking_at_tells_the_model_what_the_user_has_open():
     assert looking_at(Focus("opensearch", "index")).startswith("[Looking at aws-analyzer's opensearch window (index)")
 
 
+def test_the_drawer_offers_questions_for_a_chat_answer():
+    from aws_analyzer.agent.window.drawer import focus_questions
+
+    cited = Focus("bedrock_chat", "answer", parts=(FocusPart("knowledge_base", "KB1", "support-docs"),
+                                                   FocusPart("cited", "s3://d/refund.pdf", "cited: refund.pdf")))
+    assert focus_questions(cited)[0] == "Why did this answer cite these files, and not the one that should answer it?"
+    nothing = Focus("bedrock_chat", "answer", parts=(FocusPart("cited", "", "cited nothing"),))
+    assert focus_questions(nothing)[0] == "Why did this answer cite nothing, and which file should it have found?"
+    assert focus_questions(Focus("bedrock_chat", "chat", parts=(FocusPart("knowledge_base", "KB1", "support-docs"),)))[
+        0] == "Is support-docs up to date, and can every file be searched?"
+    assert looking_at(nothing).startswith("[Looking at the knowledge base chat window (answer)")
+
+
 def test_focus_of_takes_a_focus_or_an_explorer_window():
     window = types.SimpleNamespace(focus=RUN_FOCUS)
     assert focus_of(RUN_FOCUS) is RUN_FOCUS and focus_of(window) is RUN_FOCUS and focus_of(None) is None

@@ -2379,6 +2379,48 @@ def test_window_hides_and_shows_its_panes(window):
     assert app.tabs.layout.max_width == app_window._SIDE_MAX_WIDTH and app.chat.layout.margin == app_window._CHAT_MARGIN
 
 
+def test_window_focus_and_the_ask_drawer(window, clients, monkeypatch):
+    import ipywidgets
+
+    app = window._app
+    assert (app.focus.service, app.focus.kind, app.focus.chips()) == ("bedrock_chat", "chat",
+                                                                        ["support-docs", "claude-haiku-4-5"])
+    app.question.value = "How long do refunds take?"
+    app.send_button.click()
+    answer = app.focus
+    assert answer.kind == "answer" and answer.chips()[2:] == ["asked: How long do refunds take?", "69% grounded",
+                                                              "cited: refund-policy.pdf"]
+    assert answer.value("cited") == "s3://docs/policies/refund-policy.pdf"
+
+    told = []
+
+    class Drawer:
+        root = ipywidgets.HTML("drawer")
+
+        def focus_moved(self):
+            told.append(app.focus.kind)
+
+    class Assistant:
+        def _ask_drawer_(self, window):
+            return Drawer()
+
+    assert app.ask_button.layout.display == "none"
+    app.attach(Assistant())
+    assert app.drawer_box.children == (app.drawer.root,) and app.tabs.layout.display == "none"
+    assert told[-1] == "answer" and "kbc-assisting" in app.ask_button._dom_classes
+    app.ask_button.click()
+    assert app.drawer_box.layout.display == "none" and app.tabs.layout.display is None
+
+    view = open_window(monkeypatch, fakes(rag=by_question))
+    run = view._app
+    run.test_box.value = "How long do refunds take? | refund-policy\nDo you ship to the moon? | moon-policy"
+    run.run_button.click()
+    run.tabs.selected_index = run.TEST_TAB
+    assert run.focus.kind == "test_run" and run.focus.chips()[2:] == ["Test tab", "test run 1 · 2 questions",
+                                                                      "1 missed their file"]
+    assert run.focus.value("missed") == "Do you ship to the moon?"
+
+
 def test_window_retrieve_only_searches_without_an_answer(window, clients):
     app = window._app
     top = app.root.children[1].children[0]

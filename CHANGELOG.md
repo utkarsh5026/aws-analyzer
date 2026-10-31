@@ -41,6 +41,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🧭 **S3 explorer: ✦ Ask about the folder you're in** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
   - `S3Explorer(..., assistant=agent)` or `x.attach(agent)`: the agent's chat in the list's place, beside the preview.
 
+- 💬 **Bedrock chat: ✦ Ask the agent why an answer went that way** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `chat(..., assistant=agent)`: the agent beside the conversation, about the question, its answer and the files cited.
+
 - ⚡ **Lambda explorer: search the logs in plain English** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
   - With an agent, **✦** beside the Logs search box: describe the runs, and it writes the query for you to use.
 

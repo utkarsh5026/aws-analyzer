@@ -42,6 +42,12 @@ _QUESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
     ("bedrock_kb", "syncs"): ("How did the recent syncs go, and why did any fail?",),
     ("bedrock_kb", "search"): ("Why did this search find these passages?",
                                "Which file should answer this, and does it?"),
+    ("bedrock_chat", "chat"): ("Is {knowledge_base} up to date, and can every file be searched?",
+                               "Which files can't be searched, and why?"),
+    ("bedrock_chat", "answer"): ("Why did this answer cite these files, and not the one that should answer it?",
+                                 "Is the file that should answer this indexed, and does a search find it?"),
+    ("bedrock_chat", "test_run"): ("Why did these questions miss their expected files?",
+                                   "Are the missed files indexed, and does a search find them?"),
 }
 
 _UNNAMED = {"function": "this function", "file": "this file", "folder": "this folder",
@@ -63,11 +69,24 @@ class _Names(dict):
         return _UNNAMED.get(key, "this")
 
 
+_CITED_NOTHING = "Why did this answer cite nothing, and which file should it have found?"
+
+
+def _cited_nothing(focus: Focus) -> bool:
+    """
+    Whether the focus is a chat answer that cited no file (its 'cited' part is there, and empty).
+    """
+    return any(part.key == "cited" and not part.value for part in focus.parts)
+
+
 def _first_instead(focus: Focus) -> str:
     """
     The question that leads instead of the usual first one, when the focus says it should: a run that failed is
-    asked why, a file that's indexed what it answers. '' when the usual one stands.
+    asked why, a file that's indexed what it answers, a chat answer that cited nothing why. '' when the usual one
+    stands.
     """
+    if _cited_nothing(focus):
+        return _CITED_NOTHING
     if focus.value("error"):
         return _FIRST_INSTEAD.get((focus.service, focus.kind, "error"), "")
     return _FIRST_INSTEAD.get((focus.service, focus.kind, focus.value("state")), "")

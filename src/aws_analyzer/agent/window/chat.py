@@ -123,7 +123,8 @@ _DRAWINGS = {
 
 _MOST_PLACES = 3
 
-_FOCUS_SERVICES = {"lambda": ("lambda", "logs"), "s3": ("s3",), "bedrock_kb": ("bedrock", "s3")}
+_FOCUS_SERVICES = {"lambda": ("lambda", "logs"), "s3": ("s3",), "bedrock_kb": ("bedrock", "s3"),
+                   "bedrock_chat": ("bedrock", "s3")}
 
 
 @dataclass(frozen=True)

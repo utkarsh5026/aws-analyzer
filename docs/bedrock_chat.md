@@ -161,6 +161,18 @@ The knowledge base list, open. Type part of a name or an ID to narrow it; Enter 
 Two files ticked: the next answers come only from them, and the conversation goes on.
 ///
 
+### Ask the agent why: ✦ Ask { #ask }
+
+When an answer cites the wrong file, or none, the agent can find out why: whether the file is indexed, where it ranks for your question, and what the settings left out.
+{ .gist }
+
+```python
+from aws_analyzer import AgentView
+chat("support-docs", model="sonnet", assistant=AgentView(provider="bedrock"))
+```
+
+**✦ Ask**, at the end of the top row, opens the agent's chat in the side tabs' place, beside the conversation. Its **Looking at** line is what you have open: the knowledge base, the model, the data sources and files picked, and the last question with how much of its answer is grounded and the files it cited (on the Test tab, the run and the questions that missed their file). It offers questions for that ("Why did this answer cite these files, and not the one that should answer it?"), reads the knowledge base with its read-only tools, and answers with what it checked. [The agent's guide](agent.md#ask-drawer) says more.
+
 ## Retrieve only: the search without the answer { #retrieve }
 
 When an answer is wrong, the search or the model is to blame. Switch to **Retrieve only** and ask again: you see every passage the search found, and which ones the answer used.

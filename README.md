@@ -1196,6 +1196,7 @@ chat("support-docs", data_source="faq")    # ask only one of its data sources (a
 chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
 chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
 chat("support-docs", height=800)           # an 800px conversation (else the window fills the browser's height)
+chat("support-docs", assistant=AgentView())   # ✦ Ask: the agent beside the chat, asking why an answer cited what it did
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
 ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])   # every combination on that list, the setups ranked

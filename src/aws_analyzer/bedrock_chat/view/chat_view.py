@@ -451,6 +451,7 @@ def chat(
     questions: Any = None,
     height: int | str | None = None,
     log: str | None = None,
+    assistant: Any = None,
     **values: Any,
 ) -> BedrockChatView:
     """
@@ -473,7 +474,8 @@ def chat(
     with a list of test questions to ask with the window's settings (a list, or text with one per line). log= names a
     file every test run is added to as it finishes, so runs outlast a kernel restart (load_runs() reads them back).
     The window fills the browser's height; height= sets the conversation's instead (800 pixels, or CSS such as
-    '70vh').
+    '70vh'). assistant=AgentView(...) adds ✦ Ask: the agent's chat beside the conversation, asking why an answer went
+    the way it did about the question, answer and setup you have open.
     """
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
                            stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only,
@@ -489,5 +491,5 @@ def chat(
             view.questions = question_list(questions)
         except ValueError as exc:
             view._notes.append(f"The test questions weren't used: {exc}.")
-    view.app()
+    view.app(assistant=assistant)
     return view

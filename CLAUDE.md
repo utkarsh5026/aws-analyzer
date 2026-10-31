@@ -627,7 +627,10 @@ How the View layer works:
   test questions), `config_json` (`config_of`: the request without its question and session) or `cli_command`; `code()`
   shows all three as a report.
   `_ipython_display_` shows the window once per cell, so a cell
-  ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
+  ending in `chat()` doesn't show it twice. It has the ✦ Ask slot too (`_AskSlot`, `_PREFIX = "kbc"`; `chat(...,
+  assistant=)` / `app(assistant=)`): ✦ Ask ends the top row, the drawer takes the side tabs' place (`_show_drawer`,
+  which gives them back as they were), `focus_moved` comes from `_set_status` and `_tab_changed`, and its `focus`
+  (`window/focus.py`) is 'chat', 'answer' (the last question, its grounded share and the files cited) or 'test_run'. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
 - `bedrock_kb`'s explorer window, `KBExplorer` (`bedrock_kb/explorer/`: `window.py` with `explore()`, `frame.py` its
   tabs, stylesheet and `_window_text`, `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
