@@ -6,7 +6,9 @@ what no window meets (a command that can't run, an error that should still raise
 reports read, and each window's tests click through it.
 """
 
+import asyncio
 import itertools
+import threading
 import os
 import re
 import time
@@ -26,7 +28,7 @@ from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
 from aws_analyzer._kit.render import _base_css, _copy_button, _Look, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
-from aws_analyzer._kit.window import _for_window, _Window, _window_errors
+from aws_analyzer._kit.window import _Explorer, _for_window, _Window, _window_errors
 from aws_analyzer.dynamodb import style as ddb_style
 
 # Each service: its module, Analyzer and View, and its list prices.
@@ -209,6 +211,14 @@ def test_times_show_in_utc_until_a_zone_is_picked():
     assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone.utc)
 
 
+def test_today_and_yesterday_start_at_midnight_in_the_zone_picked():
+    assert parse_time("today", now=MAY_DAY) == datetime(2024, 5, 1, tzinfo=timezone.utc)
+    assert parse_time(" Yesterday ", now=MAY_DAY) == datetime(2024, 4, 30, tzinfo=timezone.utc)
+    set_timezone("Asia/Kolkata")
+    assert parse_time("today", now=MAY_DAY) == datetime(2024, 4, 30, 18, 30, tzinfo=timezone.utc)
+    set_timezone(None)
+
+
 @pytest.mark.parametrize("zone, label, may, january", [
     ("Asia/Kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),
     ("kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),  # its city, in any case
@@ -365,6 +375,28 @@ def test_a_themes_rules_reach_only_reports_drawn_in_it(theme):
     assert not unscoped, f"rules that would restyle reports drawn in other themes: {unscoped}"
 
 
+def test_background_jobs_tick_while_they_run():
+    explorer = _Explorer()
+    explorer._COUNT_EVERY = 0.01
+    released, ticks, results = threading.Event(), [], []
+
+    def work():
+        released.wait(5)
+        return "read"
+
+    async def main():
+        explorer._later("logs", work, results.append, ticking=lambda: ticks.append(len(ticks)))
+        while len(ticks) < 3:
+            await asyncio.sleep(0.01)
+        released.set()
+        await explorer._tasks["logs"]
+        count = len(ticks)
+        await asyncio.sleep(0.05)
+        return count
+
+    assert asyncio.run(main()) == len(ticks) >= 3 and results == ["read"]
+
+
 def test_classic_and_the_windows_reports_draw_no_theme():
     """
     A window draws its reports without a theme (a service's _render_html with none named), as classic does.
@@ -388,3 +420,56 @@ def test_a_view_draws_its_reports_in_the_theme_picked(monkeypatch):
     view._show([_Title("Report")])
     assert '<div class="ddb theme-console">' in drawn[0] and ".ddb.theme-console{" in drawn[0]
     assert '<div class="ddb theme-editorial">' in drawn[1] and "theme-console" not in drawn[1]
+
+
+
+def test_frecency_counts_often_and_lately():
+    from datetime import datetime, timedelta, timezone
+
+    from aws_analyzer._kit.history import Visit, frecency, rank_places
+
+    now = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    assert frecency([now], now) == 1.0 and frecency([now - timedelta(days=7)], now) == 0.5
+    daily = [Visit("s3://lake/daily/", "daily", now - timedelta(days=d)) for d in range(5)]
+    march = [Visit("s3://lake/march/", "march", now - timedelta(days=210)) for _ in range(30)]
+    once = [Visit("s3://lake/once/", "once", now - timedelta(hours=1))]
+    ranked = rank_places(march + once + daily, now)
+    assert [p.key for p in ranked] == ["s3://lake/daily/", "s3://lake/once/", "s3://lake/march/"]
+    assert ranked[0].visits == 5 and ranked[0].last == now
+    assert len(rank_places(march + once, now, limit=1)) == 1
+
+
+def test_history_path_and_store(tmp_path, monkeypatch):
+    from aws_analyzer._kit import history
+
+    assert history.history_path(False) == "" and history.history_path(True) == ""
+    monkeypatch.setenv(history.HISTORY_ENV, str(tmp_path / "h.sqlite"))
+    assert history.history_path(True) == str(tmp_path / "h.sqlite")
+    monkeypatch.delenv(history.HISTORY_ENV)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert history.history_path(True) == str(tmp_path / "aws-analyzer" / "history" / "places.sqlite")
+
+    store = history.PlaceHistory(str(tmp_path / "places.sqlite"), "s3")
+    assert store.places("111") == [] and store.last("111") is None
+    store.record("111", "s3://a/", "a")
+    store.record("111", "s3://b/", "b")
+    store.record("222", "s3://other/", "other")
+    assert [p.key for p in store.places("111")] == ["s3://b/", "s3://a/"] and store.last("111").key == "s3://b/"
+    assert history.PlaceHistory(store.path, "lambda").places("111") == []
+    assert store.forget("111", "s3://a/") == 1 and store.forget("111") == 1
+    assert [p.key for p in store.places("222")] == ["s3://other/"]
+
+    monkeypatch.setattr(history, "KEPT_VISITS", 3)
+    for i in range(5):
+        store.record("111", f"s3://k{i}/")
+    assert len(store.visits("111")) == 3
+
+
+def test_history_that_cant_be_written_turns_itself_off(tmp_path):
+    from aws_analyzer._kit.history import PlaceHistory
+
+    blocker = tmp_path / "file"
+    blocker.write_text("not a folder")
+    store = PlaceHistory(str(blocker / "places.sqlite"), "s3")
+    store.record("111", "s3://a/")
+    assert not store.is_on and "Recent places are off" in store.problem and store.places("111") == []

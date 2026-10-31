@@ -38,6 +38,12 @@ version each has), and `make install-env` installs this checkout into the ones y
 extras, and whether to add a Jupyter kernel for one that has none. `make install-env ARGS="--env pytorch_p310
 --extras all --kernel --yes"` does the same without questions.
 
+`make clean` removes what these tasks built in the checkout (`.local-check/`, `dist/`, `build/`, `site/`, the test and
+lint caches and `__pycache__/` folders); `make clean ARGS="--all"` also removes the sandbox's Pyodide files from
+`~/.cache/aws-analyzer`, and `ARGS="--dry-run"` says what it would remove, and how much, without removing it. It
+never uninstalls from the environments `install-env` installed into, or deletes files saved beside your notebooks: it
+prints how to do those yourself.
+
 ## How the code is laid out
 
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads
@@ -58,7 +64,8 @@ just as well for people. The rules that matter most:
   says what to install.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base, or stops or deletes anything.
   Reports show the command to run instead. A new AWS call needs its read-only IAM permission listed in README.md.
-  On the notebook's disk, the only thing deleted is what `clean_downloads()` removes from `s3.py`'s downloads folder.
+  On the notebook's disk, the only things deleted are what `clean_downloads()` removes from s3's downloads folder and
+  what `aws_analyzer.clean_up()` removes: folders aws-analyzer made and marked, its cache, and charts when named.
 - **Python 3.10 and up**, with pandas 2 and 3 both supported.
 - **Reports help someone decide what to do.** The answer comes first, findings say what's wrong, what it costs and
   what to run next, and errors become a short note instead of a traceback. CLAUDE.md's "Product goal" section has

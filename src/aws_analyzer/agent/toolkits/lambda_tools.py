@@ -684,6 +684,12 @@ class LambdaToolkit(Toolkit):
         self._clients = clients
         self._prices = prices
 
+    def view_class(self) -> type:
+        """
+        LambdaView, whose commands the agent's findings can name.
+        """
+        return _lambda_module().LambdaView
+
     def make_analyzer(self, session: Any) -> LambdaAnalyzer:
         return _lambda_module().LambdaAnalyzer(session, clients=self._clients, prices=self._prices)
 

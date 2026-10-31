@@ -7,12 +7,13 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..._kit.blocks import _Note
 from ..._kit.errors import _why
-from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money
+from ..._kit.fmt import _count, _plural, _total, _utcnow, human_age, human_money
+from ..._kit.render import _split_lead
 from ..._kit.text import _esc, _marked, search_rank
 from ..._kit.window import _class_if
 
@@ -21,14 +22,19 @@ from ..models import Function, FunctionMetrics, ProvisionedConcurrency, RuntimeS
 from ..analysis.functions import runtime_status
 from ..analysis.cost import function_monthly_cost
 from ..analysis.overview import Overview
-from ..analysis.findings import _day_age, _errors_level, account_findings, function_findings
+from ..analysis.findings import (
+    RECENT_DAYS, _day_age, _errors_level, _recent, _runtime_findings, account_findings, function_findings,
+)
+from ..analysis.changes import FunctionChanges, FunctionLook, function_changes, function_look
 from ..view import _unread
-from .frame import _FUNCTION_PAGE, _FUNCTION_TABS
+from .frame import _FUNCTION_PAGE, _FUNCTION_TABS, _window_text
 from .widgets import _Row
 
 
 _COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width); a header sorts, again reverses
     ("name", "Function", "Sort by name", ""),
+    ("trend", "Last 14 days", f"Calls a day, the failed part in red. Sort by the share of calls that failed in the last "
+                              f"{RECENT_DAYS} days", "96px"),
     ("calls", "Calls · 30d", "Sort by calls in the last 30 days", "86px"),
     ("errors", "Errors", "Sort by the share of calls that failed", "64px"),
     ("duration", "Avg run", "Sort by the average run time", "72px"),
@@ -38,15 +44,36 @@ _COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width);
 )
 
 _FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it names; again shows every function
-    ("", "All", "all"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
+    ("", "All", "all"), ("recent", "Recent", "all"), ("changed", "Changed", "new"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
     ("runtime", "Old runtime", "warn"), ("public", "Public", "warn"), ("idle", "Not called", "idle"),
 )
+
+_TREND_DAYS = 14
+
+_SHORTEST_BAR = 12
+
+_CHIP_TIPS = {
+    "": "Show every function",
+    "recent": "Show only the functions you've opened here before, the ones you open most first (click again for all)",
+    "changed": ("Show only the functions whose code or settings changed, or whose errors went up, since you last "
+                "opened them (click again for all)"),
+}
+
+
+def _arn_account(arn: str) -> str:
+    """
+    The account in a function's ARN ('arn:aws:lambda:us-east-1:123456789012:function:etl' -> '123456789012').
+    """
+    parts = arn.split(":")
+    return parts[4] if len(parts) > 4 else ""
 
 
 @dataclass
 class _Facts:
     """
-    What the explorer's list says about one function, worked out once each time more is read.
+    What the explorer's list says about one function, worked out once each time more is read. Its tone is its dot:
+    'bad' (failing), 'warn' (a warning), 'ok', 'idle' (not called) or '' (not read yet); its headline is what its
+    line says is wrong, in place of its description.
     """
 
     fn: Function
@@ -55,7 +82,9 @@ class _Facts:
     findings: list[tuple[str, str]]
     triggers: list[Trigger]
     cost: float | None
-    tone: str  # its dot: 'bad' (failing), 'warn' (a warning), 'ok', 'idle' (not called), '' (not read yet)
+    tone: str
+    headline: str = ""
+    changed: bool = False
 
     @property
     def warnings(self) -> list[str]:
@@ -77,7 +106,59 @@ def _function_facts(fn: Function, ov: Overview, prices: dict[str, float], now: d
         tone = "ok" if m.invocations else "idle"
     else:
         tone = ""
-    return _Facts(fn, m, status, found, detail.triggers, cost, tone)
+    return _Facts(fn, m, status, found, detail.triggers, cost, tone, _headline(fn, m, status, found, now))
+
+
+def _headline(fn: Function, m: FunctionMetrics | None, status: RuntimeStatus, found: list[tuple[str, str]],
+              now: datetime) -> str:
+    """
+    What a function's line in the list says is wrong: the lead of its first warning ('3 of 120 calls failed (2.5%)
+    in the last 30 days'), or '' when it has none. When its calls fail often enough to act on, that comes before an
+    old runtime, so the line says why its dot is red.
+    """
+    warnings = [message for level, message in found if level == "warn"]
+    if _errors_level(m, now) == "warn":
+        about_runtime = {message for _, message in _runtime_findings(fn, status)}
+        warnings = [message for message in warnings if message not in about_runtime] or warnings
+    if not warnings:
+        return ""
+    lead, _, _ = _split_lead(warnings[0])
+    return _window_text(lead or warnings[0])
+
+
+def _trend_days(m: FunctionMetrics | None, now: datetime) -> list[tuple[float, float]]:
+    """
+    (calls, failed calls) for each of the last _TREND_DAYS UTC days, oldest first, 0 for a day without calls; [] when
+    CloudWatch's numbers aren't daily ones.
+    """
+    if m is None or m.period < 86400:
+        return []
+    by_day = {d.start.astimezone(timezone.utc).date(): d for d in m.daily}
+    today = _midnight(now)
+    days = []
+    for back in range(_TREND_DAYS - 1, -1, -1):
+        usage = by_day.get((today - timedelta(days=back)).date())
+        days.append((usage.invocations, usage.errors) if usage is not None else (0.0, 0.0))
+    return days
+
+
+def _trend_html(days: list[tuple[float, float]]) -> str:
+    """
+    The trend column: a bar a day as tall as its calls against the busiest day, its failed part in red on top. A day
+    with any calls is at least _SHORTEST_BAR percent tall, so it stays visible beside a busy one.
+    """
+    if not days:
+        return "-"
+    busiest = max(calls for calls, _ in days)
+    bars = []
+    for calls, failed in days:
+        if not calls:
+            bars.append('<i class="z"></i>')
+            continue
+        height = max(_SHORTEST_BAR, 100 * calls / busiest)
+        red = f'<b style="height:{min(100.0, 100 * failed / calls):.1f}%"></b>' if failed else ""
+        bars.append(f'<i style="height:{height:.1f}%">{red}</i>')
+    return f'<span class="tr">{"".join(bars)}</span>'
 
 
 def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now: datetime) -> str:
@@ -88,6 +169,10 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     runtime = f.status.label
     parts = [fn.description, _triggers_text(f.triggers), f"{fn.memory:,} MB", f"{fn.timeout} s"]
     line = " · ".join(p for p in parts if p)
+    if f.headline and not words:
+        about = f'<div class="ff hl {f.tone}">{_esc(f.headline)}</div>'
+    else:
+        about = f'<div class="ff">{_marked(line, words)}</div>'
     loading = '<span class="sk"></span>'
 
     def cell(css: str, value: str, tone: str = "") -> str:
@@ -96,11 +181,13 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
 
     if m is None:
         dash = loading if numbers else "-"
-        cells = "".join(f'<div class="fc {css}">{dash}</div>' for css in ("", "", "c-dur", "", "c-called"))
+        columns = ("c-trend", "", "", "c-dur", "", "c-called")
+        cells = "".join(f'<div class="fc {css}">{dash}</div>' for css in columns)
     else:
         level = _errors_level(m, now)
         rate = _pct(m.error_rate) if m.invocations else "-"
-        cells = (cell("", _count(round(m.invocations)) if m.invocations else "0")
+        cells = (f'<div class="fc c-trend">{_trend_html(_trend_days(m, now))}</div>'
+                 + cell("", _count(round(m.invocations)) if m.invocations else "0")
                  + cell("" if m.invocations else "dim", rate, "bad" if level == "warn" else "warn" if level else "")
                  + cell("c-dur" + ("" if m.invocations else " dim"), human_ms(m.avg_duration) if m.invocations
                         else "-")
@@ -110,10 +197,21 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     warnings = len(f.warnings)
     badge = f'<span class="wb">{warnings}</span>' if warnings else ""
     region = f'<span class="rg">{_esc(fn.region)}</span>' if multi else ""
+    changed = '<span class="ch">changed</span>' if f.changed else ""
     return (f'<div class="fr"><span class="dot {f.tone}"></span><div class="fm"><div class="fn">'
             f"<b>{_marked(fn.name, words)}</b>"
-            f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}</div>'
-            f'<div class="ff">{_marked(line, words)}</div></div>{cells}<div class="fc">{badge}</div><div></div></div>')
+            f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}{changed}</div>'
+            f'{about}</div>{cells}<div class="fc">{badge}</div><div></div></div>')
+
+
+def _problem_rank(f: _Facts) -> tuple[float, ...]:
+    """
+    How far up the list's "problems first" order puts a function: failing, then warned, then the most warnings,
+    failed calls and calls.
+    """
+    m = f.metrics
+    calls = m.invocations if m is not None else -1.0
+    return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
 
 
 def _triggers_text(triggers: list[Trigger]) -> str:
@@ -223,6 +321,7 @@ class _FunctionsTab:
     def _listed(self, ov: Overview, reopen: Function | None = None, elsewhere: bool = True) -> None:
         self.overview = ov
         self._listing = False
+        self._load_recent()
         self._compute_facts()
         denied = sorted({code for key, code in ov.errors.items() if key.endswith(":list")})
         self.field.problem = (f"Couldn't list the functions ({', '.join(denied)}; needs lambda:ListFunctions). Type "
@@ -298,6 +397,7 @@ class _FunctionsTab:
         self._finish("list", f"{_plural(len(ov.functions), 'function')} in {self._where()}, read in {took:.1f}s{read}"
                      + (f" · {attention:,} need attention: the Functions tab lists them first" if attention
                         else " · none needs attention"), "" if attention else "ok", tabs=("functions",))
+        self._read_ahead()
 
     def _redraw_list(self) -> None:
         self._compute_facts()
@@ -313,6 +413,22 @@ class _FunctionsTab:
         ov = self.overview
         now = _utcnow()
         self._facts = {fn.arn: _function_facts(fn, ov, self.core.prices, now) for fn in ov.functions} if ov else {}
+        self._compute_news(now)
+
+    def _compute_news(self, now: datetime) -> None:
+        """
+        What changed in each listed function you've opened before, since your last look, from the snapshots noted
+        then and what the list has read (code and settings at once, failed calls once CloudWatch's numbers are in).
+        """
+        self._news: dict[str, FunctionChanges] = {}
+        for arn, facts in self._facts.items():
+            snapshot = self._looks.get(arn)
+            before = FunctionLook.from_data(snapshot.data) if snapshot is not None else None
+            if before is None:
+                continue
+            changes = function_changes(facts.fn, before=before, since=snapshot.at, now=now, metrics=facts.metrics)
+            self._news[arn] = changes
+            facts.changed = changes.has_news
 
     def _draw_list_note(self) -> None:
         """
@@ -366,9 +482,55 @@ class _FunctionsTab:
         self._offset = 0
         self._refilter(renew=True)
 
+    def _load_recent(self) -> None:
+        """
+        The listed functions you've opened before (in this account), the ones you open most and most lately first.
+        """
+        functions = self.overview.functions if self.overview is not None else []
+        if self._history is None or not functions:
+            self._recent, self._looks = {}, {}
+            return
+        listed = {fn.arn for fn in functions}
+        account = _arn_account(functions[0].arn)
+        places = self._history.places(account)
+        self._recent = {place.key: place for place in places if place.key in listed}
+        self._looks = self._history.snapshots_before(account)
+
+    def _look_before(self, fn: Function) -> tuple[FunctionLook | None, datetime | None]:
+        """
+        How fn looked on your last look before this one, and when (None, None on a first look).
+        """
+        snapshot = self._looks.get(fn.arn)
+        if snapshot is None:
+            return None, None
+        return FunctionLook.from_data(snapshot.data), snapshot.at
+
+    def _save_look(self, fn: Function, *, error_causes: list[str] | None = None) -> None:
+        """
+        Notes how fn looks now (with its Errors tab's causes when they were read), for your next look.
+        """
+        if self._history is not None:
+            look = function_look(fn, error_causes=error_causes)
+            self._history.save_snapshot(_arn_account(fn.arn), fn.arn, look.to_data())
+
+    def _remember(self, fn: Function) -> None:
+        """
+        Adds a visit to fn, and redraws the Recent chip and the function field's order.
+        """
+        if self._history is None:
+            return
+        self._history.record(_arn_account(fn.arn), fn.arn, fn.name)
+        self._load_recent()
+        if self._facts:
+            self._draw_chips()
+
+    def _recent_note(self, fn: Function) -> str:
+        place = self._recent.get(fn.arn)
+        return f"opened {human_age(place.last)}" if place is not None else ""
+
     def _in_chip(self, f: _Facts, key: str) -> bool:
         m = f.metrics
-        return {"": True, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
+        return {"": True, "recent": f.fn.arn in self._recent, "changed": f.changed, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
                 "runtime": f.status.state in ("deprecated", "blocked", "ending"),
                 "public": any(t.public for t in f.triggers), "idle": bool(m is not None and not m.invocations)}[key]
 
@@ -409,8 +571,7 @@ class _FunctionsTab:
             n = sum(1 for f in facts if self._in_chip(f, key))
             if key and not n:
                 continue
-            tip = ("Show every function" if not key
-                   else f"Show only the functions that are {label.lower()} (click again for all)")
+            tip = _CHIP_TIPS.get(key, f"Show only the functions that are {label.lower()} (click again for all)")
             chips.append((self._chip_button(self._function_chips, key, tone, self._pick_chip), f"{label} {n:,}", tip,
                           key == self._chip))
         self._show_chips(self.chips, chips if facts else [])
@@ -422,6 +583,10 @@ class _FunctionsTab:
             return (f.fn.name.lower(), f.fn.region)
         if self._sort == "calls":
             return (calls,)
+        if self._sort == "trend":
+            recent = _recent(m, _utcnow()) if m is not None else None
+            failed_lately = recent[1] / recent[0] if recent and recent[0] else -1.0
+            return (failed_lately, recent[1] if recent else -1.0)
         if self._sort == "errors":
             return ((m.error_rate or 0.0) if m is not None else -1.0, m.errors if m is not None else -1.0)
         if self._sort == "duration":
@@ -430,7 +595,14 @@ class _FunctionsTab:
             return (f.cost if f.cost is not None else -1.0,)
         if self._sort == "called":
             return ((m.last_invoked.timestamp() if m is not None and m.last_invoked else 0.0),)
-        return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
+        return _problem_rank(f)
+
+    def _most_yours_first(self, facts: list[_Facts]) -> list[_Facts]:
+        """
+        The Recent chip's order, unless a column sorts: the functions you open most and most lately first.
+        """
+        rank = {arn: i for i, arn in enumerate(self._recent)}
+        return sorted(facts, key=lambda f: rank.get(f.fn.arn, len(rank)))
 
     def _refilter(self, renew: bool = False) -> None:
         facts = [f for f in self._facts.values() if self._in_chip(f, self._chip)] if self._chip else list(
@@ -448,6 +620,8 @@ class _FunctionsTab:
         if not self._query or self._sort != "problems":  # a search ranks its best match first, unless a column sorts
             facts = sorted(facts, key=lambda f: (f.fn.name.lower(), f.fn.region))
             facts = sorted(facts, key=self._sort_key, reverse=self._descending)
+        if self._chip == "recent" and self._sort == "problems":
+            facts = self._most_yours_first(facts)
         self._visible = facts
         self._offset = min(self._offset, max(0, (len(facts) - 1) // _FUNCTION_PAGE * _FUNCTION_PAGE))
         for key, button in self.column_buttons.items():

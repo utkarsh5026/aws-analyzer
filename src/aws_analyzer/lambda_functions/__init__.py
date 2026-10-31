@@ -32,6 +32,7 @@ Quick start
     ui.function_info("etl-nightly")                   # one function in plain English: triggers, access, cost, activity
     ui.errors("etl-nightly")                          # its errors in the last 24 hours, grouped by cause
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
+    ui.runs("etl-nightly", where="duration > 15s")    # its runs as rows: filter, sort, pick columns, group by hour
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
     ui.diff("etl-nightly")                            # what changed since its last published version: files, lines, settings
@@ -50,6 +51,7 @@ Quick start
     df = lam.overview(regions="all").to_df()          # one row per function
     detail = lam.describe("etl-nightly")              # FunctionDetail: .function, .triggers, .aliases, .metrics
     runs = lam.log_runs("etl-nightly").runs           # LogRun per call: its lines, status, run time, memory
+    table = lam.runs("etl-nightly", where="duration > 15s")  # RunTable: each run as fields, to filter, sort, group
 """
 
 from __future__ import annotations
@@ -62,7 +64,7 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
+    AccountLimits, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
     LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
@@ -72,15 +74,29 @@ from .analysis.functions import (
 )
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .analysis.overview import Overview
-from .analysis.findings import RECENT_DAYS, account_findings, function_findings, secret_like
-from .analysis.errors import classify_error, error_findings, group_errors, request_id_of
-from .analysis.logs import LogPage, LogRun, line_level, parse_report, split_runs
+from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
+from .analysis.errors import (
+    cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
+)
+from .analysis.logs import (
+    LogPage, LogRun, TimeBucket, line_level, parse_report, run_console_url, run_insights_query, run_timeline,
+    slow_cutoff, split_runs,
+)
 from .analysis.performance import percentile, performance_findings, suggest_memory
+from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
+from .analysis.runs import (
+    BUILTIN_FIELDS, FieldInfo, LoggedEvent, RunGroup, RunRow, RunTable, logged_event, run_fields, run_table,
+    runs_findings,
+)
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
 )
 from .analysis.source import find_symbol_in, read_sources, search_package, source_files
 from .analysis.versions import diff_findings, diff_packages, diff_settings, version_before
+from .analysis.changes import (
+    FunctionChanges, FunctionLook, cause_key, change_findings, function_changes, function_look, new_causes_finding,
+    new_error_causes,
+)
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
 from .analysis.codemap.findings import code_map_findings
@@ -90,6 +106,20 @@ from .view import LambdaView
 from .explorer.window import LambdaExplorer, explore
 
 __all__ = [
+    "runs_findings",
+    "run_table",
+    "run_fields",
+    "parse_query",
+    "looks_like_query",
+    "logged_event",
+    "RunTable",
+    "RunRow",
+    "RunQuery",
+    "RunGroup",
+    "QueryError",
+    "LoggedEvent",
+    "FieldInfo",
+    "BUILTIN_FIELDS",
     "CODE_STORAGE_LIMIT",
     "DAYS_PER_MONTH",
     "DOWNLOADS",
@@ -123,13 +153,17 @@ __all__ = [
     "CodeStep",
     "DailyUsage",
     "EnvRead",
+    "ChangeEffect",
+    "CodeFrame",
     "ErrorGroup",
     "ErrorReport",
     "EventField",
     "FileChange",
     "Function",
     "FunctionDetail",
+    "FunctionChanges",
     "FunctionMetrics",
+    "FunctionLook",
     "FunctionUrl",
     "GraphEdge",
     "GraphNode",
@@ -144,6 +178,7 @@ __all__ = [
     "LogGroup",
     "LogPage",
     "LogRun",
+    "TimeBucket",
     "Overview",
     "PackageDownload",
     "PackageSources",
@@ -158,7 +193,11 @@ __all__ = [
     "Version",
     "VersionDiff",
     "account_findings",
+    "cause_search",
+    "cause_key",
+    "change_findings",
     "classify_error",
+    "code_frames",
     "code_graph",
     "code_map_findings",
     "diff_findings",
@@ -167,7 +206,11 @@ __all__ = [
     "error_findings",
     "explore",
     "function_findings",
+    "change_effect",
+    "function_changes",
+    "function_look",
     "function_monthly_cost",
+    "failing_frame",
     "group_errors",
     "handler_file",
     "human_age",
@@ -183,6 +226,8 @@ __all__ = [
     "search_package",
     "source_files",
     "masked_config",
+    "new_causes_finding",
+    "new_error_causes",
     "package_file_name",
     "package_findings",
     "page_file_name",
@@ -204,6 +249,10 @@ __all__ = [
     "runtime_status",
     "search_rank",
     "secret_like",
+    "run_console_url",
+    "run_insights_query",
+    "run_timeline",
+    "slow_cutoff",
     "split_runs",
     "stream_version",
     "suggest_memory",

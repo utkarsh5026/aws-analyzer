@@ -9,11 +9,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
-from ..._kit.fmt import _count, _utcnow, human_age, human_money, human_size
+from ..._kit.fmt import _count, _fmt_dt, _utcnow, human_age, human_money, human_size
 
 from ..prices import LAMBDA_PRICES
 from ..helpers import GB, MAX_TIMEOUT, MB, MEMORY_STEPS, _in_days, _midnight, _pct, human_ms
-from ..models import AccountLimits, Function, FunctionDetail, FunctionMetrics, RuntimeStatus
+from ..models import AccountLimits, ChangeEffect, Function, FunctionDetail, FunctionMetrics, RuntimeStatus
 from .text import _cli, _reason, _region_flag, _window
 from .functions import runtime_status
 from .cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
@@ -150,6 +150,66 @@ def _longer(fn: Function) -> str:
     return f"aws lambda update-function-configuration {_cli(fn)} --timeout {_next_timeout(fn.timeout)}"
 
 
+CHANGE_BEFORE_DAYS = 7
+
+_CHANGE_JUMP = 3
+
+_CHANGE_ERRORS = 10
+
+_CHANGE_RATE = 0.01
+
+
+def change_effect(metrics: FunctionMetrics | None, changed: datetime | None, now: datetime | None = None
+                  ) -> ChangeEffect | None:
+    """
+    A function's calls and failed calls in the days before it was last changed (at most CHANGE_BEFORE_DAYS) and in
+    the days since, from CloudWatch's daily numbers (whole UTC days: the day of the change counts as after only when
+    nothing came after it yet). None for hourly numbers, a change outside the window, or no calls before it.
+    """
+    now = now or _utcnow()
+    if metrics is None or changed is None or metrics.period < 86400 or changed > now:
+        return None
+    change_day = _midnight(changed)
+    first_day = _midnight(now) - timedelta(days=math.ceil(metrics.days - 1e-6) - 1)
+    if change_day <= first_day:
+        return None
+    since = max(first_day, change_day - timedelta(days=CHANGE_BEFORE_DAYS))
+    before = [d for d in metrics.daily if since <= d.start < change_day]
+    after = [d for d in metrics.daily if d.start > change_day]
+    if not sum(d.invocations for d in after):
+        after = [d for d in metrics.daily if d.start >= change_day]
+    calls_before = sum(d.invocations for d in before)
+    if not calls_before:
+        return None
+    return ChangeEffect(changed, calls_before, sum(d.errors for d in before), sum(d.invocations for d in after),
+                        sum(d.errors for d in after), (change_day - since).days)
+
+
+def _change_findings(fn: Function, metrics: FunctionMetrics, detail: FunctionDetail, now: datetime
+                     ) -> list[tuple[str, str]]:
+    """
+    A warning when calls began to fail after the function was last changed: at least _CHANGE_ERRORS failed calls
+    since, at least _CHANGE_RATE of them, and _CHANGE_JUMP times the share before.
+    """
+    effect = change_effect(metrics, fn.last_modified, now)
+    if effect is None:
+        return []
+    after, before = effect.rate_after, effect.rate_before
+    jumped = after >= _CHANGE_JUMP * before and after - before >= _CHANGE_RATE
+    if effect.errors_after < _CHANGE_ERRORS or after < _CHANGE_RATE or not jumped:
+        return []
+    name = fn.name
+    look = (f"diff('{name}') shows what changed against the version before it"
+            if detail.versions else f"code('{name}') shows the code it runs now")
+    return [("warn", (
+        f"Its calls began to fail after it was last changed ({_fmt_dt(effect.changed, zone=True)}, "
+        f"{human_age(effect.changed, now)}): {_pct(after)} failed since ({_count(round(effect.errors_after))} of "
+        f"{_count(round(effect.calls_after))}), against {_pct(before)} in the {effect.days_before} days before "
+        f"(CloudWatch, by UTC day). The change may have broken it: {look}, and errors('{name}') groups the errors by "
+        "cause."
+    ))]
+
+
 def _usage_findings(
     fn: Function, metrics: FunctionMetrics, detail: FunctionDetail, prices: dict[str, float], now: datetime
 ) -> list[tuple[str, str]]:
@@ -186,6 +246,7 @@ def _usage_findings(
             f"{_count(round(errors))} of {_count(round(calls))} calls failed ({_pct(rate)}) in the last {window}"
             f"{last(metrics.last_error)}{rising}: errors('{name}') groups them by cause."
         )))
+    found += _change_findings(fn, metrics, detail, now)
     if metrics.throttles >= 1:
         found.append(("warn", (
             f"{_count(round(metrics.throttles))} calls were throttled in the last {window}"

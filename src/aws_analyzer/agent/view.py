@@ -1,8 +1,8 @@
 """
 AgentView: the agent's notebook UI. ask() shows the answer first, with the charts the agent drew for it (_Charts),
-then the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
+then its findings (what it found in the account, and what to do), the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
-View commands to look closer; transcript() and tools() show the questions so far and what the agent can call. A
+View commands to look closer, the ones its findings name first; transcript() and tools() show the questions so far and what the agent can call. A
 question that pauses before a big read shows what it would read instead, and go(), smaller() and skip() go on.
 
 Its reports sit in a box of the class _ROOT, which scopes its stylesheet's rules, and each title starts with
@@ -15,7 +15,7 @@ import base64
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import date, datetime, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import BotoCoreError
@@ -25,14 +25,17 @@ from .._bedrock.prices import _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _draws
 from .._kit.deps import _require
 from .._kit.errors import _Hint
-from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money, human_size
+from .._kit.fmt import _duration, _fmt_dt, _plural, _tz_label, _utcnow, _zone_name, human_money, human_size
 from .._kit.render import _base_css, _Look, _report_html
 from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next
+from .chats import ChatSummary
+from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
+from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
+from .runbooks import RUNBOOK_FILE, runbook_findings
 
 if TYPE_CHECKING:
     from .window import _AgentChat
@@ -248,7 +251,9 @@ class AgentView(_BaseView):
         "💬 Ask": ("chat", "ask", "new_conversation"),
         "✋ Big reads": ("go", "smaller", "skip"),
         "🔎 Look back": ("transcript", "save_charts"),
-        "🧰 What it can do": ("tools", "use_model"),
+        "🗂 Saved chats": ("chats", "open_chat", "rename_chat", "delete_chat"),
+        "🧠 Memory": ("memory", "forget", "forget_all"),
+        "🧰 What it can do": ("tools", "runbooks", "use_model"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -258,6 +263,7 @@ class AgentView(_BaseView):
         ("ask('Did the files uploaded to acme-raw last night get processed?')", "S3 and Lambda together"),
         ("AgentView(python='local').ask('Chart the CSVs in s3://acme-raw/sales/ by month')",
          "its own Python over your files, with charts"),
+        ("AgentView(chats=True).chats()", "your earlier chats, by title, to carry one on"),
         ("tools()", "what the agent can call, its model and its budget"),
     )
     _PROGRESS = ("Thinking", "steps")
@@ -426,8 +432,9 @@ class AgentView(_BaseView):
 
     def _checked_blocks(self, answer: AgentAnswer) -> list[Any]:
         """
-        What an answer's report shows under the answer: the cards, the findings, the plan it worked to, each tool call, the AWS reads, what
-        it cost and the commands to look closer.
+        What an answer's report shows under the answer: the cards, the findings (what the agent found in the account,
+        then what to know about how it got the answer), the plan it worked to, each tool call, the AWS reads, what
+        it cost and the commands to look closer (the calls its findings name first).
         """
         core = self.core
         failed = sum(1 for c in answer.calls if c.error)
@@ -442,8 +449,9 @@ class AgentView(_BaseView):
             ("Tokens", tokens),
             ("Model cost (est.)", cost),
             ("Time", _duration(answer.seconds)),
+            *([("Runbook", ", ".join(answer.runbooks))] if answer.runbooks else []),
         ]))
-        blocks.append(_Findings(answer_findings(answer, core.budget)))
+        blocks.append(_Findings([*reply_findings(answer), *answer_findings(answer, core.budget)]))
         if answer.plan:
             blocks.append(_Plan(answer.plan))
         if answer.calls:
@@ -539,9 +547,13 @@ class AgentView(_BaseView):
                     ("Model cost (est.)", human_money(sum(costs)) if costs else "unknown")]),
         ]
         threads: dict[str, int] = {}
+        titles = self._chat_titles()
         for answer in history:
             number = threads.setdefault(answer.thread, len(threads) + 1)
-            sub = f"conversation {number} · {_plural(len(answer.calls), 'tool call')} · {_duration(answer.seconds)}"
+            chat = f"conversation {number}"
+            if answer.thread in titles:
+                chat = f"{chat}: {titles[answer.thread]}"
+            sub = f"{chat} · {_plural(len(answer.calls), 'tool call')} · {_duration(answer.seconds)}"
             if answer.cost is not None:
                 sub += f" · {human_money(answer.cost)}"
             blocks.append(_Title(answer.question, sub))
@@ -550,6 +562,14 @@ class AgentView(_BaseView):
             if answer.charts:
                 blocks.append(_Charts(answer.charts))
         self._show(blocks)
+
+    def _chat_titles(self) -> dict[str, str]:
+        """
+        Each saved conversation's title, by thread (with chats=True; empty otherwise).
+        """
+        if self.core.chats_file is None:
+            return {}
+        return {chat.thread: chat.title for chat in self.core.chats()}
 
     @_friendly_errors
     def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> None:
@@ -564,6 +584,243 @@ class AgentView(_BaseView):
         self._show([_Title("Charts saved", f"{_plural(len(paths), 'file')} in {paths[0].parent}"),
                     _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
+
+    @_friendly_errors
+    def runbooks(self) -> None:
+        """
+        The agent's runbooks: the step-by-step guides it reads when a question needs one (each one's name, what it's
+        for, where it's from and the toolkits it needs), and any that couldn't be loaded and why. Add your own with
+        AgentView(runbooks='~/team-runbooks'): a folder of runbook folders, each with a SKILL.md.
+        """
+        kit = self.core.runbook_kit
+        if kit is None:
+            self._show([_Title("Runbooks"), _Note("Runbooks are off for this agent (runbooks=False): "
+                                                  "AgentView(runbooks=True) gives it the built-in ones.")])
+            return
+        shelf, offered = kit.shelf, kit.offered
+        toolkits = [t.name for t in self.core.toolkits]
+        theirs = [s for s in shelf.sources if s.label != "built-in"]
+        blocks: list[Any] = [
+            _Title("Runbooks", f"{_plural(len(offered), 'runbook')} the agent can follow"),
+            _Cards([("Offered", f"{len(offered):,}"), ("Found", f"{len(shelf.runbooks):,}"),
+                    ("Sources", ", ".join(s.label for s in shelf.sources) or "none"),
+                    ("Not loaded", f"{len(shelf.problems):,}", *(["warn"] if shelf.problems else []))]),
+            _Findings(runbook_findings(shelf, toolkits), empty="Every runbook loaded, and the agent can follow them all."),
+        ]
+        rows = [[book.name, book.description, book.source, " ".join(book.toolkits) or "any",
+                 "yes" if book in offered else "no"] for _name, book in sorted(shelf.runbooks.items())]
+        if rows:
+            blocks.append(_Table(["Runbook", "What it's for", "From", "Needs", "Offered"], rows, prose_cols=(1,)))
+        folders = [[s.label, str(s.folder)] for s in shelf.sources]
+        blocks.append(_Table(["Source", "Folder"], folders, title="Where they're read from", path_cols=(1,),
+                             collapsed=True, sortable=False))
+        blocks.append(_Note(f"The model sees each runbook's name and description, and reads the whole {RUNBOOK_FILE} "
+                            "(read_runbook) only when a question matches it. A runbook can't widen what the agent "
+                            "does: it still only reads."))
+        nxt = [("ask('Which Lambda failed last night?')", "a question a runbook covers")]
+        if not theirs:
+            nxt.append(("AgentView(runbooks='~/team-runbooks')", "add your team's runbooks"))
+        nxt.append(("tools()", "every tool the agent can call"))
+        blocks.append(_Next(nxt))
+        self._show(blocks)
+
+    def _learned_text(self, note: Note, today: date) -> str:
+        """
+        When a note was learned, as its table shows it: '2026-10-27 (today)', '2026-08-01 (87d ago)', or 'not dated'.
+        """
+        days = note.age_days(today)
+        if note.learned is None or days is None:
+            return "not dated"
+        when = "today" if days <= 0 else f"{days:,}d ago"
+        return f"{note.learned.isoformat()} ({when})"
+
+    def _memory_blocks(self, state: MemoryState) -> list[Any]:
+        """
+        The memory() report's blocks for memory that's on: cards, findings, the notes, the file as it's stored.
+        """
+        today = self.core._today()
+        title = _Title("What the agent remembers", f"account {state.account} · {state.path}")
+        if not state.notes:
+            return [title, _Note("Nothing noted yet: the agent keeps a note when it finds a lasting fact about your "
+                                 "account (where a function runs, what a bucket is for), so the next conversation "
+                                 "doesn't look it up again. Ask it something: ask('Which Lambda failed last night?').")]
+        ages = [days for note in state.notes if (days := note.age_days(today)) is not None]
+        findings = memory_findings(state, today)
+        old_tone = ("warn",) if any(level == "warn" for level, _ in findings) else ()
+        rows = [[note.text, self._learned_text(note, today)] for note in state.notes]
+        return [
+            title,
+            _Cards([("Notes", f"{len(state.notes):,}"),
+                    ("Size", f"{human_size(state.size)} of {human_size(state.limit)}"),
+                    ("Oldest", f"{max(ages):,}d ago" if ages else "not dated", *old_tone),
+                    ("Account", state.account)]),
+            _Findings(findings, empty="Every note is recent, and there's room for more."),
+            _Table(["Note", "Learned"], rows, title="Notes, in the order it wrote them", sortable=False),
+            _Text(state.text, title="/memories/AGENTS.md, as the agent reads it", collapsed=True),
+        ]
+
+    def _memory_next(self, state: MemoryState) -> _Next:
+        """
+        The memory() report's last block: clearing a note, every note, and a question that starts from them.
+        """
+        return _Next([(f"forget('{match_words(state.notes[0])}')", "clear the notes with these words"),
+                      ("forget_all()", "clear every note about this account"),
+                      ("ask('Which Lambda failed last night?')", "an answer that starts from these notes")])
+
+    @_friendly_errors
+    def memory(self) -> None:
+        """
+        What the agent remembers about your account between conversations (with memory=True): each note it kept,
+        like "orders-etl runs in eu-west-1", and when it learned it, which notes are old enough to check, and how full
+        its memory is. Your own notes= file is shown too.
+        """
+        core = self.core
+        blocks: list[Any] = []
+        state: MemoryState | None = None
+        if core.memory_file is None:
+            blocks += [_Title("What the agent remembers"),
+                       _Note("The agent's memory is off: each conversation starts from nothing but your notes=. "
+                             "AgentView(memory=True) lets it keep notes about your account (where a function runs, "
+                             "what a bucket is for) in ~/.cache/aws-analyzer/agent/memory.sqlite, one set per AWS "
+                             "account, so it doesn't look them up again.")]
+        else:
+            state = core.memories()
+            blocks += self._memory_blocks(state)
+        if is_notes_file(core.notes):
+            blocks.append(_Text(notes_text(core.notes), title=f"Your notes ({core.notes}), read for each new "
+                                                              "conversation", collapsed=True))
+        if state is not None and state.notes:
+            blocks.append(self._memory_next(state))
+        self._show(blocks)
+
+    @_friendly_errors
+    def forget(self, match: str) -> None:
+        """
+        Clears the agent's notes that hold these words (any case), and lists what it cleared: forget('orders-etl').
+        The next conversation starts without them; the one going on still has them, until new_conversation().
+        """
+        dropped = self.core.forget(match)
+        if not dropped:
+            self._show([_Note(f"No note holds {match!r}: memory() lists them all.", "warn")])
+            return
+        self._show([_Title("Forgotten", _plural(len(dropped), "note")),
+                    _Table(["Note"], [[note.text] for note in dropped], sortable=False),
+                    _Note("The next conversation starts without them (new_conversation() starts one now).", "ok")])
+
+    @_friendly_errors
+    def forget_all(self) -> None:
+        """
+        Clears every note the agent kept about this AWS account. Notes about other accounts, and your notes= file,
+        stay as they are.
+        """
+        count = self.core.forget_all()
+        self._show([_Note(f"Cleared {_plural(count, 'note')} about account {self.core.account()}: the next "
+                          "conversation starts from nothing but your notes=.", "ok")])
+
+    def _chats_off(self) -> list[Any]:
+        return [_Title("Saved chats"),
+                _Note("Chats aren't saved: each conversation ends with the kernel. AgentView(chats=True) keeps every "
+                      "one on this machine (~/.cache/aws-analyzer/agent/chats.sqlite), titled from its first "
+                      "question, so you can open it again and carry on, even after a restart.")]
+
+    def _chat_rows(self, saved: list[ChatSummary]) -> list[list[Any]]:
+        current = self.core.thread
+        rows = []
+        for number, chat in enumerate(saved, 1):
+            title = f"{chat.title} (open)" if chat.thread == current else chat.title
+            cost = human_money(chat.cost) if chat.cost is not None else "unknown"
+            rows.append([f"{number}", title, f"{chat.questions:,}", _fmt_dt(chat.updated), _fmt_dt(chat.started),
+                         short_model(chat.model) if chat.model else "", cost, chat.thread])
+        return rows
+
+    @_friendly_errors
+    def chats(self) -> None:
+        """
+        Your saved chats (with chats=True), the one you asked in last first: each one's title, how many questions it
+        holds, when it was last asked in, the model and what it cost, and its number to open it by:
+        open_chat(1) carries on the newest. Titles come from each chat's first question until you rename one.
+        """
+        core = self.core
+        if core.chats_file is None:
+            self._show(self._chats_off())
+            return
+        saved = core.chats()
+        if not saved:
+            self._show([_Title("Saved chats", str(core.chats_file)),
+                        _Note("No chats saved yet: each conversation is saved, with its first question as its title, "
+                              "once its first question is answered. Ask one: ask('Which Lambda failed last night?')."),
+                        _Next([("ask('Which Lambda failed last night?')", "a first question, saved as a chat")])])
+            return
+        costs = [chat.cost for chat in saved if chat.cost is not None]
+        blocks: list[Any] = [
+            _Title("Saved chats", f"{_plural(len(saved), 'chat')} · {core.chats_file}"),
+            _Cards([("Chats", f"{len(saved):,}"), ("Questions", f"{sum(c.questions for c in saved):,}"),
+                    ("Last asked", _fmt_dt(saved[0].updated)),
+                    ("Model cost (est.)", human_money(sum(costs)) if costs else "unknown")]),
+            _Table(["#", "Title", "Questions", f"Last asked ({_tz_label()})", f"Started ({_tz_label()})", "Model",
+                    "Cost (est.)", "ID"], self._chat_rows(saved), sortable=False),
+        ]
+        newest = saved[0]
+        nxt = [("open_chat(1)", f"carry on {newest.title!r}"),
+               ("rename_chat('Nightly ETL failures', chat=1)", "give it a title of your own"),
+               ("new_conversation()", "start a new chat")]
+        blocks.append(_Next(nxt))
+        self._show(blocks)
+
+    @_friendly_errors
+    def open_chat(self, chat: str | int) -> None:
+        """
+        Opens a saved chat again and shows it, question by question, so your next ask() carries it on where it left
+        off, even after the kernel restarted: open_chat(1) for the newest, or its title's words,
+        open_chat('nightly etl'). An open chat window shows it too.
+        """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then open the chat.")
+        picked = self.core.open_chat(chat)
+        if window is not None:
+            window.opened()
+        answers = [answer for answer in self.core.history if answer.thread == picked.thread]
+        blocks: list[Any] = [_Title(picked.title, f"saved chat · {_plural(picked.questions, 'question')} · last "
+                                                  f"asked {_fmt_dt(picked.updated, zone=True)}")]
+        for answer in answers:
+            blocks.append(_Title(answer.question, _fmt_dt(answer.asked) if answer.asked else ""))
+            blocks.append(_Answer(answer.text) if answer.text else
+                          _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
+            if answer.charts:
+                blocks.append(_Charts(answer.charts))
+        blocks.append(_Note("The chat is open: your next ask() follows its last question.", "ok"))
+        blocks.append(_Next([("ask('What changed since then?')", "a follow-up in this chat"),
+                             ("rename_chat('Nightly ETL failures')", "give it a title of your own"),
+                             ("chats()", "every saved chat")]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def rename_chat(self, title: str, *, chat: str | int | None = None) -> None:
+        """
+        Gives a saved chat a title of your own: the chat going on, or the one chat= names (its number in chats(), or
+        its title's words): rename_chat('Nightly ETL failures').
+        """
+        renamed = self.core.rename_chat(title, chat)
+        if self.window is not None:
+            self.window.renamed()
+        self._show([_Note(f"Renamed: the chat is now {renamed.title!r}.", "ok")])
+
+    @_friendly_errors
+    def delete_chat(self, chat: str | int) -> None:
+        """
+        Removes a saved chat from this machine (its number in chats(), or its title's words): its questions and
+        answers, and the conversation the model would carry on. Removing the chat going on starts a new one.
+        """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then delete.")
+        was_open = self.core.thread
+        removed = self.core.delete_chat(chat)
+        if window is not None and removed.thread == was_open:
+            window.cleared()
+        self._show([_Note(f"Deleted {removed.title!r} ({_plural(removed.questions, 'question')}): chats() lists the "
+                          "rest.", "ok")])
 
     def _budget_rows(self) -> list[list[str]]:
         """
@@ -605,6 +862,8 @@ class AgentView(_BaseView):
                 ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
                 ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
             ]
+        if core.memory_file is not None:
+            limits.append(["Notes", human_size(budget.memory_bytes), "a note that would go past it isn't kept"])
         if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
             limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb, file_chunks and answer_kb stop running"])
         if core.ask_more:
@@ -631,7 +890,7 @@ class AgentView(_BaseView):
         except (ValueError, BotoCoreError):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
-            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits) + ", read-only"),
+            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits if t.name != "runbooks") + ", read-only"),
             _Cards([("Model", model, *([] if is_set_up else ["warn"])), ("Provider", provider),
                     ("Regions", regions), ("Time zone", _zone_label(core.zone)), ("Tools", f"{len(core.tools())}")]),
         ]
@@ -652,6 +911,8 @@ class AgentView(_BaseView):
         blocks.append(_Note(
             "Sent to the model: your question and what the tools return (names, settings, counts, error messages and "
             "log lines, with anything that looks like a key or password hidden)." + (f" {never}" if never else "")
+            + (" With memory=, its notes about the account go too, at the start of each conversation."
+               if core.memory_file is not None else "")
             + place + stay))
         together = ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together")
         if has_kb:

@@ -38,6 +38,13 @@ Quick start
     agent.new_conversation()                             # forget it
     agent.tools()                                        # what it can call, its model and its budget
     agent.transcript()                                   # every question and answer so far, with their cost
+    agent = AgentView(memory=True, notes="AGENTS.md")    # it keeps notes between conversations; yours from a file
+    agent.memory()                                       # what it remembers about this account
+    agent.forget("orders-etl")                           # clear the notes about it
+    agent = AgentView(chats=True)                        # every chat saved on this machine, with a title
+    agent.chats()                                        # your earlier chats, newest first
+    agent.open_chat(1)                                   # carry on the newest, even after a restart
+    agent.rename_chat("Nightly ETL failures")            # a title of your own for the chat going on
     agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
     agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
     agent.save_charts()                                  # those charts as files, in agent-charts/
@@ -45,7 +52,7 @@ Quick start
     agent.smaller()                                      # ... or only the smaller part it named
     agent.skip()                                         # ... or answer without it
 
-    answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .calls, .aws_calls, .cost
+    answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .findings, .calls, .cost
     agent.core.ask("Which functions are slow?", on_step=print)   # each AgentStep as it happens
 
 How it's built
@@ -65,9 +72,18 @@ One concern per module, so a new service's tools or a new agent capability goes 
     prompt.py        The system prompt (shared rules, then each toolkit's section) and each question's time line.
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
-    harness.py       The agent loop: deepagents built once, and one question streamed through it.
+    harness.py       The agent loop: deepagents built once, and one question streamed through it, ending in the
+                     model's reply (its final_answer: the answer and its findings).
+    memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
+                     deepagents StoreBackend in a local SQLite file, secrets hidden, one set per AWS account.
+    chats.py         The saved chats (chats=True): every conversation kept with a title in a local SQLite file, its
+                     answers as JSON and LangGraph's checkpoints, so a chat opened again carries on.
+    runbooks/        Step-by-step guides for common problems (runbooks=): each a folder with a SKILL.md, the
+                     built-in ones beside its __init__.py (which reads them), offered to the model by name and
+                     description and read whole through toolkits/runbook_tools.py's read_runbook.
     answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
-                     does, told as it happens) and BigRead (what a tool asks before a big read), and the pure findings
+                     does, told as it happens), BigRead (what a tool asks before a big read) and AgentFinding (what
+                     the model found, from its reply: REPLY_SCHEMA, parse_reply, checked_call), and the pure findings
                      and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
@@ -81,7 +97,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      sandboxes/   The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
                                   (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
-                     (chat.py), and its ⚙ model panel (model_panel.py).
+                     (chat.py), its 🗂 chats panel (chats_panel.py), ⚙ model panel (model_panel.py) and 🧠 memory panel
+                     (memory_panel.py).
 """
 
 from __future__ import annotations
@@ -89,16 +106,21 @@ from __future__ import annotations
 from .analyzer import AgentAnalyzer
 from .answers import (
     CHOICES,
+    REPLY_SCHEMA,
     AgentAnswer,
+    AgentFinding,
     AgentStep,
     BigRead,
     PlanStep,
     ToolCall,
     answer_findings,
     answer_next,
+    checked_call,
     choice_of,
     limit_read,
     parse_plan,
+    parse_reply,
+    reply_findings,
 )
 from .budget import Budget
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
@@ -114,6 +136,8 @@ from .llm import (
     model_rates,
     pick_provider,
 )
+from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
+from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
 from .prompt import asked_at, system_prompt
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
@@ -164,6 +188,8 @@ from .toolkits.lambda_tools import (
 from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
 from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
+from .toolkits.runbook_tools import RunbookToolkit, summarize_runbook
+from .runbooks import Runbook, RunbookProblem, RunbookShelf, load_runbooks, parse_front_matter, runbook_findings
 from .toolkits.s3_listing import count_read, listing_read, save_read
 from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
@@ -173,6 +199,8 @@ __all__ = [
     "AgentView",
     "AgentAnswer",
     "AgentStep",
+    "AgentFinding",
+    "REPLY_SCHEMA",
     "PlanStep",
     "ToolCall",
     "BigRead",
@@ -195,6 +223,14 @@ __all__ = [
     "Arrivals",
     "TriggerLink",
     "PythonToolkit",
+    "RunbookToolkit",
+    "Runbook",
+    "RunbookProblem",
+    "RunbookShelf",
+    "load_runbooks",
+    "parse_front_matter",
+    "runbook_findings",
+    "summarize_runbook",
     "LocalSandbox",
     "PYODIDE_VERSION",
     "Workspace",
@@ -218,10 +254,26 @@ __all__ = [
     "pick_provider",
     "model_rates",
     "hide_secrets",
+    "DEFAULT_MEMORY",
+    "MemoryState",
+    "Note",
+    "parse_notes",
+    "stamp_notes",
+    "drop_notes",
+    "memory_findings",
+    "DEFAULT_CHATS",
+    "ChatSummary",
+    "chat_title",
+    "find_chats",
+    "answer_record",
+    "answer_from_record",
     "asked_at",
     "system_prompt",
     "answer_findings",
     "answer_next",
+    "reply_findings",
+    "parse_reply",
+    "checked_call",
     "parse_plan",
     "answer_cost",
     "explain_model_error",

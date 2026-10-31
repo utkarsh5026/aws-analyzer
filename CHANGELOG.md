@@ -11,10 +11,140 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🧭 **S3 explorer: from a file to your code, and more reports** ([#180](https://github.com/utkarsh5026/aws-analyzer/pull/180))
+  - **🐍 Use in Python** writes the lines that load the file in a notebook cell, for its format; on ticked files, one DataFrame.
+  - **‹ ›** beside ✕ show the file before and after in the list, the same way, without going back to it.
+  - **More ▾** on a folder: largest, newest and oldest files, what's inside them, copies, unfinished uploads, and in a versioned bucket old versions, deleted files and a file's **🕘 Versions**.
+
+- ⚡ **Lambda: ask for runs by their fields** ([#181](https://github.com/utkarsh5026/aws-analyzer/pull/181))
+  - `runs("orders-etl", since="today", where="duration > 15s and cold")`: each run as a row, sorted, grouped by hour.
+  - Queries reach your JSON logs' fields and the event when it's logged (`size > 30MB`); `core.runs()` gives a table.
+  - The explorer's Logs search box takes the same queries, with a sort menu, **Today**, and each run's logged event.
+
+## [0.41.0] - 2026-10-30
+
+### Added
+
+- ⚡ **Lambda explorer: from an error to its code** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - On the Errors tab, click a cause for the runs it failed in: the Logs tab, searched for it.
+  - A failed run's traceback has a button that opens the failing line in the Code tab, shaded.
+  - `code_frames()` / `failing_frame()` read a traceback's lines; `cause_search()` says what finds a cause's runs.
+
+- ⚡ **Lambda: errors put down to the last change** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - A warning when calls began to fail after the function was last changed, with the error rate before and since.
+  - The explorer's Overview charts mark the day of the change; its Logs tab draws a line between the runs after and before.
+  - `change_effect()` compares a function's days before and after a change.
+
+- ⚡ **Lambda explorer: timeline, slowest runs, code to reopen** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The Logs tab draws its runs over time, red where they failed; click a bar for only those runs. **Slowest 10%** picks out the slow ones.
+  - **⧉ Copy as code** holds the one call that opens it as it is now: `explore('orders-etl', tab='logs', since='3h', search='KeyError')`.
+  - A function you open again within 5 minutes shows at once; ↻ Refresh reads it again.
+
+- ⚡ **Lambda explorer: run links, slim header, quicker opening** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - An open run has its request ID and a Logs Insights query to copy, and opens in the AWS console.
+  - With a function picked, the header is one line of its numbers, so the tabs get the height.
+  - The function at the top of the problems is read in the background, so it opens at once.
+
+### Changed
+
+- ⚡ **Lambda explorer: quicker to see what's wrong** ([#172](https://github.com/utkarsh5026/aws-analyzer/pull/172))
+  - The function list draws each function's last 14 days of calls, the failed part in red, and says what's wrong with it under its name.
+  - A time range picked in the Logs, Errors or Performance tab is the range all three read.
+  - Every card names its window (`Error rate · 30d`), and a Logs tab cut at 3,000 lines says it shows the newest runs.
+
+## [0.40.0] - 2026-10-30
+
+### Added
+
+- 🧭 **S3 explorer: recent folders, one click away** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Recent** row over your buckets; **↩** picks up where you left off.
+  - `S3Explorer(history=False)` or `AWS_ANALYZER_HISTORY=off` turns it off; `x.forget_recent()` clears it.
+
+- ⚡ **Lambda explorer: your recent functions first** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Recent** chip, and the function field lists the ones you've opened first.
+  - `explore(history=False)` turns it off; `x.forget_recent()` clears it.
+
+- 🧭 **S3 explorer: what's new since your last visit** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A folder's overview counts the files new or changed since you were last there, and how its file count moved.
+  - **●** marks those files in the list.
+
+- ⚡ **Lambda explorer: what changed since your last look** ([#174](https://github.com/utkarsh5026/aws-analyzer/pull/174))
+  - A **Changed** chip: functions whose code or settings changed, or whose errors went up, since you last opened them.
+  - The Overview says what changed; the Errors tab names errors it hadn't seen on your last look.
+
+## [0.39.0] - 2026-10-30
+
+### Changed
+
+- ⚡ **Lambda explorer: the chat windows' terminal look** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - The same monospace font and code-editor colours as `chat()` and the S3 explorer, with flat outlined buttons and underlined tabs.
+  - Reports in its tabs follow `set_theme()`, so the Overview or Errors tab looks like the same command run in a cell.
+
+### Fixed
+
+- 🧭 **S3 explorer: the terminal colours in dark mode** ([#173](https://github.com/utkarsh5026/aws-analyzer/pull/173))
+  - In a dark JupyterLab or VS Code, the keyboard focus outline and link buttons kept the old blue; they now follow the terminal look.
+
+## [0.38.0] - 2026-10-30
+
+### Added
+
+- ⚡ **Lambda explorer: logs between any two times** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - The Logs tab's time range has **Custom range…**: pick From and To on a calendar, then **Show runs**.
+  - Leave To empty to read up to now; times are in the reports' time zone.
+  - From code: `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")`.
+
+- ⚡ **Lambda explorer: a progress bar while logs are read** ([#170](https://github.com/utkarsh5026/aws-analyzer/pull/170))
+  - Reading or searching the Logs tab's time range fills a bar: how much is done, how far back it has read, the lines found.
+  - An empty range says so: "Nothing logged in … · pick another time range above" ([#171](https://github.com/utkarsh5026/aws-analyzer/pull/171)).
+
+### Changed
+
+- 🧭 **S3 explorer: the chat windows' terminal look** ([#169](https://github.com/utkarsh5026/aws-analyzer/pull/169))
+  - The same monospace font and code-editor colours as `chat()`, with an `s3://` path that highlights the open folder.
+  - Reports in its right pane follow `set_theme()`, so a preview looks like the same command run in a cell.
+
+## [0.37.0] - 2026-10-28
+
+### Added
+
+- 🧰 **Free the disk: list and remove what aws-analyzer saved** ([#164](https://github.com/utkarsh5026/aws-analyzer/pull/164))
+  - `local_files()` lists what aws-analyzer saved on this machine: S3 and Lambda downloads, the agent's charts, the sandbox's cache.
+  - `clean_up()` removes what comes back by itself; `clean_up("all")` the charts too; `dry_run=True` only shows what would go.
+  - Only folders aws-analyzer made: one without its `.gitignore`, or that holds the notebook, stays.
+
+- 🤖 **Agent: saved chats, each with a title** ([#165](https://github.com/utkarsh5026/aws-analyzer/pull/165))
+  - `AgentView(chats=True)` saves every conversation on this machine, titled from its first question.
+  - `chats()` lists them; `open_chat(1)` carries one on, even after a restart; `rename_chat()` / `delete_chat()`.
+  - The chat window's 🗂 chats does the same by clicking, and its header shows the open chat's title.
+
+## [0.36.0] - 2026-10-27
+
+### Added
+
+- 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
+  - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
+  - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
+  - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
+
+- 🤖 **Agent: runbooks it reads when needed** ([#162](https://github.com/utkarsh5026/aws-analyzer/pull/162))
+  - Step-by-step guides for common problems; it reads one only when the question matches it, and says which.
+  - Three built in (`lambda-failing`, `s3-trigger-not-firing`, `kb-answer-wrong`); `AgentView(runbooks="~/team-runbooks")` adds yours.
+  - `runbooks()` lists them and any that didn't load; `runbooks=False` turns them off.
+
+## [0.35.0] - 2026-10-27
+
+### Added
+
 - 🤖 **Agent: asks before going past a limit** ([#156](https://github.com/utkarsh5026/aws-analyzer/pull/156))
   - A question that uses up a limit (tool calls, time, cost, Python runs, searches, charts, workspace size) asks to raise it for that question.
   - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
   - Go, smaller or skip, as for big reads; `AgentView(ask_more=False)` never asks.
+
+- 🤖 **Agent: remembers your account between conversations** ([#160](https://github.com/utkarsh5026/aws-analyzer/pull/160))
+  - `AgentView(memory=True)`: it keeps dated notes like "orders-etl runs in eu-west-1" and starts from them next time.
+  - `memory()` or the chat window's 🧠 memory shows them; `forget('orders-etl')`, a note's ✕ or `forget_all()` clears them.
+  - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
 
 ## [0.34.0] - 2026-10-26
 
@@ -975,7 +1105,14 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.40.0...v0.41.0
+[0.40.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...v0.40.0
+[0.39.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...v0.39.0
+[0.38.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...v0.38.0
+[0.37.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...v0.37.0
+[0.36.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...v0.36.0
+[0.35.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...v0.32.0

@@ -13,6 +13,8 @@ The code every analyzer shares, written once: each service module imports what i
     analyzer `_BaseAnalyzer`, which every <Service>Analyzer subclasses (session, prices, clients made once)
     highlight source code as HTML: Python and JSON with their tokens in colour
     jsontree  JSON as a tree you can fold (`_JsonTree`): S3's .json previews and Lambda's configuration
+    local_files  what aws-analyzer saved on this machine (downloads folders, the agent's charts, the sandbox's cache),
+             found and removed, only where it made them; housekeeping draws them: local_files(), clean_up()
     window   what the notebook windows share: `_Window` and `_Explorer` (errors said in the window, AWS read in the
              background, the status line, tabs), `@_window_errors`, the searchable `_Picker`, `_row_button`, ...
 

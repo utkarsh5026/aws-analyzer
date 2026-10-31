@@ -58,6 +58,7 @@ from .blocks.walk import _Walk
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
+from .blocks.runs import _RunsLayout, _runs_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -272,7 +273,7 @@ class LambdaView(_BaseView):
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
-        "🩺 When something goes wrong": ("errors", "logs", "performance"),
+        "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
     }
@@ -769,8 +770,8 @@ class LambdaView(_BaseView):
     def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
                        for_window: bool = False) -> list[Any]:
         """
-        errors()'s report, as blocks; for_window=True leaves out the newest error lines (the explorer lists them as
-        runs to click).
+        errors()'s report, as blocks; for_window=True leaves out the errors by cause and the newest error lines (the
+        explorer lists them as lines to click).
         """
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
@@ -805,7 +806,7 @@ class LambdaView(_BaseView):
         empty = (f"No errors in the last {window}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
         blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
-        if report.groups:
+        if report.groups and not for_window:
             lines = sum(g.count for g in report.groups)
             blocks.append(_Table(
                 ["Cause", "Times", "Last", "First", "Example"],
@@ -814,13 +815,12 @@ class LambdaView(_BaseView):
                 bars=[_share(g.count, lines) for g in report.groups], bar_label="Share",
                 title="Errors by cause (from its log lines: a failed call can log more than one)",
             ))
-            if not for_window:
-                blocks.append(_Table(
-                    [f"Time ({_tz_label()})", "Request ID", "Line"],
-                    [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
-                     for e in report.newest],
-                    title="The newest error lines", max_rows=0,
-                ))
+            blocks.append(_Table(
+                [f"Time ({_tz_label()})", "Request ID", "Line"],
+                [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
+                 for e in report.newest],
+                title="The newest error lines", max_rows=0,
+            ))
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)
         if newest is not None:
@@ -954,6 +954,41 @@ class LambdaView(_BaseView):
             steps.append((self._call_for("logs", fn, since="24h"), "the last 24 hours"))
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def runs(
+        self,
+        name: str,
+        *,
+        since: Any = "24h",
+        where: str | None = None,
+        sort: Any = None,
+        columns: Any = None,
+        group_by: str | None = None,
+        fields: dict[str, str] | None = None,
+        n: Any = 50,
+        region: str | None = None,
+        limit: Any = 10_000,
+    ) -> None:
+        """
+        A function's runs in the last 24 hours, one row each: status, start, run time, memory, cold start and what it
+        logged. where='duration > 15s and cold' keeps the runs that match (also status, memory, error ~ KeyError, or
+        any field its JSON logs or logged event carry: event.Records.s3.object.size > 30MB), sort='-duration' puts
+        the longest first, columns=[...] picks what each row shows, group_by='hour' sums them up per hour (or per
+        error_type, version or any field), and since='today' or '7d' reads another range.
+        """
+        n = _as_int(n, "n")
+        limit = _as_count(limit, "limit")
+        with self._progress("Reading runs", unit="lines") as tick, self._named(name, region):
+            table = self.core.runs(name, since=since, where=where, sort=sort, fields=fields, limit=limit,
+                                   region=region, progress=tick)
+        fn = table.function
+        chosen = [columns] if isinstance(columns, str) else list(columns) if columns else None
+        blocks = _runs_blocks(
+            table, call=lambda command, **kwargs: self._call_for(command, fn, **kwargs),
+            since_arg=_since_arg(since, "24h"), layout=_RunsLayout(chosen, group_by, n))
+        blocks[1:1] = self._log_notes(table.errors, fn, fn.log_group)
         self._show(blocks)
 
     @_friendly_errors
@@ -1349,13 +1384,14 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def explore(self, name: str | None = None, *, tab: str | None = None, region: str | None = None,
-                height: int | str | None = None) -> None:
+                height: int | str | None = None, history: bool | str = True) -> None:
         """
         The explorer window: every function in the region to click through, and for the one you pick, how it's
         doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
         in), its errors grouped by cause, its run times, the code in its package and every setting. Needs Jupyter and
         ipywidgets; view.explorer is the window. name opens one function, on tab= 'logs', 'errors', 'performance',
-        'code' or 'settings'; region='all' lists every region.
+        'code' or 'settings'; region='all' lists every region. history=False: don't remember the functions you open
+        (the Recent chip).
         """
         if not self.use_html:
             raise _Hint(
@@ -1365,4 +1401,5 @@ class LambdaView(_BaseView):
         _require("ipywidgets", "The explorer window")
         from .explorer.window import LambdaExplorer
 
-        self.explorer = LambdaExplorer(name, tab=tab, region=region, view=self, height=height, mode="widgets")
+        self.explorer = LambdaExplorer(name, tab=tab, region=region, view=self, height=height, mode="widgets",
+                                      history=history)

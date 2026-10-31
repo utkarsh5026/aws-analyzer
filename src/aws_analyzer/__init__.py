@@ -33,6 +33,9 @@ Quick start
     from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
     AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
 
+    from aws_analyzer import clean_up        # free the disk: remove the downloads and the agent sandbox's cache
+    clean_up(dry_run=True)                   # aws-analyzer saved here (local_files() lists them); dry_run only says
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions, agent.
@@ -47,6 +50,7 @@ from typing import TYPE_CHECKING, Any
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
     from ._kit.fmt import set_timezone
+    from ._kit.housekeeping import clean_up, local_files
     from ._kit.themes import set_theme
     from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
@@ -57,7 +61,7 @@ if TYPE_CHECKING:
     from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
 
-__version__ = "0.34.0"
+__version__ = "0.41.0"
 
 __all__ = [
     "__version__",
@@ -84,6 +88,8 @@ __all__ = [
     "AgentView",
     "set_timezone",
     "set_theme",
+    "local_files",
+    "clean_up",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -109,6 +115,8 @@ _EXPORTS = {  # name -> the module it comes from
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",
     "set_theme": "_kit.themes",
+    "local_files": "_kit.housekeeping",
+    "clean_up": "_kit.housekeeping",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
             "lambda_functions", "agent")

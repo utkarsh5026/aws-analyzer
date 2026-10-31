@@ -14,9 +14,10 @@ from ..._kit.fmt import _count, _plural, human_age
 from ..._kit.text import _clip
 
 from ..helpers import stream_version
-from ..models import ErrorGroup, ErrorReport, LogEvent
+from ..models import CodeFrame, ErrorGroup, ErrorReport, LogEvent
 from .text import _cli, _window
 from .findings import _longer, _next_memory, _times
+from .codemap.terms import _LIBRARIES
 
 
 # ------------------------------------------------------------------ log lines
@@ -183,6 +184,82 @@ def _filter_pattern(search: str | None) -> str | None:
     if text.startswith(("{", "[", "?", "-", '"')) or " ?" in text:
         return text
     return '"' + text.replace('"', '\\"') + '"'
+
+
+_PYTHON_FRAME_RE = re.compile(r'File "(?P<path>[^"]+)", line (?P<line>\d+)(?:, in (?P<function>[^\s]+))?')
+
+_NODE_FRAME_RE = re.compile(r"\bat (?:(?P<function>[^\s()]+) \()?(?:file://)?(?P<path>/[^\s():]+):(?P<line>\d+)(?::\d+)?\)?")
+
+_TASK_ROOT = "/var/task/"
+
+_BUNDLED_SDK = frozenset({"boto3", "botocore", "s3transfer", "urllib3", "dateutil", "jmespath", "six"})
+
+_LIBRARY_FOLDERS = frozenset({"site-packages", "dist-packages", "node_modules", "vendor"})
+
+_CAUSE_SEARCH_CHARS = 120
+
+_SHORTEST_CAUSE_SEARCH = 8
+
+_CHANGING_PART_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-|\b[0-9a-f]{12,}\b|\d")
+
+
+def _is_library(path: str) -> bool:
+    parts = path.split("/")
+    top = parts[0].removesuffix(".py")
+    return top in _LIBRARIES or top in _BUNDLED_SDK or bool(_LIBRARY_FOLDERS & set(parts[:-1]))
+
+
+def code_frames(text: str) -> list[CodeFrame]:
+    """
+    The lines of the function's deployment package a traceback or stack trace names, the one it failed on first:
+    Python's `File "/var/task/etl.py", line 23, in handler` and Node.js's `at handler (/var/task/index.js:12:5)`, as
+    paths in the package ('etl.py'). Frames in the runtime and in layers (/opt) are left out; frames in a library the
+    package bundles are kept, marked `library`.
+    """
+    python = [(m, True) for m in _PYTHON_FRAME_RE.finditer(text)]
+    matches = list(reversed(python)) if python else [(m, False) for m in _NODE_FRAME_RE.finditer(text)]
+    frames: list[CodeFrame] = []
+    seen: set[tuple[str, int]] = set()
+    for match, _ in matches:
+        full = match.group("path")
+        if not full.startswith(_TASK_ROOT):
+            continue
+        path, line = full[len(_TASK_ROOT):], int(match.group("line"))
+        if (path, line) in seen:
+            continue
+        seen.add((path, line))
+        frames.append(CodeFrame(path, line, match.group("function") or "", _is_library(path)))
+    return frames
+
+
+def failing_frame(text: str) -> CodeFrame | None:
+    """
+    Where a traceback says the function's own code failed: the innermost frame outside the libraries it bundles,
+    else the innermost of all, else None.
+    """
+    frames = code_frames(text)
+    return next((f for f in frames if not f.library), frames[0] if frames else None)
+
+
+def cause_search(group: ErrorGroup) -> str:
+    """
+    What to search the logs for to find the runs a cause failed in: the start of its message, up to the first
+    number or ID (which changes from run to run), as CloudWatch's exact, case-sensitive phrase; the longest steady
+    part when the start is too short, else the error's kind. "Task timed out" for a timeout, and a filter pattern for
+    running out of memory.
+    """
+    if group.kind == "Timeout":
+        return "Task timed out"
+    if group.kind == "Out of memory":
+        return '?Runtime.OutOfMemory ?"signal: killed"'
+    first_line = (group.message.strip().splitlines() or [""])[0][:_CAUSE_SEARCH_CHARS]
+    steady_parts = [part.strip(" \t:;,.=([{)]}'\"#-") for part in _CHANGING_PART_RE.split(first_line)]
+    if steady_parts and len(steady_parts[0]) >= _SHORTEST_CAUSE_SEARCH:
+        return steady_parts[0] if len(steady_parts) > 1 else first_line.strip()
+    longest = max(steady_parts, key=len, default="")
+    if len(longest) >= _SHORTEST_CAUSE_SEARCH:
+        return longest
+    return "ERROR" if group.kind == "Logged error" else group.kind
 
 
 def _error_key(text: str) -> str:

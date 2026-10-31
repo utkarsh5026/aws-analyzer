@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..._kit.window import _icon_url
+from ..._kit.window import _icon_url, _terminal_theme
 
 from .navigator import Entry
 
@@ -38,6 +38,63 @@ def _icon_rules() -> str:
     A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw.
     """
     return "\n".join(f".s3x .s3x-i-{name}{{--s3x-icon:{_icon_url(paths)}}}" for name, paths in _ICON_PATHS.items())
+
+_TERMINAL_CSS = _terminal_theme((".s3x",), "s3t") + """
+.s3x.s3x.s3x{--s3x-accent:var(--s3t-accent);--s3x-accent-fg:var(--s3t-accent);--s3x-tint:var(--s3t-hover);
+ --s3x-tint-line:var(--s3t-line);--s3x-line:var(--s3t-line);--s3x-fill:transparent;--s3x-hover:var(--s3t-hover);
+ --s3x-bg:var(--s3t-bg)}
+.s3x.s3x{font-family:var(--s3t-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
+.s3x .jupyter-button,.s3x .widget-label,.s3x input{font-family:var(--s3t-mono);font-size:12.5px}
+.s3x .s3x-bar{padding:7px 12px}
+.s3x .s3x-navs{gap:0;padding:0;background:none}
+.s3x button.s3x-nav{width:26px;min-width:26px;height:26px;border-radius:6px;opacity:.65}
+.s3x .s3x-crumbs::before{content:"s3://";flex:0 0 auto;margin:0 0 0 6px;color:var(--s3t-prompt);font-weight:700}
+.s3x button.s3x-crumb{height:26px;padding:0 3px;border-radius:5px;opacity:.7;font-weight:400}
+.s3x button.s3x-crumb.s3x-here{font-weight:700;color:var(--s3t-accent)}
+.s3x .widget-label.s3x-sep{width:auto;min-width:0;opacity:.45;font-size:0}
+.s3x .s3x-sep::before{content:"/";width:auto;height:auto;background:none;-webkit-mask:none;mask:none;font-size:12.5px;
+ line-height:26px;padding:0 1px}
+.s3x .s3x-search input,.s3x .s3x-path input,.s3x .s3x-setting input{height:28px;border-radius:6px;border:1px solid var(--s3t-line);background:transparent}
+.s3x .s3x-search input:focus,.s3x .s3x-path input:focus,.s3x .s3x-setting input:focus{border-color:var(--s3t-accent);box-shadow:none}
+.s3x .s3x-search::before{content:"\\203A";-webkit-mask:none;mask:none;background:none;width:auto;height:auto;margin-top:-10px;
+ left:11px;font-size:15px;line-height:20px;font-weight:700;color:var(--s3t-prompt);opacity:1}
+.s3x .s3x-search input{padding:0 30px 0 26px}
+.s3x .s3x-segs{gap:6px;padding:1px;background:none}
+.s3x button.s3x-seg,.s3x button.s3x-chip,.s3x button.s3x-act,.s3x a.s3x-act,.s3x button.s3x-quiet{height:24px;line-height:22px;
+ padding:0 9px;border-radius:6px;border:1px solid var(--s3t-line);background:transparent;font-size:12px;font-weight:400;opacity:1}
+.s3x button.s3x-seg{padding:0 7px;color:var(--s3t-dim)}
+.s3x .s3x-kinds{gap:6px}
+.s3x button.s3x-deep{padding:0 7px}
+.s3x button.s3x-seg:hover,.s3x button.s3x-chip:hover,.s3x button.s3x-act:hover,.s3x a.s3x-act:hover,
+.s3x button.s3x-quiet:hover:enabled{background:transparent;border-color:var(--s3t-accent);color:var(--s3t-accent)}
+.s3x button.s3x-seg.s3x-on,.s3x button.s3x-chip.s3x-on,.s3x button.s3x-act.s3x-on{background:transparent;box-shadow:none;
+ border-color:var(--s3t-accent);color:var(--s3t-accent);font-weight:700}
+.s3x button.s3x-close,.s3x button.s3x-step{border-color:transparent;font-size:0}
+.s3x .s3x-head{padding:0 10px}
+.s3x button.s3x-col{height:26px;line-height:26px;font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;
+ color:var(--s3t-comment);opacity:1}
+.s3x button.s3x-col::before{content:"# "}
+.s3x button.s3x-col.s3x-num::before{content:none}
+.s3x button.s3x-col.s3x-on{color:inherit;font-weight:700}
+.s3x .s3x-rows{padding:4px 6px}
+.s3x .s3x-r,.s3x button.s3x-row{height:28px}
+.s3x .s3x-r2,.s3x .s3x-r2 button.s3x-row{height:44px}
+.s3x .s3x-r2 button.s3x-check{top:14px}
+.s3x button.s3x-row{border-radius:5px}
+.s3x button.s3x-row.s3x-on{background:var(--s3t-hover);font-weight:700;box-shadow:inset 2px 0 0 var(--s3t-accent);
+ color:var(--s3t-accent)}
+.s3x button.s3x-row.s3x-picked{background:var(--s3t-hover)}
+.s3x .s3x-r .widget-label{color:var(--s3t-dim);opacity:.85;font-size:11.5px}
+.s3x button.s3x-check{border-radius:3px}
+.s3x button.s3x-primary{height:26px;padding:0 12px;border-radius:6px;border:1px solid var(--s3t-accent);background:transparent;
+ color:var(--s3t-accent);font-weight:700;box-shadow:none}
+.s3x button.s3x-primary:hover:enabled{background:var(--s3t-hover)}
+.s3x .s3x-actions{padding:9px 0}
+.s3x .s3x-status{background:transparent;font-size:11.5px;color:var(--s3t-dim)}
+.s3x .s3x-status .s3x-at::before{content:"\\25CF  ";color:var(--s3t-ok)}
+.s3x .s3x-status code{border:0;background:var(--s3t-hover);border-radius:4px;color:var(--s3t-s)}
+.s3x .s3x-pages .widget-html-content{color:var(--s3t-dim)}
+.s3x .s3x-busy::before,.s3x .s3x-spin{border-top-color:var(--s3t-accent)}"""
 
 
 _CSS = """<style>
@@ -107,6 +164,12 @@ body[class*=vscode-] .s3x .s3x-body{height:560px}
 .s3x button.s3x-chip.s3x-on{background:var(--s3x-tint);border-color:var(--s3x-tint-line);color:var(--s3x-accent-fg);
  font-weight:600}
 .s3x button.s3x-more{border-style:dashed;opacity:.75}
+.s3x .s3x-recent{flex-wrap:wrap;gap:6px;align-items:center}
+.s3x .s3x-recent>*{margin:0}
+.s3x .s3x-recent-l{font-size:11px;color:var(--s3t-comment);margin-right:2px}
+.s3x .s3x-r .widget-label.s3x-new{color:var(--s3t-ok);opacity:1;font-weight:700}
+.s3x .s3x-r .widget-label.s3x-new::before{content:"●";margin-right:5px}
+.s3x button.s3x-place{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .s3x button.s3x-deep{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
 .s3x button.s3x-deep::before{width:13px;height:13px}
 .s3x .s3x-list>*{margin:0}
@@ -188,11 +251,11 @@ body[class*=vscode-] .s3x .s3x-body{height:560px}
  transition:background-color .12s ease}
 .s3x a.s3x-act:hover{background:var(--s3x-hover)}
 .s3x a.s3x-act:focus-visible{outline:2px solid var(--s3x-tint-line);outline-offset:-2px}
-.s3x button.s3x-close{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:28px;
+.s3x button.s3x-close,.s3x button.s3x-step{display:inline-flex;align-items:center;justify-content:center;width:28px;
  min-width:28px;padding:0;border-color:transparent;font-size:0;opacity:.7}
-.s3x button.s3x-close:hover{opacity:1}
-.s3x button.s3x-expand{margin-left:auto}
-.s3x button.s3x-expand+button.s3x-close{margin-left:0}
+.s3x button.s3x-close:hover,.s3x button.s3x-step:hover:enabled{opacity:1}
+.s3x button.s3x-step:disabled{opacity:.25}
+.s3x .s3x-actions>.s3x-push{margin-left:auto}
 .s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;padding:10px 0 4px;
  border-top:1px solid var(--s3x-line)}
 .s3x .s3x-pager>*{margin:0}
@@ -225,7 +288,7 @@ body[class*=vscode-] .s3x .s3x-body{height:560px}
 .s3x .s3x-sk-cards{display:flex;gap:8px;margin:0 0 18px}
 .s3x .s3x-sk-cards .s3x-sk{flex:1;height:50px;margin:0;border-radius:8px}
 @media (prefers-reduced-motion:reduce){.s3x *,.s3x *::before{transition:none!important;animation-duration:2.5s!important}}
-""" + _icon_rules() + "\n</style>"
+""" + _TERMINAL_CSS + "\n" + _icon_rules() + "\n</style>"
 
 
 _PAGE_BUTTONS = (("first", "«", "The first page"), ("previous", "‹", "The page before"), ("next", "›", "The next page"),

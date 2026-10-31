@@ -27,10 +27,11 @@ from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_f
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
-from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, logs as logs_tab
+from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.blocks import _Next, _Report
+from aws_analyzer._kit.fmt import _fmt_dt
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
@@ -40,10 +41,19 @@ from aws_analyzer.lambda_functions import (
     MB,
     RUNTIMES,
     AccountLimits,
+    QueryError,
+    logged_event,
+    looks_like_query,
+    parse_query,
+    run_fields,
+    run_table,
+    runs_findings,
     AsyncConfig,
     CodeFile,
     CodePackage,
     DailyUsage,
+    ChangeEffect,
+    CodeFrame,
     ErrorGroup,
     ErrorReport,
     Function,
@@ -56,13 +66,18 @@ from aws_analyzer.lambda_functions import (
     Layer,
     LogEvent,
     LogGroup,
+    LogPage,
     LogRun,
+    TimeBucket,
     Performance,
     ProvisionedConcurrency,
     Trigger,
     Version,
     account_findings,
+    cause_search,
+    change_effect,
     classify_error,
+    code_frames,
     code_graph,
     code_map_findings,
     diff_findings,
@@ -71,6 +86,7 @@ from aws_analyzer.lambda_functions import (
     find_symbol_in,
     function_findings,
     function_monthly_cost,
+    failing_frame,
     group_errors,
     handler_file,
     human_ms,
@@ -96,6 +112,10 @@ from aws_analyzer.lambda_functions import (
     search_rank,
     secret_like,
     source_files,
+    run_console_url,
+    run_insights_query,
+    run_timeline,
+    slow_cutoff,
     split_runs,
     suggest_memory,
     version_before,
@@ -1454,6 +1474,140 @@ def test_diff_renders_as_html_and_text():
     assert "-- app.py (changed, +1 −1, in load) --" in out and '+    return event["customer_id"]' in out
 
 
+def run_page(*runs, timeout=60, memory=512):
+    """
+    A LogPage of runs, each (request ID, ms, MB used, extra lines, cold, timed out), a minute apart from NOW.
+    """
+    events = []
+    for i, (rid, ms, used, extra, cold, timed_out) in enumerate(runs):
+        start = NOW + timedelta(minutes=i)
+        stream = f"2026/10/06/[$LATEST]s{i % 2}"
+        events.append(LogEvent(start, f"START RequestId: {rid} Version: $LATEST", stream, rid))
+        for j, message in enumerate(extra):
+            events.append(LogEvent(start + timedelta(milliseconds=1 + j), message, stream, rid))
+        if timed_out:
+            events.append(LogEvent(start + timedelta(milliseconds=ms), f"{NOW:%Y-%m-%dT%H:%M:%S}.000Z {rid} Task "
+                                                                       f"timed out after {timeout}.00 seconds", stream))
+        events.append(LogEvent(start + timedelta(milliseconds=ms), f"END RequestId: {rid}", stream, rid))
+        report = report_line(rid, ms, used, init=380.5 if cold else None, status="timeout" if timed_out else None)
+        events.append(LogEvent(start + timedelta(milliseconds=ms + 1), report.replace("1024 MB", f"{memory} MB"),
+                               stream, rid))
+    fn = Function(name="orders-etl", arn=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:orders-etl", region=REGION,
+                  memory=memory, timeout=timeout)
+    return LogPage(fn, "/aws/lambda/orders-etl", NOW, NOW + timedelta(hours=1), sorted(events, key=lambda e: e.time))
+
+
+EVENT = {"Records": [{"eventName": "ObjectCreated:Put", "s3": {"object": {"key": "orders/b1.json", "size": 48_000_000}}}]}
+
+
+def orders_page():
+    batch = json.dumps({"level": "INFO", "message": "reading batch", "batch_rows": 48112, "customer": {"id": 7}})
+    small = json.dumps({"level": "INFO", "message": "reading batch", "batch_rows": 120, "customer": {"id": 9}})
+    logged = json.dumps({"level": "INFO", "message": EVENT})
+    return run_page(
+        ("r0", 37200.0, 388, [logged, batch, "wrote 48,112 orders"], True, False),
+        ("r1", 900.0, 120, [small, "wrote 120 orders"], False, False),
+        ("r2", 60000.0, 470, [logged, batch], False, True),
+        ("r3", 16100.0, 240, ["[ERROR] KeyError: 'customer_id'"], False, False),
+    )
+
+
+@pytest.mark.parametrize("text, matched", [
+    ("duration > 15s", ["r3", "r2", "r0"]),
+    ("duration > 15000", ["r3", "r2", "r0"]),
+    ("duration >= 1m", ["r2"]),
+    ("duration > 15s and cold", ["r0"]),
+    ("cold or failed", ["r3", "r2", "r0"]),
+    ("not cold and duration > 10s", ["r3", "r2"]),
+    ("status in (failed, timeout)", ["r3", "r2"]),
+    ("status in timeout", ["r2"]),
+    ("Status = TIMEOUT", ["r2"]),
+    ("memory > 300MB", ["r2", "r0"]),
+    ("memory_share >= 90%", ["r2"]),
+    ("timeout_share > 50%", ["r2", "r0"]),
+    ("error ~ customer_id", ["r3"]),
+    ("error_type = KeyError", ["r3"]),
+    ("text ~ 'wrote 120'", ["r1"]),
+    ("batch_rows > 1000", ["r2", "r0"]),
+    ("customer.id = 9", ["r1"]),
+    ("event.Records.s3.object.size > 30MB", ["r2", "r0"]),
+    ("size > 30MB", ["r2", "r0"]),
+    ("key ~ b1 and not cold", ["r2"]),
+    ("started >= 2026-10-06T12:02", ["r3", "r2"]),
+    ("started >= '2026-10-06 12:02'", ["r3", "r2"]),
+    ("(cold or memory > 400MB) and duration > 30s", ["r2", "r0"]),
+    ("hour = 12", ["r3", "r2", "r1", "r0"]),
+])
+def test_where_keeps_the_runs_a_query_matches(text, matched):
+    table = run_table(orders_page())
+    assert [row.run.request_id for row in table.where(text).rows] == matched
+
+
+@pytest.mark.parametrize("text, said", [
+    ("duration >", "stops too soon"),
+    ("duration > abc", "duration can't be 'abc'; a run time is like 15s"),
+    ("memory > lots", "memory is like 512MB"),
+    ("cold = maybe", "it's yes or no"),
+    ("a b", "Didn't expect 'b'"),
+    ("(cold", "stops too soon"),
+    ("duration > 1s and", "stops too soon"),
+    ("", "The query is empty"),
+])
+def test_a_query_that_cant_be_read_says_why(text, said):
+    with pytest.raises(QueryError, match=re.escape(said)):
+        parse_query(text)
+
+
+def test_what_reads_as_a_query_rather_than_words():
+    assert looks_like_query("duration > 15s") and looks_like_query("cold") and looks_like_query("not failed")
+    assert not looks_like_query("KeyError") and not looks_like_query("ORD-77")
+    assert not looks_like_query('"duration > 15s"') and not looks_like_query("payment failed")
+    at_two = parse_query("started > 14:00", now=NOW)
+    assert at_two.matches({"started": NOW + timedelta(hours=3)}) and not at_two.matches({"started": NOW})
+
+
+def test_run_fields_read_lambdas_lines_the_json_logs_and_the_event():
+    page = orders_page()
+    first = next(run for run in page.runs if run.request_id == "r0")
+    values = run_fields(first, timeout_seconds=60, patterns={"written": re.compile(r"wrote ([\d,]+) orders")})
+    assert values["status"] == "ok" and values["cold"] is True and values["init"] == 380.5
+    assert values["duration"] == 37200.0 and values["memory"] == 388 and values["memory_size"] == 512
+    assert values["memory_share"] == 75.8 and values["timeout_share"] == 62.0 and values["version"] == "$LATEST"
+    assert values["batch_rows"] == 48112 and values["customer.id"] == 7 and values["written"] == 48112
+    assert values["event.Records.s3.object.key"] == "orders/b1.json" and values["summary"] == "reading batch"
+    assert logged_event(first).event == EVENT
+    assert logged_event(next(run for run in page.runs if run.request_id == "r1")) is None
+
+
+def test_run_table_sorts_groups_and_lists_its_fields():
+    table = run_table(orders_page(), fields={"written": r"wrote ([\d,]+) orders"})
+    assert [row.run.request_id for row in table.sorted_by("-duration").rows] == ["r2", "r0", "r3", "r1"]
+    assert [row.run.request_id for row in table.sorted_by("written").rows] == ["r1", "r0", "r3", "r2"]
+    groups = table.group("status")
+    assert [(g.value, g.runs, g.failed) for g in groups] == [("ok", 2, 0), ("failed", 1, 1), ("timeout", 1, 1)]
+    assert table.group("cold")[0].median == 16100.0
+    names = table.field_names()
+    assert names[:3] == ["status", "failed", "started"] and "event.Records.s3.object.size" in names
+    assert next(f for f in table.fields() if f.name == "written").runs == 2
+    kept = table.where("duration > 15s").where("not cold")
+    assert kept.query == "(duration > 15s) and (not cold)" and kept.unfiltered is table and kept.read == 4
+    with pytest.raises(ValueError, match="isn't a regular expression"):
+        run_table(orders_page(), fields={"bad": "wrote ("})
+
+
+def test_runs_findings_name_what_to_do():
+    table = run_table(orders_page())
+    found = runs_findings(table.where("duration > 15s"))
+    assert found[0][0] == "warn" and "1 run reached the 60s timeout: Lambda stopped it" in found[0][1]
+    assert "logs('orders-etl', request_id='r2')" in found[0][1] and "--timeout 120" in found[0][1]
+    assert any("used 90% or more of 512 MB" in message for _, message in found)
+    typo = runs_findings(table.where("durtion > 1s"), named=["route"])
+    assert typo[0] == ("warn", "No run has a field 'durtion': did you mean 'duration'?")
+    assert "No run has a field 'route'" in typo[1][1]
+    no_events = run_table(run_page(("a", 10.0, 50, [], False, False)))
+    assert "Lambda never logs the event itself" in runs_findings(no_events.where("event.size > 1"))[0][1]
+
+
 # ---- AWS (moto)
 
 
@@ -1600,7 +1754,9 @@ def seeded(role):
     put_logs("/aws/lambda/etl-nightly", [
         (started, f"START RequestId: {RID} Version: $LATEST"),
         (started + timedelta(milliseconds=5), "loading 1,204 orders"),
-        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):"),
+        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n"
+                                               '  File "/var/runtime/bootstrap.py", line 60, in run\n'
+                                               '  File "/var/task/app.py", line 2, in handler'),
         (started + timedelta(milliseconds=20), f"END RequestId: {RID}"),
         (started + timedelta(milliseconds=21), f"REPORT RequestId: {RID}\tDuration: 102.12 ms\tBilled Duration: 103 ms"
                                                "\tMemory Size: 1024 MB\tMax Memory Used: 88 MB\tInit Duration: 300.11 ms"),
@@ -2130,6 +2286,18 @@ def test_missing_region_is_a_readable_error(monkeypatch):
         LambdaAnalyzer().client
 
 
+def test_runs_reads_a_functions_runs_as_rows_to_filter_and_sort(core):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    table = core.runs("etl-nightly", since="1h")
+    assert [row.run.request_id for row in table.rows] == [*reversed(ids), RID] and table.read == 5
+    slow = core.runs("etl-nightly", since="1h", where="duration > 51ms", sort="-duration")
+    assert [row.run.request_id for row in slow.rows] == [RID, ids[3], ids[2]]
+    assert slow.query == "duration > 51ms" and slow.unfiltered.read == 5
+    orders = core.runs("etl-nightly", since="1h", fields={"order": r"order (ORD-\d+)"}, where="order = ord-77")
+    assert [row.run.request_id for row in orders.rows] == [ids[1]] and orders.rows[0].values["order"] == "ORD-77"
+
+
 # ---- UI
 
 
@@ -2476,6 +2644,23 @@ def test_ui_explore_needs_jupyter(ui, capsys):
     assert "The explorer window needs Jupyter" in out and "logs('name') shows what one logged" in out
 
 
+def test_runs_report_filters_sorts_groups_and_lists_the_fields(ui, capsys):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    out = run(capsys, ui.runs, "etl-nightly", since="1h", where="duration > 51ms", sort="-duration",
+              group_by="status")
+    assert "Runs of etl-nightly where duration > 51ms" in out and "Runs that match: 3 of 5" in out
+    assert "The 3 runs by status" in out and "The runs, longest first" in out
+    assert out.index(RID) < out.index(ids[3]) < out.index(ids[2]) and ids[0] not in out.split("Fields to query")[0]
+    assert "Fields to query, sort or group by" in out and "memory_share" in out
+    assert f"logs('etl-nightly', request_id='{RID}', since='1h')" in out
+    typo = run(capsys, ui.runs, "etl-nightly", since="1h", columns=["status", "route"], where="durtion > 1s")
+    assert "No run has a field 'durtion': did you mean 'duration'?" in typo and "No run has a field 'route'" in typo
+    assert "No run of the 5 read matches" in typo
+    bad = run(capsys, ui.runs, "etl-nightly", since="1h", where="duration > abc")
+    assert "duration can't be 'abc'" in bad and "Traceback" not in bad
+
+
 # ---- the explorer window
 
 
@@ -2507,14 +2692,21 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     assert x.region == REGION and sorted(f.name for f in x.overview.functions) == ["api-handler", "etl-nightly"]
     assert plain(x.title.value) == ("Lambda explorer us-east-1 2 functions · every function, its logs run by run, its "
                                     "errors and code · read-only")
-    assert plain(x.stats.value) == ("Functions 2 Calls · 30d 1,000 Error rate 4.0% Est. $ / month <$0.01 "
+    assert plain(x.stats.value) == ("Functions 2 Calls · 30d 1,000 Error rate · 30d 4.0% Est. $ / month <$0.01 "
                                     "Need attention 2")
     assert [c.description for c in x.chips.children] == ["All 2", "Needs attention 2", "With errors 1",
                                                          "Old runtime 1", "Public 1", "Not called 1"]
     assert [f.fn.name for f in x._visible] == ["etl-nightly", "api-handler"]  # problems first
     assert faces(x._rows, 2) == [
-        "etl-nightly python3.9 (ended) Nightly orders load · SQS, S3 · 1,024 MB · 900 s 1,000 4.0% 250 ms <$0.01 today 3",
-        "api-handler python3.12 Anyone (public) · 128 MB · 3 s 0 - - $0.00 not in 30d 1"]
+        "etl-nightly python3.9 (ended) 40 of 1,000 calls failed (4.0%) in the last 30 days, the last today 1,000 4.0% "
+        "250 ms <$0.01 today 3",
+        "api-handler python3.12 Its resource policy lets anyone invoke it (statement open: Principal \"*\" with no "
+        "condition) 0 - - $0.00 not in 30d 1"]
+    assert "lmx-app" not in row_of(x, "etl-nightly").face.value and 'class="ff hl bad"' in row_of(
+        x, "etl-nightly").face.value and row_of(x, "etl-nightly").face.value.count('<i style="height:') == 1
+    x.find.value = "nightly"
+    assert "(ended) Nightly orders load · SQS, S3" in faces(x._rows, 1)[0]
+    x.find.value = ""
     status = plain(x.status.value)
     assert status.startswith("2 functions in us-east-1, read in") and "2 need attention" in status
     assert "(15 CloudWatch metrics, about <$0.01)" in status  # what reading the list cost
@@ -2524,8 +2716,8 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     row_of(x, "etl-nightly").button.click()
     assert x.function.name == "etl-nightly" and x._tab == "overview" and x.detail.function.tags == {"team": "ml"}
     assert "etl-nightly python3.9" in plain(x.field.face.value) and "lmx-on" in row_of(x, "etl-nightly").box._dom_classes
-    assert plain(x.stats.value) == ("Calls · 30d 1,000 Error rate 4.0% Avg / longest run 250 ms / 4m 10s "
-                                    "Est. $ / month <$0.01 Warnings 3")
+    assert plain(x.stats.value) == "1,000 calls · 4.0% failed · 250 ms avg · 4m 10s max · <$0.01/mo · 3 warnings · 30 days"
+    assert "lmx-slim" in x.head_box._dom_classes
     overview = plain(x.overview_view.value)
     assert "Runtime python3.9 (ended) Memory 1,024 MB Timeout 900 s Architecture x86_64 Triggers 2" in overview
     assert "Calls (30d)" not in overview  # the header shows the numbers
@@ -2567,7 +2759,7 @@ def test_explorer_holds_the_report_css_once(explorer):
     panes = html_widgets(x.root)
     [style] = [pane for pane in panes if stylemod._CSS in pane.value]
     assert style.layout.display == "none"
-    pages = [pane for pane in panes if '<div class="lmb">' in pane.value]
+    pages = [pane for pane in panes if '<div class="lmb theme-console">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
              for rule in style.split("</style>")[0].split("\n")]
     assert len(pages) >= 2 and all(rule.startswith(".lmb form.tbl:has(") for rule in rules)
@@ -2666,6 +2858,7 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     quiet.range_pick.value = "1h"
     quiet._reload_logs()
     assert "Nothing logged in the last hour. Its newest line is from 5h ago." in plain(quiet.runs_box.children[0].value)
+    assert plain(quiet.status.value) == "Nothing logged in the last hour · pick another time range above"
     assert quiet.jump_button.layout.display == "" and quiet.jump_button.description == "Show last 12 hours ›"
     quiet.jump_button.click()
     assert quiet._range == "12h" and quiet.range_pick.value == "12h" and len(quiet._runs) == 1
@@ -2674,6 +2867,7 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     x._reload_logs()
     assert x.logs_page.truncated and x.older_button.layout.display == ""
     assert "These are the newest 6 lines" in plain(x.run_head.value)
+    assert plain(x.run_head.value).startswith("the newest 2 runs") and plain(x.status.value).startswith("The newest")
     for _ in range(5):
         if not x.logs_page.truncated:
             break
@@ -2682,6 +2876,64 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     x.run(RID)
     assert x.found is not None and x._found_runs[0].request_id == RID and x.log_find.value == RID
     assert x._range == "24h"  # run() looks back a day at least
+
+
+def test_explorer_logs_tab_reads_a_custom_range(core, explorer):
+    now = datetime.now(timezone.utc)
+    old = seed_runs(now - timedelta(days=2), stream="2026/10/04/[$LATEST]old")
+    x = explorer("etl-nightly", tab="logs")
+    assert [run.request_id for run in x._runs] == [RID] and x.custom_bar.layout.display == "none"
+    x.range_pick.value = "custom"
+    assert x.custom_bar.layout.display == "" and x.range_to.value is None and x._range == "1h"
+    assert abs(x.range_from.value - (now - timedelta(hours=1)).replace(tzinfo=None)) < timedelta(minutes=1)
+    assert x.range_from.value.second == 0 and plain(x.range_hint.value) == "Times in UTC; an empty To means up to now."
+    x.range_from.value = (now - timedelta(days=3)).replace(tzinfo=None)
+    x.range_to.value = (now - timedelta(days=1)).replace(tzinfo=None)
+    show = next(b for b in x.custom_bar.children if getattr(b, "description", "") == "Show runs")
+    show.click()
+    assert [run.request_id for run in x._runs] == list(reversed(old)) and x._until is not None
+    span = f"{now - timedelta(days=3):%Y-%m-%d %H:%M} – {now - timedelta(days=1):%Y-%m-%d %H:%M}"
+    assert plain(x.status.value) == f"4 runs in {span} · click a run to see its lines"
+    assert f"Newest first, {span}; times in UTC" in plain(x.run_head.value)
+    assert x.errors_pick.value == "custom" and (span, "custom") in x.errors_pick.options
+    x.live_button.click()
+    assert not x._live and "this range ends before now" in plain(x.status.value)
+    x.range_to.value = None
+    show.click()
+    assert {run.request_id for run in x._runs} == {RID, *old} and x._until is None
+    x.range_from.value = (now + timedelta(hours=1)).replace(tzinfo=None)
+    show.click()
+    assert "has to be before now" in plain(x.status.value) and len(x._runs) == 5
+    x.range_pick.value = "1h"
+    assert x.custom_bar.layout.display == "none" and x._until is None and [r.request_id for r in x._runs] == [RID]
+    x.logs(since=now - timedelta(days=3), until="1d")
+    assert x.range_pick.value == "custom" and x.custom_bar.layout.display == ""
+    assert [run.request_id for run in x._runs] == list(reversed(old))
+    x.run(RID)
+    assert x._range == "24h" and x._until is None and x.custom_bar.layout.display == "none"
+
+
+def test_log_reads_say_how_far_back_they_have_come(core):
+    now = datetime.now(timezone.utc)
+    seed_runs(now - timedelta(hours=5), stream="2026/10/04/[$LATEST]old")
+    fn = core.function("etl-nightly")
+    reaches = []
+    core._log_runs(fn, now - timedelta(hours=6), now, reached=reaches.append)
+    assert reaches and reaches == sorted(reaches, reverse=True)
+    assert abs(reaches[-1] - (now - timedelta(hours=6))) < timedelta(seconds=1)
+
+
+def test_explorer_reading_bar_fills_as_the_range_is_read():
+    end = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    reading = logs_tab._Reading("logs", "Reading what etl logged in the last 4 hours…", end - timedelta(hours=4),
+                                end, 3_000)
+    assert "starting…" in plain(logs_tab._reading_html(reading, None, 0))
+    assert "lmx-wait" in logs_tab._reading_html(reading, None, 0)
+    halfway = plain(logs_tab._reading_html(reading, end - timedelta(hours=1), 120))
+    assert halfway.endswith("25% · read back to 2026-10-29 11:00 · 120 lines found")
+    assert "100%" in plain(logs_tab._reading_html(reading, end - timedelta(hours=1), 3_000))
+    search = logs_tab._Reading("search", "Searching…", reading.start, end, 1_000, then="now reading each run it's in")
+    assert plain(logs_tab._reading_html(search, search.start, 4)).endswith("4 lines found · now reading each run it's in")
 
 
 def test_explorer_live_adds_new_runs(core, explorer):
@@ -2700,7 +2952,7 @@ def test_explorer_live_adds_new_runs(core, explorer):
 
 def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     x = explorer("etl-nightly", tab="errors")
-    errors = plain(x.errors_view.value)
+    errors = plain(x.errors_view.value) + " " + plain(x.errors_more.value)
     assert "Errors in etl-nightly" in errors and "The most common error happened once" in errors
     assert "KeyError: 'customer_id'" in errors
     assert f"Run {RID[:8]} in the Logs tab shows the whole run" in errors and "The newest error lines" not in errors
@@ -2715,10 +2967,265 @@ def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     perf = plain(x.perf_view.value)
     assert "Performance of etl-nightly" in perf and "256 MB still leaves room" in perf and "The slowest runs" not in perf
     assert "102 ms 88 of 1,024 MB · cold start 300 ms" in plain(x._slow_rows[0].face.value)
-    x.errors_pick.value = "3d"
-    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(days=2)
     x._slow_rows[0].button.click()
     assert x._tab == "logs" and x._found_runs[0].request_id == RID
+
+
+
+def test_explorer_tabs_share_one_time_range(core, explorer):
+    x = explorer("etl-nightly", tab="logs")
+    assert x.range_pick.value == "1h" and x.errors_pick.value == x.perf_pick.value == "24h"
+    x.tab_buttons["errors"].click()
+    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(hours=23)
+    x.errors_pick.value = "3d"
+    assert x._range == "3d" and x.range_pick.value == x.perf_pick.value == "3d"
+    assert x.error_report.since < datetime.now(timezone.utc) - timedelta(days=2)
+    assert "logs" not in x._asked
+    x.tab_buttons["logs"].click()
+    assert x.logs_page.since < datetime.now(timezone.utc) - timedelta(days=2) and "the last 3 days" in plain(
+        x.run_head.value)
+    x.logs(since="2026-01-01")
+    assert x.range_pick.value == x.errors_pick.value == "custom" and ("Since 2026-01-01", "custom") in x.perf_pick.options
+
+
+def test_explorer_list_draws_each_functions_last_two_weeks():
+    now = datetime(2026, 10, 20, 15, tzinfo=timezone.utc)
+    day = timedelta(days=1)
+    midnight = now.replace(hour=0)
+    daily = [DailyUsage(midnight - 20 * day, 50), DailyUsage(midnight - 3 * day, 100, 0),
+             DailyUsage(midnight, 40, 10)]
+    metrics = FunctionMetrics("etl", 30, 86400, 190, 10, daily=daily)
+    days = functions_tab._trend_days(metrics, now)
+    assert len(days) == 14 and days[-1] == (40, 10) and days[-4] == (100, 0) and days[0] == (0.0, 0.0)
+    html = functions_tab._trend_html(days)
+    assert html.count("<i") == 14 and html.count('class="z"') == 12
+    assert '<i style="height:100.0%"></i>' in html and '<i style="height:40.0%"><b style="height:25.0%"></b></i>' in html
+    assert functions_tab._trend_days(FunctionMetrics("etl", 1, 3600), now) == [] and functions_tab._trend_html([]) == "-"
+
+
+
+def test_tracebacks_name_the_line_of_the_package_they_failed_on():
+    python = ("[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n"
+              '  File "/var/runtime/bootstrap.py", line 60, in run\n'
+              '  File "/var/task/etl.py", line 23, in handler\n    rows = load(event)\n'
+              '  File "/var/task/botocore/client.py", line 553, in _api_call\n')
+    assert code_frames(python) == [CodeFrame("botocore/client.py", 553, "_api_call", library=True),
+                                   CodeFrame("etl.py", 23, "handler")]
+    assert failing_frame(python) == CodeFrame("etl.py", 23, "handler")
+    node = ("TypeError: x\n    at build (/var/task/lib/report.js:41:12)\n"
+            "    at Runtime.handler (file:///var/task/index.mjs:9:3)\n    at /var/runtime/index.mjs:1:1")
+    assert [(f.path, f.line) for f in code_frames(node)] == [("lib/report.js", 41), ("index.mjs", 9)]
+    assert failing_frame("[ERROR] KeyError: 'x'") is None
+    assert failing_frame('  File "/var/task/node_modules/x/a.js", line 1') == CodeFrame(
+        "node_modules/x/a.js", 1, library=True)
+
+
+def test_each_cause_searches_its_runs_by_what_stays_the_same():
+    def search(kind, message):
+        return cause_search(ErrorGroup(kind, message, 1, NOW, NOW, message))
+    assert search("KeyError", "KeyError: 'customer_id'") == "KeyError: 'customer_id'"
+    assert search("ValueError", "ValueError: order 1234 not found") == "ValueError: order"
+    assert search("Timeout", "Task timed out after 60.00 seconds") == "Task timed out"
+    assert search("Out of memory", "Runtime exited: out of memory") == '?Runtime.OutOfMemory ?"signal: killed"'
+    assert search("Logged error", "42 rows failed to load") == "rows failed to load"
+    assert search("Logged error", "7 bad") == "ERROR" and search("OSError", "OSError: 28") == "OSError"
+
+
+def test_explorer_errors_open_their_runs_and_their_code(core, explorer):
+    x = explorer("etl-nightly", tab="errors")
+    assert plain(x.cause_head.value).startswith("Errors by cause")
+    row = x._cause_rows[0]
+    assert plain(row.face.value).startswith("✕ ×1 KeyError KeyError: 'customer_id' 10m")
+    assert row.action.layout.display == "" and "Errors by cause" not in plain(x.errors_more.value)
+    row.button.click()
+    assert x._tab == "logs" and x.log_find.value == "KeyError: 'customer_id'"
+    assert [run.request_id for run in x._found_runs] == [RID] and x._range == "24h"
+    assert x._run_rows[0].body.layout.display == ""
+    code = x._run_rows[0].code_button
+    assert code.layout.display == "" and code.description == "Open app.py, line 2, in the Code tab ›"
+    code.click()
+    assert x._tab == "code" and x._code_file == "app.py"
+    source = x.source_view.value
+    assert "Line 2, in handler()" in plain(source) and "where the run failed" in plain(source)
+    assert source.count('class="src hit" style="--mark:1"') == 2
+    assert plain(x.status.value).startswith("app.py, line 2: where the run failed")
+    x._code_rows[[r.item.path for r in x._code_rows[:len(x.files_box.children)]].index("utils.py")].button.click()
+    assert "where the run failed" not in plain(x.source_view.value) and "hit" not in x.source_view.value
+    x.tab_buttons["errors"].click()
+    row.action.click()
+    assert x._tab == "code" and x._code_file == "app.py" and "where the run failed" in plain(x.source_view.value)
+
+
+
+def daily_metrics(days, now=NOW):
+    """
+    30 days of daily numbers ending today: days is (calls, errors) for each day, oldest first, the rest quiet.
+    """
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    daily = [DailyUsage(today - timedelta(days=len(days) - 1 - i), calls, errors) for i, (calls, errors) in
+             enumerate(days)]
+    return FunctionMetrics("etl", 30, 86400, sum(c for c, _ in days), sum(e for _, e in days), daily=daily)
+
+
+def test_errors_that_began_with_a_change_are_put_down_to_it():
+    m = daily_metrics([(1000, 1)] * 8 + [(1000, 60), (1000, 90), (1000, 80)])
+    changed = NOW.replace(hour=0, minute=0) - timedelta(days=2, hours=-9)
+    effect = change_effect(m, changed, NOW)
+    assert effect == ChangeEffect(changed, 7000, 7, 2000, 170, 7)
+    assert f"{effect.rate_before:.3f} {effect.rate_after:.3f}" == "0.001 0.085"
+    found = [message for level, message in function_findings(fn(last_modified=changed), m, now=NOW) if level == "warn"]
+    began = next(message for message in found if message.startswith("Its calls began to fail after it was last changed"))
+    assert "8.5% failed since (170 of 2,000), against 0.1% in the 7 days before" in began
+    assert began.startswith(f"Its calls began to fail after it was last changed ({_fmt_dt(changed, zone=True)}, 2d ago):")
+    assert "code('etl') shows the code it runs now" in began
+    same = daily_metrics([(1000, 30)] * 11)
+    assert not any("began to fail" in message for _, message in function_findings(fn(last_modified=changed), same,
+                                                                                    now=NOW))
+    assert change_effect(m, NOW - timedelta(days=40), NOW) is None and change_effect(m, None, NOW) is None
+    today = change_effect(daily_metrics([(1000, 0)] * 10 + [(500, 50)]), NOW - timedelta(hours=1), NOW)
+    assert (today.calls_after, today.errors_after) == (500, 50)
+
+
+def test_columns_mark_the_day_a_function_changed():
+    days = [(f"Oct {i}", float(i), 0.0, "") for i in range(1, 6)]
+    block = wiring_block._Columns(days, title="Calls", mark=2, mark_label="changed Oct 3")
+    html = stylemod._render_html([block], 30)
+    assert html.count('class="mk"') == 1 and "changed Oct 3" in html
+    lines = wiring_block._columns_lines(block, None)
+    assert lines[-1] == "          ^ changed Oct 3"
+
+
+def test_explorer_logs_show_where_the_function_changed(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    x = explorer("etl-nightly", tab="logs")
+    assert x.change_line is None or x.change_line not in x.runs_box.children
+    x.detail.function.last_modified = now - timedelta(minutes=2, seconds=30)
+    x._draw_runs()
+    children = list(x.runs_box.children)
+    place = children.index(x.change_line)
+    assert [r.run.request_id for r in x._run_rows[:place]] == [ids[3], ids[2]]
+    assert plain(x.change_line.value).startswith("Changed ") and "the runs below ran it as it was before" in plain(
+        x.change_line.value)
+
+
+
+def toy_run(start, duration=100.0, failed=False):
+    rid = f"{int(start.timestamp() * 1000) % 10**8:08x}-1111-4222-8333-444455556666"
+    events = [LogEvent(start, f"START RequestId: {rid} Version: $LATEST", "s", rid)]
+    if failed:
+        events.append(LogEvent(start, "[ERROR] KeyError: 'x'", "s", rid))
+    events.append(LogEvent(start, report_line(rid, duration), "s", rid))
+    return split_runs(events)[0]
+
+
+def test_runs_counted_by_time_and_the_slowest_picked_out():
+    start = NOW - timedelta(hours=1)
+    runs = [toy_run(start + timedelta(minutes=minute), failed=minute == 31) for minute in (1, 2, 31, 59)]
+    buckets = run_timeline(runs, start, NOW, buckets=6)
+    assert [(b.runs, b.failed) for b in buckets] == [(2, 0), (0, 0), (0, 0), (1, 1), (0, 0), (1, 0)]
+    assert buckets[0] == TimeBucket(start, start + timedelta(minutes=10), 2, 0)
+    assert run_timeline(runs, NOW, start) == [] and run_timeline([toy_run(NOW)], start, NOW, 3)[2].runs == 0
+    many = [toy_run(start + timedelta(minutes=i), duration=100.0 * (i + 1)) for i in range(20)]
+    assert slow_cutoff(many) == 1800.0 and slow_cutoff(many[:9]) is None
+
+
+def test_explorer_logs_timeline_and_slow_runs(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now, count=12)
+    x = explorer("etl-nightly", tab="logs")
+    assert x.timeline_box.layout.display == "" and len(x._buckets) == 30
+    assert sum(b.runs for b in x._buckets) == len(x._runs) == 13
+    labels = [c.description for c in x.run_chips.children]
+    assert "Slowest 10% 2" in labels
+    x._run_chip_buttons["slow"].click()
+    assert [r.run.request_id for r in x._run_rows[:len(x._visible_runs())]] == [ids[11], RID]
+    x._run_chip_buttons["slow"].click()
+    busy = next(i for i, b in enumerate(x._buckets) if any(r.request_id == RID for r in x._runs if b.start <= r.start < b.end))
+    x.timeline_bars[busy].click()
+    bucket = x._buckets[busy]
+    inside = [r.request_id for r in x._runs if bucket.start <= r.start < bucket.end]
+    assert [r.request_id for r in x._visible_runs()] == inside and RID in inside and len(inside) == bucket.runs
+    assert "lmx-on" in x.timeline_bars[busy]._dom_classes and "lmx-bad" in x.timeline_bars[busy]._dom_classes
+    assert "click the bar again for every run" in plain(x.status.value)
+    x.timeline_bars[busy].click()
+    assert x._run_window is None and len(x._visible_runs()) == 13
+
+
+def test_explorer_remembers_the_functions_opened(core, explorer, monkeypatch):
+    x = explorer("etl-nightly", tab="logs")
+    first = x.logs_page
+    reads = []
+    real = core.describe
+    monkeypatch.setattr(core, "describe", lambda *args, **kwargs: reads.append(args) or real(*args, **kwargs))
+    x.open("api-handler")
+    assert x.function.name == "api-handler" and len(reads) == 1
+    x.open("etl-nightly")
+    assert x.logs_page is first and len(reads) == 1 and x.detail is not None
+    assert plain(x.status.value) == "1 run in the last hour, 1 failed · click a run to see its lines"
+    api = next(arn for arn in x._kept if arn.endswith(":api-handler"))
+    x._kept[api].read_at -= 180
+    x.open("api-handler")
+    assert len(reads) == 1 and "api-handler as the window read it 3 minutes ago" in plain(x.status.value)
+    x.refresh()
+    assert x.function.name == "api-handler" and len(reads) == 2 and x._kept == {}
+
+
+def test_explorer_reads_the_top_problem_ahead(core, explorer, monkeypatch):
+    reads = []
+    real = core.describe
+    monkeypatch.setattr(core, "describe", lambda *args, **kwargs: reads.append(args[0]) or real(*args, **kwargs))
+    x = explorer()
+    assert reads == ["etl-nightly"] and x.function is None
+    row_of(x, "etl-nightly").button.click()
+    assert reads == ["etl-nightly"] and x.detail is not None and "Calls a day" in plain(x.overview_view.value)
+    explorer("api-handler")
+    assert reads[1:] == ["api-handler"]
+
+
+
+def test_explorer_gives_the_call_that_reopens_it(core, explorer):
+    x = explorer()
+    assert x._view_code() == "explore()"
+    x.open("etl-nightly")
+    assert x._view_code() == "explore('etl-nightly')"
+    x.tab_buttons["logs"].click()
+    assert x._view_code() == "explore('etl-nightly', tab='logs')"
+    x.log_find.value = "loading"
+    x._log_search()
+    x.range_pick.value = "3h"
+    assert x._view_code() == "explore('etl-nightly', tab='logs', since='3h', search='loading')"
+    assert "explore(&#x27;etl-nightly&#x27;, tab=&#x27;logs&#x27;, since=&#x27;3h&#x27;" in x.view_code.value
+    x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")
+    assert x._view_code() == ("explore('etl-nightly', tab='logs', since='2026-10-27 09:00', until='2026-10-27 17:30', "
+                              "search='loading')")
+    assert explorer(region="all")._view_code() == "explore(region='all')"
+    again = explorer("etl-nightly", since="3h", search="loading")
+    assert again._tab == "logs" and again._range == "3h" and again.errors_pick.value == "3h"
+    assert [run.request_id for run in again._found_runs] == [RID]
+    assert again._view_code() == "explore('etl-nightly', tab='logs', since='3h', search='loading')"
+
+
+
+
+def test_a_run_in_the_console_and_in_logs_insights():
+    url = run_console_url("us-east-1", "/aws/lambda/etl", "2026/10/06/[$LATEST]abc", RID)
+    assert url == ("https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/"
+                   "log-group/$252Faws$252Flambda$252Fetl/log-events/2026$252F10$252F06$252F$255B$2524LATEST$255Dabc"
+                   f"$3FfilterPattern$3D$2522{RID}$2522")
+    assert run_console_url("cn-north-1", "g", "s", "r").startswith("https://cn-north-1.console.amazonaws.cn/")
+    assert run_insights_query(RID) == (f'fields @timestamp, @message\n| filter @requestId = "{RID}" or @message like '
+                                       f'"{RID}"\n| sort @timestamp asc')
+
+
+def test_explorer_open_run_has_its_actions(core, explorer):
+    x = explorer("etl-nightly", tab="logs")
+    x._run_rows[0].button.click()
+    body = x._run_rows[0].body.value
+    assert f'<span class="cpt">{RID}</span>' in body and "filter @requestId" in body
+    stream = x._run_rows[0].run.stream
+    assert html.escape(run_console_url(REGION, "/aws/lambda/etl-nightly", stream, RID)) in body
+    assert 'target="_blank"' in body and "Open in the AWS console" in body
 
 
 NESTED = zipped({
@@ -2944,7 +3451,7 @@ def test_explorer_function_field_regions_and_commands(core, explorer):
     x.region_pick.value = REGION
     assert x.function is None and x._tab == "functions"
     x.logs("etl-nightly", search="loading")
-    assert x._tab == "logs" and [run.request_id for run in x._found_runs] == [RID] and x.logs_page is None
+    assert x._tab == "logs" and [run.request_id for run in x._found_runs] == [RID]
     x.log_find.value = ""  # it opened on a search: clearing it reads the time range
     assert x.logs_page is not None and [run.request_id for run in x._visible_runs()] == [RID]
     with pytest.raises(ValueError, match="tab= is one of"):
@@ -2996,8 +3503,10 @@ def test_explorer_reads_in_the_background(seeded):
         assert list(x._tasks) == ["list"] and x._said[2] and x.overview is None  # it returned at once
         await settle(x, "list", "numbers", "extras")
         assert x.function.name == "etl-nightly" and "logs" in x._tasks and x.logs_page is None
-        assert "skw" in x.run_head.value
+        assert "lmx-reading" in x.run_head.value and "starting…" in plain(x.run_head.value)
         await settle(x, "describe")
+        x.tab_buttons["logs"].click()
+        assert x.run_chips.children == () and x._reading is not None
         x.tab_buttons["settings"].click()  # the window answers while the logs are read
         assert "Settings of etl-nightly" in plain(x.settings_view.value)
         x.tab_buttons["logs"].click()
@@ -3074,3 +3583,172 @@ def test_view_explore_opens_the_window(core):
     x = view.explorer
     assert isinstance(x, LambdaExplorer) and x.ui is view and x.function.name == "etl-nightly" and x._tab == "logs"
     assert x.pages["logs"].layout.height == "700px"
+
+
+def test_explorer_remembers_the_functions_you_open(explorer, tmp_path):
+    places = str(tmp_path / "places.sqlite")
+    x = explorer(history=places)
+    assert x.recent == [] and "Recent" not in " ".join(c.description for c in x.chips.children)
+    row_of(x, "etl-nightly").button.click()
+    assert [arn.split(":")[-1] for arn in x.recent] == ["etl-nightly"]
+
+    again = explorer(history=places)
+    assert [c.description for c in again.chips.children][:2] == ["All 2", "Recent 1"]
+    again.field.button.click()
+    assert [arn.split(":")[-1] for arn in again.field.shown] == ["etl-nightly", "api-handler"]
+    assert "opened just now" in plain(again.field.rows[again.field.shown[0]][2].value)
+    again.field.close()
+
+    again.chips.children[1].click()
+    assert [f.fn.name for f in again._visible] == ["etl-nightly"]
+
+    again.forget_recent("etl-nightly")
+    assert again.recent == [] and plain(again.status.value) == "Forgot etl-nightly."
+
+
+def test_explorer_without_history_remembers_nothing(explorer):
+    x = explorer(history=False)
+    row_of(x, "etl-nightly").button.click()
+    assert x.recent == []
+    x.forget_recent()
+    assert "Recent places are off" in plain(x.status.value)
+
+
+def test_function_changes_since_your_last_look():
+    import dataclasses
+
+    from aws_analyzer._kit.fmt import human_age
+    from aws_analyzer.lambda_functions.analysis.changes import (
+        FunctionLook, cause_key, change_findings, function_changes, function_look, new_causes_finding,
+        new_error_causes,
+    )
+
+    before_fn = Function("etl", arn="arn:aws:lambda:us-east-1:1:function:etl", runtime="python3.9", handler="app.h",
+                         memory=512, timeout=30, raw={"CodeSha256": "old"})
+    look = function_look(before_fn)
+    assert FunctionLook.from_data(look.to_data()) == look and FunctionLook.from_data({"memory": 1}) is None
+    assert "error_causes" not in look.to_data()
+
+    since = NOW - timedelta(days=3)
+    deployed = NOW - timedelta(days=1)
+    now_fn = dataclasses.replace(before_fn, memory=1024, last_modified=deployed, raw={"CodeSha256": "new"})
+    daily = [DailyUsage(helpers._midnight(NOW - timedelta(days=d)), 100, 20 if d < 3 else 1) for d in range(10)]
+    metrics = FunctionMetrics("etl", days=30, daily=daily)
+    changes = function_changes(now_fn, before=look, since=since, now=NOW, metrics=metrics)
+    assert changes.code_changed and changes.settings == ["memory 512 → 1,024 MB"]
+    assert changes.errors_since == 60 and changes.errors_a_day == 20 and changes.errors_rose
+    found = change_findings(changes)
+    assert [level for level, _ in found] == ["warn", "info", "info"]
+    assert found[0][1].startswith(f"Errors went up since your last look {human_age(since)}: 60 failed calls since 04 Oct (UTC days),"
+                                  " about 20 a day, against about 0.2 a day before.")
+    assert found[1][1].startswith(f"The code changed since your last look {human_age(since)}: deployed 2026-10-05 12:00 UTC.")
+
+    same_day = function_changes(before_fn, before=look, since=NOW - timedelta(hours=2), now=NOW, metrics=metrics)
+    assert same_day.errors_since is None and not same_day.has_news
+    assert change_findings(same_day) == [("info", f"Nothing changed since your last look {human_age(NOW - timedelta(hours=2))}"
+                                                  ": the same code and settings.")]
+
+    old = ErrorGroup("Timeout", "Task timed out after # seconds", 3, NOW, NOW, "Task timed out after 30.0 seconds")
+    new = ErrorGroup("KeyError", "KeyError: 'customer_id'", 2, NOW - timedelta(hours=6), NOW, "KeyError: 'customer_id'")
+    assert len(cause_key(old)) == 16 and cause_key(old) != cause_key(new)
+    assert new_error_causes([new, old], [cause_key(old)]) == [new]
+    assert new_causes_finding([new], since) == (
+        "warn", f"A new error since your last look {human_age(since)}: KeyError (2 times, first "
+                f"{human_age(new.first)}). They're in the table below.")
+
+
+def test_explorer_says_what_changed_since_your_last_look(explorer, tmp_path, monkeypatch):
+    from aws_analyzer._kit import history
+
+    monkeypatch.setattr(history, "VISIT_GAP_MINUTES", 0)
+    places = str(tmp_path / "places.sqlite")
+    first = explorer(history=places)
+    row_of(first, "etl-nightly").button.click()
+    first.tab_buttons["errors"].click()
+    assert "last look" not in plain(first.overview_view.value) + plain(first.errors_view.value) + plain(first.errors_more.value)
+
+    boto3.client("lambda", region_name=REGION).update_function_configuration(FunctionName="etl-nightly",
+                                                                             MemorySize=2048)
+    put_logs("/aws/lambda/etl-nightly", [(datetime.now(timezone.utc) - timedelta(minutes=2),
+                                          "[ERROR] ValueError: bad order date")], stream="2026/10/06/[$LATEST]new")
+    again = explorer(history=places)
+    assert "Changed 1" in [chip.description for chip in again.chips.children]
+    assert '<span class="ch">changed</span>' in row_of(again, "etl-nightly").face.value
+    assert 'class="ch"' not in row_of(again, "api-handler").face.value
+
+    row_of(again, "etl-nightly").button.click()
+    overview = plain(again.overview_view.value)
+    assert "Its settings changed since your last look" in overview and "Memory 1,024 → 2,048 MB" in overview
+    assert overview.index("⚡ Lambda Function") < overview.index("Its settings changed")
+    again.tab_buttons["errors"].click()
+    errors = plain(again.errors_view.value) + " " + plain(again.errors_more.value)
+    assert "A new error since your last look" in errors and "ValueError (1 time" in errors
+    assert "KeyError (" not in errors.split("They're in the table below")[0]
+
+
+def test_explorer_logs_tab_asks_for_runs_by_their_fields(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "duration > 51ms"
+    assert [run.request_id for run in x._visible_runs()] == [ids[3], ids[2], RID]
+    assert plain(x.status.value) == "3 of 5 runs read match duration > 51ms · click a run to see its lines"
+    enter(x.log_find)
+    assert x.found is None and len(x._visible_runs()) == 3
+    assert x._view_code() == "explore('etl-nightly', tab='logs', search='duration > 51ms')"
+    x.log_find.value = "cold or failed"
+    assert [run.request_id for run in x._visible_runs()] == [RID]
+    x.log_find.value = "durtion > 1s"
+    assert plain(x.status.value) == "No run has a field 'durtion': did you mean duration?"
+    x.log_find.value = "duration > abc"
+    assert "duration can't be 'abc'" in plain(x.status.value) and len(x._visible_runs()) == 5
+    x.log_find.value = ""
+    assert x.sort_pick.layout.display == ""
+    x.sort_pick.value = "-duration"
+    assert [run.request_id for run in x._visible_runs()] == [RID, ids[3], ids[2], ids[1], ids[0]]
+    assert "Longest first, the last hour" in plain(x.run_head.value)
+    assert ("Today", "today") in x.range_pick.options
+    x.range_pick.value = "today"
+    assert x._range == "today" and "today" in plain(x.run_head.value)
+
+
+def test_explorer_says_to_quote_a_query_that_is_also_text_in_the_logs(core, explorer):
+    now = datetime.now(timezone.utc)
+    seed_runs(now)
+    rid = "abcdef12-1111-4222-8333-444455556666"
+    put_logs("/aws/lambda/etl-nightly", [
+        (now - timedelta(seconds=30), f"START RequestId: {rid} Version: $LATEST"),
+        (now - timedelta(seconds=29), "WARN slow call: duration > 15s on the orders table"),
+        (now - timedelta(seconds=28), f"END RequestId: {rid}"),
+        (now - timedelta(seconds=28), report_line(rid, 20.0)),
+    ], stream="2026/10/06/[$LATEST]txt")
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "duration > 15s"
+    assert x._visible_runs() == [] and plain(x.status.value) == (
+        'No run read matches duration > 15s as a query · 1 run has this text in a line: put it in quotes, '
+        '"duration > 15s", to find it')
+    x.log_find.value = "duraton > 15s"
+    assert plain(x.status.value) == "No run has a field 'duraton': did you mean duration?"
+    x.log_find.value = '"duration > 15s"'
+    assert [run.request_id for run in x._visible_runs()] == [rid]
+    enter(x.log_find)
+    assert x.found is not None and [run.request_id for run in x._found_runs] == [rid]
+
+
+def test_explorer_shows_the_event_a_run_logged(core, explorer):
+    now = datetime.now(timezone.utc)
+    rid = "abcdef12-1111-4222-8333-444455556666"
+    event = {"Records": [{"s3": {"object": {"key": "orders/b1.json", "size": 4800}}}]}
+    put_logs("/aws/lambda/etl-nightly", [
+        (now - timedelta(seconds=30), f"START RequestId: {rid} Version: $LATEST"),
+        (now - timedelta(seconds=29), json.dumps({"level": "INFO", "message": event, "requestId": rid})),
+        (now - timedelta(seconds=28), f"END RequestId: {rid}"),
+        (now - timedelta(seconds=28), report_line(rid, 2000.0)),
+    ], stream="2026/10/06/[$LATEST]evt")
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "key ~ b1"
+    assert [run.request_id for run in x._visible_runs()] == [rid]
+    row = x._run_rows[0]
+    assert "Records" not in plain(row.face.value)
+    row.button.click()
+    assert '<details class="rev" open><summary>Event' in row.body.value and "orders/b1.json" in plain(row.body.value)

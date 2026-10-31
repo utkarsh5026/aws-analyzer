@@ -10,7 +10,7 @@ shots.py renders reports, which are plain HTML. The explorer is ipywidgets, whic
 a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's Lambda functions (moto, us-east-1),
 then uses it the way a person would: reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired),
 its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors tab and the
-Code tab (a folder of its tree open), then picks report-api in the function field for its JSON logs, a failed run and a
+Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError (the line it failed on), then picks report-api in the function field for its JSON logs, a failed run and a
 good one open. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/lambda_functions.md, by
 shots.py's set_height.
@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -41,12 +42,15 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
-           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code")
+           "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
+           "lambda-explorer-recent", "lambda-explorer-changed", "lambda-explorer-changes")
+SECOND_WINDOW = ("lambda-explorer-changed", "lambda-explorer-changes")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
 os.environ.update({{"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
-                   "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}})
+                   "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1",
+                   "AWS_ANALYZER_HISTORY": "off"}})
 os.environ.pop("AWS_PROFILE", None)
 from moto import mock_aws
 mock_aws().start()
@@ -54,7 +58,42 @@ import demo
 from aws_analyzer import lambda_functions
 core = lambda_functions.LambdaAnalyzer(region="us-east-1", **demo.seed_lambda_functions())
 # height=620: the figures don't grow with the browser's height
-x = lambda_functions.LambdaExplorer(core=core, height=620)"""
+import tempfile
+x = lambda_functions.LambdaExplorer(core=core, height=620, history=tempfile.mktemp(suffix=".sqlite"))"""
+
+
+CHANGES_SEED = """import dataclasses, datetime, tempfile
+from aws_analyzer._kit.history import PlaceHistory
+from aws_analyzer.lambda_functions import function_look
+looks = PlaceHistory(tempfile.mktemp(suffix=".sqlite"), "lambda")
+then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
+for fn in core.overview(metrics=False, details=False).functions:
+    account = fn.arn.split(":")[4]
+    looks.record(account, fn.arn, fn.name, at=then)
+    if fn.name == "orders-etl":
+        fn = dataclasses.replace(fn, memory=fn.memory // 2, raw={**fn.raw, "CodeSha256": "an earlier build"})
+    looks.save_snapshot(account, fn.arn, function_look(fn).to_data(), at=then)
+y = lambda_functions.LambdaExplorer(core=core, height=620, history=looks.path)
+"""
+
+
+def open_second_window(page: Any) -> Any:
+    """
+    Runs a second cell, which notes how the functions looked three days ago (orders-etl with half its memory and
+    other code) and opens another explorer on that history, and returns its window once its list is read.
+    """
+    page.locator(".jp-Cell .jp-InputArea-editor").first.click()
+    page.keyboard.press("Escape")
+    page.keyboard.press("b")
+    page.keyboard.press("Enter")
+    page.keyboard.type('exec(open("changes_seed.py").read())')
+    page.keyboard.press("Shift+Enter")
+    page.wait_for_function("document.querySelectorAll('.lmx-app').length > 1", timeout=90_000)
+    window = page.locator(".lmx-app").nth(1)
+    page.wait_for_function("document.querySelectorAll('.lmx-app .lmx-status')[1].innerText.includes('read in')",
+                           timeout=90_000)
+    window.scroll_into_view_if_needed()
+    return window
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:
@@ -85,11 +124,11 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     time.sleep(1)
     taken: dict[str, Path] = {}
 
-    def shot(name: str) -> None:
+    def shot(name: str, window: Any = None) -> None:
         if name in wanted:
             time.sleep(0.6)
             taken[name] = out / f"{name}-{theme}.png"
-            app.screenshot(path=str(taken[name]))
+            (window or app).screenshot(path=str(taken[name]))
 
     def tab(title: str) -> None:
         page.locator(f".lmx-app button.lmx-tab:has-text('{title}')").first.click()
@@ -124,7 +163,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     time.sleep(0.4)
     page.mouse.move(1, 1)
     shot("lambda-explorer-logs")
-    search = page.locator(".lmx-app input[placeholder^='Find runs with']")
+    search = page.locator(".lmx-app input[placeholder^='Find runs']")
     search.fill("AccessDenied")
     search.press("Enter")
     time.sleep(0.5)
@@ -141,6 +180,15 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     time.sleep(0.4)
     page.mouse.move(1, 1)
     shot("lambda-explorer-code")
+    if "lambda-explorer-failed-line" in wanted:
+        tab("Errors")
+        settled()
+        cause = page.locator(".lmx-app .lmx-row:has(.er.cause)", has_text="KeyError").first
+        cause.hover()
+        cause.locator("button.lmx-act").click()
+        settled()
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-failed-line")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON
         page.locator(".lmx-app .lmx-trig-b").first.click()
         page.locator(".lmx-app .lmx-pop input").fill("report")
@@ -155,6 +203,30 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         time.sleep(0.4)
         page.mouse.move(1, 1)
         shot("lambda-explorer-json")
+    if "lambda-explorer-recent" in wanted:
+        if "lambda-explorer-json" not in wanted:
+            page.locator(".lmx-app .lmx-trig-b").first.click()
+            page.locator(".lmx-app .lmx-pop input").fill("report")
+            page.locator(".lmx-app .lmx-pop input").press("Enter")
+            settled()
+        tab("Functions")
+        page.locator(".lmx-app button.lmx-chip", has_text="Recent").first.click()
+        time.sleep(0.5)
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-recent")
+    if set(SECOND_WINDOW) & set(wanted):
+        later = open_second_window(page)
+        settled()
+        later.locator("button.lmx-chip", has_text="Changed").first.click()
+        time.sleep(0.5)
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-changed", later)
+        later.locator(".lmx-row", has_text="orders-etl").locator("button.lmx-row-b").first.click()
+        settled()
+        page.wait_for_function("[...document.querySelectorAll('.lmx-app')][1].innerText.includes('since your last look')",
+                               timeout=60_000)
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-changes", later)
     return taken
 
 
@@ -184,6 +256,7 @@ def main() -> int:
                     "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
                     "nbformat": 4, "nbformat_minor": 5}
         Path(tmp, "explorer.ipynb").write_text(json.dumps(notebook), encoding="utf-8")
+        Path(tmp, "changes_seed.py").write_text(CHANGES_SEED, encoding="utf-8")
         server = subprocess.Popen(
             [str(Path(sys.executable).parent / "jupyter"), "lab", "--no-browser", "--allow-root", f"--port={port}",
              f"--IdentityProvider.token={token}", "--ServerApp.ip=127.0.0.1", f"--ServerApp.root_dir={tmp}",

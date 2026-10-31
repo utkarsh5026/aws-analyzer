@@ -308,8 +308,8 @@ class _Window:
 class _Job:
     """
     A job _Explorer._later runs in the background: its key and number (a newer job of the same key makes its
-    result go unused), what to do with its result or its error, and the status line it shows while it counts, as
-    long as the line is still owner's.
+    result go unused), what to do with its result or its error, the status line it shows while it counts, as
+    long as the line is still owner's, and what it redraws meanwhile (ticking: a progress bar).
     """
 
     key: str
@@ -318,6 +318,7 @@ class _Job:
     failed: Callable[[BaseException], None]
     counting: str = ""
     owner: str = ""
+    ticking: Callable[[], None] | None = None
 
 
 class _Explorer(_Window):
@@ -481,16 +482,18 @@ class _Explorer(_Window):
         return self._pool
 
     def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],  # noqa: PLR0913
-               failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
+               failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "",
+               ticking: Callable[[], None] | None = None) -> None:
         """
         Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
         window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
         A newer job of the same key makes this one's result go unused. Whatever work() raises goes to failed (by
         default said in the status line). counting: the status line to show while it runs and the line is still
-        owner's, {n} standing for the count read so far.
+        owner's, {n} standing for the count read so far. ticking() runs on the loop as often, while the job is the
+        latest of its key, to redraw how far it has come.
         """
         self._jobs[key] = number = self._jobs.get(key, 0) + 1
-        job = _Job(key, number, done, failed or self._say_error, counting, owner)
+        job = _Job(key, number, done, failed or self._say_error, counting, owner, ticking)
         loop = _running_loop()
         if loop is None:
             self._run_now(job, work)
@@ -539,12 +542,16 @@ class _Explorer(_Window):
     async def _count_while_waiting(self, job: _Job, future: asyncio.Future) -> None:
         """
         While a job that counts runs, says how much it has read every _COUNT_EVERY seconds, as long as the status
-        line is still its owner's and no newer job of its key started.
+        line is still its owner's and no newer job of its key started, and calls its ticking() as often.
         """
-        while job.counting and not future.done():
+        while (job.counting or job.ticking) and not future.done():
             await asyncio.wait([future], timeout=self._COUNT_EVERY)
-            still_counting = self._is_latest(job) and not future.done() and self._said[3] == job.owner
-            if still_counting and self._counted:
+            if not self._is_latest(job) or future.done():
+                continue
+            ticking = job.ticking
+            if ticking is not None:
+                self._hand_back(job, lambda _result: ticking(), None)
+            if job.counting and self._counted and self._said[3] == job.owner:
                 self._status(job.counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=job.owner)
 
     def _drop(self, *keys: str) -> None:

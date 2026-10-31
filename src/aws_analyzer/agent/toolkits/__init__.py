@@ -10,7 +10,8 @@ COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in RE
 joins two services (S3's s3_triggers, which reads Lambda too) goes in one of their toolkits, which offers it when the
 agent has the other (Toolkit.peer()). The Python toolkit (python_tools.py) isn't about a service: it runs the model's
 code in the agent's workspace (AgentAnalyzer(python=...)), and each service's toolkit offers a save_* tool that puts
-its data there when the agent has it (peer('python')).
+its data there when the agent has it (peer('python')). Nor is the Runbooks toolkit (runbook_tools.py): it reads the
+agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from .base import Toolkit
 from .bedrock_kb_tools import BedrockKBToolkit
 from .lambda_tools import LambdaToolkit
 from .python_tools import PythonToolkit
+from .runbook_tools import RunbookToolkit
 from .s3_tools import S3Toolkit
 
 TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "bedrock_kb": BedrockKBToolkit,
@@ -76,5 +78,5 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "BedrockKBToolkit", "LambdaToolkit", "PythonToolkit", "S3Toolkit", "Toolkit",
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "BedrockKBToolkit", "LambdaToolkit", "PythonToolkit", "RunbookToolkit", "S3Toolkit", "Toolkit",
            "default_toolkits", "make_toolkit", "make_toolkits"]

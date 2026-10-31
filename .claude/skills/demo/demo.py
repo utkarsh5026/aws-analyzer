@@ -1676,6 +1676,17 @@ def _report_api_logs(logs) -> None:
                             logEvents=sorted(batch, key=lambda e: e["timestamp"]))
 
 
+def _backdate_function(name: str, when: datetime) -> None:
+    """
+    moto stamps a function with the time it's changed; orders-etl's DynamoDB copy went out 3 days ago, when its
+    errors began to rise.
+    """
+    from moto.awslambda.models import lambda_backends
+
+    function = lambda_backends[ACCOUNT][REGION].get_function(name)
+    function.last_modified = when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+
+
 def seed_lambda_functions() -> dict:
     """
     moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
@@ -1731,6 +1742,7 @@ def seed_lambda_functions() -> dict:
     etl.update_function_code(FunctionName="orders-etl", ZipFile=packages["orders-etl"])
     etl.update_function_configuration(FunctionName="orders-etl",
                                       Environment={"Variables": {**etl_settings, "ORDERS_TABLE": "orders"}})
+    _backdate_function("orders-etl", (NOW - timedelta(days=3)).replace(hour=14, minute=2, second=0, microsecond=0))
     create("churn-scoring", Handler="app.predict", Architectures=["arm64"], MemorySize=2048, Timeout=30,
            Description="Scores customers for churn with the model trained in SageMaker", Tags={"team": "ml"})
     create("report-api", Runtime="nodejs20.x", Handler="index.handler", MemorySize=512, Timeout=10,
@@ -1846,7 +1858,7 @@ def seed_lambda_functions() -> dict:
                                    "arn:aws:lambda:us-east-1::runtime:5ad8c1e3b3f0b7e2a1f9d4c6e8b0a2f4c6d8e0b2"))
         if kind == "key":
             lines.append((seconds - 0.01, "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n  "
-                                          "File \"/var/task/etl.py\", line 23, in handler\n    table.put_item(Item="
+                                          "File \"/var/task/etl.py\", line 22, in handler\n    table.put_item(Item="
                                           "{\"pk\": row[\"customer_id\"], \"sk\": row[\"order_id\"]})"))
         elif kind == "denied":
             lines.append((seconds - 0.01, "[ERROR] ClientError: An error occurred (AccessDeniedException) when calling "
@@ -1967,7 +1979,7 @@ def seed_lambda_functions() -> dict:
 def seed_agent() -> dict:
     """
     The Lambda demo data, and a scripted stand-in for the model (no Azure OpenAI needed, but the agent's packages
-    are): it calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
+    are): it reads the lambda-failing runbook, then calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
     and writes its answer from what they returned, so the report shows the demo data's real numbers. It only knows
     that one plan; with --live the agent asks your Azure OpenAI deployment instead (AZURE_OPENAI_* variables).
     """
@@ -2002,19 +2014,38 @@ def _demo_model():
                 + f"\n\nChecked {window.get('from', '?')} to {window.get('to', '?')} UTC in "
                 + ", ".join(health.get("regions") or []) + ".")
 
+    def findings(health: dict, reports: list[dict]) -> list[dict]:
+        causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        found = []
+        for row in (health.get("failed") or [])[:3]:
+            cause = causes.get(row["name"]) or {}
+            why = f"; the most common cause is {cause['kind']} ({cause['count']} times)" if cause.get("kind") else ""
+            region = f", region={row['region']!r}" if row["region"] != REGION else ""
+            call = f"LambdaView().errors({row['name']!r}, since='24h'{region})"
+            found.append({"level": "warn",
+                          "message": f"{row['name']} failed {row['errors']:,} calls in the last 24 hours "
+                                     f"({row['error_rate_pct']}% of them){why}: those runs did no work. Read each "
+                                     "cause with the lines around it, and fix the most common first.",
+                          "call": call, "shows": "its errors, grouped by cause"})
+        return found
+
     class DemoModel(BaseChatModel):
         model_name: str = "demo-model (scripted)"
+        replies: bool = False
 
         @property
         def _llm_type(self) -> str:
             return "demo"
 
         def bind_tools(self, tools, **kwargs):
-            return self
+            offered = {getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else None) for t in tools}
+            return self.model_copy(update={"replies": "final_answer" in offered})
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
             start = max(i for i, m in enumerate(messages) if m.type == "human")
-            results = [json.loads(m.content) for m in messages[start + 1:] if m.type == "tool"]
+            read = [json.loads(m.content) for m in messages[start + 1:] if m.type == "tool"]
+            results = [result for result in read if "runbook" not in result]
+            has_runbook = "lambda-failing:" in str(messages[0].content)
             usage = {"input_tokens": 2400 + 1500 * len(results), "output_tokens": 90, "total_tokens": 0}
             usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
 
@@ -2023,12 +2054,17 @@ def _demo_model():
                     {"name": name, "args": args, "id": f"{name}-{i}", "type": "tool_call"}
                     for i, (name, args) in enumerate(steps)])
 
-            if not results:
+            if not read and has_runbook:
+                reply = calls(("read_runbook", {"name": "lambda-failing"}))
+            elif not results:
                 reply = calls(("function_health", {"since": "24h"}))
             elif len(results) == 1 and results[0].get("failed"):
                 reply = calls(*[("function_errors", {"function": row["name"], "since": "24h",
                                                      **({"region": row["region"]} if row["region"] != REGION else {})})
                                 for row in results[0]["failed"][:2]])
+            elif self.replies:
+                reply = calls(("final_answer", {"answer": answer(results[0], results[1:]),
+                                                "findings": findings(results[0], results[1:])}))
             else:
                 reply = AIMessage(content=answer(results[0], results[1:]), usage_metadata=usage)
             return ChatResult(generations=[ChatGeneration(message=reply)])

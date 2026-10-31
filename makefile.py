@@ -17,7 +17,9 @@ machines that have make, and this file runs them on machines that don't (Windows
     python makefile.py envs                  # the Python environments on this machine (conda, venv) and their kernels
     python makefile.py install-env           # install this checkout into ones you pick (asks which, and what with)
     python makefile.py install-env --env pytorch_p310 --extras all --kernel   # ... the same without questions
-    python makefile.py clean                 # remove what these tasks built
+    python makefile.py clean                 # remove what these tasks built in this checkout
+    python makefile.py clean --all           # ... and the agent sandbox's files in ~/.cache/aws-analyzer
+    python makefile.py clean --all --dry-run # say what it would remove, and how much, without removing it
 
 `local` is the check before a release: it builds the wheel from this checkout, installs it in a fresh virtual
 environment in .local-check/ (only boto3 comes with it, as from PyPI), imports every module there, then installs the
@@ -70,7 +72,13 @@ CONDA_PYTHONS = ["/opt/conda/bin/python", "~/anaconda3/bin/python", "~/anaconda3
                  "~/miniconda3/bin/python"]
 NOTEBOOK_INSTANCE_CONDA_ENVS = Path("/home/ec2-user/anaconda3/envs")
 KERNEL_NAME_UNSAFE = re.compile(r"[^a-z0-9._-]+")
-BUILT_FOLDERS = [LOCAL, ROOT / "dist", ROOT / "build", ROOT / "site", ROOT / ".pytest_cache", ROOT / ".ruff_cache"]
+BUILT_FOLDERS = [LOCAL, ROOT / "dist", ROOT / "build", ROOT / "site", ROOT / ".pytest_cache", ROOT / ".ruff_cache",
+                 ROOT / "htmlcov"]
+BUILT_PATTERNS = ["src/*.egg-info", "**/__pycache__"]
+SANDBOX_CACHE_NAME = "aws-analyzer"
+TEST_PYODIDE_ENV = "AWS_ANALYZER_TEST_PYODIDE"
+SIZE_UNITS = ["B", "KB", "MB", "GB", "TB"]
+BYTES_PER_UNIT = 1024
 PIP_QUIET = ["--quiet", "--disable-pip-version-check"]
 COMMAND_ERROR = re.compile(r"^\[!\] (?:.+  \[\w+\]|Couldn't .+)$", re.MULTILINE)
 
@@ -350,16 +358,97 @@ def task_demo(args: argparse.Namespace, extra: list[str]) -> int:
     return run([sys.executable, DEMO, args.service, code, *extra])
 
 
+def built_paths() -> list[Path]:
+    """
+    What the tasks build in this checkout: the folders in BUILT_FOLDERS and the ones BUILT_PATTERNS match.
+    """
+    found = [folder for folder in BUILT_FOLDERS if folder.exists()]
+    for pattern in BUILT_PATTERNS:
+        for match in sorted(ROOT.glob(pattern)):
+            inside_another = any(folder in match.parents for folder in found)
+            if match.is_dir() and not inside_another and ".git" not in match.parts:
+                found.append(match)
+    return found
+
+
+def sandbox_caches() -> list[Path]:
+    """
+    Where the agent's Python sandbox keeps what it downloads outside the checkout: $XDG_CACHE_HOME (else ~/.cache)
+    / aws-analyzer, as LocalSandbox's default_cache() puts it, and the tests' Pyodide folder when
+    AWS_ANALYZER_TEST_PYODIDE names one.
+    """
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    caches = [base / SANDBOX_CACHE_NAME]
+    test_pyodide = os.environ.get(TEST_PYODIDE_ENV, "").strip()
+    if test_pyodide:
+        caches.append(Path(test_pyodide).expanduser())
+    return [cache.resolve() for cache in caches if cache.exists()]
+
+
+def folder_bytes(folder: Path) -> int:
+    """
+    The size of everything in a folder, not following links, for the line that says what was removed.
+    """
+    total = 0
+    for path in folder.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            total += path.stat().st_size
+    return total
+
+
+def human_bytes(size: float) -> str:
+    """
+    1536 -> '1.5 KB'.
+    """
+    for unit in SIZE_UNITS:
+        if size < BYTES_PER_UNIT or unit == SIZE_UNITS[-1]:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= BYTES_PER_UNIT
+    return f"{size:.1f} {SIZE_UNITS[-1]}"
+
+
+def shown_path(path: Path) -> str:
+    """
+    A path from the checkout when it's in it, else from the home folder (~/.cache/aws-analyzer).
+    """
+    for base, prefix in ((ROOT, ""), (Path.home(), "~/")):
+        if path.is_relative_to(base):
+            return f"{prefix}{path.relative_to(base).as_posix()}/"
+    return f"{path}/"
+
+
+LEFT_ALONE = """Left alone (clean never touches them):
+  - aws-analyzer installed into other environments by install-env: <python> -m pip uninstall aws-analyzer
+    in each, and jupyter kernelspec remove <name> for a kernel it added (make envs lists both)
+  - files the package saved beside your notebooks (s3-downloads/, lambda-downloads/, agent-charts/): in a notebook,
+    from aws_analyzer import clean_up, local_files; local_files() lists them and clean_up() removes them
+  - Python environments new_env() made: SageMakerView().envs() shows the rm -rf command for each"""
+
+
 def task_clean(args: argparse.Namespace, extra: list[str]) -> int:
     """
-    Removes what these tasks built: .local-check/, dist/, build/, site/ and the test and lint caches.
+    Removes what these tasks built: .local-check/, dist/, build/, site/, the test and lint caches and __pycache__/
+    folders, and with --all also the agent sandbox's downloads in ~/.cache/aws-analyzer.
     """
-    for folder in BUILT_FOLDERS:
-        if folder.exists():
-            print(f"removing {folder.relative_to(ROOT)}/")
-            shutil.rmtree(folder)
+    targets = built_paths() + (sandbox_caches() if args.all else [])
+    verb = "would remove" if args.dry_run else "removing"
+    freed = 0
+    for target in targets:
+        size = folder_bytes(target)
+        freed += size
+        print(f"{verb} {shown_path(target)}  ({human_bytes(size)})")
+        if not args.dry_run:
+            shutil.rmtree(target)
+    if not targets:
+        print("nothing to remove")
+    else:
+        print(f"{'would free' if args.dry_run else 'freed'} {human_bytes(freed)}")
+    kept_caches = [] if args.all else sandbox_caches()
+    for cache in kept_caches:
+        print(f"the agent sandbox's files are still in {shown_path(cache)} ({human_bytes(folder_bytes(cache))}): "
+              f"clean --all removes them too")
+    print(f"\n{LEFT_ALONE}")
     return 0
-
 
 
 def venv_python(venv: Path = LOCAL_VENV) -> Path:
@@ -1096,6 +1185,16 @@ def add_install_env_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--yes", action="store_true", help="don't ask before installing")
 
 
+def add_clean_options(parser: argparse.ArgumentParser) -> None:
+    """
+    The options of `clean`: whether to remove the sandbox's cache outside the checkout too, and a dry run.
+    """
+    parser.add_argument("--all", action="store_true",
+                        help="also remove the agent sandbox's downloaded files in ~/.cache/aws-analyzer "
+                             "(local-agent or the agent downloads them again when needed)")
+    parser.add_argument("--dry-run", action="store_true", help="say what would be removed, and remove nothing")
+
+
 def make_parser() -> argparse.ArgumentParser:
     """
     One subcommand per task, each described by its function's docstring.
@@ -1113,6 +1212,7 @@ def make_parser() -> argparse.ArgumentParser:
     add_local_options(tasks.choices["local"])
     add_local_agent_options(tasks.choices["local-agent"])
     add_install_env_options(tasks.choices["install-env"])
+    add_clean_options(tasks.choices["clean"])
     tasks.add_parser("help", help="this list")
     return parser
 
