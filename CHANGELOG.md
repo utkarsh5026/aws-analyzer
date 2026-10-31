@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-31
+
 ### Added
 
 - 🧭 **S3 explorer: from a file to your code, and more reports** ([#180](https://github.com/utkarsh5026/aws-analyzer/pull/180))
@@ -1105,7 +1107,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.38.0...v0.39.0
