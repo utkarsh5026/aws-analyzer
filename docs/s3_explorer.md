@@ -96,6 +96,12 @@ Three things to try in your first minute. Nothing you click changes anything in 
 
     [Download some files](#select)
 
+-   **Load a file in your code**
+
+    Click it, then **🐍 Use in Python**: the lines for a notebook cell, written for its format.
+
+    [Use it in Python](#use-in-python)
+
 </div>
 
 ## Find your way around { #browse }
@@ -193,9 +199,12 @@ Every [file type `s3.py` reads](s3.md#file-types) works here. The buttons above 
 | **🏷️ Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
 | **📄 Text** | For a PDF: its words laid out to read, with headings, paragraphs and lists, [50 pages at a time](#pdf) |
+| **🐍 Use in Python** | The lines that load the file in a notebook cell, written for its format ([see below](#use-in-python)) |
+| **🕘 Versions** | In a versioned bucket: every version of the file, when each was written and its size (the [`history`](s3.md#deleted) report) |
 | **⬇ Download** | Saves a copy in `s3-downloads`, next to the notebook (the [`download`](s3.md#download) report; **⚙** changes the folder) |
 | **↗ Open in new tab** | Opens the file in a new browser tab: PDFs, pictures, sound, video and text show there, even when they were stored as a generic type, and other files download to your computer. Its link works for an hour: right-click it to copy the link for someone without AWS access, or run `x.ui.link(path)` to see it written out |
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
+| **‹** **›** | The file before and after it in the list, as it's sorted and searched, shown the same way (its preview, details or code), without going back to the list |
 | **✕** | Closes the file and shows the folder again |
 
 Clicking through files doesn't wait: previews load in the background, and files you clicked past are skipped.
@@ -205,6 +214,23 @@ Clicking through files doesn't wait: previews load in the background, and files 
 /// caption
 A Word file's first paragraphs; **📖 Read all** shows the whole document, pictures in place.
 ///
+
+### Use it in Python { #use-in-python }
+
+**🐍 Use in Python** writes the lines that load the file in your next cell: one click selects them, ready to copy.
+{ .gist }
+
+The code reads the file for its format: `pd.read_csv` for a CSV, `pd.read_parquet` for Parquet, `json.load` for JSON, `Image.open` for a picture. It uses `S3Analyzer().open(...)`, so it needs only boto3 and pandas, signs in the way the explorer does, and undoes `.gz` compression as it reads. Tick several files of one table format and **🐍 Use in Python** in the bar under the list writes the loop that puts them in one DataFrame.
+
+![S3Explorer with train.parquet highlighted and 🐍 Use in Python pressed; on the right the title Use train.parquet in Python over a code block that imports pandas, makes an S3Analyzer, opens the file's s3:// path and reads it with pd.read_parquet, then notes that Parquet is read whole into memory and the path for other tools](images/explorer-python-light.webp#only-light){ width="984" height="581" loading=lazy }
+![S3Explorer with train.parquet highlighted and 🐍 Use in Python pressed; on the right the title Use train.parquet in Python over a code block that imports pandas, makes an S3Analyzer, opens the file's s3:// path and reads it with pd.read_parquet, then notes that Parquet is read whole into memory and the path for other tools](images/explorer-python-dark.webp#only-dark){ width="984" height="581" loading=lazy }
+/// caption
+**🐍 Use in Python** on a Parquet file: copy the lines, run them, and the table is a DataFrame.
+///
+
+??? more "Pickles, other tools, and the paths from code"
+
+    A pickle comes with a warning: loading one runs whatever code its writer put in it. Formats without a reader in pandas get the reader they need (`fastavro`, `pypdf`, `numpy`, `zipfile`), and an unknown format gets the file's bytes. To use another tool, the note under the code gives the `s3://` path; `pd.read_csv("s3://...")` reads it directly when `s3fs` is installed. From code, `x.selected` is the file shown and `x.picked` the files ticked.
 
 ### Read a PDF, as it looks or as text { #pdf }
 
@@ -248,6 +274,7 @@ The buttons above the right pane change with where you are: a summary of a folde
 | --- | --- | --- |
 | In a folder | **📊 What's in here** | Every file below this folder, not only this level: sizes, file types, the biggest files and folders, the monthly cost, and findings (the [`summary`](s3.md#summary) report). It lists everything below, so a big folder takes a while; a progress bar shows how far it's got |
 | In a folder | **⬇ Download .zip** | Everything below this folder as one `.zip` ([see below](#zip)) |
+| In a folder | **More ▾** | A second row of reports on the folder ([see below](#more)). It stays open as you move, until **Fewer ▴** |
 | At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
 | On your buckets | **🪣 Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
 
@@ -255,6 +282,28 @@ The buttons above the right pane change with where you are: a summary of a folde
 ![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="579" loading=lazy }
 /// caption
 `S3Explorer()` starts from your buckets; **🪣 Every bucket** compares their size, cost and security settings.
+///
+
+### More reports on a folder { #more }
+
+**More ▾** answers the questions you have while you browse: what's taking the space, what landed recently, what's a copy.
+{ .gist }
+
+| Button | What it shows |
+| --- | --- |
+| **🐘 Largest files** | The 20 biggest files below this folder (the [`largest`](s3.md#browse) report) |
+| **🆕 Newest files**, **🕰️ Oldest files** | The 20 changed most recently, or left alone the longest |
+| **🔍 Inside the files** | What's inside each file: a table's rows and columns, and whether the tables here agree on them, a PDF's pages, a picture's size (the [`file_details`](s3.md#file-details) report) |
+| **📑 Copies** | Files stored more than once, matched by size and ETag so no file is read, and what the copies cost (the [`duplicates`](s3.md#duplicates) report) |
+| **🧩 Unfinished uploads** | Uploads that never finished: billed, but in no listing (the [`uploads`](s3.md#costs) report) |
+| **🕘 Old versions**, **🗑️ Deleted files** | In a versioned bucket only: what old versions cost, and the files you can still bring back, with the call that does it (the [`versions`](s3.md#costs) and [`deleted`](s3.md#deleted) reports) |
+
+Each one lists everything below the folder, so a big one takes a while; a progress bar shows how far it's got. Nothing changes anything in S3.
+
+![S3Explorer in the acme-ml-data bucket with More ▾ open: a second row of buttons for Largest files, Newest files, Oldest files, Inside the files, Copies and Unfinished uploads; Largest files is pressed and the right shows a table of the 20 biggest files below the bucket with their sizes, ages and storage classes](images/explorer-more-light.webp#only-light){ width="984" height="581" loading=lazy }
+![S3Explorer in the acme-ml-data bucket with More ▾ open: a second row of buttons for Largest files, Newest files, Oldest files, Inside the files, Copies and Unfinished uploads; Largest files is pressed and the right shows a table of the 20 biggest files below the bucket with their sizes, ages and storage classes](images/explorer-more-dark.webp#only-dark){ width="984" height="581" loading=lazy }
+/// caption
+**More ▾** → **🐘 Largest files**: where a bucket's space goes, without leaving the explorer.
 ///
 
 ### Download a folder as a .zip { #zip }
@@ -297,7 +346,7 @@ Five files ticked, one `.zip` with a name that says what's in it.
 
 ??? more "How the zip is laid out, and doing it from code"
 
-    The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it.
+    The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it. **🐍 Use in Python** in the bar writes the code that [loads what's ticked](#use-in-python) instead.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: big folders, driving the explorer from code, permissions, troubleshooting and every argument.</p>
 
@@ -397,6 +446,9 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `s3:ListBucket` | Listing folders, **Include subfolders**, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
 | `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **📄 Text**, **⬇ Download** and **⬇ Download .zip**, and the links **↗ Open in new tab** opens |
 | `s3:GetObjectTagging` | The tags in **🏷️ Details**; without it, the rest of **🏷️ Details** still shows |
+| `s3:GetBucketVersioning` | Whether a bucket keeps old versions, for **🕘 Versions**, **🕘 Old versions** and **🗑️ Deleted files**; without it, those buttons don't show |
+| `s3:ListBucketVersions` | **🕘 Versions**, **🕘 Old versions** and **🗑️ Deleted files** |
+| `s3:ListBucketMultipartUploads` | **🧩 Unfinished uploads** |
 | `kms:Decrypt` on the key | Files encrypted with SSE-KMS |
 
 **🛡️ Bucket settings** and **🪣 Every bucket** also read each bucket's settings, and its size from CloudWatch; the [S3 guide's policy](s3.md#permissions) covers them and every other S3 report. To scope the policy down, give `s3:ListBucket` and `s3:GetObject` your buckets' ARNs, such as `arn:aws:s3:::acme-ml-data` and `arn:aws:s3:::acme-ml-data/*`, in a statement of their own: `s3:ListAllMyBuckets` only works with `"Resource": "*"`.

@@ -11,6 +11,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🧭 **S3 explorer: from a file to your code, and more reports** ([#180](https://github.com/utkarsh5026/aws-analyzer/pull/180))
+  - **🐍 Use in Python** writes the lines that load the file in a notebook cell, for its format; on ticked files, one DataFrame.
+  - **‹ ›** beside ✕ show the file before and after in the list, the same way, without going back to it.
+  - **More ▾** on a folder: largest, newest and oldest files, what's inside them, copies, unfinished uploads, and in a versioned bucket old versions, deleted files and a file's **🕘 Versions**.
+
 - ⚡ **Lambda: ask for runs by their fields** ([#181](https://github.com/utkarsh5026/aws-analyzer/pull/181))
   - `runs("orders-etl", since="today", where="duration > 15s and cold")`: each run as a row, sorted, grouped by hour.
   - Queries reach your JSON logs' fields and the event when it's logged (`size > 30MB`); `core.runs()` gives a table.

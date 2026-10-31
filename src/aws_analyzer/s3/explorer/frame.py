@@ -69,7 +69,7 @@ _TERMINAL_CSS = _terminal_theme((".s3x",), "s3t") + """
 .s3x button.s3x-quiet:hover:enabled{background:transparent;border-color:var(--s3t-accent);color:var(--s3t-accent)}
 .s3x button.s3x-seg.s3x-on,.s3x button.s3x-chip.s3x-on,.s3x button.s3x-act.s3x-on{background:transparent;box-shadow:none;
  border-color:var(--s3t-accent);color:var(--s3t-accent);font-weight:700}
-.s3x button.s3x-close{border-color:transparent;font-size:0}
+.s3x button.s3x-close,.s3x button.s3x-step{border-color:transparent;font-size:0}
 .s3x .s3x-head{padding:0 10px}
 .s3x button.s3x-col{height:26px;line-height:26px;font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;
  color:var(--s3t-comment);opacity:1}
@@ -251,11 +251,11 @@ body[class*=vscode-] .s3x .s3x-body{height:560px}
  transition:background-color .12s ease}
 .s3x a.s3x-act:hover{background:var(--s3x-hover)}
 .s3x a.s3x-act:focus-visible{outline:2px solid var(--s3x-tint-line);outline-offset:-2px}
-.s3x button.s3x-close{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:28px;
+.s3x button.s3x-close,.s3x button.s3x-step{display:inline-flex;align-items:center;justify-content:center;width:28px;
  min-width:28px;padding:0;border-color:transparent;font-size:0;opacity:.7}
-.s3x button.s3x-close:hover{opacity:1}
-.s3x button.s3x-expand{margin-left:auto}
-.s3x button.s3x-expand+button.s3x-close{margin-left:0}
+.s3x button.s3x-close:hover,.s3x button.s3x-step:hover:enabled{opacity:1}
+.s3x button.s3x-step:disabled{opacity:.25}
+.s3x .s3x-actions>.s3x-push{margin-left:auto}
 .s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;padding:10px 0 4px;
  border-top:1px solid var(--s3x-line)}
 .s3x .s3x-pager>*{margin:0}
