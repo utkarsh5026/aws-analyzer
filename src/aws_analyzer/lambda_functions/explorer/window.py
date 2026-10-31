@@ -39,9 +39,11 @@ from .timeline import _Timeline
 from .errors import _ErrorsTab
 from .performance import _PerformanceTab
 from .code import _CodeTab
+from .focus import _FocusReads
 
 
-class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
+class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab,
+                     _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -84,7 +86,8 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
     command. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
     functions (history=). x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function,
     x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown, and x.board what the Live tab read
-    (function ARN -> LiveFunction).
+    (function ARN -> LiveFunction). x.focus is what you're looking at, as data: the function, the tab, its time range
+    and the run or file opened (x.focus.chips() reads it as a row of chips).
     """
 
     _PREFIX, _THREADS = "lmx", "lambda-explorer"

@@ -41,10 +41,11 @@ from .frame import (
     _CHIP_LABELS, _EXPLORER_CSS, _EXPLORER_TABS, _FIELD_ROLES, _FILE_PAGE, _LOGO, _RESULTS, _file_face, _parser_name,
     _sync_step, _window_text,
 )
+from .focus import _FocusReads
 from .widgets import _Chooser, _FileRow
 
 
-class KBExplorer(_Explorer):
+class KBExplorer(_FocusReads, _Explorer):
     """
     The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
@@ -70,7 +71,9 @@ class KBExplorer(_Explorer):
 
     Nothing here changes the knowledge base: the window only reads (where a sync is needed it shows the command), and
     the one file it writes is the list ⬇ List saves. x.ui is a BedrockKBView for reports in other cells
-    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown.
+    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown, and x.focus
+    what you're looking at, as data: the knowledge base, the tab and the file or search open (x.focus.chips() reads
+    it as a row of chips).
     """
 
     _PREFIX, _THREADS = "kbx", "kb-explorer"

@@ -133,6 +133,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   the windows' terminal theme reads too); `_BaseView._show` passes `theme=_theme_name()`, and the windows call
   `_render_html` with none, so they keep their own look; a new rule in `_BASE_RULES` for a shared block may need a
   line in each theme, and `demo.py --look` / a `Figure(theme=)` in `shots.py` show one)
+  `focus.py` (`Focus` and `FocusPart`: what an explorer window is showing, as data, pure; each explorer's `focus`
+  property builds one in its own `explorer/focus.py`, a `_FocusReads` mixin, and `chips()` / `value(key)` /
+  `without(key)` read it),
   and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an

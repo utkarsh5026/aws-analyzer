@@ -4372,6 +4372,35 @@ def test_explorer_search_tab_opens_each_passages_file(world):
     assert x._tab == "search" and x.found.question == "refund window"
 
 
+def test_explorer_focus_says_what_you_are_looking_at(world):
+    x = explorer(world)
+    overview = x.focus
+    assert (overview.service, overview.kind, overview.region) == ("bedrock_kb", "knowledge_base", "us-east-1")
+    assert overview.chips() == ["support-docs", "Overview tab"] and overview.value("knowledge_base") == KB_ID
+    x.tab_buttons["files"].click()
+    assert x.focus.kind == "files" and x.focus.chips() == ["support-docs", "Files tab", "6 files"]
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()
+    assert x.focus.chips()[2:] == ["Failed", "1 file"] and x.focus.value("state") == "failed"
+    assert x.focus.value("files") == FOLDER + "scanned.pdf"
+
+    row(x, "scanned.pdf").button.click()
+    failed = x.focus
+    assert failed.kind == "file" and failed.value("file") == FOLDER + "scanned.pdf"
+    assert failed.chips()[2:] == ["scanned.pdf", "Failed", "The file is a scanned image with no text layer", "docs-s3"]
+    failed_chip = next(c for c in x.chips.children if c.description.startswith("Failed"))
+    failed_chip.click()
+    row(x, "faq.md").button.click()
+    x.ask_box.value = "word120 word121"
+    enter(x.ask_box)
+    assert x.focus.chips()[-1] == "asked: word120 word121" and x.focus.value("question") == "word120 word121"
+
+    x.search("refund window")
+    assert x.focus.kind == "search" and x.focus.chips()[1:] == ["Search tab", "search: refund window", "4 passages"]
+    x.tab_buttons["syncs"].click()
+    assert x.focus.kind == "syncs" and str(x.focus) == "support-docs · Syncs tab"
+    assert KBExplorer("support-docs", core=world.core(), mode="text").focus is None
+
+
 def test_explorer_syncs_and_settings_tabs(world):
     x = explorer(world)
     assert world.agent.called("list_ingestion_jobs")[-1]["maxResults"] == 5  # describe's: the history isn't read yet

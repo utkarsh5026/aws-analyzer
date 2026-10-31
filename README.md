@@ -387,6 +387,7 @@ x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, fr
 x.filter(".parquet", subfolders=True)                 # the search box: every Parquet file below this folder
 x.filter(kind="folders")                              # only the folders here; x.filter() shows everything again
 x.ui.download_zip(x.picked)                           # what's ticked in the list, as one .zip
+x.focus.chips()                                       # what you're looking at: ['my-bucket/raw/', '12 files · 3.4 GB']
 x.ui.summary(x.location)                              # any S3View report about where you are, in its own cell
 
 nav = S3Navigator()                                   # the same navigation as data, with no UI
@@ -943,8 +944,9 @@ browser tab). Without it, or outside Jupyter, it shows the same as reports: `fil
 
 Everything is read in the background, so a click shows what's known at once and the rest as it arrives, and the
 window keeps answering. Like the rest of the file it only reads: where a sync would help, it shows the command.
-`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, and `x.ui`
-is a `BedrockKBView` for reports in other cells.
+`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is
+what you're looking at (the knowledge base, the tab and the file or search open), and `x.ui` is a `BedrockKBView` for
+reports in other cells.
 
 ### Commands (`BedrockKBView`)
 

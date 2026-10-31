@@ -21,6 +21,7 @@ from ..readers.formats import _DATA_ERRORS
 from ..view.s3_view import S3View
 
 from .navigator import _KINDS, Entry, Folder, S3Navigator, _s3_module, parse_filter, parse_location
+from .focus import _FocusReads
 from .frame import _CHECK, _CSS, _PAGE_BUTTONS, _Row
 from .listing import _ListPane
 from .recent import _RecentPane
@@ -29,7 +30,7 @@ from .selection import _SelectionPane
 from .settings import _SettingsPane
 
 
-class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentPane):
+class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentPane, _FocusReads):
     """
     Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
     click on the right. Click a folder to open it; ← → ↑ go back, forward and up; click the path to jump
@@ -60,7 +61,8 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
-    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list.
+    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list. `x.focus` is what you're looking at,
+    as data: the folder, the file shown, the search and what's ticked (x.focus.chips() reads it as a row of chips).
     """
 
     def __init__(

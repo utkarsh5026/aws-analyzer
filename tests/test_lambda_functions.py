@@ -3872,6 +3872,49 @@ def test_live_tab_shows_whats_running_and_follows_a_function(explorer):
     assert x._tab == "logs" and x.function.name == "etl-nightly" and not x._watching
 
 
+def test_explorer_focus_says_what_you_are_looking_at(core, explorer):
+    x = explorer()
+    listed = x.focus
+    assert (listed.service, listed.kind, listed.region) == ("lambda", "functions", REGION)
+    assert listed.chips() == [REGION, "2 functions"]
+    assert sorted(listed.value("functions").split(", ")) == ["api-handler", "etl-nightly"]
+    x.find.value = "nightly"
+    assert x.focus.chips() == [REGION, "search: nightly", "1 function"]
+    assert x.focus.value("functions") == "etl-nightly"
+
+    x = explorer("etl-nightly", tab="errors")
+    errors = x.focus
+    assert errors.kind == "errors" and errors.region == REGION
+    assert errors.chips() == ["etl-nightly", REGION, "Errors tab", "the last 24 hours", "1 cause"]
+    assert errors.value("function").endswith(":function:etl-nightly") and errors.value("tab") == "errors"
+    assert errors.value("causes") == "KeyError: 'customer_id' (×1)"
+    assert errors.until - errors.since == timedelta(hours=24)
+
+    x._cause_rows[0].button.click()
+    opened = x.focus
+    assert opened.kind == "run" and opened.value("request_id") == RID
+    assert opened.chips()[2:] == ["Logs tab", "the last 24 hours", "search: KeyError: 'customer_id'",
+                                  f"run {RID[:8]}", "KeyError: 'customer_id'"]
+    widened = opened.without("range").without("request_id")
+    assert widened.since is None and widened.until is None and "the last 24 hours" not in widened.chips()
+    assert widened.value("request_id") == "" and opened.value("request_id") == RID
+
+    x._run_rows[0].code_button.click()
+    assert x.focus.kind == "code" and x.focus.chips()[2:] == ["Code tab", "app.py", "line 2"]
+    x.tab_buttons["overview"].click()
+    assert x.focus.kind == "function" and str(x.focus) == f"etl-nightly · {REGION} · Overview tab"
+    x.run(RID)
+    assert x.focus.kind == "run" and x.focus.value("request_id") == RID and x.focus.value("search") == ""
+    assert LambdaExplorer(core=core, mode="text").focus is None
+
+
+def test_explorer_focus_on_the_live_tab_names_the_function_it_follows(core, explorer):
+    x = explorer("etl-nightly", tab="live")
+    assert x.focus.kind == "live" and x.focus.chips() == ["etl-nightly", REGION, "Live tab"]
+    x._unfollow()
+    assert x.focus.chips() == [REGION, "Live tab"]
+
+
 def test_live_tab_says_when_nothing_ran_or_cant_be_read(core, explorer, capsys):
     x = explorer("etl-nightly", tab="live")
     assert x.board[x._following].function.name == "etl-nightly"

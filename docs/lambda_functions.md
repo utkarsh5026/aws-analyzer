@@ -340,7 +340,7 @@ The other tabs are the reports below, a click away: **Errors** is [`errors()`](#
 
 ??? more "Driving the window from code"
 
-    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package`, `x.code_map` (what **How it works** read) and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")` (or `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")` for a custom range), `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
+    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package`, `x.code_map` (what **How it works** read) and `x.saved` (what **Download .zip** saved) hold the data behind what's shown, and `x.focus` is what you're looking at (the function, the tab, its time range and the run or file opened; `x.focus.chips()` reads it as a row of chips); `x.open("report-api")`, `x.logs(search="KeyError", since="24h")` (or `x.logs(since="2026-10-27 09:00", until="2026-10-27 17:30")` for a custom range), `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
 
 ## Every function { #functions }
 
