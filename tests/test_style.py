@@ -150,7 +150,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/s3/explorer/frame.py": 2,
     "src/aws_analyzer/s3/explorer/listing.py": 14,
     "src/aws_analyzer/s3/explorer/navigator.py": 32,
-    "src/aws_analyzer/s3/explorer/report.py": 14,
+    "src/aws_analyzer/s3/explorer/report.py": 13,
     "src/aws_analyzer/s3/explorer/selection.py": 2,
     "src/aws_analyzer/s3/explorer/window.py": 54,
     "src/aws_analyzer/s3/helpers.py": 3,

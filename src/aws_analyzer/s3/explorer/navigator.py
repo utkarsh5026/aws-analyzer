@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -202,6 +202,9 @@ class FolderStats:
     types: list[tuple[str, int, int]] = field(default_factory=list)  # (extension, files, bytes), biggest first
 
 
+_CONSOLE_DOMAINS = (("cn-", "console.amazonaws.cn"), ("us-gov-", "console.amazonaws-us-gov.com"))
+
+
 def parse_location(text: str | None) -> tuple[str, str]:
     """
     Where a pasted path points -> (bucket, key); ('', '') means every bucket.
@@ -215,7 +218,7 @@ def parse_location(text: str | None) -> tuple[str, str]:
     if lower.startswith(("http://", "https://")):
         url = urlparse(text)
         host, path = url.netloc.lower(), unquote(url.path)
-        if "console.aws.amazon.com" in host:
+        if "console.aws.amazon.com" in host or host.endswith(tuple(domain for _, domain in _CONSOLE_DOMAINS)):
             match = re.search(r"/s3/(?:buckets|object)/([^/?#]+)", path)
             prefix = parse_qs(url.query).get("prefix", [""])[0]
             return (match.group(1), prefix) if match else ("", "")
@@ -230,6 +233,27 @@ def parse_location(text: str | None) -> tuple[str, str]:
             break
     bucket, _, key = text.lstrip("/").partition("/")
     return bucket, key
+
+
+def console_url(uri: str, region: str = "") -> str:
+    """
+    The AWS console's page for a place in S3: the list of buckets for '', a bucket or folder's listing for
+    's3://bucket/prefix/', and a file's page (its properties, permissions and versions) for 's3://bucket/key'.
+    Without `region` the console finds the bucket's region itself, a redirect later. parse_location() reads it back.
+    """
+    bucket, key = parse_location(uri)
+    domain = next((domain for start, domain in _CONSOLE_DOMAINS if region.startswith(start)), "console.aws.amazon.com")
+    host = f"{region}.{domain}" if region else domain
+    query = {"region": region} if region else {}
+    if not bucket:
+        return f"https://{host}/s3/buckets" + (f"?{urlencode(query)}" if query else "")
+    is_file = bool(key) and not key.endswith("/")
+    page = "object" if is_file else "buckets"
+    if key:
+        query["prefix"] = key
+    if not is_file:
+        query["showversions"] = "false"
+    return f"https://{host}/s3/{page}/{bucket}?{urlencode(query)}"
 
 
 def folder_uri(bucket: str, prefix: str = "") -> str:

@@ -24,7 +24,9 @@ from ..._kit.themes import _theme_name
 from ..view.s3_view import S3View
 
 from .changes import changes_card, changes_sentence
-from .navigator import Entry, Folder, _extension, breadcrumbs, entry_icon, explain_list_error, parse_location
+from .navigator import (
+    Entry, Folder, _extension, breadcrumbs, console_url, entry_icon, explain_list_error, parse_location,
+)
 from .snippets import file_snippet, files_snippet
 
 
@@ -52,6 +54,9 @@ _FOLDER_REPORTS = {
 
 _STEPS = {"prev": -1, "next": 1}
 
+_CONSOLE_ACTION = ("console", "↗ S3 console", "This place in the AWS console, in a new browser tab: where you sign in "
+                   "with your own AWS account to change settings, permissions or files (the explorer only reads)")
+
 _KEPT_WHILE_STEPPING = ("preview", "head", "code", "history")
 
 _TAIL = ("prev", "next", "close")
@@ -62,7 +67,9 @@ _ICON_ACTIONS = {
     "close": ("s3x-close", "s3x-ic", "s3x-i-close"),
 }
 
-_UNMARKED = ("open", *_TAIL)
+_LINKS = ("open", "console")
+
+_UNMARKED = (*_LINKS, *_TAIL)
 
 
 class _ReportPane:
@@ -337,7 +344,8 @@ class _ReportPane:
         actions += [("download", "⬇ Download", f"Save a copy in {self._where()} (⚙ changes the folder)"),
                     ("open", "↗ Open in new tab", "The file in a new browser tab: PDFs, pictures, sound, video "
                      "and text show there, other files download. The link works for an hour after you click the "
-                     "file (right-click to copy it for someone without AWS access)")]
+                     "file (right-click to copy it for someone without AWS access)"),
+                    _CONSOLE_ACTION]
         actions += self._step_actions()
         actions.append(("close", "✕", "Close the file and show this folder"))
         return actions
@@ -354,6 +362,7 @@ class _ReportPane:
             actions.append(("bucket_info", "🛡️ Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
         actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip in {self._where()}, "
                         f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
+        actions.append(_CONSOLE_ACTION)
         if self._more_open:
             actions.append(("more", "Fewer ▴", "Hide the other reports on this folder"))
             return actions + self._more_actions(bucket)
@@ -407,12 +416,12 @@ class _ReportPane:
         elif bucket:
             actions = self._folder_actions(bucket, prefix)
         else:
-            actions = [("overview", "🪣 Every bucket", "Each bucket's size, cost and security warnings")]
+            actions = [("overview", "🪣 Every bucket", "Each bucket's size, cost and security warnings"), _CONSOLE_ACTION]
         old = self._actions.children
         self._act_buttons = {}
         for action, label, tip in actions:
-            if action == "open":  # a link, so the browser opens the tab (a button's click only reaches Python)
-                link = self._open_link(label, tip)
+            if action in _LINKS:
+                link = self._open_link(label, tip) if action == "open" else self._console_link(label, tip)
                 if link:
                     self._act_buttons[action] = w.HTML(link, layout=w.Layout(width="auto"))
                 continue
@@ -506,6 +515,28 @@ class _ReportPane:
         except (ClientError, BotoCoreError):
             return ""
         esc = html.escape
+        return (f'<a class="s3x-act" href="{esc(url)}" target="_blank" rel="noopener noreferrer" '
+                f'title="{esc(tip)}">{esc(label)}</a>')
+
+    def _console_url(self, uri: str) -> str:
+        """
+        The AWS console's page for a file or folder, in its bucket's region when that can be read (it's cached once
+        the folder is listed); without it, the console finds the region itself.
+        """
+        bucket, _ = parse_location(uri)
+        try:
+            region = self.core.bucket_region(bucket) if bucket else ""
+        except (ClientError, BotoCoreError):
+            region = ""
+        return console_url(uri, region)
+
+    def _console_link(self, label: str, tip: str) -> str:
+        """
+        ↗ S3 console: a link to the console's page for the chosen file, or for this folder, that looks like the
+        buttons beside it.
+        """
+        esc = html.escape
+        url = self._console_url(self.selected or self.nav.location)
         return (f'<a class="s3x-act" href="{esc(url)}" target="_blank" rel="noopener noreferrer" '
                 f'title="{esc(tip)}">{esc(label)}</a>')
 

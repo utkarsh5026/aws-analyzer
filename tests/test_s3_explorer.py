@@ -68,6 +68,18 @@ def test_parse_location(text, expected):
     assert parse_location(text) == expected
 
 
+@pytest.mark.parametrize("uri, region, expected", [
+    ("", "", "https://console.aws.amazon.com/s3/buckets"),
+    ("s3://b/", "eu-west-1", "https://eu-west-1.console.aws.amazon.com/s3/buckets/b?region=eu-west-1&showversions=false"),
+    ("s3://b/a b/", "", "https://console.aws.amazon.com/s3/buckets/b?prefix=a+b%2F&showversions=false"),
+    ("s3://b/x/y.csv", "cn-north-1", "https://cn-north-1.console.amazonaws.cn/s3/object/b?region=cn-north-1&prefix=x%2Fy.csv"),
+    ("s3://b/k", "us-gov-west-1", "https://us-gov-west-1.console.amazonaws-us-gov.com/s3/object/b?region=us-gov-west-1&prefix=k"),
+])
+def test_console_url(uri, region, expected):
+    url = navigator.console_url(uri, region)
+    assert url == expected and parse_location(url) == parse_location(uri)
+
+
 def test_folder_uri_parent_and_breadcrumbs():
     assert folder_uri("lake", "raw") == "s3://lake/raw/" and folder_uri("lake") == "s3://lake/" and folder_uri("") == ""
     assert parent_uri("s3://lake/raw/events/") == "s3://lake/raw/"
@@ -390,7 +402,8 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert "Preview of part-2.csv" in out and "s3://lake/raw/events/part-2.csv" not in out  # the name, not the path
     assert "Next:" not in out  # the S3View's next steps name commands this explorer doesn't have
     assert "s3://lake/raw/events/part-2.csv" in x._status.value
-    assert list(x._act_buttons) == ["preview", "head", "code", "download", "open", "prev", "next", "close"]
+    assert list(x._act_buttons) == ["preview", "head", "code", "download", "open", "console", "prev", "next",
+                                    "close"]
     assert x._act_buttons["preview"]._dom_classes == ("s3x-act", "s3x-on")
     assert 'class="s3a theme-console"' in x._content.value and "<table" in x._content.value
 
@@ -400,8 +413,13 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert link.startswith('<a class="s3x-act" href="https://') and 'target="_blank"' in link
     assert "part-2.csv?" in link and "response-content-disposition=inline" in link and "↗ Open in new tab" in link
     assert x._act_buttons["head"]._dom_classes == ("s3x-act", "s3x-on")
+    console = x._act_buttons["console"].value
+    assert 'href="https://us-east-1.console.aws.amazon.com/s3/object/lake?region=us-east-1&amp;prefix=raw%2Fevents%2Fpart-2.csv"' in console
+    assert 'target="_blank"' in console and "↗ S3 console" in console
+    assert x.console_url == "https://us-east-1.console.aws.amazon.com/s3/object/lake?region=us-east-1&prefix=raw%2Fevents%2Fpart-2.csv"
     x._act_buttons["close"].click()
-    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip", "more"]
+    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip", "console", "more"]
+    assert "/s3/buckets/lake?region=us-east-1&prefix=raw%2Fevents%2F&showversions=false" in x.console_url
 
 
 def test_explorer_toolbar_and_breadcrumbs(explorer):
@@ -417,7 +435,8 @@ def test_explorer_toolbar_and_breadcrumbs(explorer):
     crumbs[1].click()
     assert x.location == "s3://lake/"
     [b for b in x._crumbs.children if hasattr(b, "on_click")][0].click()
-    assert x.location == "" and rows(x)[0] == "🪣  lake" and list(x._act_buttons) == ["overview"]
+    assert x.location == "" and rows(x)[0] == "🪣  lake" and list(x._act_buttons) == ["overview", "console"]
+    assert x.console_url == "https://console.aws.amazon.com/s3/buckets"
 
 
 def test_explorer_path_box(explorer):
@@ -1036,7 +1055,7 @@ def test_explorer_saves_downloads_in_the_downloads_folder(explorer, tmp_path, mo
 def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     x = explorer("s3://lake/raw/", zip_max_size="20B")
-    assert list(x._act_buttons) == ["summary", "zip", "more"] and "no bigger than 20 B and 10,000 files" in x._act_buttons["zip"].tooltip
+    assert list(x._act_buttons) == ["summary", "zip", "console", "more"] and "no bigger than 20 B and 10,000 files" in x._act_buttons["zip"].tooltip
     x._act_buttons["zip"].click()
     out = text(x)
     assert "Can't zip this here yet" in out and "⚙ at the top right raises them (now 20 B and 10,000 files)" in out
@@ -1363,7 +1382,7 @@ def test_explorer_more_reports_on_a_folder(explorer, aws):
     x = explorer("s3://lake/many/")
     assert "more" in x._act_buttons and "largest" not in x._act_buttons
     x._act_buttons["more"].click()
-    assert [a for a in x._act_buttons if a not in ("summary", "zip")] == [
+    assert [a for a in x._act_buttons if a not in ("summary", "zip", "console")] == [
         "more", "largest", "newest", "oldest", "details", "duplicates", "uploads"]
     assert x._act_buttons["more"].description == "Fewer ▴" and "s3x-on" in x._act_buttons["more"]._dom_classes
     x._act_buttons["largest"].click()

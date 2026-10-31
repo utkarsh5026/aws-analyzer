@@ -182,6 +182,14 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         return "the notebook's folder" if os.path.abspath(os.path.expanduser(folder)) == os.getcwd() else folder
 
     @property
+    def console_url(self) -> str:
+        """
+        The AWS console's page for what the explorer shows: the file on the right, else the folder you're in, else
+        the list of buckets. "↗ S3 console", above the right pane, opens it in a new browser tab.
+        """
+        return self._console_url(self.selected or self.location) if self.s3 is not None else ""
+
+    @property
     def picked(self) -> list[str]:
         """
         The files and folders ticked in the list (s3:// paths), in the order they were ticked: x.ui.download_zip(
