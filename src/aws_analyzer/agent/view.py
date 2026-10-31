@@ -234,6 +234,14 @@ def _look_closer(commands: list[tuple[str, str]]) -> str:
     return f"Look closer ({', '.join(f'aws_analyzer.{view}' for view in views)})" if views else "Look closer"
 
 
+def _focus_blocks(answer: AgentAnswer) -> list[Any]:
+    """
+    The note under a question asked with focus=: what the agent was told the user had open, read as chips.
+    """
+    if answer.focus is None or not answer.focus.parts:
+        return []
+    return [_Note(f"Looking at: {answer.focus}")]
+
 class AgentView(_BaseView):
     """
     Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
@@ -300,21 +308,23 @@ class AgentView(_BaseView):
 
 
     @_friendly_errors
-    def ask(self, question: str, *, new: bool = False) -> None:
+    def ask(self, question: str, *, new: bool = False, focus: Any = None) -> None:
         """
         The agent's answer to a question about your AWS account (Lambda and S3, for now), then what it checked to
         get it: the plan it worked to, each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
         the tokens and what it cost, and the LambdaView and S3View commands to look closer. Follow-up questions continue the
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
         found until then. Before a big read (a deep S3 listing, many days of logs, a large save) it stops to ask:
-        go(), smaller() or skip() goes on.
+        go(), smaller() or skip() goes on. focus= asks about what you have open in an explorer window: pass the window
+        (x = LambdaView().explore("orders-etl")), and "why does this fail?" means the function, tab, time range and
+        run you're looking at; the report says what it was told under the question.
         """
         window = self.window
         if window is not None and window.busy:
             raise _Hint("The chat window is answering a question: wait for it, press its Stop, or type the question in "
                         "the window, which asks it next.")
         with self._progress() as tick:
-            answer = self.core.ask(question, new=new, progress=tick)
+            answer = self.core.ask(question, new=new, focus=focus, progress=tick)
         if window is not None and not answer.waiting:
             window.added(answer)
         self._show(self._answer_blocks(answer))
@@ -381,7 +391,7 @@ class AgentView(_BaseView):
     def _answer_blocks(self, answer: AgentAnswer) -> list[Any]:
         if answer.waiting:
             return self._waiting_blocks(answer)
-        blocks: list[Any] = [_Title(answer.question, self._answer_line(answer))]
+        blocks: list[Any] = [_Title(answer.question, self._answer_line(answer)), *_focus_blocks(answer)]
         if answer.text:
             blocks.append(_Answer(answer.text))
         if answer.charts:
@@ -557,6 +567,7 @@ class AgentView(_BaseView):
             if answer.cost is not None:
                 sub += f" · {human_money(answer.cost)}"
             blocks.append(_Title(answer.question, sub))
+            blocks += _focus_blocks(answer)
             blocks.append(_Answer(answer.text) if answer.text else
                           _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
             if answer.charts:

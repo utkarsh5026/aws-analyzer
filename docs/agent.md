@@ -227,6 +227,8 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 
 Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. `new=True` or `agent.new_conversation()` starts a fresh one, which knows nothing of the last unless [memory](#memory) is on: then it starts from the agent's notes about your account. The kernel's stop button stops a question, and the report shows what it found until then.
 
+To ask about what an explorer window shows, pass the window as `focus=`: `agent.ask("Why does this fail?", focus=x)` with `x = LambdaView().explore("orders-etl", tab="errors")`. The model is told the function, the tab, its time range and the run or file you opened (the S3 and knowledge base explorers' windows work the same), and the report says what it was told under the question.
+
 ## What it can call { #tools }
 
 Eighteen read-only tools over Lambda and S3, and seven for [Bedrock knowledge bases](#knowledge-bases). Each returns a compact summary with what it covered, never raw AWS data.
@@ -774,7 +776,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | Command | What it shows |
 |---|---|
 | `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🗂 chats opens a saved chat again (with `chats=True`); 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
-| `ask(question, new=False)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
+| `ask(question, new=False, focus=None)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. `focus=` asks about what an explorer window shows (the window, or its `x.focus`) |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
 | `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |

@@ -27,6 +27,7 @@ from typing import Any, Iterable
 
 from .._kit.deps import _require
 from .._kit.errors import _Hint
+from .._kit.focus import Focus, FocusPart
 from .._kit.text import _clip
 from .answers import AgentAnswer, AgentFinding, BigRead, PlanStep, ToolCall
 from .llm import Rates
@@ -159,6 +160,18 @@ def _tool_call(record: dict[str, Any]) -> ToolCall:
     return ToolCall(**known, asks=asks, next=nexts, reads=reads)
 
 
+def _focus(record: Any) -> Focus | None:
+    """
+    A saved answer's focus (the dict answer_record wrote for it), or None when it had none.
+    """
+    if not isinstance(record, dict):
+        return None
+    parts = [FocusPart(str(part.get("key", "")), str(part.get("value", "")), str(part.get("text", "")))
+             for part in record.get("parts") or []]
+    return Focus(str(record.get("service") or ""), str(record.get("kind") or ""), region=str(record.get("region") or ""),
+                 since=_time(record.get("since")), until=_time(record.get("until")), parts=tuple(parts))
+
+
 def answer_from_record(text: str) -> AgentAnswer:
     """
     The answer a saved chat's JSON holds, as AgentAnswer (answer_record's other half). ValueError when it isn't one.
@@ -190,6 +203,7 @@ def answer_from_record(text: str) -> AgentAnswer:
         error=record.get("error"),
         thread=str(record.get("thread") or ""),
         asked=_time(record.get("asked")),
+        focus=_focus(record.get("focus")),
     )
 
 
