@@ -395,6 +395,14 @@ def _query_of(text: str) -> tuple[RunQuery | None, str]:
 _ASKS_RE = re.compile(r"[<>=~]")
 
 
+def _runs_with_text(runs: list[LogRun], text: str) -> int:
+    """
+    How many runs have a line with the text, in any case: a query typed that is also words in the logs.
+    """
+    needle = text.lower()
+    return sum(1 for run in runs if any(needle in event.message.lower() for event in run.events))
+
+
 class _LogsTab:
     """
     The Logs tab of LambdaExplorer: the function's runs in a time range, newest first, filtered as you type, a
@@ -753,12 +761,18 @@ class _LogsTab:
         """
         runs = self._source_runs()
         table = self._table_of(runs)
+        in_lines = _runs_with_text(runs, query.text)
+        quote = (f" · {_plural(in_lines, 'run')} {'has' if in_lines == 1 else 'have'} this text in a line: "
+                 f"put it in quotes, \"{query.text}\", to find {'it' if in_lines == 1 else 'them'}"
+                 if in_lines else "")
         unknown = table.unknown_fields(query)
         if unknown:
             name, meant = unknown[0]
             hint = f": did you mean {meant}?" if meant else ". Fields: duration, memory, status, cold, error…"
-            return f"No run has a field {name!r}{hint}", "warn"
+            return f"No run has a field {name!r}{hint}{quote}", "warn"
         shown = len(self._visible_runs())
+        if not shown and quote:
+            return f"No run read matches {query.text} as a query{quote}", "warn"
         truncated = self.logs_page is not None and self.logs_page.truncated
         return (f"{shown:,} of {_plural(len(table.rows), 'run')} read match {query.text}"
                 + (" · Older runs reads further back" if truncated else " · click a run to see its lines"), "")

@@ -3712,6 +3712,29 @@ def test_explorer_logs_tab_asks_for_runs_by_their_fields(core, explorer):
     assert x._range == "today" and "today" in plain(x.run_head.value)
 
 
+def test_explorer_says_to_quote_a_query_that_is_also_text_in_the_logs(core, explorer):
+    now = datetime.now(timezone.utc)
+    seed_runs(now)
+    rid = "abcdef12-1111-4222-8333-444455556666"
+    put_logs("/aws/lambda/etl-nightly", [
+        (now - timedelta(seconds=30), f"START RequestId: {rid} Version: $LATEST"),
+        (now - timedelta(seconds=29), "WARN slow call: duration > 15s on the orders table"),
+        (now - timedelta(seconds=28), f"END RequestId: {rid}"),
+        (now - timedelta(seconds=28), report_line(rid, 20.0)),
+    ], stream="2026/10/06/[$LATEST]txt")
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "duration > 15s"
+    assert x._visible_runs() == [] and plain(x.status.value) == (
+        'No run read matches duration > 15s as a query · 1 run has this text in a line: put it in quotes, '
+        '"duration > 15s", to find it')
+    x.log_find.value = "duraton > 15s"
+    assert plain(x.status.value) == "No run has a field 'duraton': did you mean duration?"
+    x.log_find.value = '"duration > 15s"'
+    assert [run.request_id for run in x._visible_runs()] == [rid]
+    enter(x.log_find)
+    assert x.found is not None and [run.request_id for run in x._found_runs] == [rid]
+
+
 def test_explorer_shows_the_event_a_run_logged(core, explorer):
     now = datetime.now(timezone.utc)
     rid = "abcdef12-1111-4222-8333-444455556666"
