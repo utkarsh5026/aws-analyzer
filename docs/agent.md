@@ -206,6 +206,25 @@ A plan reads like "check every function's health → read orders-etl's errors �
 
     The plan is LangChain's `TodoListMiddleware`, which deepagents doesn't add by itself: it gives the model a `write_todos` tool, with short instructions written for this agent. Writing a plan reads nothing from AWS, so it isn't counted against the budget's tool calls or listed among them. Its instructions are sent with every model call; `AgentView(plan=False)` leaves them out to save those tokens. `answer.plan` holds the steps (`PlanStep`: `.text`, `.status`).
 
+### Ask from an explorer: ✦ Ask { #ask-drawer }
+
+Give an explorer the agent, and **✦ Ask** at the end of its tab bar opens the chat beside the tabs, asking about what the window shows.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock")
+x = LambdaView().explore("orders-etl", tab="errors", assistant=agent)   # or x.attach(agent) later
+from aws_analyzer import set_assistant
+set_assistant(agent)                                                   # ✦ Ask in every explorer opened after
+```
+
+- **Looking at**, under the drawer's head, is what the window shows as chips: the function, the tab, its time range, the run or file you opened. It follows as you click. Untick **use it** to ask about your whole account instead.
+- An empty drawer offers two or three questions for what's open: on an Errors tab "Why does orders-etl fail, and what should I change?", on a failed run "Why did this run fail, and what should I change?", on a file that failed to index "Why does scanned.pdf show as Failed, and how do I fix it?". They're picked by rules, so they cost nothing until you click one.
+- Each question shows what it was asked about under it, and runs like any other: its plan, its tool calls as they happen, stop, and the read-only guard.
+- The drawer shares the conversation with `agent.chat()`'s window and `agent.ask()`: an answer in one shows in the others, and the agent answers one question at a time.
+
+The Lambda and knowledge base explorers have it; the S3 explorer's comes later. In a cell, `agent.ask("Why does this fail?", focus=x)` asks the same way.
+
 ## How it answers { #how-it-works }
 
 The model picks which read-only tools to call. For "Which Lambda failed last night?" it usually:

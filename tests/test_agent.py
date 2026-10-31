@@ -1866,6 +1866,54 @@ def test_ask_about_what_an_explorer_shows(seeded, capsys):
     assert answer_from_record(answer_record(AgentAnswer(question="hi"))).focus is None
 
 
+def test_the_ask_drawer_asks_about_what_the_explorer_shows(seeded):
+    pytest.importorskip("ipywidgets")
+    from aws_analyzer.lambda_functions import LambdaExplorer
+
+    model = scripted(
+        calls(("function_errors", {"function": "etl-nightly", "since": "24h"})),
+        says("It fails on `customer_id`: some rows don't have it."),
+        says("Two of your functions failed today."),
+    )
+    agent = AgentView(make(model), mode="html", progress="off")
+    agent._display = lambda widget: None
+    agent.chat()
+    x = LambdaExplorer("etl-nightly", tab="errors", core=agent.core.toolkit("lambda").analyzer, mode="widgets",
+                       assistant=agent)
+    assert x.ask_button.layout.display == "" and x.drawer is None and x.drawer_box.layout.display == "none"
+    x.ask_button.click()
+    drawer = x.drawer
+    assert drawer in agent.drawers and x.drawer_box.children == (drawer.root,) and x.drawer_box.layout.display == ""
+    assert "lmx-asking" in x.ask_button._dom_classes and "✦ Ask" in drawer.title.value
+    assert drawer.chats_button.layout.display == "none" and drawer.memory_button.layout.display == "none"
+    line = drawer.focus_line.value
+    assert "looking at" in line and "etl-nightly" in line and "Errors tab" in line and "1 cause" in line
+    assert drawer.offered == ["Why does etl-nightly fail, and what should I change?",
+                              "When did these errors start, and what changed then?"]
+
+    drawer.empty.children[1].children[0].click()
+    asked = model.prompts[0][-1].content
+    assert "[Looking at the Lambda explorer (errors)" in asked and asked.endswith("Why does etl-nightly fail, and what "
+                                                                                   "should I change?")
+    shown = page(drawer)
+    assert "about: etl-nightly · us-east-1 · Errors tab · the last 24 hours · 1 cause" in html.unescape(shown)
+    assert "It fails on" in shown and not drawer.busy
+    assert "It fails on" in page(agent.window)
+
+    x.tab_buttons["overview"].click()
+    assert "Overview tab" in drawer.focus_line.value and "Errors tab" not in drawer.focus_line.value
+    drawer.focus_check.value = False
+    assert "not using" in drawer.focus_line.value
+    enter(drawer, "Which functions failed today?")
+    assert "[Looking at" not in model.prompts[-1][-1].content
+    assert agent.core.history[-1].focus is None and agent.core.history[-2].focus.kind == "errors"
+
+    x.ask_button.click()
+    assert x.drawer_box.layout.display == "none" and "lmx-asking" not in x.ask_button._dom_classes
+    x.attach(None)
+    assert x.ask_button.layout.display == "none" and x.drawer is None and x.drawer_box.children == ()
+
+
 def test_the_report_shows_windows_in_the_chosen_zone(view, capsys):
     set_timezone("Asia/Kolkata")
     out = run(capsys, view.ask, "Which Lambda failed in the last 2 hours?")

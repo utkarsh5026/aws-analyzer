@@ -2023,6 +2023,7 @@ agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 a
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
 x = LambdaView().explore("orders-etl", tab="errors")
 agent.ask("Why does this fail?", focus=x)               # about what the explorer shows: the function, tab and window
+x.attach(agent)                                         # ✦ Ask in the explorer: the chat beside its tabs, asking about it
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
 agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations

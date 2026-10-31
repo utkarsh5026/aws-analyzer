@@ -291,6 +291,42 @@ class AgentView(_BaseView):
                             f"{', '.join(f'{k}=...' for k in settings)})")
         self.core: AgentAnalyzer = core or AgentAnalyzer(**settings)
         self.window: _AgentChat | None = None
+        self.drawers: list[_AgentChat] = []
+
+    def _windows(self) -> list[_AgentChat]:
+        """
+        Every window on this agent: agent.chat()'s, then each explorer's ✦ Ask drawer.
+        """
+        return [window for window in (self.window, *self.drawers) if window is not None]
+
+    def _busy_window(self, *, other_than: Any = None) -> _AgentChat | None:
+        """
+        The window that's answering a question, if one is (other_than: leave that one out). The agent answers one
+        question at a time, whichever window asks it.
+        """
+        return next((window for window in self._windows() if window.busy and window is not other_than), None)
+
+    def _tell_windows(self, what: str, *args: Any, other_than: Any = None) -> None:
+        """
+        Tells every window (but other_than) what changed in the conversation they share: 'added' (an answer), 'cleared',
+        'opened', 'renamed' or 'model_changed'.
+        """
+        for window in self._windows():
+            if window is not other_than:
+                getattr(window, what)(*args)
+
+    def _ask_drawer_(self, window: Any) -> _AgentChat:
+        """
+        The ✦ Ask drawer an explorer window shows once it has this agent (assistant=, x.attach(agent),
+        set_assistant(agent)): the chat window, narrow, asking every question about what the explorer shows
+        (focus=). The explorer calls it, the way IPython calls _ipython_display_, so it never imports the agent.
+        """
+        widgets = _require("ipywidgets", "The ✦ Ask drawer")
+        from .window import _AgentChat
+
+        drawer = _AgentChat(self, widgets, focus_from=window)
+        self.drawers.append(drawer)
+        return drawer
 
     def _display(self, widget: Any) -> None:
         from IPython.display import display
@@ -319,14 +355,13 @@ class AgentView(_BaseView):
         (x = LambdaView().explore("orders-etl")), and "why does this fail?" means the function, tab, time range and
         run you're looking at; the report says what it was told under the question.
         """
-        window = self.window
-        if window is not None and window.busy:
+        if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: wait for it, press its Stop, or type the question in "
                         "the window, which asks it next.")
         with self._progress() as tick:
             answer = self.core.ask(question, new=new, focus=focus, progress=tick)
-        if window is not None and not answer.waiting:
-            window.added(answer)
+        if not answer.waiting:
+            self._tell_windows("added", answer)
         self._show(self._answer_blocks(answer))
 
     @_friendly_errors
@@ -354,16 +389,15 @@ class AgentView(_BaseView):
         self._resume("skip")
 
     def _resume(self, choice: str) -> None:
-        window = self.window
-        if window is not None and window.busy:
+        if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: pick go, smaller or skip with its buttons.")
         if not self.core.waiting:
             raise _Hint("Nothing is waiting for your choice: go(), smaller() and skip() answer the agent when it "
                         "stops to ask before a big read.")
         with self._progress() as tick:
             answer = self.core.resume(choice, progress=tick)
-        if window is not None and not answer.waiting:
-            window.added(answer)
+        if not answer.waiting:
+            self._tell_windows("added", answer)
         self._show(self._answer_blocks(answer))
 
     @_friendly_errors
@@ -503,8 +537,7 @@ class AgentView(_BaseView):
         it fail?" need the conversation they follow).
         """
         self.core.new_conversation()
-        if self.window is not None:
-            self.window.cleared()
+        self._tell_windows("cleared")
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
 
@@ -525,14 +558,12 @@ class AgentView(_BaseView):
         endpoint=...), or any LangChain provider. The chat window's ⚙ model does the same by clicking. A new
         conversation starts, and a key or package that's missing is said here, keeping the model it had.
         """
-        window = self.window
-        if window is not None and window.busy:
+        if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then switch.")
         core = self.core
         core.use_model(provider, model, endpoint=endpoint, api_key=api_key, api_version=api_version,
                        chat_model=chat_model)
-        if window is not None:
-            window.model_changed()
+        self._tell_windows("model_changed")
         place = model_place(core.provider, core.model, core.endpoint)
         self._show([_Note(f"Now answering with {core.model} ({provider_info(core.provider).title}): what it sends "
                           f"goes to {place}. A new conversation starts with the next question.", "ok")])
@@ -785,12 +816,10 @@ class AgentView(_BaseView):
         off, even after the kernel restarted: open_chat(1) for the newest, or its title's words,
         open_chat('nightly etl'). An open chat window shows it too.
         """
-        window = self.window
-        if window is not None and window.busy:
+        if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then open the chat.")
         picked = self.core.open_chat(chat)
-        if window is not None:
-            window.opened()
+        self._tell_windows("opened")
         answers = [answer for answer in self.core.history if answer.thread == picked.thread]
         blocks: list[Any] = [_Title(picked.title, f"saved chat · {_plural(picked.questions, 'question')} · last "
                                                   f"asked {_fmt_dt(picked.updated, zone=True)}")]
@@ -813,8 +842,7 @@ class AgentView(_BaseView):
         its title's words): rename_chat('Nightly ETL failures').
         """
         renamed = self.core.rename_chat(title, chat)
-        if self.window is not None:
-            self.window.renamed()
+        self._tell_windows("renamed")
         self._show([_Note(f"Renamed: the chat is now {renamed.title!r}.", "ok")])
 
     @_friendly_errors
@@ -823,13 +851,12 @@ class AgentView(_BaseView):
         Removes a saved chat from this machine (its number in chats(), or its title's words): its questions and
         answers, and the conversation the model would carry on. Removing the chat going on starts a new one.
         """
-        window = self.window
-        if window is not None and window.busy:
+        if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then delete.")
         was_open = self.core.thread
         removed = self.core.delete_chat(chat)
-        if window is not None and removed.thread == was_open:
-            window.cleared()
+        if removed.thread == was_open:
+            self._tell_windows("cleared")
         self._show([_Note(f"Deleted {removed.title!r} ({_plural(removed.questions, 'question')}): chats() lists the "
                           "rest.", "ok")])
 

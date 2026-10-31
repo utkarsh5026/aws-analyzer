@@ -4402,6 +4402,31 @@ def test_explorer_focus_says_what_you_are_looking_at(world):
     assert KBExplorer("support-docs", core=world.core(), mode="text").focus is None
 
 
+def test_explorer_ask_drawer_follows_the_file_opened(world):
+    pytest.importorskip("ipywidgets")
+    import ipywidgets
+
+    told = []
+
+    class Drawer:
+        root = ipywidgets.HTML("drawer")
+
+        def focus_moved(self):
+            told.append(x.focus.kind)
+
+    class Assistant:
+        def _ask_drawer_(self, window):
+            return Drawer()
+
+    x = explorer(world, assistant=Assistant())
+    assert x.ask_button.layout.display == "" and x.drawer is None
+    x.ask_button.click()
+    assert x.drawer_box.children == (x.drawer.root,) and told[-1] == "knowledge_base"
+    x.tab_buttons["files"].click()
+    row(x, "faq.md").button.click()
+    assert told[-1] == "file"
+
+
 def test_explorer_syncs_and_settings_tabs(world):
     x = explorer(world)
     assert world.agent.called("list_ingestion_jobs")[-1]["maxResults"] == 5  # describe's: the history isn't read yet

@@ -255,7 +255,7 @@ The **Search**, **Syncs** and **Settings** tabs are the reports below, a click a
 
 ??? more "Driving the window from code"
 
-    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is what you're looking at (the knowledge base, the tab and the file or search open), `x.file("faq.md")`, `x.search("...")` and `x.open("another-kb")` do what the clicks do, and `x.ui` is a `BedrockKBView` for reports in other cells.
+    Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is what you're looking at (the knowledge base, the tab and the file or search open), `x.file("faq.md")`, `x.search("...")` and `x.open("another-kb")` do what the clicks do, and `x.ui` is a `BedrockKBView` for reports in other cells. With `explore(..., assistant=AgentView(...))` (or `x.attach(agent)`), **✦ Ask** at the end of the tab bar opens the agent's chat beside the tabs, asking about the file you have open ([the agent's guide](agent.md#ask-drawer)).
 
 ## Your knowledge bases { #kbs }
 

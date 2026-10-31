@@ -29,6 +29,7 @@ from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as gr
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
+from aws_analyzer import set_assistant
 from aws_analyzer.lambda_functions.analysis import live as live_mod
 from aws_analyzer.lambda_functions.models import Activity
 from aws_analyzer import set_timezone
@@ -3913,6 +3914,65 @@ def test_explorer_focus_on_the_live_tab_names_the_function_it_follows(core, expl
     assert x.focus.kind == "live" and x.focus.chips() == ["etl-nightly", REGION, "Live tab"]
     x._unfollow()
     assert x.focus.chips() == [REGION, "Live tab"]
+
+
+class FakeAssistant:
+    """
+    What an explorer's ✦ Ask drawer needs from an assistant (an AgentView): _ask_drawer_(window), whose drawer has
+    a root widget and hears focus_moved() as the window changes.
+    """
+
+    def __init__(self):
+        self.windows, self.moves = [], []
+
+    def _ask_drawer_(self, window):
+        import ipywidgets
+
+        self.windows.append(window)
+        assistant = self
+
+        class Drawer:
+            root = ipywidgets.HTML("drawer")
+
+            def focus_moved(self):
+                assistant.moves.append(str(window.focus))
+
+        return Drawer()
+
+
+def test_explorer_ask_drawer_slot(core, explorer, monkeypatch):
+    x = explorer("etl-nightly", tab="errors")
+    assert x.assistant is None and x.ask_button.layout.display == "none"
+    assert x.ask_button.description == "✦ Ask"
+    helper = FakeAssistant()
+    x.attach(helper)
+    assert helper.windows == [x] and x.drawer_box.layout.display == "" and x.ask_button.layout.display == ""
+    assert x.drawer_box.children == (x.drawer.root,) and helper.moves[-1].startswith("etl-nightly")
+    x.tab_buttons["logs"].click()
+    assert "Logs tab" in helper.moves[-1]
+    x.ask_button.click()
+    moves_while_open = len(helper.moves)
+    x.tab_buttons["errors"].click()
+    assert len(helper.moves) == moves_while_open
+    x.ask_button.click()
+    assert "Errors tab" in helper.moves[-1] and helper.windows == [x]
+    x.attach("not an assistant")
+    assert "An explorer's assistant is an AgentView" in plain(x.status.value) and x.assistant is helper
+
+    other = FakeAssistant()
+    monkeypatch.setattr(windowmod, "_assistant", None)
+    set_assistant(other)
+    y = explorer("etl-nightly")
+    assert y.assistant is other and y.ask_button.layout.display == "" and y.drawer is None
+    set_assistant(None)
+    assert explorer().assistant is None
+    with pytest.raises(TypeError, match="An explorer's assistant is an AgentView"):
+        set_assistant(object())
+    with pytest.raises(TypeError, match="An explorer's assistant is an AgentView"):
+        LambdaExplorer(core=core, mode="widgets", assistant="nope")
+    text = LambdaExplorer(core=core, mode="text")
+    text.attach(helper)
+    assert text.assistant is None
 
 
 def test_live_tab_says_when_nothing_ran_or_cant_be_read(core, explorer, capsys):
