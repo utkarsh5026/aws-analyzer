@@ -206,6 +206,25 @@ A plan reads like "check every function's health → read orders-etl's errors �
 
     The plan is LangChain's `TodoListMiddleware`, which deepagents doesn't add by itself: it gives the model a `write_todos` tool, with short instructions written for this agent. Writing a plan reads nothing from AWS, so it isn't counted against the budget's tool calls or listed among them. Its instructions are sent with every model call; `AgentView(plan=False)` leaves them out to save those tokens. `answer.plan` holds the steps (`PlanStep`: `.text`, `.status`).
 
+### Ask from an explorer: ✦ Ask { #ask-drawer }
+
+Give an explorer the agent, and **✦ Ask** at the end of its tab bar opens the chat beside the tabs, asking about what the window shows.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock")
+x = LambdaView().explore("orders-etl", tab="errors", assistant=agent)   # or x.attach(agent) later
+from aws_analyzer import set_assistant
+set_assistant(agent)                                                   # ✦ Ask in every explorer opened after
+```
+
+- **Looking at**, under the drawer's head, is what the window shows as chips: the function, the tab, its time range, the run or file you opened. It follows as you click. Untick **use it** to ask about your whole account instead.
+- An empty drawer offers two or three questions for what's open: on an Errors tab "Why does orders-etl fail, and what should I change?", on a failed run "Why did this run fail, and what should I change?", on a file that failed to index "Why does scanned.pdf show as Failed, and how do I fix it?". They're picked by rules, so they cost nothing until you click one.
+- Each question shows what it was asked about under it, and runs like any other: its plan, its tool calls as they happen, stop, and the read-only guard.
+- The drawer shares the conversation with `agent.chat()`'s window and `agent.ask()`: an answer in one shows in the others, and the agent answers one question at a time.
+
+The Lambda and knowledge base explorers have it; the S3 explorer's comes later. In a cell, `agent.ask("Why does this fail?", focus=x)` asks the same way.
+
 ## How it answers { #how-it-works }
 
 The model picks which read-only tools to call. For "Which Lambda failed last night?" it usually:
@@ -226,6 +245,8 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
     For "Were last night's uploads to acme-raw processed?" it calls `s3_triggers` for the bucket and the window. That reads the bucket's event notifications (which functions it invokes, on which events, for which keys), lists the files written in the window, checks that the function is there and that its resource policy lets the bucket invoke it, and reads the function's runs and failures from CloudWatch for the same window. The findings name what broke the link: files whose ending is `.CSV` when the filter says `.csv` (S3 compares case-sensitively), files uploaded in parts when the notification fires only on PUT uploads, a function that isn't there, a permission that's missing (with the `aws lambda add-permission` command), or no file arriving at all. Then `function_errors` reads why the runs that did happen failed.
 
 Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. `new=True` or `agent.new_conversation()` starts a fresh one, which knows nothing of the last unless [memory](#memory) is on: then it starts from the agent's notes about your account. The kernel's stop button stops a question, and the report shows what it found until then.
+
+To ask about what an explorer window shows, pass the window as `focus=`: `agent.ask("Why does this fail?", focus=x)` with `x = LambdaView().explore("orders-etl", tab="errors")`. The model is told the function, the tab, its time range and the run or file you opened (the S3 and knowledge base explorers' windows work the same), and the report says what it was told under the question.
 
 ## What it can call { #tools }
 
@@ -774,7 +795,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | Command | What it shows |
 |---|---|
 | `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🗂 chats opens a saved chat again (with `chats=True`); 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
-| `ask(question, new=False)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
+| `ask(question, new=False, focus=None)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. `focus=` asks about what an explorer window shows (the window, or its `x.focus`) |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
 | `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |

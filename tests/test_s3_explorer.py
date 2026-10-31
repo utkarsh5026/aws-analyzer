@@ -1420,3 +1420,29 @@ def test_explorer_more_reports_on_a_folder(explorer, aws):
     row(x, "model.pkl").button.click()
     x._act_buttons["history"].click()
     assert "2 versions" in text(x)
+
+
+def test_explorer_focus_says_what_you_are_looking_at(explorer):
+    x = explorer()
+    assert (x.focus.service, x.focus.kind, x.focus.chips()) == ("s3", "buckets", [])
+    x.open("s3://lake/raw/")
+    folder = x.focus
+    assert folder.kind == "folder" and folder.value("folder") == "s3://lake/raw/"
+    assert folder.chips() == ["lake/raw/", "1 folder · 1 file · 30 B"]
+    assert folder.value("contents") == "1 folders, 1 files, 30 bytes"
+    x.filter(".csv", subfolders=True)
+    assert x.focus.chips()[2:] == ["search: .csv", "with subfolders"]
+    x.filter(kind="folders")
+    assert x.focus.chips()[1:] == ["1 folder · 1 file · 30 B", "Folders only"]
+    x.filter()
+
+    x.open("s3://lake/raw/events/")
+    check(x, "part-2.csv")
+    check(x, "part-10.csv")
+    assert x.focus.chips()[-1] == "2 ticked"
+    assert x.focus.value("picked") == "s3://lake/raw/events/part-2.csv\ns3://lake/raw/events/part-10.csv"
+    row(x, "part-2.csv").button.click()
+    file = x.focus
+    assert file.kind == "file" and file.value("file") == "s3://lake/raw/events/part-2.csv"
+    assert file.chips() == ["part-2.csv", "lake/raw/events/", "2 ticked"]
+    assert str(file.without("picked")) == "part-2.csv · lake/raw/events/"

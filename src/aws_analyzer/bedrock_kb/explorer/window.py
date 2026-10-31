@@ -19,7 +19,7 @@ from ..._kit.blocks import _Cards, _Findings, _Note, _Table, _Text, _Title
 from ..._kit.errors import _error_name, _why
 from ..._kit.fmt import _fmt_dt, _plural, human_age, human_money
 from ..._kit.text import _clip, _esc, search_rank
-from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
+from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import sync_command
 from ..models import (
@@ -41,10 +41,11 @@ from .frame import (
     _CHIP_LABELS, _EXPLORER_CSS, _EXPLORER_TABS, _FIELD_ROLES, _FILE_PAGE, _LOGO, _RESULTS, _file_face, _parser_name,
     _sync_step, _window_text,
 )
+from .focus import _FocusReads
 from .widgets import _Chooser, _FileRow
 
 
-class KBExplorer(_Explorer):
+class KBExplorer(_FocusReads, _Explorer):
     """
     The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
@@ -66,11 +67,15 @@ class KBExplorer(_Explorer):
     one. file: a file to open in the Files tab once the files are listed. view / core: a BedrockKBView or
     BedrockKBAnalyzer to use (else one is made from region / profile). height: the height of the tabs' pages, which
     fill the browser window unless set (pixels, or CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports
-    elsewhere), 'widgets' or 'text'.
+    elsewhere), 'widgets' or 'text'. assistant: an AgentView to ask about what the window shows: ✦ Ask, at the end of
+    the tab bar, opens a drawer where "why isn't this file searchable?" means the file you have open
+    (x.attach(agent) does it later, and aws_analyzer.set_assistant(agent) for every explorer).
 
     Nothing here changes the knowledge base: the window only reads (where a sync is needed it shows the command), and
     the one file it writes is the list ⬇ List saves. x.ui is a BedrockKBView for reports in other cells
-    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown.
+    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown, and x.focus
+    what you're looking at, as data: the knowledge base, the tab and the file or search open (x.focus.chips() reads
+    it as a row of chips).
     """
 
     _PREFIX, _THREADS = "kbx", "kb-explorer"
@@ -88,10 +93,14 @@ class KBExplorer(_Explorer):
         height: int | str | None = None,
         mode: str = "auto",
         progress: str = "auto",
+        assistant: Any = None,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         super().__init__()
+        if assistant is not None:
+            _check_assistant(assistant)
+            self.assistant = assistant
         if view is None:
             view = BedrockKBView(core or BedrockKBAnalyzer(region=region, profile=profile), kb=kb,
                                  mode="text" if mode == "text" else "auto", progress=progress)
@@ -1044,6 +1053,7 @@ def explore(
     region: str | None = None,
     profile: str | None = None,
     height: int | str | None = None,
+    assistant: Any = None,
 ) -> KBExplorer:
     """
     Opens the knowledge base explorer window and returns it: every file next to Bedrock's record of it, how each
@@ -1056,6 +1066,7 @@ def explore(
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 
     The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only
-    reads: where a sync is needed it shows the command to run.
+    reads: where a sync is needed it shows the command to run. assistant=AgentView(...) adds ✦ Ask: a drawer where you
+    ask the agent about what the window shows.
     """
-    return KBExplorer(kb, file=file, region=region, profile=profile, height=height)
+    return KBExplorer(kb, file=file, region=region, profile=profile, height=height, assistant=assistant)

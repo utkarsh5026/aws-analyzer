@@ -25,6 +25,7 @@ from aws_analyzer._kit.analyzer import _BaseAnalyzer
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
+from aws_analyzer._kit.focus import Focus, FocusPart
 from aws_analyzer._kit.render import _base_css, _copy_button, _Look, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
@@ -473,3 +474,23 @@ def test_history_that_cant_be_written_turns_itself_off(tmp_path):
     store = PlaceHistory(str(blocker / "places.sqlite"), "s3")
     store.record("111", "s3://a/")
     assert not store.is_on and "Recent places are off" in store.problem and store.places("111") == []
+
+
+def test_a_focus_reads_as_chips_and_loses_one_part_at_a_time():
+    start, end = datetime(2026, 10, 30, tzinfo=timezone.utc), datetime(2026, 10, 31, tzinfo=timezone.utc)
+    focus = Focus("lambda", "run", region="us-east-1", since=start, until=end, parts=(
+        FocusPart("function", "arn:aws:lambda:us-east-1:123:function:etl", "etl"),
+        FocusPart("region", "us-east-1", "us-east-1"),
+        FocusPart("range", f"{start.isoformat()}/{end.isoformat()}", "the last 24 hours"),
+        FocusPart("request_id", "c0ffee00-1d2e", "run c0ffee00"),
+    ))
+    assert focus.chips() == ["etl", "us-east-1", "the last 24 hours", "run c0ffee00"]
+    assert str(focus) == "etl · us-east-1 · the last 24 hours · run c0ffee00"
+    assert focus.value("request_id") == "c0ffee00-1d2e" and focus.value("file") == ""
+    no_range = focus.without("range")
+    assert no_range.since is None and no_range.until is None and no_range.chips() == ["etl", "us-east-1", "run c0ffee00"]
+    no_region = focus.without("region")
+    assert no_region.region == "" and no_region.since == start and "us-east-1" not in no_region.chips()
+    assert focus.without("no-such-part") == focus and focus.since == start
+    with pytest.raises(AttributeError):
+        focus.kind = "logs"

@@ -205,12 +205,14 @@ class BedrockKBView(_KnowledgeBaseCommands, _IndexCommands, _SearchCommands, _Me
     # ------------------------------------------------------------------- the window
 
     @_friendly_errors
-    def explore(self, kb: str | None = None, *, file: str | None = None, height: int | str | None = None) -> None:
+    def explore(self, kb: str | None = None, *, file: str | None = None, height: int | str | None = None,
+                assistant: Any = None) -> None:
         """
         The explorer window: every file next to Bedrock's record of it (failed and why, changed since the last
         sync, not synced yet...), and for the one you click, how it was indexed: the parser, its chunks in document
         order, its metadata, and whether a question finds it. Also the indexing pipeline, the sync history, a search
         box and every setting, by clicking. Needs Jupyter and ipywidgets; view.explorer is the window.
+        assistant=AgentView(...) adds ✦ Ask: a drawer where you ask the agent about what the window shows.
         """
         if not self.use_html:
             raise _Hint(
@@ -221,4 +223,4 @@ class BedrockKBView(_KnowledgeBaseCommands, _IndexCommands, _SearchCommands, _Me
         _require("ipywidgets", "The explorer window")
         from ..explorer.window import KBExplorer
         self.explorer = KBExplorer(kb if kb is not None else self.kb, file=file, view=self, height=height,
-                                   mode="widgets")
+                                   mode="widgets", assistant=assistant)

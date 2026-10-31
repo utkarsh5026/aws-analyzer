@@ -171,12 +171,12 @@ class _ChatsPanel:
 
     def _open(self, chat: ChatSummary) -> None:
         window = self.window
-        if window.busy:
+        if window.view._busy_window() is not None:
             window._set_status("Still answering: press stop first, then open another chat.", "warn")
             return
         self.sure = None
         opened = self.core.open_chat(chat.thread)
-        window.opened()
+        window.view._tell_windows("opened")
         window._set_status(f"Opened {opened.title!r}: your next question carries it on.", "ok")
 
     def _rename(self) -> None:
@@ -185,7 +185,7 @@ class _ChatsPanel:
             self.window._set_status("Type a title first, then press Enter or rename.", "warn")
             return
         renamed = self.core.rename_chat(title)
-        self.window.renamed()
+        self.window.view._tell_windows("renamed")
         self.window._set_status(f"Renamed: this chat is now {renamed.title!r}.", "ok")
 
     def _delete(self, chat: ChatSummary) -> None:

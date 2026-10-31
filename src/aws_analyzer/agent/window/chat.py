@@ -53,8 +53,10 @@ from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
 from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, services_of
 from ..llm import provider_info
+from ..prompt import focus_of
 from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
 from .chats_panel import _CHATS_CSS, _ChatsPanel
+from .drawer import _DRAWER_CSS, _focus_html, focus_questions
 from .memory_panel import _MEMORY_CSS, _MemoryPanel
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
@@ -117,6 +119,9 @@ _DRAWINGS = {
     "hex": "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/>",
     "search": "<circle cx='11' cy='11' r='6'/><path d='M20 20l-4.5-4.5'/>",
 }
+
+
+_FOCUS_SERVICES = {"lambda": ("lambda", "logs"), "s3": ("s3",), "bedrock_kb": ("bedrock", "s3")}
 
 
 @dataclass(frozen=True)
@@ -363,7 +368,7 @@ def _service_rules() -> str:
 
 def _window_css() -> str:
     return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _PANEL_CSS, _MEMORY_CSS,
-                      _CHATS_CSS, _json_tree_css(_ROOT)])
+                      _CHATS_CSS, _DRAWER_CSS, _json_tree_css(_ROOT)])
 
 
 def _wrap(inner: str) -> str:
@@ -405,11 +410,14 @@ def _answer_text_html(text: str) -> str:
     return f'<div class="ans">{_markdown_html(text)}</div>'
 
 
-def _question_html(question: str) -> str:
+def _question_html(question: str, about: str = "") -> str:
     """
-    A question on the right, in a box, with the person's mark beside it.
+    A question on the right, in a box, with the person's mark beside it; under it, what it was asked about when an
+    explorer's ✦ Ask drawer asked it (the window's focus, as its chips read).
     """
-    return f'<div class="ag-q"><span class="ag-mark">{_HUMAN}</span><span class="ag-said">{_esc(question)}</span></div>'
+    line = f'<span class="ag-about">about: {_esc(about)}</span>' if about else ""
+    return (f'<div class="ag-q"><span class="ag-mark">{_HUMAN}</span><span class="ag-said">{_esc(question)}{line}'
+            "</span></div>")
 
 
 def _thinking_html(text: str) -> str:
@@ -661,10 +669,16 @@ class _AgentChat(_Window):
                  the conversation's, out of `items`, so the question asked next moves above the rest)
         busy     a question is being answered (the send button is Stop meanwhile)
         task     the asyncio task waiting for it, in a notebook (tests await it)
+        focus_from   the explorer window it's the ✦ Ask drawer of, or None for agent.chat()'s window: then every
+                 question is asked with focus= what the window shows, while use_focus (its "use it" box) is on
+        offered  the questions the empty conversation offers, as they were last drawn
     """
 
-    def __init__(self, view: AgentView, widgets: Any, *, height: int | str | None = None):
+    def __init__(self, view: AgentView, widgets: Any, *, height: int | str | None = None, focus_from: Any = None):
         self.view, self.w = view, widgets
+        self.focus_from = focus_from
+        self.use_focus = True
+        self.offered: list[str] = []
         self.pickers = []
         self.quiet = False
         self.busy = False
@@ -691,6 +705,9 @@ class _AgentChat(_Window):
         head = w.HBox([self.title, self.chats_button, self.memory_button, self.model_button, self.new_button],
                       layout=layout(width="100%"))
         head.add_class("agc-head")
+        focus_row = self._focus_row()
+        if self.is_drawer:
+            self.chats_button.layout.display = self.memory_button.layout.display = "none"
         self.panel = _ModelPanel(self, w, os.environ)
         self.memory_panel = _MemoryPanel(self, w)
         self.chats_panel = _ChatsPanel(self, w)
@@ -706,14 +723,64 @@ class _AgentChat(_Window):
         composer = w.HBox([prompt, self.question, self.send_button], layout=layout(width="100%"))
         composer.add_class("agc-composer")
         self.status = w.HTML(layout=layout(width="100%"))
-        root = w.VBox([style, head, self.panel.root, self.memory_panel.root, self.chats_panel.root, self.log, composer, self.status],
-                      layout=layout(width="100%"))
+        root = w.VBox([style, head, focus_row, self.panel.root, self.memory_panel.root, self.chats_panel.root, self.log,
+                       composer, self.status], layout=layout(width="100%"))
         root.add_class("agc-app")
         self._fill_log()
         self._say_ready()
         if not self._has_model():
             self._safely(self.panel.open)()
         return root
+
+    @property
+    def is_drawer(self) -> bool:
+        return self.focus_from is not None
+
+    def _focus_row(self) -> Any:
+        """
+        The drawer's Looking at line, under the head, with its "use it" box: what every question is asked about.
+        Hidden in agent.chat()'s window, which asks about the whole account.
+        """
+        w, layout = self.w, self.w.Layout
+        self.focus_line = w.HTML(layout=layout(flex="1 1 auto", width="auto", min_width="0"))
+        self.focus_check = w.Checkbox(value=True, description="use it", indent=False,
+                                      tooltip="Ask about what the window shows; untick to ask about your whole account",
+                                      layout=layout(width="auto", flex="0 0 auto"))
+        self.focus_check.observe(self._safely(lambda change: self._use_focus(bool(change["new"]))), names="value")
+        row = w.HBox([self.focus_line, self.focus_check],
+                     layout=layout(width="100%", align_items="center", display="" if self.is_drawer else "none"))
+        row.add_class("agc-focus")
+        return row
+
+    def _window_focus(self) -> Any:
+        """
+        What the explorer shows now, as a Focus (None outside a drawer, or when it shows nothing yet).
+        """
+        return focus_of(self.focus_from) if self.is_drawer else None
+
+    def _asked_focus(self) -> Any:
+        """
+        What a question is asked about: the window's focus, unless "use it" is unticked.
+        """
+        return self._window_focus() if self.use_focus else None
+
+    def _use_focus(self, used: bool) -> None:
+        self.use_focus = used
+        self.focus_moved()
+
+    def focus_moved(self) -> None:
+        """
+        What the explorer shows may have changed (the explorer says so as you click): the Looking at line follows,
+        and so do the questions an empty conversation offers.
+        """
+        if not self.is_drawer:
+            return
+        focus = self._window_focus()
+        self._set(self.focus_line, _wrap(_focus_html(focus, used=self.use_focus)))
+        if self.empty in self.items and [s.question for s in self._suggestions()] != self.offered:
+            self.items.remove(self.empty)
+            self.empty = self._empty_state()
+            self._show_empty()
 
     def _button(self, label: str, tooltip: str, on_click: Callable[[], None], css: str) -> Any:
         button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto",
@@ -755,7 +822,14 @@ class _AgentChat(_Window):
             f'<div class="ag-legend"><span class="ag-k ag-label">services</span>'
             f'{_named_badges(self._services())}</div><div class="ag-k"># try</div></div>'),
             layout=w.Layout(width="100%"))
-        rows = [self._suggestion(suggestion) for suggestion in self._suggestions()]
+        if self.is_drawer:
+            intro = w.HTML(_wrap(
+                '<div class="ag-intro"><p class="ag-dim">Ask about what the window shows: "this" is what the line '
+                "above names, and every tool call shows as it runs. It only reads.</p>"
+                '<div class="ag-k"># try</div></div>'), layout=w.Layout(width="100%"))
+        suggestions = self._suggestions()
+        self.offered = [suggestion.question for suggestion in suggestions]
+        rows = [self._suggestion(suggestion) for suggestion in suggestions]
         empty = w.VBox([intro, *rows], layout=w.Layout(width="100%", margin="0 0 auto 0", flex="0 0 auto"))
         empty.add_class("agc-empty")
         return empty
@@ -770,8 +844,13 @@ class _AgentChat(_Window):
 
     def _suggestions(self) -> list[_Suggestion]:
         """
-        Questions to start from, for the toolkits the agent has.
+        Questions to start from: in a drawer, the ones focus_questions() offers for what the window shows; else
+        the usual ones, for the toolkits the agent has.
         """
+        if self.is_drawer and self.use_focus:
+            focus = self._window_focus()
+            services = _FOCUS_SERVICES.get(focus.service, ()) if focus is not None else ()
+            return [_Suggestion(frozenset(), question, services) for question in focus_questions(focus)]
         names = {toolkit.name for toolkit in self.view.core.toolkits}
         return [suggestion for suggestion in _SUGGESTIONS if suggestion.needs <= names]
 
@@ -797,7 +876,8 @@ class _AgentChat(_Window):
         """
         chat = self.view.core.chat_title
         named = f'<span class="ag-ct" title="{_esc(chat)}">{_esc(chat)}</span>' if chat else ""
-        return (f'<div class="ag-head"><b>aws-agent</b>{named}<span class="ag-dim">{_esc(self._model_where())}</span>'
+        name = "✦ Ask" if self.is_drawer else "aws-agent"
+        return (f'<div class="ag-head"><b>{name}</b>{named}<span class="ag-dim">{_esc(self._model_where())}</span>'
                 f'{_badges(self._services())}<span class="ag-ro">● read-only</span></div>')
 
     def _set_status(self, text: str, level: str = "") -> None:
@@ -884,7 +964,8 @@ class _AgentChat(_Window):
         A question answered outside the window (before it opened, or with ask() in a cell): the steps it took,
         folded, then its answer. The model's words between them weren't kept.
         """
-        self._add(self._html(_wrap(_question_html(answer.question))))
+        about = str(answer.focus) if answer.focus is not None else ""
+        self._add(self._html(_wrap(_question_html(answer.question, about))))
         self._add(self._box([self._html(self._reply_html(answer, list(answer.calls)))]))
 
     def added(self, answer: AgentAnswer) -> None:
@@ -936,11 +1017,11 @@ class _AgentChat(_Window):
                          "starts with the next question.", "ok")
 
     def _new_chat(self) -> None:
-        if self.busy:
+        if self.view._busy_window() is not None:
             self._set_status("Still answering: press stop first, then start a new chat.", "warn")
             return
         self.view.core.new_conversation()
-        self.cleared()
+        self.view._tell_windows("cleared")
 
     def _send_or_stop(self) -> None:
         if self.busy:
@@ -963,6 +1044,9 @@ class _AgentChat(_Window):
             return
         if not text:
             self._set_status("Type a question first, then press Enter.")
+            return
+        if not self.busy and self.view._busy_window(other_than=self) is not None:
+            self._set_status("The agent is answering in another window: wait for it, or press stop there.", "warn")
             return
         self._quietly(self.question, value="")
         if self.busy:
@@ -1011,12 +1095,13 @@ class _AgentChat(_Window):
         self._ask(self.queued.pop(0).question)
 
     def _ask(self, text: str) -> None:
-        self._begin(text)
+        focus = self._asked_focus()
+        self._begin(text, about=str(focus) if focus is not None else "")
         stop, steps = threading.Event(), queue.SimpleQueue()
         self.stop = stop
 
         def work() -> AgentAnswer:
-            return self.view.core.ask(text, stop=stop, on_step=steps.put)
+            return self.view.core.ask(text, focus=focus, stop=stop, on_step=steps.put)
 
         self._start(work, steps)
 
@@ -1032,12 +1117,13 @@ class _AgentChat(_Window):
         self.new_button.disabled = busy
         self.panel.use_button.disabled = busy
 
-    def _begin(self, question: str) -> None:
+    def _begin(self, question: str, *, about: str = "") -> None:
         """
-        The question in the conversation, a turn under it that its steps go in, and the window set to wait.
+        The question in the conversation (with what it's about, in a drawer), a turn under it that its steps go in,
+        and the window set to wait.
         """
         self._show_busy(True)
-        self._add(self._html(_wrap(_question_html(question))))
+        self._add(self._html(_wrap(_question_html(question, about))))
         pulse = self._html("")
         box = self._add(self._box([pulse]))
         self.turn = _Turn(question, box, pulse)
@@ -1246,6 +1332,7 @@ class _AgentChat(_Window):
             turn.box.children = (turn.pulse,)
             self._set(turn.pulse, self._reply_html(answer, turn.trail))
         self._done()
+        self.view._tell_windows("added", answer, other_than=self)
         if self.memory_panel.is_open:
             self.memory_panel.refresh()
         self.renamed()
