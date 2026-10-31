@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧭 **S3 explorer: open it in the S3 console** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pulls))
+- 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
   - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
   - `x.console_url` is the link, and `console_url("s3://bucket/key")` makes one for any path.
 
