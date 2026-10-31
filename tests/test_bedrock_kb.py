@@ -4188,7 +4188,8 @@ def test_explorer_opens_the_knowledge_base_and_lists_its_files(world):
     assert [f.name for f in x._visible] == ["scanned.pdf", "added.pdf", "video.mp4", "gone.pdf", "faq.md",
                                             "refund-policy.pdf"]
     assert "Failed" in plain(x._rows[0].face.value) and "kbx-alarm" in x.tab_buttons["files"]._dom_classes
-    assert plain(x.status.value) == "6 files listed in 0.0s · 4 files to look at: the Files tab lists them first"
+    assert re.fullmatch(r"6 files listed in \d+\.\ds · 4 files to look at: the Files tab lists them first",
+                        plain(x.status.value))
     overview = plain(x.overview.value)
     assert "Its 6 files, by state" in overview and "1 file failed to index (scanned.pdf)" in overview
     assert "help-site is a WEB data source" in overview and "the Syncs tab shows how many each sync read" in overview
@@ -4209,7 +4210,7 @@ def test_explorer_shows_how_a_file_was_indexed(world):
     page = plain(x.file_view.value)
     assert "How it was indexed" in page and "Its 4 chunks, in document order" in page and "100% covered" in page
     assert "Other files of its data source have a metadata file and this one doesn't" in page
-    assert plain(x.status.value) == "faq.md: indexed, 4 chunks (0.0s)"
+    assert re.fullmatch(r"faq\.md: indexed, 4 chunks \(\d+\.\ds\)", plain(x.status.value))
     assert x.ask_row.layout.display == "" and x.back_button.layout.display == ""
     x.ask_box.value = "word120 word121"
     enter(x.ask_box)
