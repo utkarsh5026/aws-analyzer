@@ -11,6 +11,7 @@ from moto import mock_aws
 
 from aws_analyzer import s3 as s3mod
 from aws_analyzer.s3.explorer import frame, listing, navigator, report, window
+from aws_analyzer.s3.explorer.snippets import file_snippet, files_snippet
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer.s3 import S3Analyzer, S3View
 from aws_analyzer.s3.blocks import _Flow, _Pages
@@ -389,7 +390,7 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert "Preview of part-2.csv" in out and "s3://lake/raw/events/part-2.csv" not in out  # the name, not the path
     assert "Next:" not in out  # the S3View's next steps name commands this explorer doesn't have
     assert "s3://lake/raw/events/part-2.csv" in x._status.value
-    assert list(x._act_buttons) == ["preview", "head", "download", "open", "close"]
+    assert list(x._act_buttons) == ["preview", "head", "code", "download", "open", "prev", "next", "close"]
     assert x._act_buttons["preview"]._dom_classes == ("s3x-act", "s3x-on")
     assert 'class="s3a theme-console"' in x._content.value and "<table" in x._content.value
 
@@ -400,7 +401,7 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert "part-2.csv?" in link and "response-content-disposition=inline" in link and "↗ Open in new tab" in link
     assert x._act_buttons["head"]._dom_classes == ("s3x-act", "s3x-on")
     x._act_buttons["close"].click()
-    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip"]
+    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip", "more"]
 
 
 def test_explorer_toolbar_and_breadcrumbs(explorer):
@@ -951,12 +952,12 @@ def test_explorer_expands_every_part_of_a_json_file(explorer, aws):
     x = explorer("s3://lake/curated/images.json")
     folded = x._content.value.count('<details class="jo">')  # the images after the first, and the long note
     assert folded == 10 and x._expand_btn not in x._act_buttons.values()
-    assert x._actions.children[-2:] == (x._expand_btn, x._act_buttons["close"])  # beside ✕
+    assert x._actions.children[-4:] == (x._expand_btn, *(x._act_buttons[a] for a in ("prev", "next", "close")))
     assert x._expand_btn.description == "▾ Expand all" and "one by one" in x._expand_btn.tooltip
 
     x._expand_btn.click()
     assert x._content.value.count('<details class="jo">') == 1  # only the long string stays folded
-    assert x._expand_btn._dom_classes == ("s3x-act", "s3x-expand", "s3x-on") and "Collapse" in x._expand_btn.tooltip
+    assert x._expand_btn._dom_classes == ("s3x-act", "s3x-expand", "s3x-on", "s3x-push") and "Collapse" in x._expand_btn.tooltip
     assert all(tree.root.children[2].children[9].open for tree in x._trees())
     row(x, "labels.json").button.click()  # it stays on for the next file
     assert x._expand_btn in x._actions.children and '<details class="jo">' not in x._content.value
@@ -1035,7 +1036,7 @@ def test_explorer_saves_downloads_in_the_downloads_folder(explorer, tmp_path, mo
 def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     x = explorer("s3://lake/raw/", zip_max_size="20B")
-    assert list(x._act_buttons) == ["summary", "zip"] and "no bigger than 20 B and 10,000 files" in x._act_buttons["zip"].tooltip
+    assert list(x._act_buttons) == ["summary", "zip", "more"] and "no bigger than 20 B and 10,000 files" in x._act_buttons["zip"].tooltip
     x._act_buttons["zip"].click()
     out = text(x)
     assert "Can't zip this here yet" in out and "⚙ at the top right raises them (now 20 B and 10,000 files)" in out
@@ -1278,3 +1279,112 @@ def test_overview_says_whats_new_since_your_last_visit(explorer, aws, tmp_path, 
 
     later = explorer("s3://lake/raw/", history=places)
     assert any(note.startswith("Nothing new here since your last visit") for note in notes(later))
+
+
+# ----------------------------------------------------------------------------- 🐍 Use in Python, ‹ ›, More ▾
+
+
+def test_file_snippet_reads_each_format_its_own_way():
+    csv = file_snippet("s3://lake/raw/day.csv.gz")
+    assert csv.code.splitlines() == ["import pandas as pd", "from aws_analyzer import S3Analyzer", "",
+                                     "s3 = S3Analyzer()", 'path = "s3://lake/raw/day.csv.gz"', "with s3.open(path) as f:",
+                                     "    df = pd.read_csv(f)", "df.head()"]
+    assert "undoes the .gz compression" in csv.note
+    parquet = file_snippet("s3://lake/t.parquet", profile="analytics")
+    assert "s3 = S3Analyzer(profile='analytics')" in parquet.code
+    assert "df = pd.read_parquet(io.BytesIO(f.read()))" in parquet.code and "import io" in parquet.code
+    assert "read whole into memory" in parquet.note
+    assert "S3Analyzer()" in file_snippet("s3://b/x.csv", profile="default").code
+    assert "data = json.load(f)" in file_snippet("s3://b/x.json").code
+    assert "sep='\\t'" in file_snippet("s3://b/x.tsv").code
+    assert "Only load a pickle you trust" in file_snippet("s3://b/model.pkl").note
+    unknown = file_snippet("s3://b/blob.bin")
+    assert "data = f.read()" in unknown.code and "df.head()" not in unknown.code and not unknown.note
+
+
+def test_files_snippet_joins_tables_of_one_format():
+    joined = files_snippet(["s3://b/a.csv", "s3://b/b.csv"])
+    assert "df = pd.concat(frames, ignore_index=True)" in joined.code
+    assert '    "s3://b/a.csv",' in joined.code and "frames.append(pd.read_csv(f))" in joined.code
+    mixed = files_snippet(["s3://b/a.csv", "s3://b/b.json"])
+    assert "pd.concat" not in mixed.code and "contents[path] = f.read()" in mixed.code
+    assert "aren't all tables of one format" in mixed.note and "iter_objects" not in mixed.code
+    with_folder = files_snippet(["s3://b/a.csv", "s3://b/day/"])
+    assert "s3.iter_objects(path)" in with_folder.code and "pd.concat" not in with_folder.code
+
+
+def run_snippet(code):
+    names = {}
+    exec(code, names)
+    return names
+
+
+def test_explorer_shows_the_code_that_loads_a_file(explorer):
+    x = explorer("s3://lake/raw/events/part-2.csv")
+    x._act_buttons["code"].click()
+    out = text(x)
+    assert "Use part-2.csv in Python" in out and 'path = "s3://lake/raw/events/part-2.csv"' in out
+    assert "s3fs is installed" in out and x._act_buttons["code"]._dom_classes == ("s3x-act", "s3x-on")
+    code = next(block.text for block in x.shown if getattr(block, "code", False))
+    assert run_snippet(code)["df"].to_dict("list") == {"a": [3], "b": [4]}
+
+    row(x, "part-10.csv").check.click()
+    row(x, "part-2.csv").check.click()
+    [b for b in x._picks_bar.children if "Use in Python" in getattr(b, "description", "")][0].click()
+    assert "Use the 2 selected items in Python" in text(x) and x._action == "picks_code"
+    code = next(block.text for block in x.shown if getattr(block, "code", False))
+    assert run_snippet(code)["df"].to_dict("list") == {"a": [1, 3], "b": [2, 4]}
+    row(x, "part-10.csv").check.click()
+    assert "Use the 1 selected item in Python" in text(x)
+    row(x, "part-2.csv").check.click()
+    assert x._action == "preview" and "Preview of part-2.csv" in text(x)
+
+
+def test_explorer_steps_to_the_file_before_and_after(explorer):
+    x = explorer("s3://lake/raw/events/part-2.csv")
+    prev, nxt = x._act_buttons["prev"], x._act_buttons["next"]
+    assert prev.disabled and not nxt.disabled and nxt.tooltip.endswith("part-10.csv")
+    assert "s3x-push" in prev._dom_classes
+    x._act_buttons["head"].click()
+    x._act_buttons["next"].click()
+    assert x.selected == "s3://lake/raw/events/part-10.csv" and x._action == "head"
+    assert "System metadata" in text(x) and row(x, "part-10.csv").button._dom_classes == ("s3x-row", "s3x-on")
+    assert x._act_buttons["next"].disabled and not x._act_buttons["prev"].disabled
+
+    x = explorer("s3://lake/raw/readme.md")
+    assert x._act_buttons["prev"].disabled and x._act_buttons["next"].disabled
+    x = explorer("s3://lake/many/f00.txt", page_size=10)
+    for _ in range(10):
+        x._act_buttons["next"].click()
+    assert x.selected == "s3://lake/many/f10.txt" and x._offset == 10
+
+
+def test_explorer_more_reports_on_a_folder(explorer, aws):
+    x = explorer("s3://lake/many/")
+    assert "more" in x._act_buttons and "largest" not in x._act_buttons
+    x._act_buttons["more"].click()
+    assert [a for a in x._act_buttons if a not in ("summary", "zip")] == [
+        "more", "largest", "newest", "oldest", "details", "duplicates", "uploads"]
+    assert x._act_buttons["more"].description == "Fewer ▴" and "s3x-on" in x._act_buttons["more"]._dom_classes
+    x._act_buttons["largest"].click()
+    assert "Largest 20 objects in s3://lake/many/" in text(x) and "f24.txt" in text(x)
+    x._act_buttons["duplicates"].click()
+    assert x._action == "duplicates" and "Next:" not in text(x)
+    x.open("s3://lake/raw/")
+    assert "largest" in x._act_buttons
+    x._act_buttons["more"].click()
+    assert "largest" not in x._act_buttons and x._act_buttons["more"].description == "More ▾"
+
+    aws.put_bucket_versioning(Bucket="models", VersioningConfiguration={"Status": "Enabled"})
+    for body in (b"v1", b"version two"):
+        aws.put_object(Bucket="models", Key="churn/model.pkl", Body=body)
+    aws.put_object(Bucket="models", Key="churn/gone.txt", Body=b"x")
+    aws.delete_object(Bucket="models", Key="churn/gone.txt")
+    x = explorer("s3://models/churn/")
+    x._act_buttons["more"].click()
+    assert {"versions", "deleted"} <= set(x._act_buttons)
+    x._act_buttons["deleted"].click()
+    assert "gone.txt" in text(x)
+    row(x, "model.pkl").button.click()
+    x._act_buttons["history"].click()
+    assert "2 versions" in text(x)

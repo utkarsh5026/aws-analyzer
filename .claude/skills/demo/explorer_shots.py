@@ -99,6 +99,12 @@ FIGURES = [
            "Training data"),
     Figure("explorer-pdf-text", 'x = S3Explorer("s3://acme-ml-data/docs/data-retention-policy.pdf", core=core, height=500)',
            "Text of page 1", (Step("act:Text", "Left out what repeats"),)),
+    Figure("explorer-python", 'x = S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet", core=core, height=500)',
+           "First 20 rows", (Step("act:Use in Python", "Use train.parquet in Python"),)),
+    Figure("explorer-more", 'x = S3Explorer("s3://acme-ml-data/", core=core, height=500)', "Click a folder", (
+        Step("act:More ▾", "Largest files", where=".s3x-actions"),
+        Step("act:Largest files", "Largest 20 objects"),
+    )),
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
     Figure("explorer-recent", RECENT, "Your buckets"),
     Figure("explorer-changes", CHANGES, "Since your last visit"),

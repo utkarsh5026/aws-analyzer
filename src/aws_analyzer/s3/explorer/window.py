@@ -104,6 +104,8 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         self._task: Any = None  # the last background report's asyncio task (tests wait for it)
         self._first_page = 1  # where "Read all" or "Text" starts in a PDF; the pager under the report moves it
         self._page_counts: dict[tuple[str, str], int] = {}  # (uri, etag) -> a PDF's pages (0: couldn't count)
+        self._more_open = False
+        self._versioning: dict[str, bool] = {}
         self._expand_all = False  # ▾ Expand all: JSON trees show every object and array (it stays on, like the sort)
         self._reports: list[list[Any]] = []  # the reports on the right, to draw again when that changes
         try:
@@ -223,6 +225,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         """
         keep = self.selected
         self._cache.clear()
+        self._versioning.clear()
         self._navigate(self.nav.refresh, keep=keep, same=True)
 
     @_window_errors
@@ -386,9 +389,10 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         self._save_look(self.nav.folder())
         self._draw_recent()
 
-    def _select(self, uri: str) -> None:
+    def _select(self, uri: str, action: str = "preview") -> None:
         """
-        Show a file on the right, and the page of the list it's on.
+        Show a file on the right (its preview, or another of its file reports: `action`), and the page of the list
+        it's on.
         """
         self.selected = uri
         if self._widgets is not None:
@@ -397,10 +401,11 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
                 self._offset = index - index % self.page_size
                 self._draw_rows(self._source())
                 self._renew("left")
+            self._action = action
             self._mark_rows()
             self._draw_actions()
             self._draw_status(self._source())
-        self._report("preview", "preview", uri)
+        self._on_action(action)
 
     # ------------------------------------------------------------------ widgets
 
@@ -503,6 +508,9 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         self._picks_note = w.HTML(layout=w.Layout(flex="1 1 auto", min_width="0"))
         self._picks_bar = w.HBox([self._picks_note,
                                   button("Clear", "s3x-quiet", "Unselect everything", self._clear_picks),
+                                  button("🐍 Use in Python", "s3x-quiet", "The lines that load what's selected "
+                                         "in a notebook cell: one DataFrame when they're tables of one format",
+                                         self._open_picks_code),
                                   button("⬇ Download selected", "s3x-primary", "Download what's selected as one "
                                          ".zip: see what goes in and name it first", self._open_picks)],
                                  layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
