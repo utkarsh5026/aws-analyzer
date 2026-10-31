@@ -32,6 +32,7 @@ Quick start
     ui.function_info("etl-nightly")                   # one function in plain English: triggers, access, cost, activity
     ui.errors("etl-nightly")                          # its errors in the last 24 hours, grouped by cause
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
+    ui.runs("etl-nightly", where="duration > 15s")    # its runs as rows: filter, sort, pick columns, group by hour
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
     ui.diff("etl-nightly")                            # what changed since its last published version: files, lines, settings
@@ -50,6 +51,7 @@ Quick start
     df = lam.overview(regions="all").to_df()          # one row per function
     detail = lam.describe("etl-nightly")              # FunctionDetail: .function, .triggers, .aliases, .metrics
     runs = lam.log_runs("etl-nightly").runs           # LogRun per call: its lines, status, run time, memory
+    table = lam.runs("etl-nightly", where="duration > 15s")  # RunTable: each run as fields, to filter, sort, group
 """
 
 from __future__ import annotations
@@ -81,6 +83,11 @@ from .analysis.logs import (
     slow_cutoff, split_runs,
 )
 from .analysis.performance import percentile, performance_findings, suggest_memory
+from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
+from .analysis.runs import (
+    BUILTIN_FIELDS, FieldInfo, LoggedEvent, RunGroup, RunRow, RunTable, logged_event, run_fields, run_table,
+    runs_findings,
+)
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
 )
@@ -99,6 +106,20 @@ from .view import LambdaView
 from .explorer.window import LambdaExplorer, explore
 
 __all__ = [
+    "runs_findings",
+    "run_table",
+    "run_fields",
+    "parse_query",
+    "looks_like_query",
+    "logged_event",
+    "RunTable",
+    "RunRow",
+    "RunQuery",
+    "RunGroup",
+    "QueryError",
+    "LoggedEvent",
+    "FieldInfo",
+    "BUILTIN_FIELDS",
     "CODE_STORAGE_LIMIT",
     "DAYS_PER_MONTH",
     "DOWNLOADS",

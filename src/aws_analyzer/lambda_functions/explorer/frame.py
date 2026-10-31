@@ -263,6 +263,9 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app .lmx-bar>*{margin:0}
 .lmx-app.lmx-app .lmx-chips{flex-wrap:wrap;gap:6px;margin:0 0 8px}
 .lmx-app.lmx-app .lmx-chips>*{margin:0}
+.lmx-app.lmx-app .lmx-chiprow{gap:8px;align-items:flex-start}
+.lmx-app.lmx-app .lmx-chiprow>*{margin:0}
+.lmx-app.lmx-app .lmx-sort select,.lmx-app.lmx-app .lmx-sort>select{height:26px;border-radius:999px;font-size:12px;padding:0 24px 0 10px}
 .lmx-app.lmx-app button.lmx-chip{width:auto;height:26px;padding:0 10px;border-radius:999px;font-size:12px;background:transparent;border:1px solid var(--lx-line);display:inline-flex;align-items:center;gap:6px}
 .lmx-app.lmx-app button.lmx-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:rgba(127,127,127,.5)}
 .lmx-app.lmx-app button.lmx-chip.lmx-t-all::before{display:none}
@@ -398,6 +401,16 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .rl details[open] summary{opacity:.9}
 .lmx-app .rl .jf{display:block;margin:3px 0 4px;padding:6px 9px;border-radius:7px;border:1px solid var(--lx-line);background:var(--lx-bg);white-space:pre-wrap;font-size:11.5px;color:var(--jp-content-font-color1,inherit)}
 .lmx-app .rf{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 14px 2px 40px;font-size:11.5px}
+.lmx-app .rev{margin:6px 14px 4px 40px;border:1px solid var(--lx-line);border-radius:8px;background:var(--lx-bg);font-size:11.5px}
+.lmx-app .rev summary{cursor:pointer;padding:5px 10px;font-weight:650;list-style:none}
+.lmx-app .rev summary::-webkit-details-marker{display:none}
+.lmx-app .rev summary::before{content:"\\25B8\\2002";opacity:.6}
+.lmx-app .rev[open] summary::before{content:"\\25BE\\2002"}
+.lmx-app .rev summary span{font-weight:400;opacity:.65;margin-left:8px}
+.lmx-app .rev .jk{color:var(--lx-accent);font-weight:600}
+.lmx-app .rev .js{color:var(--lx-tok-s)}
+.lmx-app .rev .jn,.lmx-app .rev .jl{color:var(--lx-tok-n)}
+.lmx-app .rev .jf{display:block;margin:0;padding:4px 12px 8px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--lx-mono);font-size:11.5px}
 .lmx-app .rf span{white-space:nowrap;opacity:.75}
 .lmx-app .rf b{font-weight:650}
 .lmx-app .rf code{font-family:var(--lx-mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--lx-tint-2);user-select:all;-webkit-user-select:all;cursor:text;opacity:1}

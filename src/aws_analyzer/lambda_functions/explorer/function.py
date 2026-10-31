@@ -308,6 +308,7 @@ class _FunctionTab:
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._run_window = None
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
+        self._run_values = {}
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
         self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()
         self._asked = set()

@@ -58,6 +58,7 @@ from .blocks.walk import _Walk
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
+from .blocks.runs import _RunsLayout, _runs_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -272,7 +273,7 @@ class LambdaView(_BaseView):
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
-        "🩺 When something goes wrong": ("errors", "logs", "performance"),
+        "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
     }
@@ -953,6 +954,41 @@ class LambdaView(_BaseView):
             steps.append((self._call_for("logs", fn, since="24h"), "the last 24 hours"))
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def runs(
+        self,
+        name: str,
+        *,
+        since: Any = "24h",
+        where: str | None = None,
+        sort: Any = None,
+        columns: Any = None,
+        group_by: str | None = None,
+        fields: dict[str, str] | None = None,
+        n: Any = 50,
+        region: str | None = None,
+        limit: Any = 10_000,
+    ) -> None:
+        """
+        A function's runs in the last 24 hours, one row each: status, start, run time, memory, cold start and what it
+        logged. where='duration > 15s and cold' keeps the runs that match (also status, memory, error ~ KeyError, or
+        any field its JSON logs or logged event carry: event.Records.s3.object.size > 30MB), sort='-duration' puts
+        the longest first, columns=[...] picks what each row shows, group_by='hour' sums them up per hour (or per
+        error_type, version or any field), and since='today' or '7d' reads another range.
+        """
+        n = _as_int(n, "n")
+        limit = _as_count(limit, "limit")
+        with self._progress("Reading runs", unit="lines") as tick, self._named(name, region):
+            table = self.core.runs(name, since=since, where=where, sort=sort, fields=fields, limit=limit,
+                                   region=region, progress=tick)
+        fn = table.function
+        chosen = [columns] if isinstance(columns, str) else list(columns) if columns else None
+        blocks = _runs_blocks(
+            table, call=lambda command, **kwargs: self._call_for(command, fn, **kwargs),
+            since_arg=_since_arg(since, "24h"), layout=_RunsLayout(chosen, group_by, n))
+        blocks[1:1] = self._log_notes(table.errors, fn, fn.log_group)
         self._show(blocks)
 
     @_friendly_errors

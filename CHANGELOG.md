@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - **‹ ›** beside ✕ show the file before and after in the list, the same way, without going back to it.
   - **More ▾** on a folder: largest, newest and oldest files, what's inside them, copies, unfinished uploads, and in a versioned bucket old versions, deleted files and a file's **🕘 Versions**.
 
+- ⚡ **Lambda: ask for runs by their fields** ([#181](https://github.com/utkarsh5026/aws-analyzer/pull/181))
+  - `runs("orders-etl", since="today", where="duration > 15s and cold")`: each run as a row, sorted, grouped by hour.
+  - Queries reach your JSON logs' fields and the event when it's logged (`size > 30MB`); `core.runs()` gives a table.
+  - The explorer's Logs search box takes the same queries, with a sort menu, **Today**, and each run's logged event.
+
 ## [0.41.0] - 2026-10-30
 
 ### Added

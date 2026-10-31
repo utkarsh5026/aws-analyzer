@@ -26,6 +26,8 @@ from ..analysis.logs import (
     LogPage, LogRun, _marker, line_level, run_console_url, run_insights_query, slow_cutoff,
 )
 from ..analysis.performance import percentile
+from ..analysis.query import QueryError, RunQuery, parse_query
+from ..analysis.runs import LoggedEvent, RunRow, RunTable, logged_event, run_fields
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
 from ..view import _LINE_PREFIX_RE, _stamp
 from .frame import _RUN_PAGE, _RUN_STATES, _run_clock, _seconds
@@ -33,13 +35,27 @@ from .widgets import _RunRow
 
 
 _RANGES = (("Last 15 minutes", "15m"), ("Last hour", "1h"), ("Last 3 hours", "3h"), ("Last 12 hours", "12h"),
-           ("Last 24 hours", "24h"), ("Last 3 days", "3d"), ("Last 7 days", "7d"), ("Last 30 days", "30d"))
+           ("Today", "today"), ("Last 24 hours", "24h"), ("Last 3 days", "3d"), ("Last 7 days", "7d"), ("Last 30 days", "30d"))
 
 _CUSTOM_RANGE = "custom"
 
 _RANGE_CHOICES = (*_RANGES, ("Custom range…", _CUSTOM_RANGE))
 
 _FIRST_TAB_RANGE = "24h"
+
+_SINCE_MIDNIGHT = "today"
+
+_RUN_SORTS = (("Newest first", ""), ("Oldest first", "started"), ("Longest first", "-duration"),
+              ("Most memory first", "-memory"))
+
+_QUERY_HINT = ("Find runs: KeyError, an order ID… or ask: duration > 15s and cold (Enter searches CloudWatch for "
+               "words)")
+
+_QUERY_TIP = ("Words find the runs with a line that has them; Enter searches the whole time range in CloudWatch.\n\n"
+              "Or ask for runs by their fields: duration > 15s · memory_share > 80% · status in (failed, timeout) · "
+              "cold · error ~ KeyError · started > 14:00 · not cold and duration > 2s. Fields your JSON logs carry "
+              "work too (customer_id = 42), and the event when it's logged (event.Records.s3.object.size > 30MB, or "
+              "just size > 30MB). Units: 15s, 500ms, 512MB, 80%.")
 
 _FIRST_LOGS_RANGE = "1h"
 
@@ -191,8 +207,9 @@ def _run_summary(run: LogRun) -> tuple[str, str]:
     error = run.error
     if error is not None:
         return error[1].splitlines()[0][:300], "bad" if run.status in ("failed", "timeout") else "warn"
+    logged = logged_event(run)
     for event in run.events:
-        if _marker(event.message) is None:
+        if _marker(event.message) is None and (logged is None or event is not logged.line):
             text = _line_parts(event.message)[0].strip()
             if text:
                 return text.splitlines()[0][:300], ""
@@ -274,7 +291,9 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES, *, region
     their other fields a click away), then what its REPORT line says and its request ID to copy.
     """
     started = next((e.time for e in run.events if (_marker(e.message) or ("",))[0] == "start"), run.start)
-    lines = [e for e in run.events if (_marker(e.message) or ("",))[0] not in ("start", "end", "report")]
+    logged = logged_event(run)
+    lines = [e for e in run.events if (_marker(e.message) or ("",))[0] not in ("start", "end", "report")
+             and (logged is None or e is not logged.line)]
     rows = []
     for event in lines[:limit]:
         level = line_level(event.message)
@@ -315,7 +334,73 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES, *, region
     if run.stream:
         facts.append(f'<span title="The log stream: one execution environment">{_esc(_clip(run.stream, 70))}</span>')
     actions = _run_actions(run, region, log_group)
-    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div>{actions}</div>'
+    return (f'<div class="rbody">{_event_html(run, logged)}{"".join(rows)}<div class="rf">{"".join(facts)}</div>'
+            f"{actions}</div>")
+
+
+_OPEN_EVENT_LINES = 24
+
+_FILTER_PATTERN_STARTS = ("{", "[")
+
+
+def _event_html(run: LogRun, logged: LoggedEvent | None) -> str:
+    """
+    The event an open run was called with, when it logged it, as JSON to fold: open when it's short.
+    """
+    if logged is None:
+        return ""
+    text = json.dumps(logged.event, indent=2, default=str, ensure_ascii=False)
+    started = next((e.time for e in run.events if (_marker(e.message) or ("",))[0] == "start"), run.start)
+    when = _offset((logged.line.time - started).total_seconds())
+    shown = " open" if text.count("\n") < _OPEN_EVENT_LINES else ""
+    return (f'<details class="rev"{shown}><summary>Event<span>what it was called with, logged at {_esc(when)}'
+            f'</span></summary><span class="jf">{_json_source_html(text)}</span></details>')
+
+
+def _sorted_runs(runs: list[LogRun], sort: str) -> list[LogRun]:
+    """
+    Runs in the order the sort field picks: '' newest first (as read), 'started' oldest first, '-duration' the
+    longest first, '-memory' the most memory first; runs without a REPORT line go last.
+    """
+    if not sort:
+        return runs
+    if sort == "started":
+        return sorted(runs, key=lambda run: (run.start, run.end))
+
+    def measure(run: LogRun) -> float | None:
+        if sort == "-duration":
+            return run.duration
+        return float(run.report.max_memory) if run.report is not None and run.report.memory else None
+
+    measured = [run for run in runs if measure(run) is not None]
+    unmeasured = [run for run in runs if measure(run) is None]
+    return sorted(measured, key=lambda run: measure(run) or 0.0, reverse=True) + unmeasured
+
+
+def _query_of(text: str) -> tuple[RunQuery | None, str]:
+    """
+    The search box as a query of the runs' fields ('duration > 15s'), else None; and what's wrong with text that
+    asks for one (it compares something) but can't be read. Words, and CloudWatch filter patterns ({ $.level = ...
+    }), aren't queries.
+    """
+    if not text or text.lstrip().startswith(_FILTER_PATTERN_STARTS):
+        return None, ""
+    try:
+        query = parse_query(text)
+    except QueryError as exc:
+        return None, str(exc) if _ASKS_RE.search(text) else ""
+    return (query, "") if query.compares else (None, "")
+
+
+_ASKS_RE = re.compile(r"[<>=~]")
+
+
+def _runs_with_text(runs: list[LogRun], text: str) -> int:
+    """
+    How many runs have a line with the text, in any case: a query typed that is also words in the logs.
+    """
+    needle = text.lower()
+    return sum(1 for run in runs if any(needle in event.message.lower() for event in run.events))
 
 
 class _LogsTab:
@@ -327,8 +412,7 @@ class _LogsTab:
     def _logs_page(self) -> Any:
         w, layout = self._w, self._w.Layout
         self.range_pick = self._range_pick(_RANGE_CHOICES)
-        self.log_find = w.Text(placeholder="Find runs with: an order ID, KeyError, a request ID… (Enter searches "
-                                           "CloudWatch)", continuous_update=True,
+        self.log_find = w.Text(placeholder=_QUERY_HINT, tooltip=_QUERY_TIP, continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
         self.log_find.observe(self._safely(self._log_typed), names="value")
         self.log_find.on_msg(self._on_enter(self._log_search))
@@ -349,8 +433,14 @@ class _LogsTab:
         bar = w.HBox([self.range_pick, ask, self.live_button, again], layout=layout(width="100%"))
         bar.add_class("lmx-bar")
         self.custom_bar = self._custom_range_bar()
-        self.run_chips = w.HBox(layout=layout(width="100%"))
+        self.run_chips = w.HBox(layout=layout(width="auto", flex="1 1 auto"))
         self.run_chips.add_class("lmx-chips")
+        self.sort_pick = w.Dropdown(options=_RUN_SORTS, value=self._run_sort, tooltip="The order the runs are listed in",
+                                    layout=layout(width="auto", flex="0 0 auto", display="none"))
+        self.sort_pick.add_class("lmx-sort")
+        self.sort_pick.observe(self._safely(self._sort_picked), names="value")
+        chip_row = w.HBox([self.run_chips, self.sort_pick], layout=layout(width="100%"))
+        chip_row.add_class("lmx-chiprow")
         self.run_head = w.HTML(layout=layout(width="100%"))
         self.jump_button = w.Button(layout=layout(width="auto", display="none"))
         self.jump_button.add_class("lmx-small")
@@ -363,7 +453,7 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, self.custom_bar, self.run_chips, self._timeline_strip(), self.run_head, self.jump_button,
+        page = w.VBox([bar, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
                        self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
@@ -487,7 +577,7 @@ class _LogsTab:
         value = self._range if value is None else value
         label = next((label for label, v in _RANGES if v == value), None)
         if label:
-            return f"the {label.lower()}"
+            return label.lower() if value == _SINCE_MIDNIGHT else f"the {label.lower()}"
         if isinstance(value, datetime):
             return f"since {_fmt_dt(value)}"
         return f"since {value}"
@@ -620,6 +710,11 @@ class _LogsTab:
                     else f"Couldn't read its logs ({_why(code, 'logs:FilterLogEvents')})")
         runs = self._found_runs if self.found is not None else self._runs
         failed = sum(1 for r in runs if r.status in ("failed", "timeout"))
+        query, problem = _query_of(self._log_query) if self.found is None else (None, "")
+        if problem:
+            return problem
+        if query is not None and runs:
+            return self._query_line(query)[0]
         if self.found is not None:
             return (f"{_plural(len(runs), 'run')} with {self._searched!r} in {self._range_text()}"
                     + (f", {failed:,} failed" if failed else "") + " · ✕ shows every run again")
@@ -631,8 +726,70 @@ class _LogsTab:
                 + " · click a run to see its lines" + (" · Older runs reads further back" if page.truncated else ""))
 
     def _words(self) -> list[str]:
+        if self._asks():
+            return []
         phrase = _phrase(self._log_query) if self._log_query else None
         return [phrase] if phrase else []
+
+    def _asks(self) -> bool:
+        """
+        Whether the search box holds a query of the runs' fields (or one that can't be read), not words.
+        """
+        query, problem = _query_of(self._log_query)
+        return query is not None or bool(problem)
+
+    def _values_of(self, run: LogRun) -> dict[str, Any]:
+        """
+        A run's fields (run_fields), kept until its lines change.
+        """
+        key = (run.key, len(run.events), run.report is not None)
+        values = self._run_values.get(key)
+        if values is None:
+            values = run_fields(run, timeout_seconds=self._full().timeout)
+            self._run_values[key] = values
+        return values
+
+    def _table_of(self, runs: list[LogRun]) -> RunTable:
+        start, end = self._range_window()
+        rows = [RunRow(run, self._values_of(run)) for run in runs if run.request_id is not None]
+        return RunTable(self._full(), start, end, rows, read=len(rows))
+
+    def _query_line(self, query: RunQuery) -> tuple[str, str]:
+        """
+        (the status line for a query in the search box, its level): how many runs read match, a field no run has,
+        and how to read further back.
+        """
+        runs = self._source_runs()
+        table = self._table_of(runs)
+        in_lines = _runs_with_text(runs, query.text)
+        quote = (f" · {_plural(in_lines, 'run')} {'has' if in_lines == 1 else 'have'} this text in a line: "
+                 f"put it in quotes, \"{query.text}\", to find {'it' if in_lines == 1 else 'them'}"
+                 if in_lines else "")
+        unknown = table.unknown_fields(query)
+        if unknown:
+            name, meant = unknown[0]
+            hint = f": did you mean {meant}?" if meant else ". Fields: duration, memory, status, cold, error…"
+            return f"No run has a field {name!r}{hint}{quote}", "warn"
+        shown = len(self._visible_runs())
+        if not shown and quote:
+            return f"No run read matches {query.text} as a query{quote}", "warn"
+        truncated = self.logs_page is not None and self.logs_page.truncated
+        return (f"{shown:,} of {_plural(len(table.rows), 'run')} read match {query.text}"
+                + (" · Older runs reads further back" if truncated else " · click a run to see its lines"), "")
+
+    def _say_query(self) -> None:
+        query, problem = _query_of(self._log_query)
+        if problem:
+            self._status(problem, "warn")
+        elif query is not None:
+            self._status(*self._query_line(query))
+
+    def _sort_picked(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        self._run_sort = str(change.get("new") or "")
+        self._run_offset = 0
+        self._draw_runs(renew=True)
 
     def _log_typed(self, change: dict[str, Any]) -> None:
         if self.quiet:
@@ -647,7 +804,9 @@ class _LogsTab:
                 return
         self._run_offset = 0
         self._draw_runs()
-        if self._log_query and _phrase(self._log_query) is None:
+        if self._asks():
+            self._say_query()
+        elif self._log_query and _phrase(self._log_query) is None:
             self._status("That's a CloudWatch Logs filter pattern: press Enter to search the time range with it.")
         elif self._log_query:
             shown = len(self._visible_runs())
@@ -666,6 +825,8 @@ class _LogsTab:
         fn = self.function
         text = str(self.log_find.value or "").strip()
         if fn is None:
+            return
+        if text and self._asks_for(text):
             return
         if not text:
             self.found, self._found_runs, self._searched = None, [], ""
@@ -686,6 +847,26 @@ class _LogsTab:
         self._later("search", lambda: self.core._log_runs(fn, start, end, search=text, limit=_RUN_LINES,
                                                           progress=self._count_lines, reached=self._note_reach),
                     self._got_search, self._search_failed, ticking=lambda: self._draw_reading("search"))
+
+    def _asks_for(self, text: str) -> bool:
+        """
+        Enter on a query of the runs' fields: it filters the runs read (read the time range first when none
+        are), with no search in CloudWatch. False for words, which CloudWatch searches.
+        """
+        query, problem = _query_of(text)
+        if query is None and not problem:
+            return False
+        self._log_query = text
+        self.found, self._found_runs, self._searched = None, [], ""
+        self._run_window = None
+        if self.logs_page is None and "logs" not in self._tasks:
+            self._load_logs()
+            return True
+        self._run_offset = 0
+        self._draw_run_chips()
+        self._draw_runs(renew=True)
+        self._say_query()
+        return True
 
     def _search_failed(self, exc: BaseException) -> None:
         self._done_reading("search")
@@ -757,12 +938,25 @@ class _LogsTab:
         if self._run_chip:
             runs = [r for r in runs if self._in_run_chip(r, self._run_chip)]
         if self._log_query and self.found is None:
-            phrase = _phrase(self._log_query)
-            if phrase:
-                needle = phrase.lower()
-                runs = [r for r in runs if needle in (r.request_id or "").lower()
-                        or any(needle in e.message.lower() for e in r.events)]
-        return runs
+            runs = self._searched_runs(runs)
+        return _sorted_runs(runs, self._run_sort)
+
+    def _searched_runs(self, runs: list[LogRun]) -> list[LogRun]:
+        """
+        The runs the search box keeps: the ones a query of their fields matches, or the ones with a line that has
+        its words.
+        """
+        query, problem = _query_of(self._log_query)
+        if problem:
+            return runs
+        if query is not None:
+            return self._table_of(runs).where(query).runs
+        phrase = _phrase(self._log_query)
+        if not phrase:
+            return runs
+        needle = phrase.lower()
+        return [r for r in runs if needle in (r.request_id or "").lower()
+                or any(needle in e.message.lower() for e in r.events)]
 
     def _pick_run_chip(self, key: str) -> None:
         self._run_chip = "" if key == self._run_chip else key
@@ -784,6 +978,7 @@ class _LogsTab:
             chips.append((self._chip_button(self._run_chip_buttons, key, tone, self._pick_run_chip), f"{label} {n:,}", tip,
                           key == self._run_chip))
         self._show_chips(self.run_chips, chips if runs else [])
+        self.sort_pick.layout.display = "" if runs else "none"
         self._draw_timeline()
 
     def _draw_runs(self, renew: bool = False) -> None:
@@ -808,7 +1003,7 @@ class _LogsTab:
             row.body.layout.display = "" if opened else "none"
             self._draw_run_code(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
-        changed_at = self._changed_at(visible)
+        changed_at = self._changed_at(visible) if not self._run_sort else None
         if changed_at is not None and self._run_offset < changed_at < self._run_offset + len(page):
             children.insert(changed_at - self._run_offset, self._change_line())
         if not page:
@@ -909,16 +1104,19 @@ class _LogsTab:
             if cold:
                 bits.append(f"<span><b>{cold:,}</b> cold {'start' if cold == 1 else 'starts'}</span>")
             where = (f"with {self._searched!r}" if self.found is not None else self._range_text())
-            bits.append(f'<span class="lmx-note">Newest first, {where}; times in {_tz_label()}. Click a run to see '
+            order = next((label for label, value in _RUN_SORTS if value == self._run_sort), _RUN_SORTS[0][0])
+            marked = self.found is not None or (self._log_query and not self._asks())
+            bits.append(f'<span class="lmx-note">{order}, {where}; times in {_tz_label()}. Click a run to see '
                         "its lines"
-                        + (", the matching ones marked" if self.found is not None or self._log_query else "")
+                        + (", the matching ones marked" if marked else "")
                         + ".</span>")
         summary = f'<div class="lmx-sum">{"".join(bits)}</div>' if bits else ""
         self._set(self.run_head, summary + (self._html(notes) if notes else ""))
         latest = page.latest if self.found is None and not self._source_runs() else None
         if latest is not None:
             seconds = (_utcnow() - latest).total_seconds()
-            option = next(((label, value) for label, value in _RANGES if _seconds(value) > seconds), None)
+            option = next(((label, value) for label, value in _RANGES
+                           if value != _SINCE_MIDNIGHT and _seconds(value) > seconds), None)
             if option is not None and option[1] != self._range:
                 self.jump_button.description = f"Show {option[0].lower()} ›"
                 self.jump_button.tooltip = f"Its newest line is from {human_age(latest)}"

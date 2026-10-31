@@ -64,7 +64,7 @@ The examples use acme's functions: `orders-etl` loads each day's orders from S3 
 
 ## Start here { #tour }
 
-Seven questions people bring to Lambda, and the one line that answers each. Nothing is invoked, changed or deleted.
+Eight questions people bring to Lambda, and the one line that answers each. Nothing is invoked, changed or deleted.
 { .gist }
 
 <div class="quick" markdown>
@@ -84,6 +84,14 @@ Seven questions people bring to Lambda, and the one line that answers each. Noth
     ```
 
     [When something goes wrong](#errors)
+
+-   **Which runs took 15 seconds or more today?**
+
+    ```python
+    ui.runs("orders-etl", since="today", where="duration > 15s")
+    ```
+
+    [Every run, as rows](#runs)
 
 -   **I'd rather click through it all.**
 
@@ -224,7 +232,11 @@ Each run shows how long it ran against the timeout, the memory it used, a cold s
 ??? more "The time range, searching CloudWatch, the chips and Live"
 
     - **The time range**, from the last 15 minutes to the last 30 days (the last hour at first), or **Custom range…**: pick **From** and **To** on a calendar (in the reports' time zone; leave To empty for up to now) and click **Show runs**, to read last Tuesday's 09:00 to 17:30. Errors and Performance start at the last 24 hours; once you pick a range in any of the three tabs, the others follow it, a custom range too. While a range is read, a bar fills as it goes, with how far back it has read and the lines found so far. The newest 3,000 lines are read; when the range holds more, the line over the runs says these are the newest runs, and **Older runs** under the list reads further back. A range with nothing in it says when the function last logged, and a button picks a range that reaches it.
+    - **The time range** also has **Today**: from midnight, in the reports' time zone.
     - **The search box** finds runs as you type: an order ID, `KeyError`, a request ID, in any case, among the runs read. **Enter** asks CloudWatch to search the whole time range, and brings back each run with a matching line whole, the matching lines marked. A CloudWatch Logs filter pattern (`?ERROR ?WARN`, `{ $.level = "ERROR" }`) works too, with Enter. ✕ shows every run again.
+    - **The same box asks for runs by their fields**: type `duration > 15s`, `duration > 15s and cold`, `memory_share > 80%`, `error ~ KeyError` or `started > 14:00`, and the list keeps the runs read that match, as [`runs(where=...)`](#runs) does. Fields your JSON logs carry work too, and so does the event when the function logs it (`size > 30MB`). The line under the tabs says how many match, or the field you likely meant when no run has the one typed. Put words in quotes to search for them instead.
+    - **The sort menu** beside the chips lists the runs newest first, oldest first, longest first or most memory first.
+    - **A run that logged its event** shows it at the top of its lines, as JSON to fold. Lambda never logs the event itself, so it's there only when the code does (Powertools: `@logger.inject_lambda_context(log_event=True)`).
     - **The chips** show only the runs that failed, timed out, logged an error (and may have handled it) or were cold starts.
     - **A dashed line across the runs** marks when the function was last changed (its code or settings): the runs under it ran it as it was before.
     - **The timeline** over the runs is a bar for each thirtieth of the time read, as tall as the runs that started in it and red where some failed. Click a bar for only those runs, and again for every run.
@@ -436,6 +448,31 @@ ui.logs("orders-etl", since="24h", n=200)
 ```
 
 `request_id=` shows every line of one run, including what the code printed without the ID: everything its log stream recorded between the run's first and last line. When the window has no lines, the report says when the newest one was, and the call that reaches back that far.
+
+### Every run, as rows to ask about { #runs }
+
+`runs()` lists a function's runs one row each, and keeps the ones you ask for: `where="duration > 15s"`.
+{ .gist }
+
+Each run has fields: what Lambda says about it (status, start, run time, memory, cold start, the error it hit), every field its JSON log lines carry, and the event, when the code logs it. Ask about any of them, sort by them, pick them as columns, or sum the runs up by one.
+
+```python
+ui.runs("orders-etl", since="today", where="duration > 15s")       # today's runs that took 15 s or more
+ui.runs("orders-etl", where="duration > 15s and cold", sort="-duration")
+ui.runs("orders-etl", where="status in (failed, timeout)", group_by="hour")   # when do they fail?
+ui.runs("orders-etl", where="size > 30MB", columns=["started", "duration", "event.Records.s3.object.key"])
+ui.runs("orders-etl", fields={"written": r"wrote (\d+) orders"}, where="written > 40000")  # from text lines
+```
+
+The report starts with how many runs match and how they went, says when one reached the timeout or used 90% of the memory (with the command to fix it), and when a field you named isn't one any run has, with the one you likely meant. The fields there are to ask about are listed, folded, at the end.
+
+??? more "What a query can say"
+
+    - **Compare**: `>`, `<`, `>=`, `<=`, `=`, `!=`, `~` (contains, any case), `!~`, and `in (a, b)`. Join with `and`, `or`, `not`, and brackets.
+    - **Units**: run times as `15s`, `500ms`, `2m` (a bare number is in ms, as REPORT lines say), memory as `512MB` or `1GB`, shares as `80%`, sizes in a field your code logs as `30MB` (in bytes). Times as `14:00` (today), `2h` (2 hours ago), `today` or `2026-10-31T09:00`.
+    - **Lambda's fields**: `status` (ok, failed, timeout, logged, running), `failed` and `cold` (yes or no, so `cold` alone works), `started`, `day`, `hour`, `duration`, `billed`, `init`, `memory`, `memory_size`, `memory_share`, `timeout_share`, `version`, `error_type`, `error`, `summary`, `text`, `lines`, `request_id`, `stream`.
+    - **Your fields**: a JSON log line's fields by their path (`customer.id`), the event's as `event.` and its path (a list is read through its first item: `event.Records.s3.object.size`). A short name stands for the one field that ends in it: `size`.
+    - **The data**: `ui.core.runs(...)` returns a `RunTable`: `.where()`, `.sorted_by()`, `.group()`, `.fields()` and `.to_df()`, with no other read from AWS.
 
 ### Run times, memory and cold starts { #performance }
 
@@ -784,6 +821,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
+| `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
 | `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
 | `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
