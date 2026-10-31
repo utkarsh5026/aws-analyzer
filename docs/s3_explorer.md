@@ -109,8 +109,8 @@ Three things to try in your first minute. Nothing you click changes anything in 
 The folder you're in is on the left, whatever you clicked on the right. Click folders to go down, the path at the top to go back up.
 { .gist }
 
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path s3:// All buckets / acme-ml-data / curated / features / churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="581" loading=lazy }
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path s3:// All buckets / acme-ml-data / curated / features / churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="581" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path s3:// All buckets / acme-ml-data / curated / features / churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download, Open in new tab and S3 console buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="581" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path s3:// All buckets / acme-ml-data / curated / features / churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download, Open in new tab and S3 console buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="581" loading=lazy }
 /// caption
 The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.
 ///
@@ -203,6 +203,7 @@ Every [file type `s3.py` reads](s3.md#file-types) works here. The buttons above 
 | **🕘 Versions** | In a versioned bucket: every version of the file, when each was written and its size (the [`history`](s3.md#deleted) report) |
 | **⬇ Download** | Saves a copy in `s3-downloads`, next to the notebook (the [`download`](s3.md#download) report; **⚙** changes the folder) |
 | **↗ Open in new tab** | Opens the file in a new browser tab: PDFs, pictures, sound, video and text show there, even when they were stored as a generic type, and other files download to your computer. Its link works for an hour: right-click it to copy the link for someone without AWS access, or run `x.ui.link(path)` to see it written out |
+| **↗ S3 console** | Opens the file's page in the AWS console in a new tab: its properties, permissions and versions, where you can change what the explorer only reads. The console asks you to sign in with your own AWS account; `x.console_url` is the link |
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
 | **‹** **›** | The file before and after it in the list, as it's sorted and searched, shown the same way (its preview, details or code), without going back to the list |
 | **✕** | Closes the file and shows the folder again |
@@ -274,12 +275,13 @@ The buttons above the right pane change with where you are: a summary of a folde
 | --- | --- | --- |
 | In a folder | **📊 What's in here** | Every file below this folder, not only this level: sizes, file types, the biggest files and folders, the monthly cost, and findings (the [`summary`](s3.md#summary) report). It lists everything below, so a big folder takes a while; a progress bar shows how far it's got |
 | In a folder | **⬇ Download .zip** | Everything below this folder as one `.zip` ([see below](#zip)) |
+| Anywhere | **↗ S3 console** | Opens this folder, or your list of buckets, in the AWS console in a new tab, to change what the explorer only reads (`x.console_url` is the link) |
 | In a folder | **More ▾** | A second row of reports on the folder ([see below](#more)). It stays open as you move, until **Fewer ▴** |
 | At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
 | On your buckets | **🪣 Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
 
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="579" loading=lazy }
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="579" loading=lazy }
 /// caption
 `S3Explorer()` starts from your buckets; **🪣 Every bucket** compares their size, cost and security settings.
 ///
@@ -378,6 +380,7 @@ x.filter(kind="folders")                   # only the folders here; x.filter() s
 x.picked                                   # what's ticked in the list, as s3:// paths
 x.location                                 # the folder you're in, such as 's3://acme-ml-data/raw/' ('' on your buckets)
 x.selected                                 # the file shown on the right, or ''
+x.console_url                              # the AWS console's page for that file, else the folder
 x.ui.summary(x.location)                   # any S3View report about where you are, in its own cell
 ```
 
@@ -513,6 +516,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `filter(text="", kind="all", subfolders=False)` | The search box and its buttons: names or file types (`".csv .json"`), `kind="folders"` or `"files"`, and everything below with `subfolders=True`. It searches the whole folder, up to its first 10,000 entries, and in a bigger one also asks S3 for the names that start with `text`. `filter()` shows everything again |
 | `location` | The folder you're in, or `""` on your buckets |
 | `selected` | The file shown on the right, or `""` |
+| `console_url` | The AWS console's page for the file shown, else the folder you're in, else your buckets: what **↗ S3 console** opens |
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
 | `nav` | The `S3Navigator` behind the list |
 | `picked` | The files and folders ticked in the list, as `s3://` paths: `x.ui.download_zip(x.picked)` |

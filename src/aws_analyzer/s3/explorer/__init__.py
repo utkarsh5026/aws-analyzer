@@ -34,6 +34,7 @@ Quick start
     x.open("s3://my-bucket/raw/")                   # drive it from code: open, back, forward, up, refresh
     x.filter(".parquet", subfolders=True)           # every Parquet file below this folder; x.filter() clears it
     x.ui.summary(x.location)                        # any S3View report about where you are, in its own cell
+    x.console_url                                   # the AWS console's page for the file or folder shown
 
     nav = S3Navigator()                             # the same navigation as data, with no UI
     folder = nav.open("s3://my-bucket/data/")       # its first 1,000 entries; nav.list_rest() lists up to 10,000
@@ -43,7 +44,7 @@ Quick start
 from __future__ import annotations
 
 from .navigator import (
-    Entry, Filter, Folder, FolderStats, S3Navigator, breadcrumbs, count_types, entry_icon, explain_list_error,
+    Entry, Filter, Folder, FolderStats, S3Navigator, breadcrumbs, console_url, count_types, entry_icon, explain_list_error,
     filter_entries, folder_stats, folder_uri, parent_uri, parse_filter, parse_location, sort_entries,
 )
 from .window import S3Explorer
@@ -61,6 +62,7 @@ __all__ = [
     "breadcrumbs",
     "changes_card",
     "changes_sentence",
+    "console_url",
     "count_types",
     "entry_icon",
     "explain_list_error",

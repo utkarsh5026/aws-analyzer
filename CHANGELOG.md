@@ -11,7 +11,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- ⚡ **Lambda explorer: see what's running now** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
+  - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
+  - `x.console_url` is the link, and `console_url("s3://bucket/key")` makes one for any path.
+
+- ⚡ **Lambda explorer: see what's running now** ([#184](https://github.com/utkarsh5026/aws-analyzer/pull/184))
   - A **Live** tab: every function that ran in the last 10 minutes, the ones running now first, looked at every 5 s.
   - Click one to follow its runs as their lines come; a run nearing its timeout says so, with the fix.
   - `explore(tab="live")` or `x.live("orders-etl")`; CloudWatch's numbers cost about a cent per 15 minutes.
