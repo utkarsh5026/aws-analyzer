@@ -20,6 +20,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Click one to follow its runs as their lines come; a run nearing its timeout says so, with the fix.
   - `explore(tab="live")` or `x.live("orders-etl")`; CloudWatch's numbers cost about a cent per 15 minutes.
 
+- 🧰 **Explorers: what you're looking at, as data** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `x.focus` in the Lambda, S3 and knowledge base explorers: the function, folder or file, the tab, the time range and what's open.
+  - `x.focus.chips()` reads it as a row of chips, and `x.focus.value("request_id")` one part.
+
 ## [0.42.0] - 2026-10-31
 
 ### Added
