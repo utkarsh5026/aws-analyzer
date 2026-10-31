@@ -12,17 +12,19 @@ _BADGE, so its reports are easy to tell from other analyzers'.
 from __future__ import annotations
 
 import base64
+import importlib.util
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, tzinfo
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from botocore.exceptions import BotoCoreError
 
 from .._bedrock.blocks import _Answer
 from .._bedrock.prices import _per_million, short_model
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _draws
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
 from .._kit.deps import _require
 from .._kit.errors import _Hint
 from .._kit.fmt import _duration, _fmt_dt, _plural, _tz_label, _utcnow, _zone_name, human_money, human_size
@@ -37,6 +39,23 @@ from .chats import ChatSummary
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
+from .model_setup import (
+    AGENT_MODULES,
+    KernelState,
+    blocker,
+    ProviderSetup,
+    every_notebook_lines,
+    install_line,
+    is_ready,
+    provider_setup,
+    provider_title,
+    settings_cell,
+    setup_findings,
+    setup_providers,
+    start_cell,
+    suggested_provider,
+    unset_variables,
+)
 from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
 from .runbooks import RUNBOOK_FILE, runbook_findings
 
@@ -229,6 +248,41 @@ def _cost_basis(answer: AgentAnswer) -> str:
     return f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
 
 
+def _installed(module: str) -> bool:
+    """
+    Whether a package can be imported in this kernel, found without importing it.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _python_version() -> tuple[int, int]:
+    """
+    This kernel's Python as (major, minor).
+    """
+    return sys.version_info[:2]
+
+
+def _variable_rows(setup: ProviderSetup, environ: Mapping[str, str]) -> list[list[Any]]:
+    """
+    The Settings table: each variable the provider reads, what it is, and whether this kernel sets it (never its
+    value).
+    """
+    unset = {variable.name for variable in unset_variables(setup, environ, needed_only=False)}
+    rows = []
+    for variable in setup.variables:
+        if variable.name not in unset:
+            here = _Tone("set", "ok")
+        elif variable.needed:
+            here = _Tone("not set", "warn")
+        else:
+            here = "optional"
+        rows.append([variable.name, variable.what, here])
+    return rows
+
+
 def _look_closer(commands: list[tuple[str, str]]) -> str:
     """
     The title over the commands to run next, naming the Views they're on: 'Look closer (aws_analyzer.LambdaView)'.
@@ -264,10 +318,12 @@ class AgentView(_BaseView):
         "🔎 Look back": ("transcript", "save_charts"),
         "🗂 Saved chats": ("chats", "open_chat", "rename_chat", "delete_chat"),
         "🧠 Memory": ("memory", "forget", "forget_all"),
-        "🧰 What it can do": ("tools", "runbooks", "use_model"),
+        "🔑 Set up": ("setup", "use_model"),
+        "🧰 What it can do": ("tools", "runbooks"),
         "❓ Help": ("help",),
     }
     _START = (
+        ("setup()", "set up the model it answers with: the steps to copy, checked against this notebook"),
         ("chat()", "a chat window: ask, and watch each tool call as it runs"),
         ("ask('Which Lambda failed last night?')", "the answer, what it checked, and what to run next"),
         ("ask('Why did it fail?')", "a follow-up: it remembers the conversation"),
@@ -981,3 +1037,136 @@ class AgentView(_BaseView):
             ("AgentView(budget={'tool_calls': 50, 'log_days': 7})", "a bigger budget per question"),
         ]))
         self._show(blocks)
+
+    def _kernel_state(self, setup: ProviderSetup) -> KernelState:
+        """
+        What this kernel has for a provider: its Python, which of the packages it needs are missing, the environment
+        (read only for whether each variable is set) and the provider the agent answers with now.
+        """
+        major, minor = _python_version()
+        modules = (*AGENT_MODULES, *setup.modules)
+        missing = tuple(module for module in modules if not _installed(module))
+        return KernelState(python_ok=(major, minor) >= (3, 11), python=f"{major}.{minor}",
+                           missing_modules=missing, environ=os.environ, current=self.core.provider)
+
+    def _zone_key(self) -> str:
+        """
+        The agent's time zone as set_timezone() takes it ('Asia/Kolkata'), 'UTC' when it has no such name.
+        """
+        return getattr(self.core.zone, "key", "") or "UTC"
+
+    def _setup_cards(self, setup: ProviderSetup, kernel: KernelState) -> _Cards:
+        """
+        The setup report's cards: Python, packages, settings, and whether the agent can answer with it here.
+        """
+        unset = unset_variables(setup, kernel.environ)
+        ready = is_ready(setup, kernel)
+        packages = "installed" if not kernel.missing_modules else f"{len(kernel.missing_modules)} missing"
+        settings = "all set" if not unset else f"{len(unset)} to set"
+        return _Cards([
+            ("Python", kernel.python, *([] if kernel.python_ok else ["warn"])),
+            ("Packages", packages, *([] if not kernel.missing_modules else ["warn"])),
+            ("Settings", settings, *([] if not unset else ["warn"])),
+            ("Ready here", "yes" if ready else "not yet", "ok" if ready else "warn"),
+        ])
+
+    def _setup_cells(self, setup: ProviderSetup, kernel: KernelState) -> list[Any]:
+        """
+        The cells to copy, in order: install, settings (only what's missing), start; then the lines that set the
+        provider up for every notebook, folded.
+        """
+        install_title = "1. Install" + ("" if kernel.missing_modules else " (already installed here)")
+        cells: list[Any] = [_Text(install_line(setup), title=install_title, code=True)]
+        settings = settings_cell(setup, kernel.environ)
+        if settings:
+            cells.append(_Text(settings, title="2. Settings for this kernel: fill in the <...> parts; a key is asked for, never saved",
+                               code=True))
+        start_title = "3. Start the agent" if settings else "2. Start the agent"
+        cells.append(_Text(start_cell(setup, zone=self._zone_key()), title=start_title, code=True))
+        cells.append(_Text(every_notebook_lines(setup), code=True, collapsed=True,
+                           title="For every notebook: add these to ~/.bashrc, a .env file or a SageMaker lifecycle "
+                                 "configuration, the key from your secrets store"))
+        return cells
+
+    def _provider_setup_blocks(self, setup: ProviderSetup) -> list[Any]:
+        """
+        One provider's setup: cards, what's missing, what to do outside the notebook, its settings and the cells to
+        copy.
+        """
+        kernel = self._kernel_state(setup)
+        blocks: list[Any] = [
+            self._setup_cards(setup, kernel),
+            _Findings(setup_findings(setup, kernel),
+                      empty=f"This notebook has what {setup.title} needs: the Start cell gives you an agent on it, "
+                            "once the steps outside the notebook are done."),
+        ]
+        blocks += [_Note(f"Before you start, outside the notebook: {step}") for step in setup.steps]
+        if setup.variables:
+            blocks.append(_Table(["Variable", "What it is", "Here"], _variable_rows(setup, kernel.environ),
+                                 title="Settings it reads", sortable=False))
+        blocks += self._setup_cells(setup, kernel)
+        blocks.append(_Note(f"What the agent sends (your question and what its tools return) goes to {setup.where}."))
+        return blocks
+
+    def _provider_rows(self) -> tuple[list[list[Any]], list[str]]:
+        """
+        The overview's table, a row per provider with whether it's ready here, and the providers that are.
+        """
+        rows: list[list[Any]] = []
+        ready: list[str] = []
+        for provider in setup_providers():
+            setup = provider_setup(provider)
+            kernel = self._kernel_state(setup)
+            needs = blocker(setup, kernel)
+            if not needs:
+                ready.append(provider)
+            here = _Tone(f"needs {needs}", "warn") if needs else _Tone("ready", "ok")
+            rows.append([provider_title(provider), setup.where, here, f"setup('{provider}')"])
+        return rows, ready
+
+    def _overview_blocks(self) -> list[Any]:
+        """
+        setup() without a provider: every provider with whether it's ready here, then the steps for the one the agent
+        uses, else the first that's ready, else Amazon Bedrock.
+        """
+        rows, ready = self._provider_rows()
+        picked = provider_setup(suggested_provider(self.core.provider, ready))
+        others = [name for name in ("bedrock", "openai", "azure", "anthropic") if name != picked.provider][:2]
+        blocks: list[Any] = [
+            _Title("Set up the agent's model", f"{len(ready)} of {len(rows)} providers ready here; the steps for "
+                                               f"{picked.title} below"),
+            _Table(["Provider", "Your data goes to", "Here", "Its steps"], rows, title="Providers", code_cols=(3,),
+                   sortable=False),
+            _Title(picked.title, "the steps to copy, checked against this notebook"),
+        ]
+        blocks += self._provider_setup_blocks(picked)
+        blocks.append(_Next([*((f"setup('{name}')", f"the steps for {provider_title(name)}") for name in others),
+                             ("tools()", "the model it picked, and what it can call")]))
+        return blocks
+
+    def _one_provider_blocks(self, provider: str) -> list[Any]:
+        """
+        setup('azure'): that provider's steps, checked against this notebook.
+        """
+        try:
+            setup = provider_setup(provider)
+        except ValueError as exc:
+            raise _Hint(str(exc)) from None
+        blocks: list[Any] = [_Title(f"Set up {setup.title} for the agent",
+                                    "the steps to copy, checked against this notebook")]
+        blocks += self._provider_setup_blocks(setup)
+        blocks.append(_Next([("setup()", "every provider, and which are ready here"),
+                             ("tools()", "the model it picked, and what it can call")]))
+        return blocks
+
+    @_friendly_errors
+    def setup(self, provider: str | None = None) -> None:
+        """
+        How to set up the model the agent answers with, as cells to copy: what to install, the API keys and settings
+        to put in the environment (a key is asked for with getpass, so it's never saved in the notebook), and the
+        call that starts the agent, each checked against this notebook (which packages and variables it has, never
+        their values). Without a provider it lists every one with whether it's ready here, then the steps for the
+        one the agent uses, else the first that's ready, else Amazon Bedrock. setup('azure'), setup('openai'),
+        setup('anthropic'), setup('ollama'), ... show one.
+        """
+        self._show(self._one_provider_blocks(provider) if provider else self._overview_blocks())

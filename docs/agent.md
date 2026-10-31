@@ -51,6 +51,12 @@ It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is
 
     It reads AWS with the notebook's IAM execution role and region, like every other view, and `agent.tools()` shows which model it picked.
 
+    Not sure what a provider needs? `AgentView().setup()` lists every provider with whether it's ready in this notebook, and `setup("azure")` (or `"openai"`, `"anthropic"`, `"ollama"`, ...) gives the cells to copy: the install line, a settings cell that asks for the key with `getpass` so it's never saved in the notebook, and the call that starts the agent.
+
+    ```python
+    AgentView().setup("azure")
+    ```
+
 3. **Let it remember your account** (optional). With `memory=True` it keeps notes like "orders-etl runs in eu-west-1" between conversations, so it doesn't look them up again. [Notes it keeps](#memory) says what it notes and how to clear it.
 
     ```python
@@ -812,6 +818,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `delete_chat(chat)` | Removes a saved chat from this machine |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
+| `setup(provider=None)` | How to set up the model, as cells to copy, checked against this notebook: every provider with whether it's ready here, then one's install line, settings cell (the key asked for with `getpass`) and start cell |
 | `use_model(provider=None, model=None, ...)` | Switches the model the agent answers with, and says where what it sends goes; the window's ⚙ model does it by clicking |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 

@@ -242,7 +242,7 @@ def no_model_hint(model: str = "") -> str:
             "OpenAI: set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY and AZURE_OPENAI_DEPLOYMENT. Any provider "
             "LangChain supports: AgentView(model='anthropic:claude-sonnet-4-5'), or chat_model= with a LangChain "
             f"chat model. To set one for every notebook, set {MODEL_ENV} (os.environ['{MODEL_ENV}'] = "
-            "'bedrock:sonnet').")
+            "'bedrock:sonnet'). AgentView().setup() shows each step as a cell to copy.")
 
 
 def bedrock_model_id(wanted: str, models: list[ModelInfo]) -> str:
