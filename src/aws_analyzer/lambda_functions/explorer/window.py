@@ -32,6 +32,7 @@ from .frame import (
 )
 from .widgets import _FunctionField, _Row, _RunRow
 from .functions import _Facts, _FunctionsTab, _arn_account
+from .live import _LIVE_CSS, _LiveTab
 from .function import _FunctionTab, _KeptReads
 from .logs import _FIRST_LOGS_RANGE, _LogsTab, _Reading
 from .timeline import _Timeline
@@ -40,7 +41,7 @@ from .performance import _PerformanceTab
 from .code import _CodeTab
 
 
-class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
+class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -48,6 +49,10 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         Functions    every function in the region (or in every region): runtime, calls, errors, run time, cost and
                      warnings, the ones that need attention first. Search, filter, sort by a column, and click one to
                      open it (or Logs on its line, to go straight to its logs)
+        Live         what's running now: every function that ran in the last 10 minutes, the ones with runs going
+                     first, with how long each run has gone against its timeout and its calls a minute, looked at
+                     again every few seconds. Click one to follow it: its runs, newest first, the ones going open
+                     with their lines as they come
         Overview     how the picked function is doing: what's wrong and what to do, what calls it and where its
                      results, failed events and logs go, calls and run time day by day, and what it costs
         Logs         what it logged, run by run, newest first: each run's start, status, run time, memory and cold
@@ -64,10 +69,10 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
 
     name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
-    'errors', 'performance', 'code' or 'settings'). since / until: the time range of the Logs, Errors and Performance
-    tabs ('3h', '7d', '2026-10-27 09:00'; until is now when left out). search: text to find in the logs (opens the Logs
-    tab). region: the region to list, or 'all' for every region your account
-    has turned on (the region field switches it). view / core: a LambdaView or LambdaAnalyzer to use (else one is made
+    'errors', 'performance', 'code' or 'settings'; 'live' follows it on the Live tab, which tab='live' opens without
+    a name). since / until: the time range of the Logs, Errors and Performance tabs ('3h', '7d', '2026-10-27 09:00';
+    until is now when left out). search: text to find in the logs (opens the Logs tab). region: the region to list,
+    or 'all' for every region your account has turned on (the region field switches it). view / core: a LambdaView or LambdaAnalyzer to use (else one is made
     from region / profile). height: the height of the tabs' pages, which fill the browser window unless set (pixels, or
     CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports elsewhere), 'widgets' or 'text'.
     history: whether to remember the functions you open, between sessions, so the function field lists them first and
@@ -78,7 +83,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
     Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
     command. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
     functions (history=). x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function,
-    x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown.
+    x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown, and x.board what the Live tab read
+    (function ARN -> LiveFunction).
     """
 
     _PREFIX, _THREADS = "lmx", "lambda-explorer"
@@ -136,6 +142,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self._want, self._want_tab = name, tab or ("logs" if search and name else None)  # opened once listed...
         self._want_search: str | None = search or None  # ...and searched for in its logs
         self._tab = "functions"
+        self._init_live()
+        if tab == "live":
+            self._tab, self._live_wanted, self._want, self._want_tab = "live", name, None, None
         self._asked: set[str] = set()  # the function's tabs whose data was asked for
         self._listing_started = 0.0
         self._query, self._chip, self._sort, self._descending, self._offset = "", "", "problems", True, 0
@@ -369,6 +378,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         The one call that opens the window as it is now, to run in another cell or send to someone: the function,
         its tab, the region, and on the Logs tab the time range and the search.
         """
+        if self._tab == "live":
+            return self._live_code()
         fn = self.function
         args = [fn.name] if fn is not None else []
         kwargs: dict[str, Any] = {}
@@ -379,6 +390,17 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
             kwargs["region"] = region
         if fn is not None and self._tab == "logs":
             kwargs.update(self._logs_code_args())
+        return _call("explore", *args, **kwargs)
+
+    def _live_code(self) -> str:
+        """
+        explore() on the Live tab, following the function followed.
+        """
+        followed = self._followed()
+        args = [followed.function.name] if followed is not None else []
+        kwargs: dict[str, Any] = {"tab": "live"}
+        if self.region and (self.region == "all" or self.region != self._session_region()):
+            kwargs["region"] = self.region
         return _call("explore", *args, **kwargs)
 
     def _logs_code_args(self) -> dict[str, str]:
@@ -464,8 +486,9 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self.settings_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
-        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, head, tabs, {
+        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
+            "live": self._live_page(),
             "overview": self._scroll_page([self.overview_view]),
             "logs": self._logs_page(),
             "errors": self._errors_page(),
@@ -539,18 +562,22 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
     def _show_tab(self, key: str, *, load: bool = True) -> None:
         if key != "logs" and self._live:
             self._stop_live("Live stopped: it runs while the Logs tab is open.")
+        if key != "live" and self._watching:
+            self._stop_watch("Live stopped: it watches while the Live tab is open.")
         self._tab = key
         for name, button in self.tab_buttons.items():
             _class_if(button, "lmx-on", name == key)
             _class_if(button, "lmx-dim", name in _FUNCTION_TABS and self.function is None and name != key)
             self.pages[name].layout.display = "" if name == key else "none"
-        if key in _FUNCTION_TABS and self.function is None:
+        if key == "live" and load:
+            self._open_live()
+        elif key in _FUNCTION_TABS and self.function is None:
             self._need_function(key)
         elif load and key in _FUNCTION_TABS and key not in self._asked:
             {"logs": self._load_logs, "errors": self._load_errors, "performance": self._load_perf,
              "code": self._load_code}.get(key, lambda: None)()
         if not self._said[2] and self._said[1] != "warn":  # the line under the tabs says what this one does
-            self._status(self._tab_line(key))
+            self._status(self._live_line() if key == "live" else self._tab_line(key))
 
     def _need_function(self, key: str) -> None:
         """
@@ -654,14 +681,16 @@ def explore(
     history: bool | str = True,
 ) -> LambdaExplorer:
     """
-    Opens the Lambda explorer window and returns it: every function in the region, and for the one you click, how
-    it's doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
+    Opens the Lambda explorer window and returns it: every function in the region, what's running now (the Live tab),
+    and for the one you click, how it's doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
     in), its errors grouped by cause, its run times, the code in its package and every setting, all by clicking.
 
         explore()                                   # every function in the notebook's region
         explore("orders-etl")                       # straight to one function (a name, an ARN or a console link)
         explore("orders-etl", tab="logs")           # ...on its logs ('errors', 'performance', 'code', 'settings')
         explore("orders-etl", tab="logs", since="3h", search="KeyError")  # ...its last 3 hours, searched
+        explore(tab="live")                         # what's running now, looked at every few seconds
+        explore("orders-etl", tab="live")           # ...following one function's runs as they come
         explore(region="all")                       # every region your account has turned on
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 

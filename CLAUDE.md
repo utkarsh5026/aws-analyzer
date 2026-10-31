@@ -693,6 +693,14 @@ How the View layer works:
   Sentences from reports go through `_for_window` / `_window_text`, which turn calls into tabs (`errors('etl')` -> "the
   Errors tab", `logs(..., request_id=...)` -> "run 8f5ce35b in the Logs tab") and capitalise them at a sentence's start.
   Without ipywidgets or Jupyter it shows the reports instead (`_reports`, `_report_for`).
+  **Live** (`explorer/live.py`'s `_LiveTab`, a top-level tab like Functions) is what's running now: every function
+  that ran in the last `LIVE_WINDOW_MINUTES`, the ones with runs going first, and one followed (`_follow`, `live()`,
+  `explore(name, tab="live")`) as its runs, the ones going open with their lines. It watches while its tab is open
+  (`_watch_loop`, up to `_WATCH_MINUTES`): `LambdaAnalyzer.activity()` (`activity.py`'s `_ActivityReads` mixin,
+  GetMetricData a value a minute) every `_ACTIVITY_SECONDS`, and `_filter()` on the busiest `_FOLLOW_MOST` (or the one
+  followed) every `_WATCH_SECONDS`, from where its last read ended. Its pure side is `analysis/live.py`
+  (`LiveFunction`, `in_flight`: a START line without a REPORT line, younger than the timeout; `live_rank`,
+  `timeout_warning`), and `x.board` holds what it read.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
