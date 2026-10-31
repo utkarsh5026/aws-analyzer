@@ -163,7 +163,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     time.sleep(0.4)
     page.mouse.move(1, 1)
     shot("lambda-explorer-logs")
-    search = page.locator(".lmx-app input[placeholder^='Find runs with']")
+    search = page.locator(".lmx-app input[placeholder^='Find runs']")
     search.fill("AccessDenied")
     search.press("Enter")
     time.sleep(0.5)

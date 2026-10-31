@@ -41,6 +41,7 @@ from .analysis.functions import (
 from .analysis.overview import Overview
 from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
+from .analysis.runs import RunTable, run_table
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.source import find_symbol_in, read_sources, search_package
 from .analysis.versions import diff_packages, nothing_before, version_before
@@ -1023,6 +1024,29 @@ class LambdaAnalyzer(_BaseAnalyzer):
         fn = self.function(ref, region=region)
         start, end = self.time_range(since, until)
         return self._log_runs(fn, start, end, search=search, limit=limit, progress=progress)
+
+    def runs(
+        self,
+        ref: str,
+        *,
+        since: Any = "24h",
+        until: Any = None,
+        where: str | None = None,
+        sort: str | Iterable[str] | None = None,
+        fields: dict[str, str] | None = None,
+        limit: int | None = 10_000,
+        region: str | None = None,
+        progress: Callable[..., None] | None = None,
+    ) -> RunTable:
+        """
+        A function's runs from `since` to `until` as rows of fields (RunTable): status, run time, memory, cold
+        start and the rest of RunTable.fields(), every field its JSON log lines carry, and the event as event.* when
+        it logs it. where='duration > 15s and cold' keeps the runs that match, sort='-duration' orders them, and
+        fields={'written': r'wrote (\\d+) orders'} reads more fields out of text lines. Reads the newest `limit`
+        log lines.
+        """
+        page = self.log_runs(ref, since=since, until=until, limit=limit, region=region, progress=progress)
+        return run_table(page, fields=fields).where(where).sorted_by(sort)
 
     def _log_runs(
         self,

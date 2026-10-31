@@ -142,6 +142,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
         self._rows: list[_Row] = []
         self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
         self._range, self._log_query, self._run_chip, self._run_offset = _FIRST_LOGS_RANGE, "", "", 0
+        self._run_sort, self._run_values = "", {}
         self._linked = False
         self._until: Any = None
         self._reading: _Reading | None = None
@@ -391,6 +392,8 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTa
             args["until"] = _time_text(self._until)
         if self.found is not None and self._searched:
             args["search"] = self._searched
+        elif self._asks():
+            args["search"] = self._log_query
         return args
 
     def _session_region(self) -> str | None:

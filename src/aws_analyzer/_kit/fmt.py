@@ -24,6 +24,7 @@ HOURS_PER_MONTH = 730
 _SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?)i?b?\s*$", re.IGNORECASE)
 _RELATIVE_TIME_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$", re.IGNORECASE)
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
+_DAYS_BACK = {"today": 0, "yesterday": 1}
 _COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE)
 
 
@@ -212,12 +213,15 @@ def parse_time(
     value: datetime | date | timedelta | str | None, now: datetime | None = None
 ) -> datetime | None:
     """
-    datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), or a relative
-    age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are in the zone reports show times in:
-    UTC, unless set_timezone() chose another ('local' is this machine's zone, which astimezone() reads).
+    datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), 'today' or 'yesterday' (midnight), or a
+    relative age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are in the zone reports show
+    times in: UTC, unless set_timezone() chose another ('local' is this machine's zone, which astimezone() reads).
     """
     if value is None:
         return None
+    if isinstance(value, str) and value.strip().lower() in _DAYS_BACK:
+        day = _in_zone(now or _utcnow()).date() - timedelta(days=_DAYS_BACK[value.strip().lower()])
+        value = day
     if isinstance(value, timedelta):
         return (now or _utcnow()) - value
     if isinstance(value, datetime):

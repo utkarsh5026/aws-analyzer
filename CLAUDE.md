@@ -473,6 +473,15 @@ How the View layer works:
   (`_midnight`), so "last called" reads today / yesterday / 3d ago; `_errors_level` is the one rule for when failed
   calls are a warning (in findings, the Error rate card and the table's tone). Log reads go backwards in growing
   slices (`_filter`) so the newest lines are the ones kept when a window holds more than `limit`.
+- `LambdaView.runs()` is a function's runs as rows of fields: `analysis/runs.py`'s `run_table` turns a `LogPage` into a
+  `RunTable` of `RunRow`s (`run_fields`: Lambda's `BUILTIN_FIELDS`, every field its JSON lines carry by dotted path, the
+  event as `event.*` when `logged_event` finds it, and `fields=` regexes on text lines), with `where()`, `sorted_by()`,
+  `group()` and `to_df()`, no read from AWS. `analysis/query.py` is the query language (`parse_query` into a tree of
+  `Compare` / `Has` / `Not` / `AllOf` / `AnyOf`, values read by the field's kind in `FIELD_KINDS`: `15s`, `512MB`,
+  `80%`, `14:00`), never `eval`; a short name stands for the one field ending in it (`size`). `blocks/runs.py` draws the
+  report. The explorer's Logs search box takes the same queries (`_query_of`: a query when it compares or names only
+  yes-or-no fields, else words for CloudWatch), with a sort menu (`_RUN_SORTS`) and a run's logged event at the top of
+  its lines (`_event_html`).
 - `LambdaView.how_it_works()` (its pure side in `lambda_functions/analysis/codemap/`: `terms`, `aws_model`, `syntax`,
   `model`, `reader`, `mapping`, `findings`, `graph`) is `LambdaAnalyzer.code_map()` -> `map_package()` (the
   package's own `.py` files;

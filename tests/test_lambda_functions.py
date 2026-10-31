@@ -41,6 +41,13 @@ from aws_analyzer.lambda_functions import (
     MB,
     RUNTIMES,
     AccountLimits,
+    QueryError,
+    logged_event,
+    looks_like_query,
+    parse_query,
+    run_fields,
+    run_table,
+    runs_findings,
     AsyncConfig,
     CodeFile,
     CodePackage,
@@ -59,6 +66,7 @@ from aws_analyzer.lambda_functions import (
     Layer,
     LogEvent,
     LogGroup,
+    LogPage,
     LogRun,
     TimeBucket,
     Performance,
@@ -1466,6 +1474,140 @@ def test_diff_renders_as_html_and_text():
     assert "-- app.py (changed, +1 −1, in load) --" in out and '+    return event["customer_id"]' in out
 
 
+def run_page(*runs, timeout=60, memory=512):
+    """
+    A LogPage of runs, each (request ID, ms, MB used, extra lines, cold, timed out), a minute apart from NOW.
+    """
+    events = []
+    for i, (rid, ms, used, extra, cold, timed_out) in enumerate(runs):
+        start = NOW + timedelta(minutes=i)
+        stream = f"2026/10/06/[$LATEST]s{i % 2}"
+        events.append(LogEvent(start, f"START RequestId: {rid} Version: $LATEST", stream, rid))
+        for j, message in enumerate(extra):
+            events.append(LogEvent(start + timedelta(milliseconds=1 + j), message, stream, rid))
+        if timed_out:
+            events.append(LogEvent(start + timedelta(milliseconds=ms), f"{NOW:%Y-%m-%dT%H:%M:%S}.000Z {rid} Task "
+                                                                       f"timed out after {timeout}.00 seconds", stream))
+        events.append(LogEvent(start + timedelta(milliseconds=ms), f"END RequestId: {rid}", stream, rid))
+        report = report_line(rid, ms, used, init=380.5 if cold else None, status="timeout" if timed_out else None)
+        events.append(LogEvent(start + timedelta(milliseconds=ms + 1), report.replace("1024 MB", f"{memory} MB"),
+                               stream, rid))
+    fn = Function(name="orders-etl", arn=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:orders-etl", region=REGION,
+                  memory=memory, timeout=timeout)
+    return LogPage(fn, "/aws/lambda/orders-etl", NOW, NOW + timedelta(hours=1), sorted(events, key=lambda e: e.time))
+
+
+EVENT = {"Records": [{"eventName": "ObjectCreated:Put", "s3": {"object": {"key": "orders/b1.json", "size": 48_000_000}}}]}
+
+
+def orders_page():
+    batch = json.dumps({"level": "INFO", "message": "reading batch", "batch_rows": 48112, "customer": {"id": 7}})
+    small = json.dumps({"level": "INFO", "message": "reading batch", "batch_rows": 120, "customer": {"id": 9}})
+    logged = json.dumps({"level": "INFO", "message": EVENT})
+    return run_page(
+        ("r0", 37200.0, 388, [logged, batch, "wrote 48,112 orders"], True, False),
+        ("r1", 900.0, 120, [small, "wrote 120 orders"], False, False),
+        ("r2", 60000.0, 470, [logged, batch], False, True),
+        ("r3", 16100.0, 240, ["[ERROR] KeyError: 'customer_id'"], False, False),
+    )
+
+
+@pytest.mark.parametrize("text, matched", [
+    ("duration > 15s", ["r3", "r2", "r0"]),
+    ("duration > 15000", ["r3", "r2", "r0"]),
+    ("duration >= 1m", ["r2"]),
+    ("duration > 15s and cold", ["r0"]),
+    ("cold or failed", ["r3", "r2", "r0"]),
+    ("not cold and duration > 10s", ["r3", "r2"]),
+    ("status in (failed, timeout)", ["r3", "r2"]),
+    ("status in timeout", ["r2"]),
+    ("Status = TIMEOUT", ["r2"]),
+    ("memory > 300MB", ["r2", "r0"]),
+    ("memory_share >= 90%", ["r2"]),
+    ("timeout_share > 50%", ["r2", "r0"]),
+    ("error ~ customer_id", ["r3"]),
+    ("error_type = KeyError", ["r3"]),
+    ("text ~ 'wrote 120'", ["r1"]),
+    ("batch_rows > 1000", ["r2", "r0"]),
+    ("customer.id = 9", ["r1"]),
+    ("event.Records.s3.object.size > 30MB", ["r2", "r0"]),
+    ("size > 30MB", ["r2", "r0"]),
+    ("key ~ b1 and not cold", ["r2"]),
+    ("started >= 2026-10-06T12:02", ["r3", "r2"]),
+    ("started >= '2026-10-06 12:02'", ["r3", "r2"]),
+    ("(cold or memory > 400MB) and duration > 30s", ["r2", "r0"]),
+    ("hour = 12", ["r3", "r2", "r1", "r0"]),
+])
+def test_where_keeps_the_runs_a_query_matches(text, matched):
+    table = run_table(orders_page())
+    assert [row.run.request_id for row in table.where(text).rows] == matched
+
+
+@pytest.mark.parametrize("text, said", [
+    ("duration >", "stops too soon"),
+    ("duration > abc", "duration can't be 'abc'; a run time is like 15s"),
+    ("memory > lots", "memory is like 512MB"),
+    ("cold = maybe", "it's yes or no"),
+    ("a b", "Didn't expect 'b'"),
+    ("(cold", "stops too soon"),
+    ("duration > 1s and", "stops too soon"),
+    ("", "The query is empty"),
+])
+def test_a_query_that_cant_be_read_says_why(text, said):
+    with pytest.raises(QueryError, match=re.escape(said)):
+        parse_query(text)
+
+
+def test_what_reads_as_a_query_rather_than_words():
+    assert looks_like_query("duration > 15s") and looks_like_query("cold") and looks_like_query("not failed")
+    assert not looks_like_query("KeyError") and not looks_like_query("ORD-77")
+    assert not looks_like_query('"duration > 15s"') and not looks_like_query("payment failed")
+    at_two = parse_query("started > 14:00", now=NOW)
+    assert at_two.matches({"started": NOW + timedelta(hours=3)}) and not at_two.matches({"started": NOW})
+
+
+def test_run_fields_read_lambdas_lines_the_json_logs_and_the_event():
+    page = orders_page()
+    first = next(run for run in page.runs if run.request_id == "r0")
+    values = run_fields(first, timeout_seconds=60, patterns={"written": re.compile(r"wrote ([\d,]+) orders")})
+    assert values["status"] == "ok" and values["cold"] is True and values["init"] == 380.5
+    assert values["duration"] == 37200.0 and values["memory"] == 388 and values["memory_size"] == 512
+    assert values["memory_share"] == 75.8 and values["timeout_share"] == 62.0 and values["version"] == "$LATEST"
+    assert values["batch_rows"] == 48112 and values["customer.id"] == 7 and values["written"] == 48112
+    assert values["event.Records.s3.object.key"] == "orders/b1.json" and values["summary"] == "reading batch"
+    assert logged_event(first).event == EVENT
+    assert logged_event(next(run for run in page.runs if run.request_id == "r1")) is None
+
+
+def test_run_table_sorts_groups_and_lists_its_fields():
+    table = run_table(orders_page(), fields={"written": r"wrote ([\d,]+) orders"})
+    assert [row.run.request_id for row in table.sorted_by("-duration").rows] == ["r2", "r0", "r3", "r1"]
+    assert [row.run.request_id for row in table.sorted_by("written").rows] == ["r1", "r0", "r3", "r2"]
+    groups = table.group("status")
+    assert [(g.value, g.runs, g.failed) for g in groups] == [("ok", 2, 0), ("failed", 1, 1), ("timeout", 1, 1)]
+    assert table.group("cold")[0].median == 16100.0
+    names = table.field_names()
+    assert names[:3] == ["status", "failed", "started"] and "event.Records.s3.object.size" in names
+    assert next(f for f in table.fields() if f.name == "written").runs == 2
+    kept = table.where("duration > 15s").where("not cold")
+    assert kept.query == "(duration > 15s) and (not cold)" and kept.unfiltered is table and kept.read == 4
+    with pytest.raises(ValueError, match="isn't a regular expression"):
+        run_table(orders_page(), fields={"bad": "wrote ("})
+
+
+def test_runs_findings_name_what_to_do():
+    table = run_table(orders_page())
+    found = runs_findings(table.where("duration > 15s"))
+    assert found[0][0] == "warn" and "1 run reached the 60s timeout: Lambda stopped it" in found[0][1]
+    assert "logs('orders-etl', request_id='r2')" in found[0][1] and "--timeout 120" in found[0][1]
+    assert any("used 90% or more of 512 MB" in message for _, message in found)
+    typo = runs_findings(table.where("durtion > 1s"), named=["route"])
+    assert typo[0] == ("warn", "No run has a field 'durtion': did you mean 'duration'?")
+    assert "No run has a field 'route'" in typo[1][1]
+    no_events = run_table(run_page(("a", 10.0, 50, [], False, False)))
+    assert "Lambda never logs the event itself" in runs_findings(no_events.where("event.size > 1"))[0][1]
+
+
 # ---- AWS (moto)
 
 
@@ -2144,6 +2286,18 @@ def test_missing_region_is_a_readable_error(monkeypatch):
         LambdaAnalyzer().client
 
 
+def test_runs_reads_a_functions_runs_as_rows_to_filter_and_sort(core):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    table = core.runs("etl-nightly", since="1h")
+    assert [row.run.request_id for row in table.rows] == [*reversed(ids), RID] and table.read == 5
+    slow = core.runs("etl-nightly", since="1h", where="duration > 51ms", sort="-duration")
+    assert [row.run.request_id for row in slow.rows] == [RID, ids[3], ids[2]]
+    assert slow.query == "duration > 51ms" and slow.unfiltered.read == 5
+    orders = core.runs("etl-nightly", since="1h", fields={"order": r"order (ORD-\d+)"}, where="order = ord-77")
+    assert [row.run.request_id for row in orders.rows] == [ids[1]] and orders.rows[0].values["order"] == "ORD-77"
+
+
 # ---- UI
 
 
@@ -2488,6 +2642,23 @@ def test_prices_are_list_prices():
 def test_ui_explore_needs_jupyter(ui, capsys):
     out = run(capsys, ui.explore)
     assert "The explorer window needs Jupyter" in out and "logs('name') shows what one logged" in out
+
+
+def test_runs_report_filters_sorts_groups_and_lists_the_fields(ui, capsys):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    out = run(capsys, ui.runs, "etl-nightly", since="1h", where="duration > 51ms", sort="-duration",
+              group_by="status")
+    assert "Runs of etl-nightly where duration > 51ms" in out and "Runs that match: 3 of 5" in out
+    assert "The 3 runs by status" in out and "The runs, longest first" in out
+    assert out.index(RID) < out.index(ids[3]) < out.index(ids[2]) and ids[0] not in out.split("Fields to query")[0]
+    assert "Fields to query, sort or group by" in out and "memory_share" in out
+    assert f"logs('etl-nightly', request_id='{RID}', since='1h')" in out
+    typo = run(capsys, ui.runs, "etl-nightly", since="1h", columns=["status", "route"], where="durtion > 1s")
+    assert "No run has a field 'durtion': did you mean 'duration'?" in typo and "No run has a field 'route'" in typo
+    assert "No run of the 5 read matches" in typo
+    bad = run(capsys, ui.runs, "etl-nightly", since="1h", where="duration > abc")
+    assert "duration can't be 'abc'" in bad and "Traceback" not in bad
 
 
 # ---- the explorer window
@@ -3513,3 +3684,48 @@ def test_explorer_says_what_changed_since_your_last_look(explorer, tmp_path, mon
     errors = plain(again.errors_view.value) + " " + plain(again.errors_more.value)
     assert "A new error since your last look" in errors and "ValueError (1 time" in errors
     assert "KeyError (" not in errors.split("They're in the table below")[0]
+
+
+def test_explorer_logs_tab_asks_for_runs_by_their_fields(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "duration > 51ms"
+    assert [run.request_id for run in x._visible_runs()] == [ids[3], ids[2], RID]
+    assert plain(x.status.value) == "3 of 5 runs read match duration > 51ms · click a run to see its lines"
+    enter(x.log_find)
+    assert x.found is None and len(x._visible_runs()) == 3
+    assert x._view_code() == "explore('etl-nightly', tab='logs', search='duration > 51ms')"
+    x.log_find.value = "cold or failed"
+    assert [run.request_id for run in x._visible_runs()] == [RID]
+    x.log_find.value = "durtion > 1s"
+    assert plain(x.status.value) == "No run has a field 'durtion': did you mean duration?"
+    x.log_find.value = "duration > abc"
+    assert "duration can't be 'abc'" in plain(x.status.value) and len(x._visible_runs()) == 5
+    x.log_find.value = ""
+    assert x.sort_pick.layout.display == ""
+    x.sort_pick.value = "-duration"
+    assert [run.request_id for run in x._visible_runs()] == [RID, ids[3], ids[2], ids[1], ids[0]]
+    assert "Longest first, the last hour" in plain(x.run_head.value)
+    assert ("Today", "today") in x.range_pick.options
+    x.range_pick.value = "today"
+    assert x._range == "today" and "today" in plain(x.run_head.value)
+
+
+def test_explorer_shows_the_event_a_run_logged(core, explorer):
+    now = datetime.now(timezone.utc)
+    rid = "abcdef12-1111-4222-8333-444455556666"
+    event = {"Records": [{"s3": {"object": {"key": "orders/b1.json", "size": 4800}}}]}
+    put_logs("/aws/lambda/etl-nightly", [
+        (now - timedelta(seconds=30), f"START RequestId: {rid} Version: $LATEST"),
+        (now - timedelta(seconds=29), json.dumps({"level": "INFO", "message": event, "requestId": rid})),
+        (now - timedelta(seconds=28), f"END RequestId: {rid}"),
+        (now - timedelta(seconds=28), report_line(rid, 2000.0)),
+    ], stream="2026/10/06/[$LATEST]evt")
+    x = explorer("etl-nightly", tab="logs")
+    x.log_find.value = "key ~ b1"
+    assert [run.request_id for run in x._visible_runs()] == [rid]
+    row = x._run_rows[0]
+    assert "Records" not in plain(row.face.value)
+    row.button.click()
+    assert '<details class="rev" open><summary>Event' in row.body.value and "orders/b1.json" in plain(row.body.value)

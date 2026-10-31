@@ -211,6 +211,14 @@ def test_times_show_in_utc_until_a_zone_is_picked():
     assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone.utc)
 
 
+def test_today_and_yesterday_start_at_midnight_in_the_zone_picked():
+    assert parse_time("today", now=MAY_DAY) == datetime(2024, 5, 1, tzinfo=timezone.utc)
+    assert parse_time(" Yesterday ", now=MAY_DAY) == datetime(2024, 4, 30, tzinfo=timezone.utc)
+    set_timezone("Asia/Kolkata")
+    assert parse_time("today", now=MAY_DAY) == datetime(2024, 4, 30, 18, 30, tzinfo=timezone.utc)
+    set_timezone(None)
+
+
 @pytest.mark.parametrize("zone, label, may, january", [
     ("Asia/Kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),
     ("kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),  # its city, in any case
