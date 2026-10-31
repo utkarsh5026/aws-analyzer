@@ -204,6 +204,16 @@ class FolderStats:
 
 _CONSOLE_DOMAINS = (("cn-", "console.amazonaws.cn"), ("us-gov-", "console.amazonaws-us-gov.com"))
 
+_CONSOLE_HOSTS = ("console.aws.amazon.com", *(domain for _, domain in _CONSOLE_DOMAINS))
+
+
+def _is_console_host(host: str) -> bool:
+    """
+    Whether a link's host is the AWS console's: one of its domains, or a part of one ('eu-west-1.' or 's3.' before
+    it), and not a lookalike that only contains the name ('console.aws.amazon.com.example.com').
+    """
+    return any(host == domain or host.endswith(f".{domain}") for domain in _CONSOLE_HOSTS)
+
 
 def parse_location(text: str | None) -> tuple[str, str]:
     """
@@ -218,7 +228,7 @@ def parse_location(text: str | None) -> tuple[str, str]:
     if lower.startswith(("http://", "https://")):
         url = urlparse(text)
         host, path = url.netloc.lower(), unquote(url.path)
-        if "console.aws.amazon.com" in host or host.endswith(tuple(domain for _, domain in _CONSOLE_DOMAINS)):
+        if _is_console_host(url.hostname or ""):
             match = re.search(r"/s3/(?:buckets|object)/([^/?#]+)", path)
             prefix = parse_qs(url.query).get("prefix", [""])[0]
             return (match.group(1), prefix) if match else ("", "")

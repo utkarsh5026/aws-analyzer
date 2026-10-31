@@ -68,6 +68,19 @@ def test_parse_location(text, expected):
     assert parse_location(text) == expected
 
 
+@pytest.mark.parametrize("link, expected", [
+    ("https://s3.console.aws.amazon.com/s3/buckets/b?prefix=x/", ("b", "x/")),
+    ("https://console.aws.amazon.com/s3/object/b?prefix=k", ("b", "k")),
+    ("https://console.aws.amazon.com.example.com/s3/buckets/b", None),
+    ("https://notconsole.aws.amazon.com/s3/buckets/b", None),
+])
+def test_parse_location_reads_only_the_real_console(link, expected):
+    if expected is None:
+        assert parse_location(link)[0] != "b"
+    else:
+        assert parse_location(link) == expected
+
+
 @pytest.mark.parametrize("uri, region, expected", [
     ("", "", "https://console.aws.amazon.com/s3/buckets"),
     ("s3://b/", "eu-west-1", "https://eu-west-1.console.aws.amazon.com/s3/buckets/b?region=eu-west-1&showversions=false"),
