@@ -31,6 +31,7 @@ Quick start
     agent = AgentView(model="openai:gpt-4.1")            # OpenAI, with OPENAI_API_KEY
     agent = AgentView()                                  # Azure OpenAI from AZURE_OPENAI_ENDPOINT, _API_KEY, _DEPLOYMENT
     agent = AgentView(model="anthropic:claude-sonnet-4-5")   # any provider LangChain's init_chat_model knows
+    agent.setup("azure")                                 # the cells to copy to set a provider up: install, keys, start
     agent.chat()                                         # a chat window: ask, and watch each tool call as it runs
     agent.ask("Which Lambda failed last night?")
     agent.ask("Why did orders-etl fail?")                # a follow-up: it remembers the conversation
@@ -72,6 +73,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
     prompt.py        The system prompt (shared rules, then each toolkit's section) and each question's time line.
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
+    model_setup.py   How to set up each provider, as cells to copy (AgentView.setup()): its packages, the
+                     environment variables it reads (keys asked for with getpass), the call that starts it.
     harness.py       The agent loop: deepagents built once, and one question streamed through it, ending in the
                      model's reply (its final_answer: the answer and its findings).
     memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
@@ -137,6 +140,7 @@ from .llm import (
     pick_provider,
 )
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
+from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
 from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
 from .prompt import asked_at, system_prompt
 from .results import hide_secrets
@@ -195,6 +199,12 @@ from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 
 __all__ = [
+    "OTHER_SETUPS",
+    "SETUPS",
+    "ProviderSetup",
+    "SetupVar",
+    "provider_setup",
+    "setup_findings",
     "AgentAnalyzer",
     "AgentView",
     "AgentAnswer",

@@ -26,6 +26,18 @@ from aws_analyzer.agent.toolkits import s3_saving
 from aws_analyzer.agent.workspace import files as workspace_files
 from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
+from aws_analyzer.agent.model_setup import (
+    KernelState,
+    blocker,
+    every_notebook_lines,
+    install_line,
+    provider_setup,
+    settings_cell,
+    setup_findings,
+    setup_providers,
+    start_cell,
+    suggested_provider,
+)
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
 from aws_analyzer.agent.window.model_panel import (
     bedrock_choices,
@@ -3757,3 +3769,82 @@ def test_the_agent_reads_a_runbook_and_the_report_says_it_followed_it(seeded, ca
     assert "# A Lambda function is failing" in model.prompts[1][-1].content
     assert "reading the runbook lambda-failing" in _tool_html(ToolCall("read_runbook", {"name": "lambda-failing"},
                                                                        first="name"), running=True)
+
+
+AZURE_KEYS = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_API_KEY")
+
+
+def test_the_settings_cell_asks_for_a_key_and_writes_only_what_is_missing():
+    azure = provider_setup("azure_openai")
+    cell = settings_cell(azure, {"AZURE_OPENAI_ENDPOINT": "https://acme.openai.azure.com"})
+    assert "AZURE_OPENAI_ENDPOINT" not in cell and 'os.environ["AZURE_OPENAI_DEPLOYMENT"] = "<deployment name>"' in cell
+    assert 'os.environ["AZURE_OPENAI_API_KEY"] = getpass("Azure OpenAI API key: ")' in cell
+    assert cell.startswith("import os\nfrom getpass import getpass\n")
+    assert settings_cell(azure, dict.fromkeys(AZURE_KEYS, "x")) == ""
+    assert settings_cell(provider_setup("bedrock"), {}) == ""
+    compile(cell, "<cell>", "exec")
+
+
+def test_the_start_cell_and_the_lines_for_every_notebook():
+    openai = provider_setup("OpenAI")
+    start = start_cell(openai, zone="Asia/Kolkata")
+    assert 'set_timezone("Asia/Kolkata")' in start and 'agent = AgentView(model="openai:gpt-4.1")' in start
+    compile(start, "<cell>", "exec")
+    shell = every_notebook_lines(openai)
+    assert 'export OPENAI_API_KEY="<your key>"' in shell and "OPENAI_BASE_URL" not in shell
+    assert shell.endswith('export AWS_ANALYZER_AGENT_MODEL="openai:gpt-4.1"')
+    assert every_notebook_lines(provider_setup("azure")).endswith('AWS_ANALYZER_AGENT_MODEL="azure:<deployment name>"')
+    assert install_line(provider_setup("ollama")).endswith('"aws-analyzer[agent,notebook]" langchain-ollama')
+    assert install_line(openai) == '%pip install --quiet "aws-analyzer[agent,notebook]"'
+
+
+def test_every_provider_has_steps_and_a_wrong_name_gets_the_close_ones():
+    assert setup_providers()[:3] == ["bedrock", "openai", "azure"]
+    for provider in setup_providers():
+        setup = provider_setup(provider)
+        assert setup.call.startswith("AgentView(") and setup.where
+    assert provider_setup("cohere").call == 'AgentView(model="cohere:<model>")'
+    with pytest.raises(ValueError, match="Did you mean 'azure'"):
+        provider_setup("azur")
+
+
+def test_setup_findings_name_the_step_that_fixes_each_gap():
+    azure = provider_setup("azure")
+    old = KernelState(python_ok=False, python="3.10", missing_modules=("deepagents", "langchain_openai"),
+                      environ={}, current="bedrock")
+    findings = setup_findings(azure, old)
+    text = " ".join(message for _, message in findings)
+    assert [level for level, _ in findings] == ["warn", "warn", "warn", "info"]
+    assert "Python 3.10: the agent needs 3.11 or newer" in text
+    assert "aws-analyzer[agent], langchain-openai are not installed" in text and "restart the kernel" in text
+    assert "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY are not set" in text
+    assert "use_model('azure')" in text
+    assert blocker(azure, old) == "Python 3.11+"
+    ready = KernelState(python_ok=True, python="3.12", environ=dict.fromkeys(AZURE_KEYS, "x"), current="azure")
+    assert setup_findings(azure, ready) == [] and blocker(azure, ready) == ""
+    assert suggested_provider("azure", []) == "azure"
+    assert suggested_provider("", ["openai"]) == "openai" and suggested_provider("", []) == "bedrock"
+
+
+def test_setup_report_shows_the_cells_and_never_a_key(monkeypatch, capsys):
+    for name in (*AZURE_KEYS, "OPENAI_API_KEY", "AWS_ANALYZER_AGENT_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-shown")
+    view = AgentView(mode="text")
+    out = run(capsys, view.setup)
+    assert "Set up the agent's model" in out and "providers ready here; the steps for Amazon Bedrock below" in out
+    assert any(line.startswith("Anthropic") and " ready " in line for line in out.splitlines())
+    assert "needs OPENAI_API_KEY" in out and "setup('azure')" in out and "sk-ant-not-shown" not in out
+
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-secret-value")
+    monkeypatch.setattr(viewmod, "_installed", lambda module: module != "langchain_openai")
+    out = run(capsys, view.setup, "azure")
+    assert "Set up Azure OpenAI for the agent" in out and "Ready here: not yet (!)" in out
+    assert "langchain-openai is not installed" in out and "1. Install --" in out
+    assert "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT are not set" in out
+    assert 'getpass(' not in out
+    assert "azure-secret-value" not in out and 'agent = AgentView(provider="azure")' in out
+
+    out = run(capsys, view.setup, "azur")
+    assert "Did you mean 'azure'" in out and "Traceback" not in out
+    assert "setup" in AgentView._GROUPS["🔑 Set up"]
