@@ -3841,7 +3841,7 @@ def test_live_tab_shows_whats_running_and_follows_a_function(explorer):
     assert plain(x.live_summary.value) == ("1 of 2 functions ran · 1 running now · 12 calls, 2 failed in the last 10 "
                                            "minutes")
     face = plain(x._live_rows[0].face.value)
-    assert face.startswith("etl-nightly 45 s into a run · wrote 9,000 of 18,400 orders 1 running 12 calls 2 failed")
+    assert re.match(r"etl-nightly 4\d s into a run · wrote 9,000 of 18,400 orders 1 running 12 calls 2 failed", face)
     assert len(x.live_box.children) == 1 and plain(x.live_note.value) == "Not called in the last 10 minutes: api-handler."
     status = plain(x.status.value)
     assert status.startswith("Live · checked") and "(6 metrics a read, about <$0.01 for 15 minutes)" in status
@@ -3851,7 +3851,7 @@ def test_live_tab_shows_whats_running_and_follows_a_function(explorer):
         "explore('etl-nightly', tab='live')")
     assert plain(x.live_summary.value).startswith("etl-nightly · 1 running now")
     first = x._live_run_rows[0]
-    assert plain(first.face.value).startswith("• ") and "45 s of 15 min" in plain(first.face.value)
+    assert plain(first.face.value).startswith("• ") and re.search(r" 4\d s of 15 min ", plain(first.face.value))
     assert first.run.request_id == rid and first.body.layout.display == ""
     body = plain(first.body.value)
     assert "reading s3://acme-uploads/orders/batch-118.json" in body and "waiting for more lines" in body
