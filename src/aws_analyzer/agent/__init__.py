@@ -142,7 +142,7 @@ from .llm import (
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
 from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
-from .prompt import asked_at, system_prompt
+from .prompt import asked_at, focus_of, looking_at, parse_query_reply, query_prompt, system_prompt
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
 from .toolkits.bedrock_kb_tools import (
@@ -278,6 +278,10 @@ __all__ = [
     "answer_record",
     "answer_from_record",
     "asked_at",
+    "focus_of",
+    "looking_at",
+    "query_prompt",
+    "parse_query_reply",
     "system_prompt",
     "answer_findings",
     "answer_next",

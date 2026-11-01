@@ -15,12 +15,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ..._kit.blocks import _Next, _Note, _Title
 from ..._kit.deps import _in_notebook, _require
 from ..._kit.history import PlaceHistory
-from ..._kit.window import _cell_number, _css_height, _window_errors
+from ..._kit.window import _AskSlot, _cell_number, _check_assistant, _css_height, _drawer_css, _window_errors
 from ..analyzer.s3_analyzer import S3Analyzer
 from ..readers.formats import _DATA_ERRORS
 from ..view.s3_view import S3View
 
 from .navigator import _KINDS, Entry, Folder, S3Navigator, _s3_module, parse_filter, parse_location
+from .focus import _FocusReads
 from .frame import _CHECK, _CSS, _PAGE_BUTTONS, _Row
 from .listing import _ListPane
 from .recent import _RecentPane
@@ -29,7 +30,7 @@ from .selection import _SelectionPane
 from .settings import _SettingsPane
 
 
-class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentPane):
+class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentPane, _FocusReads, _AskSlot):
     """
     Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
     click on the right. Click a folder to open it; ← → ↑ go back, forward and up; click the path to jump
@@ -60,7 +61,11 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
-    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list.
+    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list. `x.focus` is what you're looking at,
+    as data: the folder, the file shown, the search and what's ticked (x.focus.chips() reads it as a row of chips).
+    assistant: an AgentView to ask about what the window shows: ✦ Ask, at the end of the top bar, opens its chat in
+    the list's place, where "were these files processed?" means the folder you're in (x.attach(agent) does it later,
+    and aws_analyzer.set_assistant(agent) for every explorer).
     """
 
     def __init__(
@@ -77,9 +82,14 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         mode: str = "auto",
         progress: str = "auto",
         history: bool | str = True,
+        assistant: Any = None,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
+        self._init_ask()
+        if assistant is not None:
+            _check_assistant(assistant)
+            self.assistant = assistant
         self._history = PlaceHistory.from_setting(history, "s3")
         self._baseline = None
         self.height = height
@@ -396,6 +406,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
             self._remember()
         self._save_look(self.nav.folder())
         self._draw_recent()
+        self._focus_moved()
 
     def _select(self, uri: str, action: str = "preview") -> None:
         """
@@ -427,7 +438,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
             b.on_click(lambda _: self._guard(on_click))
             return b
 
-        style = w.HTML(_CSS, layout=w.Layout(display="none"))
+        style = w.HTML(_CSS + _drawer_css(self._PREFIX), layout=w.Layout(display="none"))
         # The icon buttons keep their glyph as the description: hidden by the style, which draws the icon instead.
         self._back_btn = button("←", "s3x-nav s3x-ic s3x-i-back", "Back", self.back)
         self._fwd_btn = button("→", "s3x-nav s3x-ic s3x-i-forward", "Forward", self.forward)
@@ -445,7 +456,8 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         self._edit_btn = button("✎", "s3x-nav s3x-ic s3x-i-edit", "Type or paste a path", self._toggle_path)
         self._gear = button("⚙", "s3x-nav s3x-ic s3x-i-settings", "Settings: the biggest folder to zip, and where "
                             "zips go", self._toggle_settings)
-        bar = w.HBox([navs, self._crumbs, self._path, self._edit_btn, self._gear], layout=w.Layout(width="100%"))
+        bar = w.HBox([navs, self._crumbs, self._path, self._edit_btn, self._gear, self._make_ask_button()],
+                     layout=w.Layout(width="100%"))
         bar.add_class("s3x-bar")
 
         self._filter = w.Text(continuous_update=True, layout=w.Layout(width="100%"))
@@ -529,12 +541,14 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         # height, 560px. height= puts its own on the box, which wins over the style's.
         self._body = w.HBox(layout=w.Layout(width="100%", height=_css_height(self.height)))
         self._body.add_class("s3x-body")
+        self._make_drawer_box()
         self._left = self._right = None
         self._renew("left", "right")
         self._status = w.HTML(layout=w.Layout(width="100%"))
         self._status.add_class("s3x-status")
         self._app = w.VBox([style, bar, self._body, self._status], layout=w.Layout(width="100%"))
         self._app.add_class("s3x")
+        self._app.add_class("s3x-app")
         self._act_buttons: dict[str, Any] = {}
 
     def _renew(self, *sides: str) -> None:
@@ -553,10 +567,26 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
                                   self._pager],
                                  layout=w.Layout(flex="1 1 auto", width="auto", min_width="0", overflow="auto"))
             self._right.add_class("s3x-right")  # min_width 0: wide tables scroll
-        self._body.children = (self._side, self._right)
+        self._body.children = (self._side, self.drawer_box, self._right)
         for box in old:
             if box is not None and box not in (self._left, self._right):
                 box.close()  # closes the box only; the widgets in it live on in the new one
+
+    _PREFIX = "s3x"
+
+    def _ask_widgets(self) -> Any:
+        return self._widgets
+
+    def _ask_click(self, handler: Callable[[], None]) -> Callable[[Any], None]:
+        return lambda _button: self._guard(handler)
+
+    def _show_drawer(self, shown: bool) -> None:
+        """
+        The ✦ Ask drawer takes the list's place, so the file or folder report on the right stays beside the answer
+        (a place an answer points at opens there).
+        """
+        self.drawer_box.layout.display = "" if shown else "none"
+        self._side.layout.display = "none" if shown else ""
 
     def _guard(self, handler: Callable[[], None]) -> None:
         """
@@ -573,6 +603,7 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
         except Exception as exc:  # a bug: still say so where the user is looking
             self._fail(f"Something went wrong ({type(exc).__name__}: {exc}). Press ↻ to try again.")
         finally:
+            self._focus_moved()
             if "…" in self._status.value:  # "Listing…" that never finished
                 folder = (self.nav._below if self._deep else self.nav._cache).get(self.nav.location)
                 if folder is not None:

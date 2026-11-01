@@ -4188,7 +4188,8 @@ def test_explorer_opens_the_knowledge_base_and_lists_its_files(world):
     assert [f.name for f in x._visible] == ["scanned.pdf", "added.pdf", "video.mp4", "gone.pdf", "faq.md",
                                             "refund-policy.pdf"]
     assert "Failed" in plain(x._rows[0].face.value) and "kbx-alarm" in x.tab_buttons["files"]._dom_classes
-    assert plain(x.status.value) == "6 files listed in 0.0s · 4 files to look at: the Files tab lists them first"
+    assert re.fullmatch(r"6 files listed in \d+\.\ds · 4 files to look at: the Files tab lists them first",
+                        plain(x.status.value))
     overview = plain(x.overview.value)
     assert "Its 6 files, by state" in overview and "1 file failed to index (scanned.pdf)" in overview
     assert "help-site is a WEB data source" in overview and "the Syncs tab shows how many each sync read" in overview
@@ -4209,7 +4210,7 @@ def test_explorer_shows_how_a_file_was_indexed(world):
     page = plain(x.file_view.value)
     assert "How it was indexed" in page and "Its 4 chunks, in document order" in page and "100% covered" in page
     assert "Other files of its data source have a metadata file and this one doesn't" in page
-    assert plain(x.status.value) == "faq.md: indexed, 4 chunks (0.0s)"
+    assert re.fullmatch(r"faq\.md: indexed, 4 chunks \(\d+\.\ds\)", plain(x.status.value))
     assert x.ask_row.layout.display == "" and x.back_button.layout.display == ""
     x.ask_box.value = "word120 word121"
     enter(x.ask_box)
@@ -4370,6 +4371,60 @@ def test_explorer_search_tab_opens_each_passages_file(world):
     assert x._tab == "files" and x.selected.name == "refund-policy.pdf" and x.chunks.chunks[0].chunk_id == "r1"
     x.search("refund window")  # from code, as typing it does
     assert x._tab == "search" and x.found.question == "refund window"
+
+
+def test_explorer_focus_says_what_you_are_looking_at(world):
+    x = explorer(world)
+    overview = x.focus
+    assert (overview.service, overview.kind, overview.region) == ("bedrock_kb", "knowledge_base", "us-east-1")
+    assert overview.chips() == ["support-docs", "Overview tab"] and overview.value("knowledge_base") == KB_ID
+    x.tab_buttons["files"].click()
+    assert x.focus.kind == "files" and x.focus.chips() == ["support-docs", "Files tab", "6 files"]
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()
+    assert x.focus.chips()[2:] == ["Failed", "1 file"] and x.focus.value("state") == "failed"
+    assert x.focus.value("files") == FOLDER + "scanned.pdf"
+
+    row(x, "scanned.pdf").button.click()
+    failed = x.focus
+    assert failed.kind == "file" and failed.value("file") == FOLDER + "scanned.pdf"
+    assert failed.chips()[2:] == ["scanned.pdf", "Failed", "The file is a scanned image with no text layer", "docs-s3"]
+    failed_chip = next(c for c in x.chips.children if c.description.startswith("Failed"))
+    failed_chip.click()
+    row(x, "faq.md").button.click()
+    x.ask_box.value = "word120 word121"
+    enter(x.ask_box)
+    assert x.focus.chips()[-1] == "asked: word120 word121" and x.focus.value("question") == "word120 word121"
+
+    x.search("refund window")
+    assert x.focus.kind == "search" and x.focus.chips()[1:] == ["Search tab", "search: refund window", "4 passages"]
+    x.tab_buttons["syncs"].click()
+    assert x.focus.kind == "syncs" and str(x.focus) == "support-docs · Syncs tab"
+    assert KBExplorer("support-docs", core=world.core(), mode="text").focus is None
+
+
+def test_explorer_ask_drawer_follows_the_file_opened(world):
+    pytest.importorskip("ipywidgets")
+    import ipywidgets
+
+    told = []
+
+    class Drawer:
+        root = ipywidgets.HTML("drawer")
+
+        def focus_moved(self):
+            told.append(x.focus.kind)
+
+    class Assistant:
+        def _ask_drawer_(self, window):
+            return Drawer()
+
+    x = explorer(world, assistant=Assistant())
+    assert x.ask_button.layout.display == "" and x.drawer is None
+    x.ask_button.click()
+    assert x.drawer_box.children == (x.drawer.root,) and told[-1] == "knowledge_base"
+    x.tab_buttons["files"].click()
+    row(x, "faq.md").button.click()
+    assert told[-1] == "file"
 
 
 def test_explorer_syncs_and_settings_tabs(world):

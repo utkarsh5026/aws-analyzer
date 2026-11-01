@@ -29,6 +29,9 @@ from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as gr
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
+from aws_analyzer.lambda_functions.explorer import plain as plain_search
+from aws_analyzer._kit.focus import QueryDraft
+from aws_analyzer import set_assistant
 from aws_analyzer.lambda_functions.analysis import live as live_mod
 from aws_analyzer.lambda_functions.models import Activity
 from aws_analyzer import set_timezone
@@ -3870,6 +3873,123 @@ def test_live_tab_shows_whats_running_and_follows_a_function(explorer):
     assert x._tab == "live" and x._watching and x.board[x._following].function.name == "etl-nightly"
     x.live_logs_button.click()
     assert x._tab == "logs" and x.function.name == "etl-nightly" and not x._watching
+
+
+def test_explorer_focus_says_what_you_are_looking_at(core, explorer):
+    x = explorer()
+    listed = x.focus
+    assert (listed.service, listed.kind, listed.region) == ("lambda", "functions", REGION)
+    assert listed.chips() == [REGION, "2 functions"]
+    assert sorted(listed.value("functions").split(", ")) == ["api-handler", "etl-nightly"]
+    x.find.value = "nightly"
+    assert x.focus.chips() == [REGION, "search: nightly", "1 function"]
+    assert x.focus.value("functions") == "etl-nightly"
+
+    x = explorer("etl-nightly", tab="errors")
+    errors = x.focus
+    assert errors.kind == "errors" and errors.region == REGION
+    assert errors.chips() == ["etl-nightly", REGION, "Errors tab", "the last 24 hours", "1 cause"]
+    assert errors.value("function").endswith(":function:etl-nightly") and errors.value("tab") == "errors"
+    assert errors.value("causes") == "KeyError: 'customer_id' (×1)"
+    assert errors.until - errors.since == timedelta(hours=24)
+
+    x._cause_rows[0].button.click()
+    opened = x.focus
+    assert opened.kind == "run" and opened.value("request_id") == RID
+    assert opened.chips()[2:] == ["Logs tab", "the last 24 hours", "search: KeyError: 'customer_id'",
+                                  f"run {RID[:8]}", "KeyError: 'customer_id'"]
+    widened = opened.without("range").without("request_id")
+    assert widened.since is None and widened.until is None and "the last 24 hours" not in widened.chips()
+    assert widened.value("request_id") == "" and opened.value("request_id") == RID
+
+    x._run_rows[0].code_button.click()
+    assert x.focus.kind == "code" and x.focus.chips()[2:] == ["Code tab", "app.py", "line 2"]
+    x.tab_buttons["overview"].click()
+    assert x.focus.kind == "function" and str(x.focus) == f"etl-nightly · {REGION} · Overview tab"
+    x.run(RID)
+    assert x.focus.kind == "run" and x.focus.value("request_id") == RID and x.focus.value("search") == ""
+    assert LambdaExplorer(core=core, mode="text").focus is None
+
+
+def test_explorer_focus_on_the_live_tab_names_the_function_it_follows(core, explorer):
+    x = explorer("etl-nightly", tab="live")
+    assert x.focus.kind == "live" and x.focus.chips() == ["etl-nightly", REGION, "Live tab"]
+    x._unfollow()
+    assert x.focus.chips() == [REGION, "Live tab"]
+
+
+class FakeAssistant:
+    """
+    What an explorer's ✦ Ask drawer needs from an assistant (an AgentView): _ask_drawer_(window), whose drawer has
+    a root widget and hears focus_moved() as the window changes.
+    """
+
+    def __init__(self):
+        self.windows, self.moves = [], []
+
+    def _ask_drawer_(self, window):
+        import ipywidgets
+
+        self.windows.append(window)
+        assistant = self
+
+        class Drawer:
+            root = ipywidgets.HTML("drawer")
+
+            def focus_moved(self):
+                assistant.moves.append(str(window.focus))
+
+        return Drawer()
+
+
+def test_explorer_ask_drawer_slot(core, explorer, monkeypatch):
+    x = explorer("etl-nightly", tab="errors")
+    assert x.assistant is None and x.ask_button.layout.display == "none"
+    assert x.ask_button.description == "✦ Ask"
+    helper = FakeAssistant()
+    x.attach(helper)
+    assert helper.windows == [x] and x.drawer_box.layout.display == "" and x.ask_button.layout.display == ""
+    assert x.drawer_box.children == (x.drawer.root,) and helper.moves[-1].startswith("etl-nightly")
+    x.tab_buttons["logs"].click()
+    assert "Logs tab" in helper.moves[-1]
+    x.ask_button.click()
+    moves_while_open = len(helper.moves)
+    x.tab_buttons["errors"].click()
+    assert len(helper.moves) == moves_while_open
+    x.ask_button.click()
+    assert "Errors tab" in helper.moves[-1] and helper.windows == [x]
+    x.attach("not an assistant")
+    assert "An explorer's assistant is an AgentView" in plain(x.status.value) and x.assistant is helper
+
+    other = FakeAssistant()
+    monkeypatch.setattr(windowmod, "_assistant", None)
+    set_assistant(other)
+    y = explorer("etl-nightly")
+    assert y.assistant is other and y.ask_button.layout.display == "" and y.drawer is None
+    set_assistant(None)
+    assert explorer().assistant is None
+    with pytest.raises(TypeError, match="An explorer's assistant is an AgentView"):
+        set_assistant(object())
+    with pytest.raises(TypeError, match="An explorer's assistant is an AgentView"):
+        LambdaExplorer(core=core, mode="widgets", assistant="nope")
+    text = LambdaExplorer(core=core, mode="text")
+    text.attach(helper)
+    assert text.assistant is None
+
+
+def test_a_written_query_is_checked_before_it_is_used(core, explorer):
+    assert plain_search._check_draft(QueryDraft("duration > 5s and cold", since="24h")) == ""
+    assert "duration" in plain_search._check_draft(QueryDraft("duration >>> 5"))
+    assert plain_search._check_draft(QueryDraft("")) == "It wrote no query."
+    assert plain_search._check_draft(QueryDraft("failed", since="whenever")).startswith("Its time range can't be read")
+    shown = plain_search._draft_html(QueryDraft("cold", since="24h", note="as asked"), "")
+    assert "<code>cold</code>" in shown and "from 24h" in shown and "as asked · one model call, no tools" in shown
+    assert "Couldn" in plain_search._draft_html(QueryDraft("x >"), "The query ends too soon")
+    assert plain_search._runs_context([], 60) == ""
+    seed_runs(datetime.now(timezone.utc))
+    x = explorer("etl-nightly", tab="logs")
+    assert re.fullmatch(r"The runs read: 5, median \S+, slowest \S+; the function's timeout is 900 s\.",
+                        plain_search._runs_context(x._runs, 900))
 
 
 def test_live_tab_says_when_nothing_ran_or_cant_be_read(core, explorer, capsys):

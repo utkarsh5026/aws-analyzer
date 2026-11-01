@@ -73,6 +73,7 @@ class _RunsTab:
         return w.VBox([head, self.runs_view, self.run_actions, self.compare_view, files], layout=layout(width="100%"))
 
     def _tab_changed(self, change: dict[str, Any]) -> None:
+        self._focus_moved()
         if change.get("new") == self.RUNS_TAB:  # drawn when it's looked at: "your setup now" follows the settings
             self._draw_runs()
 

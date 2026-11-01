@@ -13,7 +13,7 @@ from ..._kit.fmt import _in_zone, _plural
 from ..._kit.history import Place, PlaceHistory, Snapshot
 from ..._kit.render import _call
 from ..._kit.text import _esc
-from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
+from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _window_errors
 
 from ..helpers import parse_function_ref
 from ..models import CodeFrame, CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance, SavedPage
@@ -39,9 +39,12 @@ from .timeline import _Timeline
 from .errors import _ErrorsTab
 from .performance import _PerformanceTab
 from .code import _CodeTab
+from .focus import _FocusReads
+from .plain import _PLAIN_CSS, _PlainSearch
 
 
-class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab, _Explorer):
+class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab,
+                     _PlainSearch, _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -79,12 +82,16 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
     the Recent chip shows only them: True (in aws-analyzer's cache folder, ~/.cache/aws-analyzer/history/, per AWS
     account; only the ARNs and when), False, or a file to keep them in. AWS_ANALYZER_HISTORY=off turns it off
     everywhere. x.recent lists them and x.forget_recent() clears them.
+    assistant: an AgentView to ask about what the window shows: ✦ Ask, at the end of the tab bar, opens a drawer where
+    "why does this fail?" means the function, run or file you have open (x.attach(agent) does it later, and
+    aws_analyzer.set_assistant(agent) for every explorer).
 
     Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
     command. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
     functions (history=). x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function,
     x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown, and x.board what the Live tab read
-    (function ARN -> LiveFunction).
+    (function ARN -> LiveFunction). x.focus is what you're looking at, as data: the function, the tab, its time range
+    and the run or file opened (x.focus.chips() reads it as a row of chips).
     """
 
     _PREFIX, _THREADS = "lmx", "lambda-explorer"
@@ -106,6 +113,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         mode: str = "auto",
         progress: str = "auto",
         history: bool | str = True,
+        assistant: Any = None,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
@@ -114,6 +122,9 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         if since is not None or until is not None:
             LambdaAnalyzer.time_range(since if since is not None else _FIRST_LOGS_RANGE, until)
         super().__init__()
+        if assistant is not None:
+            _check_assistant(assistant)
+            self.assistant = assistant
         every = isinstance(region, str) and region.strip().lower() == "all"
         if view is None:
             view = LambdaView(core or LambdaAnalyzer(region=None if every else region, profile=profile),
@@ -486,7 +497,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         self.settings_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
-        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + self._theme_style, head, tabs, {
+        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
             "live": self._live_page(),
             "overview": self._scroll_page([self.overview_view]),
@@ -679,6 +690,7 @@ def explore(
     profile: str | None = None,
     height: int | str | None = None,
     history: bool | str = True,
+    assistant: Any = None,
 ) -> LambdaExplorer:
     """
     Opens the Lambda explorer window and returns it: every function in the region, what's running now (the Live tab),
@@ -698,7 +710,8 @@ def explore(
     and search= finds the runs whose lines have the text (on the Logs tab). The window's ⧉ Copy as code gives this
     call for what it shows. The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS
     such as '70vh'). It only reads: where a change would help, it shows the command to run. It remembers the functions
-    you open, for its Recent chip (history=False: it doesn't).
+    you open, for its Recent chip (history=False: it doesn't). assistant=AgentView(...) adds ✦ Ask: a drawer where
+    you ask the agent about what the window shows.
     """
     return LambdaExplorer(name, tab=tab, since=since, until=until, search=search, region=region, profile=profile,
-                          height=height, history=history)
+                          height=height, history=history, assistant=assistant)

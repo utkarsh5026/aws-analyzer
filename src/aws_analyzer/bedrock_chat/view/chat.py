@@ -188,10 +188,12 @@ class _ChatCommands:
     # ---------------------------------------------------------------------- chat
 
     @_friendly_errors
-    def app(self) -> None:
+    def app(self, *, assistant: Any = None) -> None:
         """
         The chat window: pick the knowledge base and model, ask questions (follow-ups keep the conversation), and
-        change what's sent in the Settings tab, with the exact request and response as JSON.
+        change what's sent in the Settings tab, with the exact request and response as JSON. assistant=AgentView(...)
+        adds ✦ Ask: the agent's chat in the side tabs' place, asking why an answer went the way it did ("why didn't it
+        cite the refund policy?") about the question, answer and setup you have open.
         """
         self._shown_in = _cell_number()
         if not self.use_html:
@@ -204,7 +206,9 @@ class _ChatCommands:
 
         widgets = _require("ipywidgets", "The chat window")
         if self._app is None:
-            self._app = _ChatApp(self, widgets)
+            self._app = _ChatApp(self, widgets, assistant=assistant)
+        elif assistant is not None:
+            self._app.attach(assistant)
         self._display(self._app.root)
 
     @_friendly_errors

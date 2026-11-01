@@ -133,6 +133,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   the windows' terminal theme reads too); `_BaseView._show` passes `theme=_theme_name()`, and the windows call
   `_render_html` with none, so they keep their own look; a new rule in `_BASE_RULES` for a shared block may need a
   line in each theme, and `demo.py --look` / a `Figure(theme=)` in `shots.py` show one)
+  `focus.py` (`Focus` and `FocusPart`: what an explorer window is showing, as data, pure; each explorer's `focus`
+  property builds one in its own `explorer/focus.py`, a `_FocusReads` mixin, and `chips()` / `value(key)` /
+  `without(key)` read it),
   and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
@@ -520,6 +523,19 @@ How the View layer works:
   first), `_load_widgets`, the status line (`_status` with the `owner` a busy line belongs to, `_finish`, `_said`),
   `_tab_bar` and `_frame` (CSS classes from `_PREFIX`), `_draw` (with the explorer's `_html`), `_workers` (threads
   named by `_THREADS`), `_later`, `_drop`, and the window shown once per cell (`_display`, `_ipython_display_`).
+  It also holds the ✦ Ask drawer slot, `_AskSlot` (a mixin the S3 explorer shares): `_frame` puts `ask_button` at the
+  end of the tab bar and `drawer_box` beside the pages, shown while the window has an `assistant` (`assistant=`,
+  `attach()`, or `set_assistant()`'s default, `_assistant`); a window says how it gets widgets (`_ask_widgets`), guards a
+  click (`_ask_click`) and shows the drawer (`_show_drawer`: the S3 explorer's takes the list's place, so the report
+  stays beside it), and hears another assistant in `_assistant_changed`. The explorer never imports the agent: it
+  calls the assistant's `_ask_drawer_(window)` (`_ASK_DRAWER`, the way IPython calls `_ipython_display_`;
+  `_check_assistant` refuses anything without it) once, and tells the drawer `focus_moved()` from `_status` (the S3
+  explorer's from `_guard` and `_navigate`) while it's open (`_focus_moved`), so its Looking at line follows each
+  click. Its classes are `<prefix>-assist` / `-assisting` / `-drawer` (`_drawer_css`), never `-ask`, which the
+  explorers' search boxes use. The Lambda explorer's Logs tab also asks it `_ask_query_(text, fields=, context=)` for
+  its ✦ plain-English search (`explorer/plain.py`'s `_PlainSearch`: Enter in ✦ mode, `_log_entered`, sends the words;
+  the `QueryDraft` that comes back, from `_kit/focus.py`, is checked by `_check_draft` with `parse_query` and
+  `time_range` and shown under the box, and Use it puts it there).
   `@_window_errors` guards a window's own commands through its `_ready` and `_command_failed` (the S3 explorer's
   too). `_Picker` is a field that opens a searchable list over the window, which the KB explorer's `_Chooser`, the
   Lambda explorer's `_FunctionField` and the chat's `_ChoicePicker` subclass: the button under its face, the panel
@@ -611,7 +627,10 @@ How the View layer works:
   test questions), `config_json` (`config_of`: the request without its question and session) or `cli_command`; `code()`
   shows all three as a report.
   `_ipython_display_` shows the window once per cell, so a cell
-  ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
+  ending in `chat()` doesn't show it twice. It has the ✦ Ask slot too (`_AskSlot`, `_PREFIX = "kbc"`; `chat(...,
+  assistant=)` / `app(assistant=)`): ✦ Ask ends the top row, the drawer takes the side tabs' place (`_show_drawer`,
+  which gives them back as they were), `focus_moved` comes from `_set_status` and `_tab_changed`, and its `focus`
+  (`window/focus.py`) is 'chat', 'answer' (the last question, its grounded share and the files cited) or 'test_run'. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
 - `bedrock_kb`'s explorer window, `KBExplorer` (`bedrock_kb/explorer/`: `window.py` with `explore()`, `frame.py` its
   tabs, stylesheet and `_window_text`, `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
@@ -1008,6 +1027,20 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `_switch_html` line across the conversation. With no model set up, the window opens the panel on Bedrock. Tests
   drive it like the other windows (`window()`, `enter()`, `page()` in `test_agent.py`), holding the scripted model
   back with a `threading.Event` among its replies.
+  **The ✦ Ask drawer** is the same `_AgentChat`, made by `AgentView._ask_drawer_(window)` with `focus_from=` the
+  explorer (`is_drawer`; kept in `view.drawers`): its head hides 🗂 chats and 🧠 memory, `_focus_row` shows the
+  window's focus (`window/drawer.py`'s `_focus_html`) with a "use it" box (`use_focus`), the empty conversation offers
+  `focus_questions(focus)` (rules by `(service, kind)`, `_QUESTIONS`, no model call; redrawn by `focus_moved()` when
+  they change, `offered`), and `_ask` asks with `focus=` (`_asked_focus`, read on the loop before the work starts),
+  the question showing it under the bubble (`_question_html(about=)`). Under each answer, `_targets_row` puts a button
+  per place its calls point at in the window (`answer_next`'s calls through `window/drawer.py`'s `target_for`:
+  `parse_call` reads a View call with `ast`, literals only, and `_lambda_target`, `_s3_target` or `_kb_target` maps
+  it to the explorer's own command, `x.logs(name, search=request_id)`, `x.open(name, tab=)`, `x.open(path)`, `x.file(path)`; `_go_to` runs it).
+  `AgentView._ask_query_` writes the Logs tab's ✦ query: `prompt.py`'s `query_prompt` and `parse_query_reply`, one
+  call through LangChain's `batch()` (not `invoke()`, which `rules.py` would read as Lambda's Invoke). Every window shares one conversation:
+  `AgentView._windows()` (the chat's and each drawer), `_busy_window()` (one question at a time, whichever window asks;
+  a window refuses while another answers) and `_tell_windows(what, ...)`, which passes `added` (an answer, also from a
+  window's `_answered` to the others), `cleared`, `opened`, `renamed` and `model_changed` to each.
 
 ## The S3 explorer (`s3/explorer/`)
 

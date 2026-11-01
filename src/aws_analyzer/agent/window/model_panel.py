@@ -446,7 +446,7 @@ class _ModelPanel:
             return
         self.failed = ""
         self.close()
-        self.window.model_changed()
+        self.window.view._tell_windows("model_changed")
 
     def _use(self, provider: str) -> None:
         core = self.core

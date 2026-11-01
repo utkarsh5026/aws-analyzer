@@ -21,6 +21,7 @@ from .._bedrock.models import ModelInfo
 from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
+from .._kit.focus import Focus
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
@@ -66,7 +67,7 @@ from .llm import (
     pick_provider,
     provider_info,
 )
-from .prompt import asked_at, system_prompt
+from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
 from .runtime import as_tool
 from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
@@ -773,6 +774,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         question: str,
         *,
         new: bool = False,
+        focus: Any = None,
         stop: threading.Event | None = None,
         progress: Callable[..., None] | None = None,
         on_step: Callable[[AgentStep], None] | None = None,
@@ -786,7 +788,10 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         step, and on_step(AgentStep) what the agent does as it does it (its words, its plan, each tool call as it
         starts and ends), from the threads the tools run on. A model or loop that fails gives an answer with .error
         set (and .exception) instead of raising. Before a big read (interrupt_on=) it pauses: the answer comes back
-        with .waiting set and no text yet, and resume() goes on with your choice.
+        with .waiting set and no text yet, and resume() goes on with your choice. focus= is what you're looking at in
+        an explorer window (the window itself, x = LambdaView().explore(), or its x.focus): the model is told what it
+        names (the function, tab, time range, run or file), so "why does this fail?" starts from there, and the
+        answer keeps it as .focus.
         """
         question = str(question or "").strip()
         if not question:
@@ -797,21 +802,32 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             waiting = self.waiting[0]
             raise _Hint(f"The agent is waiting for your choice on {waiting.call}: resume('go'), resume('smaller') "
                         "or resume('skip') first, or ask(..., new=True) to drop that question.")
+        shown = focus_of(focus)
         graph = self._harness()
         moment = now or _utcnow()
         run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more)
         answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
-                             asked=moment)
+                             asked=moment, focus=shown)
         self._guard.reset()
         self._run = run
         try:
-            answer.text = harness.stream_turn(graph, f"{asked_at(moment, self.zone)}\n\n{question}",
+            answer.text = harness.stream_turn(graph, self._message(question, moment, shown),
                                               thread=self.thread, run=run, answer=answer, model_prices=self.prices,
                                               progress=progress, provider=self.provider)
         finally:
             self._run = None
         self.history.append(answer)
         return self._finish(graph, run, answer)
+
+    def _message(self, question: str, moment: datetime, focus: Focus | None) -> str:
+        """
+        What the model is sent for a question: when it was asked, what the user has open (when they said), then
+        the question.
+        """
+        lines = [asked_at(moment, self.zone)]
+        if focus is not None:
+            lines.append(looking_at(focus))
+        return "\n".join(lines) + f"\n\n{question}"
 
     def resume(  # noqa: PLR0913
         self,

@@ -415,7 +415,7 @@ class _LogsTab:
         self.log_find = w.Text(placeholder=_QUERY_HINT, tooltip=_QUERY_TIP, continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
         self.log_find.observe(self._safely(self._log_typed), names="value")
-        self.log_find.on_msg(self._on_enter(self._log_search))
+        self.log_find.on_msg(self._on_enter(self._log_entered))
         clear = w.Button(description="✕", tooltip="Clear the search: every run again", layout=layout(flex="0 0 auto"))
         clear.add_class("lmx-x")
         clear.on_click(self._safely(lambda _button: setattr(self.log_find, "value", "")))
@@ -430,7 +430,8 @@ class _LogsTab:
         again = w.Button(description="↻", tooltip="Read the time range again", layout=layout(width="auto"))
         again.add_class("lmx-small")
         again.on_click(self._safely(lambda _button: self._reload_logs()))
-        bar = w.HBox([self.range_pick, ask, self.live_button, again], layout=layout(width="100%"))
+        plain, draft_row = self._plain_widgets()
+        bar = w.HBox([self.range_pick, ask, plain, self.live_button, again], layout=layout(width="100%"))
         bar.add_class("lmx-bar")
         self.custom_bar = self._custom_range_bar()
         self.run_chips = w.HBox(layout=layout(width="auto", flex="1 1 auto"))
@@ -453,7 +454,7 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
+        page = w.VBox([bar, draft_row, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
                        self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
@@ -792,7 +793,7 @@ class _LogsTab:
         self._draw_runs(renew=True)
 
     def _log_typed(self, change: dict[str, Any]) -> None:
-        if self.quiet:
+        if self.quiet or self._plain:
             return
         self._log_query = str(self.log_find.value or "").strip()
         if self.found is not None and self._log_query != self._searched:
