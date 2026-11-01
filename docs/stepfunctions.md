@@ -118,6 +118,12 @@ sfn.overview()            # or overview(days=30)
 
 The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command, such as `failures('order-pipeline')`.
 
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="807" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="807" loading=lazy }
+/// caption
+`sfn.overview()`: order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first.
+///
+
 !!! tip "Worth knowing"
 
     An Express workflow keeps no history in Step Functions, so its executions are read from its log group. With logging off they leave no record at all, and at `ERROR` only its failures do (without even the state that failed). The finding shows the `aws stepfunctions update-state-machine` command that turns logging on, at `ALL`.
@@ -138,6 +144,12 @@ sfn.failures("order-pipeline", since="30d", limit=200)
 
 For each failure it reads only the end of the execution's history (one request, whatever the history's length), which is where the failure is. When the failing state called Lambda, the group names the function and the newest run's request ID, ready for `LambdaView().logs('orders-etl', request_id='c0ffee00-…')`. It also says how many of the failed executions can still be **redriven**, started again from the state that failed, and shows the command; it never runs it.
 
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-light.webp#only-light){ width="984" height="958" loading=lazy }
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-dark.webp#only-dark){ width="984" height="958" loading=lazy }
+/// caption
+`sfn.failures("order-pipeline")`: most failures stop at LoadOrders with `KeyError: 'customer_id'`, and the newest run's `request_id` is filled in.
+///
+
 ## One execution, step by step { #execution }
 
 `execution()` shows each state an execution passed through: what it called, when it started, how long it took, how many tries, and where it failed and why.
@@ -152,6 +164,12 @@ sfn.execution("ord-7f3a", machine="order-pipeline", logs=False)    # skip the La
 A **waterfall** puts each state on one time axis, with a task's tries, the back-off between them and a Map's iterations in place. Then comes **one log of what happened**: Step Functions' own events and **what each Lambda function logged in that very run**, merged by time. Each run is found by the request ID Step Functions records in the step's result or error, so the lines are that run's and no other's. An older task that names a function's ARN as its resource records no request ID; then the run that started just after the step was scheduled is shown, and the report says it was matched by time.
 
 The states inside a Map or Parallel are summed up under it (`×12`, how many failed, the longest), retries show as tries, and a Catch that moved on is said in a finding.
+
+![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-light.webp#only-light){ width="984" height="1791" loading=lazy }
+![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-dark.webp#only-dark){ width="984" height="1791" loading=lazy }
+/// caption
+`sfn.execution("order-pipeline/ord-7f3a")`: the waterfall, then one log where orders-etl's traceback sits between the step that called it and the Catch that ended the execution.
+///
 
 ??? more "How the Lambda lines are read"
 
@@ -170,6 +188,18 @@ sfn.graph("order-pipeline", failures="7d")          # shaded by where executions
 ```
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
+
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1163" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1163" loading=lazy }
+/// caption
+`sfn.state_machine("order-pipeline")`: LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste.
+///
+
+![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="850" loading=lazy }
+![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-dark.webp#only-dark){ width="984" height="850" loading=lazy }
+/// caption
+`sfn.graph("order-pipeline", execution="ord-7f3a")`: the path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).
+///
 
 ## Explore by clicking { #explorer }
 

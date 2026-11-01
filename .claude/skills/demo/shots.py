@@ -23,6 +23,8 @@ Scenes:
               support-docs index, as /demo uses it.
   lambda_functions  demo.py's functions (moto, with patched Lambda and Logs clients for what moto lacks):
               orders-etl, churn-scoring, report-api and the rest, as /demo uses it.
+  stepfunctions  demo.py's fake Step Functions and CloudWatch (tests/fake_stepfunctions.py's acme scene), with the
+              Lambda runs behind order-pipeline's failed execution ord-7f3a in moto, as /demo uses it.
 
 Needs Pillow (pip install pillow) and Chrome: $CHROME, or the headless shell Playwright installs
 (npx playwright install chromium-headless-shell).
@@ -158,6 +160,11 @@ FIGURES = [
     Figure("lambda-how-it-works-steps", "lambda_functions",
            'ui._show(next(b for b in ui._how_blocks(core.code_map("support-agent-actions")) '
            'if type(b).__name__ == "_Tabs").tabs[1][1])', crop=620),
+    Figure("sfn-overview", "stepfunctions", "ui.overview()"),
+    Figure("sfn-failures", "stepfunctions", 'ui.failures("order-pipeline")'),
+    Figure("sfn-execution", "stepfunctions", 'ui.execution("order-pipeline/ord-7f3a")'),
+    Figure("sfn-state-machine", "stepfunctions", 'ui.state_machine("order-pipeline")'),
+    Figure("sfn-graph", "stepfunctions", 'ui.graph("order-pipeline", execution="ord-7f3a")', crop=850),
 ]
 
 
@@ -969,6 +976,12 @@ def seed_lambda_docs() -> dict:
     return demo.seed_lambda_functions()
 
 
+def seed_stepfunctions_docs() -> dict:
+    import demo
+
+    return demo.seed_stepfunctions()
+
+
 def seed_apigateway_docs() -> dict:
     import demo
 
@@ -977,7 +990,8 @@ def seed_apigateway_docs() -> dict:
 
 SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs,
           "sagemaker_env": seed_sagemaker_docs, "opensearch": seed_opensearch_docs,
-          "lambda_functions": seed_lambda_docs, "apigateway": seed_apigateway_docs}
+          "lambda_functions": seed_lambda_docs, "stepfunctions": seed_stepfunctions_docs,
+          "apigateway": seed_apigateway_docs}
 
 
 # ----------------------------------------------------------------------------- rendering and screenshots
