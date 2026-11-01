@@ -7,8 +7,8 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
-OpenSearch vector indexes, Lambda functions and the SageMaker notebook itself: what's there, what it costs, and what
-to do next. And windows you use by clicking: an explorer that shows how a
+OpenSearch vector indexes, Lambda functions, Step Functions workflows and the SageMaker notebook itself: what's there,
+what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
 your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
 last night?" or "Were last night's uploads to acme-raw processed?" from the same read-only tools, and says what it
@@ -24,7 +24,7 @@ checked.
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
+[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
 [Changelog](CHANGELOG.md)
 
 </div>
@@ -91,6 +91,7 @@ report still renders.
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• What's running now, every few seconds: runs in flight and their lines<br>• Its logs run by run, failed runs in red: search them, pick a time range (or any From and To), or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
+| <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions**             | • Every state machine's executions, failures, cost and logging<br>• Where and why executions fail, grouped by the state they stopped at<br>• One execution step by step: each state, its tries and how long it took<br>• For a failed Lambda step, the log lines of that very run<br>• What a definition risks: Lambda tasks with no retry, waits with no timeout | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -1986,6 +1987,115 @@ policy.
 
 </details>
 
+## AWS Step Functions
+
+<img src="docs/images/aws/stepfunctions.svg" width="22" height="22" alt="" align="absmiddle"> **State machines and their executions.** How often each workflow ran and failed, what it costs, where and why
+its executions fail, grouped by the state they stopped at, and one execution step by step. When a failed step called
+Lambda, the report shows **the log lines of that very run**, found by the request ID the execution's history records
+and read through the [Lambda module](#aws-lambda).
+
+📄 [`src/aws_analyzer/stepfunctions/`](src/aws_analyzer/stepfunctions/) · 📖 [Step Functions guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html)
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install.
+
+```python
+from aws_analyzer import StepFunctionsView
+
+sfn = StepFunctionsView()                    # uses the notebook's execution role and region
+sfn.help()                                   # every command, grouped by task
+
+sfn.overview()                               # every state machine: executions, failures, cost, logging
+sfn.failures("order-pipeline")               # where and why its executions fail, with the Lambda run to read
+sfn.execution("order-pipeline/ord-7f3a")     # one execution step by step, and the Lambda lines that broke it
+sfn.state_machine("order-pipeline")          # its numbers, what its definition risks, every state
+```
+
+Executions are named by their ARN, a console link, or `"state-machine/execution-name"`.
+
+### Commands (`StepFunctionsView`)
+
+Grouped the way `sfn.help()` lists them.
+
+#### State machines
+
+| Command                                  | Shows                                                                                                                                                                                                                                                |
+| :--------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `overview(days=7)`                       | Every state machine in the region: its type, executions and how many **didn't succeed** (CloudWatch, 7 days), its average run, its **estimated monthly cost** and its logging, the ones with failures first. Warnings: executions failing, starts throttled, Express workflows whose executions leave no record |
+| `state_machine(name, days=7)`            | One state machine: the same numbers, every state with what it calls, where it goes next, its retries and where an error sends it, the Lambda functions it calls, how the cost was worked out, and the definition. Findings: **Lambda tasks with no retry for Lambda's own errors** (with the Retry rule AWS recommends, to paste), waits for a callback with no timeout, logging that hides Express executions |
+| `graph(name)`                            | How it flows: each state, what it does and where it goes next, the states inside a Map or Parallel under it, and the whole thing as a **Mermaid flowchart** to paste into a Markdown cell |
+
+#### Executions
+
+| Command                                                   | Shows                                                                                                                                                                                                                                       |
+| :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `executions(name, status=None, since="7d", n=25)`         | A Standard state machine's latest executions, newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
+| `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: each state it passed through, what it called, when it started, how long it took and how many tries, a Map's iterations summed up under it, and where it failed and why. **For a failed Lambda step, that run's own log lines** (found by its request ID, or by time when the history has none), with its run time and memory. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run) |
+| `failures(name, since="7d", limit=50)`                    | Why a Standard state machine fails: the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>StepFunctionsAnalyzer</code>): state machines, executions and their steps as Python objects</summary>
+
+`sfn.core` is the `StepFunctionsAnalyzer`. Every UI command has a data method on it:
+
+```python
+core = sfn.core                                        # or StepFunctionsAnalyzer(region="eu-west-1", profile="dev")
+
+ov = core.overview(days=7)                             # Overview: .machines, .numbers (by ARN), .errors
+machine = core.state_machine("order-pipeline")         # StateMachine: .type, .states, .functions, .log_level
+core.executions("order-pipeline", status="failed").to_df()
+detail = core.execution("order-pipeline/ord-7f3a")     # ExecutionDetail: .steps, .failed_step, .lambda_run
+step = detail.failed_step                              # StepRun: .name, .function, .attempts, .request_id, .error
+detail.lambda_run.events                               # the Lambda run's lines (a LogRun from lambda_functions)
+core.failures("order-pipeline").groups                 # FailureGroup: state, error, count, newest, request_id
+```
+
+The analysis functions are pure (no AWS calls), so they also work on definitions and histories you already have:
+`parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
+steps an execution took), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
+`resource_label`, `retry_label`, `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
+`request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
+`idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
+`failure_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost</b>: the prices used</summary>
+
+- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-31
+  (`STEPFUNCTIONS_PRICES`): Standard workflows $0.025 per 1,000 state transitions, Express workflows $1.00 per million
+  executions and $0.00001667 per GB-second at 64 MB (the least Express bills). Executions are what CloudWatch counted
+  over the window (7 days by default) scaled to a month. A Standard execution is counted as one transition per
+  top-level state; Map iterations add more, and the 4,000 free transitions a month aren't taken off. For another
+  region or a discount: `StepFunctionsAnalyzer(prices={"transition": 0.0000275})`.
+- `overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many. Reading executions,
+  histories and Lambda logs costs nothing.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                        | For                                                                          |
+| :---------------------------------------------------------------- | :--------------------------------------------------------------------------- |
+| `states:ListStateMachines`, `states:DescribeStateMachine`         | The state machines, their definitions and logging                             |
+| `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution` and `failures`                         |
+| `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
+| `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
+
+Nothing here starts, stops or redrives an execution: findings show the `aws stepfunctions redrive-execution` command
+instead. Anything you can't read shows up as a note instead of an error. The
+[Step Functions guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#permissions) has a ready-made IAM
+policy.
+
+</details>
+
 ## Ask in plain English
 
 <img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
@@ -2440,6 +2550,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   (k-NN searches included) and fails the test if anything but a read is sent.
   The Lambda tests use moto for functions, triggers, CloudWatch and logs, with the few Lambda reads moto lacks
   (account limits, provisioned concurrency) answered by functions checked against the service model.
+  The Step Functions tests use [`tests/fake_stepfunctions.py`](tests/fake_stepfunctions.py): fake Step Functions and
+  CloudWatch clients checked against the service model, with execution histories built event by event as Step
+  Functions writes them (moto's are canned), and moto for the Lambda function whose logs a failed step shows.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
   window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
   stream event against the service model.
@@ -2450,7 +2563,7 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
   [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
-  [`docs/lambda_functions.md`](docs/lambda_functions.md)), and so does the S3
+  [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md)), and so does the S3
   explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and

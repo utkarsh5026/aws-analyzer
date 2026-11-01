@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from ..._kit.deps import _require
 
-from ..helpers import _lambda_time
+from ..helpers import _lambda_time, human_ms
 from ..models import Function, Invocation, LogEvent
 from .errors import _REPORT_FIELD_RE, _REPORT_RE, _TIMESTAMP_RE, classify_error
 from .performance import percentile
@@ -397,3 +397,36 @@ def line_level(message: str) -> str:
         return _LEVELS[parts[2].strip()]
     word = re.match(r"^(WARNING|WARN|INFO|DEBUG)\b", text)
     return _LEVELS[word.group(1)] if word else ""
+
+
+_LINE_PREFIX_RE = re.compile(
+    r"^(?P<level>\[[A-Z]+\]\s*)?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s+"
+)
+
+
+def readable_line(message: str) -> str:
+    """
+    A log line for a table: a REPORT line summed up, JSON shown as its level and message, the rest as written
+    without what Lambda writes before it (its time and request ID, which a table shows in their own columns).
+    """
+    run = parse_report(message)
+    if run is not None:
+        parts = [f"run {human_ms(run.duration)} (billed {human_ms(run.billed)})",
+                 f"{run.max_memory:,} of {run.memory:,} MB used"]
+        if run.init is not None:
+            parts.append(f"cold start {human_ms(run.init)}")
+        if run.status:
+            parts.append(f"status {run.status}" + (f" ({run.error_type})" if run.error_type else ""))
+        return "REPORT: " + ", ".join(parts)
+    text = message.rstrip()
+    if text.startswith("{"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            doc = None
+        if isinstance(doc, dict) and "message" in doc:
+            inner = doc["message"]
+            body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
+            return f"[{doc.get('level', '-')}] {body}"
+    return _LINE_PREFIX_RE.sub(r"\g<level>", text, count=1)[:2000]

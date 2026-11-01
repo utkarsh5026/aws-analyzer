@@ -11,6 +11,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🔀 **Step Functions: a new analyzer for state machines** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - `StepFunctionsView()`: `overview()`, `state_machine()`, `graph()`, `executions()`, `execution()` and `failures()`.
+  - `execution("order-pipeline/ord-7f3a")` shows each step, and for a failed Lambda step the log lines of that very run.
+  - `failures()` groups failed executions by the state they stopped at and the error, and shows the redrive command.
+
 - 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
   - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
   - `x.console_url` is the link, and `console_url("s3://bucket/key")` makes one for any path.

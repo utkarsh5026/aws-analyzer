@@ -9,7 +9,8 @@ AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as 
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
-region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
+region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
+(a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -163,7 +164,11 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as viewmod`:
   `_ProgressLine`, the line `_BaseView._progress` shows, makes that call, and `_BaseView.__init__` asks
   `_in_notebook` there too; an explorer's once-per-cell display asks `_cell_number` on `_kit.window`).
-  The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): the `agent/` package imports
+  The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`). `stepfunctions/` is one of
+  `lambda_functions`: `analyzer._lambda_module()` imports it the first time a failed Lambda step's run is read, and
+  it reuses only Lambda's public names (`LambdaAnalyzer.log_events(name, request_id=...)`, `split_runs`,
+  `parse_report`, `readable_line`, the `LogRun` it gets back), so `import aws_analyzer.stepfunctions` loads no
+  other analyzer. The `agent/` package imports
   `lambda_functions` (its Lambda toolkit's `_lambda_module()`, imported when the first tool runs; its type hints
   import it under `TYPE_CHECKING`) and reuses it instead of copying it, and so it does with every analyzer a later
   toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock/` (`SHARED`), for the
@@ -724,7 +729,9 @@ profiles, and `SAGEMAKER_PRICES` (`sagemaker_env/prices.py`), storage plus the h
 its vCPUs, memory and GPUs, and `OPENSEARCH_PRICES`, EBS storage and Serverless OCUs plus the hourly price of each
 OpenSearch instance type in `opensearch/prices.py`'s own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
 with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, and `LAMBDA_PRICES`, requests, GB-seconds
-(x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage; us-east-1 list prices
+(x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage, and
+`STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds;
+us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
@@ -1167,6 +1174,13 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `Patched` Logs client (`clients={"logs": ...}`) and `_LIVE_SECONDS` made short. `map_code()` is tested on `APP`, a
   three-file package that does most of what it follows, and `how_it_works()` and the Code tab's How it works on `HOW`;
   demo.py's `support-agent-actions` has `AGENT_SOURCES`, a Bedrock agent action group that sets off its findings.
+- Step Functions: moto has state machines, but its execution histories are canned, so `tests/test_stepfunctions.py`
+  uses `tests/fake_stepfunctions.py`: `FakeStepFunctions` and `FakeCloudWatch` (every request and answer checked
+  against the service model, `denied` to refuse an operation) over `scene(now)`, acme's four state machines, their
+  executions and their `AWS/States` numbers, each history built event by event by `History` (each event's
+  `previousEventId` pointing at its cause, as Step Functions writes them; `lambda_task`, `sdk_task`, `map_state`,
+  `fail`). A failed Lambda step's run is read from moto (`orders-etl` and `lambda_lines()`), through a real
+  `LambdaAnalyzer` passed as `lambda_core=`. demo.py's `seed_stepfunctions()` uses the same scene.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -1224,7 +1238,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or

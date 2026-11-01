@@ -499,13 +499,13 @@ def test_request_ids_and_report_lines():
 
 
 def test_log_lines_drop_what_the_columns_show():
-    assert viewmod._log_line(f"2026-10-05T23:28:28.000Z {RID} Task timed out after 60.00 seconds") == (
+    assert lfmod.readable_line(f"2026-10-05T23:28:28.000Z {RID} Task timed out after 60.00 seconds") == (
         "Task timed out after 60.00 seconds")
-    assert viewmod._log_line(f"[ERROR]\t2026-10-05T12:00:00.123Z\t{RID}\tCouldn't save") == "[ERROR]\tCouldn't save"
-    assert viewmod._log_line(f"2026-10-05T12:00:00.123Z\t{RID}\tERROR\tInvoke Error") == "ERROR\tInvoke Error"
-    assert viewmod._log_line("[ERROR] KeyError: 'x'") == "[ERROR] KeyError: 'x'"
-    assert viewmod._log_line('{"level": "WARN", "message": "slow"}') == "[WARN] slow"
-    assert viewmod._log_line(f"REPORT RequestId: {RID}\tDuration: 5.00 ms\tBilled Duration: 5 ms\tMemory Size: 128 MB"
+    assert lfmod.readable_line(f"[ERROR]\t2026-10-05T12:00:00.123Z\t{RID}\tCouldn't save") == "[ERROR]\tCouldn't save"
+    assert lfmod.readable_line(f"2026-10-05T12:00:00.123Z\t{RID}\tERROR\tInvoke Error") == "ERROR\tInvoke Error"
+    assert lfmod.readable_line("[ERROR] KeyError: 'x'") == "[ERROR] KeyError: 'x'"
+    assert lfmod.readable_line('{"level": "WARN", "message": "slow"}') == "[WARN] slow"
+    assert lfmod.readable_line(f"REPORT RequestId: {RID}\tDuration: 5.00 ms\tBilled Duration: 5 ms\tMemory Size: 128 MB"
                            "\tMax Memory Used: 64 MB") == "REPORT: run 5 ms (billed 5 ms), 64 of 128 MB used"
     assert viewmod._lifecycle(f"START RequestId: {RID} Version: $LATEST") and viewmod._lifecycle("INIT_START Runtime")
     assert viewmod._lifecycle('{"time":"2026-10-05T12:00:00Z","type":"platform.start","record":{}}')

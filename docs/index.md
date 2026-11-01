@@ -34,6 +34,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a href="sagemaker_env.html" title="Amazon SageMaker"><img src="images/aws/sagemaker.svg" alt="Amazon SageMaker" width="32" height="32"></a>
 <a href="opensearch.html" title="Amazon OpenSearch"><img src="images/aws/opensearch.svg" alt="Amazon OpenSearch" width="32" height="32"></a>
 <a href="lambda_functions.html" title="AWS Lambda"><img src="images/aws/lambda.svg" alt="AWS Lambda" width="32" height="32"></a>
+<a href="stepfunctions.html" title="AWS Step Functions"><img src="images/aws/stepfunctions.svg" alt="AWS Step Functions" width="32" height="32"></a>
 </p>
 
 </div>
@@ -172,6 +173,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">AWS Lambda</span><code>lambda_functions.py</code></span>
 <span class="asks"><span>Which function failed last night, and why?</span><span>Which runtimes lose support soon?</span><span>Is it paying for memory it never uses?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="stepfunctions.html">
+<img class="aws-icon" src="images/aws/stepfunctions.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">AWS Step Functions</span><code>stepfunctions</code></span>
+<span class="asks"><span>Which step of my workflow failed, and why?</span><span>What did that Lambda log in the run that broke it?</span><span>Can I redrive the failed ones?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="agent.html">

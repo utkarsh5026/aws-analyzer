@@ -2174,9 +2174,41 @@ class _Patched:
         return self._handlers.get(name) or getattr(self._client, name)
 
 
+def seed_stepfunctions() -> dict:
+    """
+    acme's state machines from tests/fake_stepfunctions.py (fake Step Functions and CloudWatch clients, since moto's
+    execution histories are canned), and orders-etl in moto with the log lines of the run that broke ord-7f3a, so
+    execution() shows them through the Lambda analyzer.
+    """
+    from datetime import datetime, timezone
+
+    import boto3
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_stepfunctions import ACCOUNT, FAILED_RUN, clients, lambda_lines
+
+    from aws_analyzer.lambda_functions import LambdaAnalyzer
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    fakes = clients(now)
+    role = boto3.client("iam").create_role(RoleName="acme-lambda-role", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
+    boto3.client("lambda", region_name=REGION).create_function(
+        FunctionName="orders-etl", Runtime="python3.12", Role=role, Handler="etl.handler",
+        Code={"ZipFile": _lambda_package({"etl.py": "def handler(event, context):\n    return event\n"})})
+    failed = next(r for r in fakes["stepfunctions"].runs if r.name == "ord-7f3a")
+    scheduled = next(e for e in reversed(failed.history.events) if e["type"] == "TaskScheduled")["timestamp"]
+    logs = boto3.client("logs", region_name=REGION)
+    group, stream = "/aws/lambda/orders-etl", f"{scheduled:%Y/%m/%d}/[$LATEST]{ACCOUNT[:8]}{FAILED_RUN[:8]}"
+    logs.create_log_group(logGroupName=group)
+    logs.create_log_stream(logGroupName=group, logStreamName=stream)
+    logs.put_log_events(logGroupName=group, logStreamName=stream, logEvents=[
+        {"timestamp": int(moment.timestamp() * 1000), "message": message} for moment, message in lambda_lines(scheduled)])
+    return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
-           "lambda_functions": seed_lambda_functions, "agent": seed_agent}
+           "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run

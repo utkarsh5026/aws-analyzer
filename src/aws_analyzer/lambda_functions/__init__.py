@@ -79,8 +79,8 @@ from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
 )
 from .analysis.logs import (
-    LogPage, LogRun, TimeBucket, line_level, parse_report, run_console_url, run_insights_query, run_timeline,
-    slow_cutoff, split_runs,
+    LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
+    run_timeline, slow_cutoff, split_runs,
 )
 from .analysis.live import (
     LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, minute_values, ran_lately, running_for,
@@ -257,6 +257,7 @@ __all__ = [
     "performance_findings",
     "provisioned_monthly_cost",
     "read_package",
+    "readable_line",
     "request_id_of",
     "runtime_family",
     "runtime_status",
