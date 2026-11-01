@@ -914,11 +914,11 @@ read it, each chunk in document order with the text it shares with the one befor
 chunks carry, and what to fix.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/kb-explorer-file-dark.webp">
-  <img src="docs/images/kb-explorer-file-light.webp" alt="The knowledge base explorer: at the top, the knowledge base support-docs and cards for 44 files, 39 searchable, 2 failed, 2 to sync, the last sync and the idle cost; tabs for Overview, Files, Syncs, Search and Settings; on the left the Files tab's search box with warranty typed in it, chips for each state with their counts and warranty.pdf listed; on the right warranty.pdf's page: its cards, no issues found, and how it was indexed as a line of steps from Stored in S3, Read by the parser and Cut into chunks (5 chunks, about 294 tokens each, from page 1 to 8) to Embedded, Stored as vectors and Now: Indexed">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/kb-explorer-tour-dark.webp">
+  <img src="docs/images/kb-explorer-tour-light.webp" alt="The knowledge base explorer in a notebook, animated: it starts on support-docs&#x27; Overview, its files by state and its findings; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline">
 </picture>
 
-<p align="center"><sub><code>explore("support-docs")</code>: every file next to Bedrock's record of it, and for warranty.pdf, each step from S3 into the vector store.</sub></p>
+<p align="center"><sub><code>explore(&quot;support-docs&quot;)</code>: find a file and see how it was indexed, ask whether it answers a question, search the whole knowledge base, then read its syncs.</sub></p>
 
 ```python
 from aws_analyzer.bedrock_kb import explore
@@ -1183,11 +1183,11 @@ keep every run in a file that outlasts a restart, and copy the setup as a Python
 📄 [`src/aws_analyzer/bedrock_chat/`](src/aws_analyzer/bedrock_chat/) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window, drawn like a terminal in a monospace font: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-tour-dark.webp">
+  <img src="docs/images/chat-tour-light.webp" alt="The chat window in a notebook, animated: the pointer types Can digital goods be refunded? and presses Enter, and the answer comes back with its cited spans shaded and its sources; it asks for a summary of how long refunds take as a list, and opens a source's details; then it opens the Test tab, pastes six test questions with the file each should cite and runs them, each question on its own line as its answer comes back; last it opens the Code tab, the setup as a Python script to copy">
 </picture>
 
-<p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
+<p align="center"><sub><code>chat(&quot;support-docs&quot;, model=&quot;sonnet&quot;)</code>: ask and read the cited sources, run a list of test questions, then copy the setup as a Python script.</sub></p>
 
 ### Quick start
 
@@ -1836,11 +1836,11 @@ with its status, run time against the timeout, memory and cold start, the failed
 it logged. Its errors grouped by cause, its run times, the code in its package and every setting are tabs beside them.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-explorer-logs-dark.webp">
-  <img src="docs/images/lambda-explorer-logs-light.webp" alt="The Lambda explorer on orders-etl: the function field, cards for its calls, error rate, run times, monthly cost and warnings, the tabs, and the Logs tab over the last 24 hours: chips for 70 runs, 13 failed, 3 timed out and 8 cold starts, a line summing them up, and the runs newest first, each with its time, status, a bar of its run time against the 60 s timeout, its memory and its first line; a failed run is open with its KeyError traceback in red and its REPORT line summed up, and a run that timed out shows a full red bar">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-explorer-tour-dark.webp">
+  <img src="docs/images/lambda-explorer-tour-light.webp" alt="The Lambda explorer in a notebook, animated: it starts on the Functions tab, five functions with the ones that need attention first; the pointer clicks orders-etl, whose Overview shows its findings; it opens the Logs tab, picks Last 24 hours and opens a failed run, whose lines end in KeyError: &#x27;customer_id&#x27;; it types AccessDenied in the search box and presses Enter, and the two runs that logged it come back with the word marked; then it opens the Errors tab, the failed calls grouped by cause, and the Code tab, the function&#x27;s files">
 </picture>
 
-<p align="center"><sub><code>explore("orders-etl", tab="logs")</code>: the last 24 hours run by run, a failed run open with its traceback, and a run that hit the 60 s timeout.</sub></p>
+<p align="center"><sub><code>explore()</code>: open orders-etl, read its failed run, search its logs for AccessDenied, then see its errors by cause and its code.</sub></p>
 
 ```python
 from aws_analyzer.lambda_functions import explore
@@ -2002,6 +2002,13 @@ and read through the [Lambda module](#aws-lambda).
 
 📄 [`src/aws_analyzer/stepfunctions/`](src/aws_analyzer/stepfunctions/) · 📖 [Step Functions guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sfn-explorer-tour-dark.webp">
+  <img src="docs/images/sfn-explorer-tour-light.webp" alt="The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step&#x27;s time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state&#x27;s definition and tries beside it">
+</picture>
+
+<p align="center"><sub><code>explore()</code>: open the failed execution ord-7f3a to see which step broke, then find that step on the workflow's graph.</sub></p>
+
 ### Quick start
 
 Every command works with boto3 alone, so on SageMaker there's nothing to install.
@@ -2138,11 +2145,11 @@ lines of that very run**, found by the request ID the access log records and rea
 📄 [`src/aws_analyzer/apigateway/`](src/aws_analyzer/apigateway/) · 📖 [API Gateway guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/apigw-explorer-call-dark.webp">
-  <img src="docs/images/apigw-explorer-call-light.webp" alt="The API Gateway explorer on orders-api's Calls tab: a timeline of the last 24 hours' calls with the failed ones in red, chips for 5xx, 4xx, slow and throttled calls, a list of calls with their status, route and time, and on the right a 504 on POST /orders opened: bars showing its 29 seconds spent in the integration, its request ID and caller, and the log lines of the orders-etl run behind it, which went on for 41 seconds">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/apigw-explorer-tour-dark.webp">
+  <img src="docs/images/apigw-explorer-tour-light.webp" alt="The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it">
 </picture>
 
-<p align="center"><sub><code>apigw.explore("orders-api", tab="calls")</code>: a call that timed out, where its 29 seconds went, and the Lambda run that was still working.</sub></p>
+<p align="center"><sub><code>explore()</code>: from the APIs to their routes, then a failed call: where its 29 seconds went and the Lambda run behind it.</sub></p>
 
 ### Quick start
 

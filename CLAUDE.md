@@ -1379,12 +1379,15 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
-  plays a scripted model over demo.py's Lambda functions. Remake the affected figures when
-  a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows thirteen of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
-  `bedrock-ask`, `kb-explorer-file`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`,
-  `lambda-explorer-logs`, `agent-chat`) as `<picture>`s that
-  switch to the `-dark` file in dark mode.
+  plays a scripted model over demo.py's Lambda functions. Every window but the agent's also has an animated tour like
+  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`,
+  `chat-tour`), at the top of its guide after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
+  the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when
+  a report's or window's look changes, and check their captions and alt text still match, in the guides and in README,
+  which shows fifteen of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`,
+  `dynamodb-scan-filter`, `bedrock-ask`, `kb-explorer-tour`, `chat-tour`, `sagemaker-instance`, `opensearch-index-info`,
+  `lambda-functions`, `lambda-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `agent-chat`) as
+  `<picture>`s that switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
   `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and

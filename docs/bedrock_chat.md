@@ -22,6 +22,12 @@ description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker
 The examples use a knowledge base called `support-docs` holding support policies, some tagged with a `team` and a `year`. Use your own names. The screenshots are the real window in JupyterLab, run against a simulated Bedrock with synthetic documents, so the answers and times are illustrative. For checking a knowledge base's health, its syncs, and what a search retrieves, see the [Knowledge Bases guide](bedrock_kb.md).
 { .muted }
 
+![The chat window in a notebook, animated: the pointer types Can digital goods be refunded? and presses Enter, and the answer comes back with its cited spans shaded and its sources; it asks for a summary of how long refunds take as a list, and opens a source's details; then it opens the Test tab, pastes six test questions with the file each should cite and runs them, each question on its own line as its answer comes back; last it opens the Code tab, the setup as a Python script to copy](images/chat-tour-light.webp#only-light){ width="984" height="796" loading=lazy }
+![The chat window in a notebook, animated: the pointer types Can digital goods be refunded? and presses Enter, and the answer comes back with its cited spans shaded and its sources; it asks for a summary of how long refunds take as a list, and opens a source's details; then it opens the Test tab, pastes six test questions with the file each should cite and runs them, each question on its own line as its answer comes back; last it opens the Code tab, the setup as a Python script to copy](images/chat-tour-dark.webp#only-dark){ width="984" height="796" loading=lazy }
+/// caption
+**`chat("support-docs")`**: ask, read the cited sources, run a list of test questions, then copy the setup as code.
+///
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

@@ -21,6 +21,12 @@ See which files your knowledge base failed to index, what a question really retr
 The examples use `support-docs`, a knowledge base of support policies in the bucket `support-docs-bucket`, some tagged with a `team` and a `year`. The screenshots are the tool's real output on a simulated Bedrock, so scores, answers and times are illustrative.
 { .muted }
 
+![The knowledge base explorer in a notebook, animated: it starts on support-docs' Overview, its files by state and its findings; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline](images/kb-explorer-tour-light.webp#only-light){ width="984" height="859" loading=lazy }
+![The knowledge base explorer in a notebook, animated: it starts on support-docs' Overview, its files by state and its findings; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline](images/kb-explorer-tour-dark.webp#only-dark){ width="984" height="859" loading=lazy }
+/// caption
+**`explore("support-docs")`**: find a file, ask whether it answers a question, search the whole knowledge base, then read its syncs.
+///
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
