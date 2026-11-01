@@ -9,6 +9,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🚪 **API Gateway: a new analyzer for REST, HTTP and WebSocket APIs** ([#192](https://github.com/utkarsh5026/aws-analyzer/pull/192))
+  - `APIGatewayView()`: `apis()`, `api_info()`, `routes()`, `stages()`, `calls()`, `errors()` and `performance()`.
+  - `errors("orders-api")` groups failed calls by cause from the stage's access log, with the Lambda run behind each.
+  - Routes anyone can call and routes close to the 29-second limit are warnings.
+
+- 🚪 **API Gateway: an explorer window** ([#192](https://github.com/utkarsh5026/aws-analyzer/pull/192))
+  - `apigw.explore()`: every API, its routes as a tree, and its calls one by one.
+  - Click a call to see where its time went and the Lambda run that served it.
+
 ## [0.44.0] - 2026-11-01
 
 ### Added

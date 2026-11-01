@@ -7,7 +7,7 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
-OpenSearch vector indexes, Lambda functions, Step Functions workflows and the SageMaker notebook itself: what's there,
+OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs and the SageMaker notebook itself: what's there,
 what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
 your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
@@ -24,7 +24,7 @@ checked.
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
+[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
 [Changelog](CHANGELOG.md)
 
 </div>
@@ -93,6 +93,8 @@ report still renders.
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• What's running now, every few seconds: runs in flight and their lines<br>• Its logs run by run, failed runs in red: search them, pick a time range (or any From and To), or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions**             | • Every state machine's executions, failures, cost and logging<br>• Where and why executions fail, grouped by the state they stopped at<br>• One execution step by step: each state, its tries and how long it took<br>• For a failed Lambda step, the log lines of that very run<br>• What a definition risks: Lambda tasks with no retry, waits with no timeout | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) |
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **Step Functions explorer**          | • Every state machine and how it's doing, failing ones first: click one to open it<br>• Its executions: filter by outcome, search, pick a time range<br>• An execution's waterfall: each state on one time axis, tries and back-off in place<br>• One log of what happened: Step Functions' events and every Lambda run's lines, merged by time<br>• The flow as a graph, coloured by an execution's path or by where executions stop | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#explorer) |
+| <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway**             | • Every REST, HTTP and WebSocket API's requests, 4xx and 5xx, latency and cost<br>• Routes anyone can call, and routes that run out of time (the 29 s limit)<br>• Which calls fail and why, from the stage's access log<br>• For a failed call, the log lines of the Lambda run behind it<br>• Stages without throttling or an access log, with the command that fixes each | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) |
+| <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **API Gateway explorer**             | • Every API and how it's doing, failing ones first: click one to open it<br>• Its routes as a tree: where a request goes, the step that fails marked<br>• Its calls one by one: where each call's time went, and the Lambda run behind it<br>• How long calls take, route by route, and each stage's settings | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -2125,6 +2127,146 @@ policy.
 
 </details>
 
+## Amazon API Gateway
+
+<img src="docs/images/aws/apigateway.svg" width="22" height="22" alt="" align="absmiddle"> **REST, HTTP and WebSocket APIs, and the calls they answer.** How often each API is called and
+how often it fails, who can call each route, which routes come close to API Gateway's **29-second limit**, and which
+calls failed and why, read from the stage's access log. When a failed call reached Lambda, the report shows **the log
+lines of that very run**, found by the request ID the access log records and read through the
+[Lambda module](#aws-lambda).
+
+📄 [`src/aws_analyzer/apigateway/`](src/aws_analyzer/apigateway/) · 📖 [API Gateway guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/apigw-explorer-call-dark.webp">
+  <img src="docs/images/apigw-explorer-call-light.webp" alt="The API Gateway explorer on orders-api's Calls tab: a timeline of the last 24 hours' calls with the failed ones in red, chips for 5xx, 4xx, slow and throttled calls, a list of calls with their status, route and time, and on the right a 504 on POST /orders opened: bars showing its 29 seconds spent in the integration, its request ID and caller, and the log lines of the orders-etl run behind it, which went on for 41 seconds">
+</picture>
+
+<p align="center"><sub><code>apigw.explore("orders-api", tab="calls")</code>: a call that timed out, where its 29 seconds went, and the Lambda run that was still working.</sub></p>
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install.
+
+```python
+from aws_analyzer import APIGatewayView
+
+apigw = APIGatewayView()                     # uses the notebook's execution role and region
+apigw.help()                                 # every command, grouped by task
+
+apigw.apis()                                 # every API: requests, 4xx and 5xx, latency, who can call it, cost
+apigw.api_info("orders-api")                 # its stages and routes, and what needs attention
+apigw.errors("orders-api")                   # which calls fail and why, with the Lambda run to read
+apigw.routes("partner-api")                  # who can call each route, where it goes, and curl to try it
+```
+
+APIs are named by their name, their ID, `"name/stage"`, their invoke URL or a console link. **A call's own record is
+in its stage's access log**: CloudWatch only counts calls. `calls()`, `errors()` and `performance()` read that log by
+the stage's own format (JSON or text), so they work with the format you chose; a stage without one gets the
+`aws apigateway update-stage` command that turns it on, in a format that logs everything they read.
+
+### Explore APIs by clicking
+
+`apigw.explore()` opens a window (Jupyter and ipywidgets) with every API, the failing ones first, to search, filter by
+chip (Failing, REST, HTTP, WebSocket, Open routes, Unused) or sort by a click on a column. Click one for its
+**Overview**, **Routes** (a tree of paths; click a route to see where a request goes, from the caller through the
+authorizer to the integration, the step that fails marked, and the curl command that calls it), **Calls** (a timeline,
+chips by status, a search box, and a click on a call shows where its time went and the Lambda run behind it),
+**Performance** and **Stages**. The stage menu at the top switches stage. It reads in the background, so the window
+answers while AWS is read, and it only reads: nothing in it sends a request to your API.
+
+```python
+apigw.explore("orders-api", tab="calls")    # or explore("orders-api/dev"), explore(tab="routes", since="7d")
+```
+
+### Commands (`APIGatewayView`)
+
+Grouped the way `apigw.help()` lists them.
+
+#### APIs
+
+| Command                                  | Shows                                                                                                                                                                                                                                                |
+| :--------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apis(days=7)`                           | Every API in the region, REST, HTTP and WebSocket: its stages, requests, **4xx and 5xx share**, how long the slowest 5% of calls take (p95), who can call it and its **estimated monthly cost** (CloudWatch, 7 days), the ones failing most first. Warnings: server errors, calls close to the time limit, **routes anyone can call**, APIs nobody calls (with the delete command, shown, never run), APIs that keep no access log |
+| `api_info(name, stage=None, days=7)`     | One API: its numbers on one stage (prod, `$default` or the one deployed last, unless `stage=` names one), its stages (URL, throttling, access and execution logs, tracing, cache, WAF) and its routes with where each goes, who can call it and, with detailed metrics, its calls, 5xx and p95. Findings: **routes that run out of time** (the integration still working when API Gateway gives up with a 504), routes failing, a stage with no throttle of its own, no access log, or full requests written to its log |
+| `routes(name, stage=None)`               | Every route: **who can call it** (its authorizer, IAM, an API key, or anyone), where it goes (a Lambda function, a URL, an AWS service call, a mock), how long API Gateway waits, the payload version, and **the curl command that calls it** (wscat for WebSocket), credentials left as `$PLACEHOLDERS`; then the authorizers |
+| `stages(name)`                           | Every stage's settings, each one's access log format, and what each risks, with the AWS CLI command that fixes it |
+
+#### Calls
+
+| Command                                                          | Shows                                                                                                                                                                                                                                       |
+| :--------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `calls(name, stage=None, since="24h", status=None, search=None, n=50)` | The stage's access log, call by call, newest first: when, the route, the status and error, how long it took and how much of that the backend took. `status="5xx"` (or `"4xx"`, `"failed"`, `504`) keeps some; `search="c1f08a2e"` asks CloudWatch Logs for a request ID or any text |
+| `errors(name, stage=None, since="24h")`                          | **What's failing**: CloudWatch's 4xx and 5xx counts, and the failed calls in the access log **grouped by status, error and route**, the most common first, each with **what it means** (a 504 is a timeout, a 502 a Lambda answer API Gateway can't use, a 429 throttling, a 403 "Missing Authentication Token" a path that doesn't exist) and the next thing to read: for a call that reached Lambda, `LambdaView().logs(function, request_id=...)` |
+| `performance(name, stage=None, since="24h")`                     | **How long calls take**: each route's average, p95 and longest (from the access log, else per-route metrics), how close they come to the time limit, how much of the time is the backend's, and the slowest calls, with **where the slowest one's time went** (the authorizer, the integration, API Gateway) |
+
+#### Explore by clicking
+
+| Command                                                              | Shows                                                                                                                                                                       |
+| :------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explore(name=None, tab=None, stage=None, since="24h", height=None)` | The [explorer window](#explore-apis-by-clicking): every API, its routes as a tree, its calls with where their time went and the Lambda run behind each, its performance and stages. `view.explorer` is the window |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>APIGatewayAnalyzer</code>): APIs, routes, stages and calls as Python objects</summary>
+
+`apigw.core` is the `APIGatewayAnalyzer`. Every UI command has a data method on it:
+
+```python
+core = apigw.core                                      # or APIGatewayAnalyzer(region="eu-west-1", profile="dev")
+
+ov = core.overview(days=7)                             # Overview: .apis, .numbers (by API ID), .errors
+api = core.api("orders-api")                           # Api: .kind, .stages, .routes, .authorizers, .open_routes
+route = api.route("POST /orders")                      # Route: .auth, .is_open, .integration (.function, .timeout_ms)
+report = core.report("orders-api/prod")                # ApiReport: .numbers (ApiNumbers), .route_numbers
+page = core.calls("orders-api", since="1h")            # CallPage: .calls (Call), .failed, .fields, .truncated
+page.to_df()                                           # every call as a DataFrame
+core.errors("orders-api").groups                       # ErrorGroup: status, error, route, count, newest
+run = core.lambda_run(api, page.failed[0])             # LambdaRun: .function, .lines, .duration_ms, .note
+```
+
+The analysis functions are pure (no AWS calls), so they also work on what you already have: `read_format` and
+`parse_access_line` (an access log line read by its stage's format), `group_errors`, `route_numbers_from_calls`,
+`latency_split`, `missing_fields` and `suggested_format`, `curl_command`, `monthly_cost`, the parsers
+(`parse_rest_api`, `parse_rest_routes`, `parse_rest_stage`, `parse_v2_api`, `parse_v2_routes`, `parse_v2_stage`, ...),
+and the findings: `numbers_findings`, `open_route_findings`, `idle_findings`, `stage_findings`, `format_findings`,
+`route_findings`, `overview_findings`, `api_findings`, `error_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost</b>: the prices used</summary>
+
+- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-11-01
+  (`APIGATEWAY_PRICES`): REST APIs $3.50 per million requests, HTTP APIs $1.00 per million, WebSocket APIs $1.00 per
+  million messages (each the first tier), plus a REST cache by the hour ($0.02 an hour for 0.5 GB, $3.80 for
+  237 GB). Requests are what CloudWatch counted over the window (7 days by default) scaled to a month. For another
+  region or a discount: `APIGatewayAnalyzer(prices={"rest_request": 0.0000037})`.
+- `apis()` reads 6 CloudWatch metrics per API ($0.01 per 1,000) and says how many; `api_info()` reads 6 more per route
+  when the stage has detailed metrics. Reading APIs, routes, stages and access logs costs nothing.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                        | For                                                                          |
+| :---------------------------------------------------------------- | :--------------------------------------------------------------------------- |
+| `apigateway:GET` on `arn:aws:apigateway:<region>::/*`             | Every API, its routes, integrations, authorizers and stages (REST, HTTP and WebSocket: API Gateway authorizes every read as `GET`) |
+| `cloudwatch:GetMetricData`                                        | Requests, 4xx, 5xx and latency (`AWS/ApiGateway`)                             |
+| `logs:FilterLogEvents` on the stages' access log groups           | `calls`, `errors`, `performance` and the explorer's Calls tab                 |
+| `lambda:GetFunction`, `logs:FilterLogEvents`                      | The Lambda run behind a call (the Lambda module reads it)                     |
+
+Nothing here sends a request to your API or changes one: findings show the `aws apigateway` / `aws apigatewayv2`
+command instead. Anything you can't read shows up as a note instead of an error. The
+[API Gateway guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#permissions) has a ready-made IAM
+policy.
+
+</details>
+
 ## Ask in plain English
 
 <img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
@@ -2586,6 +2728,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   The Step Functions tests use [`tests/fake_stepfunctions.py`](tests/fake_stepfunctions.py): fake Step Functions and
   CloudWatch clients checked against the service model, with execution histories built event by event as Step
   Functions writes them (moto's are canned), and moto for the Lambda function whose logs a failed step shows.
+  The API Gateway tests use moto for the APIs (REST in `apigateway`, HTTP and WebSocket in `apigatewayv2`), their
+  access logs and the Lambda run behind a call, and [`tests/fake_apigateway.py`](tests/fake_apigateway.py)'s
+  CloudWatch, since moto keeps no API Gateway metrics and no percentiles.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
   window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
   stream event against the service model.
@@ -2596,7 +2741,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
   [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
-  [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md)), and so does the S3
+  [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md),
+  [`docs/apigateway.md`](docs/apigateway.md)), and so does the S3
   explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and

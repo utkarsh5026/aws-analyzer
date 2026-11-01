@@ -10,7 +10,9 @@ AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as 
 through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
-(a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below). The code they
+(a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
+and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
+stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -171,7 +173,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `lambda_functions`: `analyzer._lambda_module()` imports it the first time a failed Lambda step's run is read, and
   it reuses only Lambda's public names (`LambdaAnalyzer.log_events(name, request_id=...)`, `split_runs`,
   `parse_report`, `readable_line`, the `LogRun` it gets back), so `import aws_analyzer.stepfunctions` loads no
-  other analyzer. The `agent/` package imports
+  other analyzer. `apigateway/` is one too, the same way: `analyzer._lambda_module()` is imported the first time
+  `lambda_run(api, call)` reads the run behind a call (by the `$context.integration.requestId` its access log line
+  records), with `log_events`, `split_runs` and `readable_line` only. The `agent/` package imports
   `lambda_functions` (its Lambda toolkit's `_lambda_module()`, imported when the first tool runs; its type hints
   import it under `TYPE_CHECKING`) and reuses it instead of copying it, and so it does with every analyzer a later
   toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock/` (`SHARED`), for the
@@ -247,6 +251,15 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
   operations go unchecked.
+- `apigateway/` reads both API Gateway clients (`apigateway` for REST, `apigatewayv2` for HTTP and WebSocket) into
+  one model (`analysis/parsing.py`: `Api`, `Route`, `Integration`, `Authorizer`, `Stage`), CloudWatch's
+  `AWS/ApiGateway` numbers (a REST API by `ApiName`, the others by `ApiId`; per route only with detailed metrics) and
+  the stages' access logs (`FilterLogEvents`, `# read-only:`). A line is read by its stage's own format
+  (`analysis/access_log.py`: `read_format` maps a JSON format's keys to the `$context` variables they hold, or turns
+  a text format into a regex, `parse_access_line` into a `Call`), so any format works; `suggested_format` and
+  `access_log_command` are the format and the `aws apigateway update-stage` command findings show. IAM authorizes
+  every read as `apigateway:GET`, so `IAM_ACTION` in `rules.py` maps each operation to it. Nothing sends a request to
+  an API: `routes()` shows `curl_command` / `curl_lines` (`analysis/try_it.py`) to copy.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
   installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
@@ -756,6 +769,17 @@ How the View layer works:
   `group_log_lines`, `execution_of`, `logging_gaps`), so `fill_detail` and the rest read them as they read a history.
   Express ARNs carry an ID, so calls name them by ARN (`helpers.execution_ref`). `tests/fake_stepfunctions.py`'s
   `FakeLogs` answers FilterLogEvents with those filter patterns, over `express_runs()` / `express_log_lines()`.
+- `apigateway`'s explorer window, `APIGatewayExplorer` (`apigateway/explorer/`: `window.py` with `explore()`,
+  composed of `_ApisTab` (`apis.py`), `_RoutesTab` (`routes.py`, the routes as a tree: `_route_tree`, a folder line
+  for each path others go on from) and `_CallsTab` (`calls.py`: the access log read for `_since`, a timeline, chips by
+  status, typing filters what's read and Enter asks CloudWatch Logs for the text; a click draws `_call_blocks` at
+  once, then the `run` job, `core.lambda_run`); `frame.py` its tabs, stylesheet (`.agx-app`, derived from the Step
+  Functions explorer's, on `_terminal_theme`), faces and `_window_text`; `widgets.py` the `_ApiField` and `_Line`;
+  `APIGatewayView.explore()` imports it lazily and keeps it in `view.explorer`), is the sixth interactive UI, built on
+  the windows' kit like `StepFunctionsExplorer`. The stage menu (`stage_pick`) reopens the API on another stage; the
+  Overview, Performance and Stages tabs draw the View's `_api_blocks`, `_performance_blocks` and `_stages_blocks`.
+  Its own blocks (`blocks.py`): `_Path` (where a route sends a request, box by box) and `_TimeSplit` (where a call's
+  time went: authorizer, integration, API Gateway).
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
@@ -780,12 +804,14 @@ its vCPUs, memory and GPUs, and `OPENSEARCH_PRICES`, EBS storage and Serverless 
 OpenSearch instance type in `opensearch/prices.py`'s own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
 with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, and `LAMBDA_PRICES`, requests, GB-seconds
 (x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage, and
-`STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds;
+`STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds,
+`APIGATEWAY_PRICES` (`apigateway/prices.py`), REST, HTTP and WebSocket requests, connection minutes and the hourly
+price of each REST cache size;
 us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
-AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonCloudWatch>/current/us-east-1/index.json`;
+AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonApiGateway|AmazonCloudWatch>/current/us-east-1/index.json`;
 `index.csv` is easier to grep), which is what AWS bills from. `lambda_functions/helpers.py`'s `RUNTIMES` holds each managed
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
@@ -1245,6 +1271,12 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `previousEventId` pointing at its cause, as Step Functions writes them; `lambda_task`, `sdk_task`, `map_state`,
   `fail`). A failed Lambda step's run is read from moto (`orders-etl` and `lambda_lines()`), through a real
   `LambdaAnalyzer` passed as `lambda_core=`. demo.py's `seed_stepfunctions()` uses the same scene.
+- API Gateway: moto covers both clients (the `apigateway` and `apigatewayv2` extras) but for apigatewayv2's
+  `GetAuthorizers` (the analyzer reads each authorizer by ID with `GetAuthorizer`) and any API Gateway metrics, so
+  `tests/fake_apigateway.py` seeds acme's six APIs in moto (`seed(now)`: their access logs, and orders-etl's runs
+  behind the newest 504 and 502) and answers GetMetricData with `FakeCloudWatch` over `traffic()` (`holds` and
+  `denied` as in the other fakes). demo.py's `seed_apigateway()` uses the same, and
+  `.claude/skills/demo/apigw_explorer_shots.py` makes the guide's `apigw-explorer*` figures in a real JupyterLab.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -1302,7 +1334,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or

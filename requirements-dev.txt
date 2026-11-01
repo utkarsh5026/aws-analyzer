@@ -13,7 +13,7 @@ ipython==9.17.1; python_version >= "3.11"
 ipython==8.39.0; python_version < "3.11"
 
 # Tests
-moto[s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs]==5.2.4
+moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs]==5.2.4
 pytest==9.1.1
 # Runs the tests on every CPU (CI's `pytest -n auto`); the Pyodide tests share one worker (tests/conftest.py).
 pytest-xdist==3.8.0

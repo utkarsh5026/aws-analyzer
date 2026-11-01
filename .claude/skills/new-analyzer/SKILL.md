@@ -51,7 +51,7 @@ For each command, give its name, what the user decides from it, its cards, and i
 Pick the names first:
 
 - the classes: `<Service>Analyzer` / `<Service>View` (for example `BedrockKBAnalyzer` / `BedrockKBView`)
-- a short CSS root class, the file's `_ROOT` (taken: `s3a`, `ddb`, `kba`, `kbc`, `smk`, `osv`, `lmb`)
+- a short CSS root class, the file's `_ROOT` (taken: `s3a`, `ddb`, `kba`, `kbc`, `smk`, `osv`, `lmb`, `sfn`, `apg`)
 - the price table: `<SERVICE>_PRICES`
 
 Then build the file:
