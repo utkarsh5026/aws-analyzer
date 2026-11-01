@@ -726,7 +726,7 @@ How the View layer works:
   (`LiveFunction`, `in_flight`: a START line without a REPORT line, younger than the timeout; `live_rank`,
   `timeout_warning`), and `x.board` holds what it read.
 - `stepfunctions`' explorer window, `StepFunctionsExplorer` (`stepfunctions/explorer/`: `window.py` with `explore()`,
-  `frame.py` its tabs, stylesheet (`.sfx-app`, derived from the KB explorer's), faces and `_window_text`, `widgets.py`
+  `frame.py` its tabs, stylesheet (`.sfx-app`, derived from the KB explorer's, with `_TERMINAL_CSS` over it, the S3 and Lambda explorers' console look on `_terminal_theme`), faces and `_window_text`, `widgets.py`
   the `_MachineField` (a `_Picker`) and `_Line` rows; `StepFunctionsView.explore()` imports it lazily and keeps it in
   `view.explorer`), is the fifth interactive UI, built on the windows' kit like `KBExplorer`. Tabs: State machines
   (`overview()` in the background, rows from `_machine_face`, the failing ones first), Overview (`_machine_blocks`),

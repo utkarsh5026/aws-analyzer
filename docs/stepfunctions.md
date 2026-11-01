@@ -182,30 +182,30 @@ sfn.explore("order-pipeline", execution="ord-7f3a") # with one execution open
 sfn.explore("order-pipeline", tab="failures", since="30d")
 ```
 
-![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-light.webp#only-light){ width="984" height="880" loading=lazy }
-![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
 `sfn.explore()`: every state machine, the failing ones first; the cards say how the one picked is doing.
 ///
 
 The **Executions** tab lists them newest first. Pick a time range, filter by outcome or search by name, and click one. Its page opens with the findings and the waterfall as soon as its history is read, then the log once its Lambda runs are.
 
-![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="880" loading=lazy }
-![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="866" loading=lazy }
+![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
 ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with `KeyError`.
 ///
 
-![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-light.webp#only-light){ width="984" height="880" loading=lazy }
-![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
 Lower on the same page: Step Functions' events and each function's lines, one log in time order.
 ///
 
 The **Graph** tab draws the state machine from its definition. It is coloured by the path the open execution took, or by where executions stopped in the time range. Pick a state beside the graph to see its tries, its Lambda run's lines, or the failures that stopped there.
 
-![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-light.webp#only-light){ width="984" height="880" loading=lazy }
-![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
 The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed.
 ///

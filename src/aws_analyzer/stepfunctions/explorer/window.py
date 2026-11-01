@@ -403,7 +403,7 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
         self._draw("machines", self.machine_view, findings)
         while len(self._machine_rows) < len(machines):
             self._machine_rows.append(_Line(self, self._clicked_machine))
-        header = self._w.HTML('<div class="sfx-cols"><span>State machine</span><span>Executions</span>'
+        header = self._w.HTML('<div class="sfx-cols"><span></span><span>State machine</span><span>Executions</span>'
                               "<span>Didn't succeed</span><span>Avg run</span><span>$ / month</span>"
                               "<span>Logging</span></div>")
         for line, machine in zip(self._machine_rows, machines):

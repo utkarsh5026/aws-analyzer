@@ -10,7 +10,7 @@ import re
 from ..._kit.fmt import _duration, _fmt_dt, human_age, human_money
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
-from ..._kit.window import _icon_url
+from ..._kit.window import _icon_url, _terminal_theme
 
 from ..helpers import STATUS_TONES, STATUS_WORDS
 from ..models import Execution, MachineNumbers, StateMachine
@@ -64,6 +64,80 @@ def _explorer_rules() -> str:
 _EXPLORER_DARK = ("--sx-accent:#60a5fa;--sx-accent-2:#f472b6;--sx-soft:rgba(96,165,250,.15);--sx-ring:rgba(96,165,250,"
                   ".38);--sx-raised:rgba(255,255,255,.11);--sx-shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,"
                   ".28);--sx-ink-bad:#f87171;--sx-ink-warn:#fbbf24;--sx-ink-ok:#34d399")
+
+_TERMINAL_TOKENS = ("--sx-accent:var(--sft-accent);--sx-button:var(--sft-accent);--sx-accent-2:var(--sft-prompt);"
+                    "--sx-soft:var(--sft-hover);--sx-ring:var(--sft-accent);--sx-line:var(--sft-line);"
+                    "--sx-line-2:var(--sft-line);--sx-tint:transparent;--sx-tint-2:var(--sft-hover);--sx-bg:var(--sft-bg);"
+                    "--sx-surface:transparent;--sx-raised:var(--sft-hover);--sx-shadow:none;--sx-ok:var(--sft-ok);"
+                    "--sx-warn:var(--sft-warn);--sx-bad:var(--sft-bad);--sx-ink-ok:var(--sft-ok);"
+                    "--sx-ink-warn:var(--sft-warn);--sx-ink-bad:var(--sft-bad)")
+
+_STEP_FUNCTIONS_PINK = "#e7157b"
+
+_TERMINAL_CSS = _terminal_theme((".sfx-app",), "sft") + """
+.sfx-app.sfx-app.sfx-app.sfx-app{""" + _TERMINAL_TOKENS + """}
+.sfx-app.sfx-app{font-family:var(--sft-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
+.sfx-app.sfx-app .widget-html-content,.sfx-app.sfx-app .widget-label,.sfx-app.sfx-app input,.sfx-app.sfx-app select{font-family:var(--sft-mono)}
+.sfx-app.sfx-app button.jupyter-button{font-family:var(--sft-mono);font-size:12px;border-radius:6px;background:transparent;font-weight:400}
+.sfx-app.sfx-app button.jupyter-button:hover:enabled{background:transparent;border-color:var(--sft-accent);color:var(--sft-accent)}
+.sfx-app.sfx-app button.jupyter-button.mod-primary,.sfx-app.sfx-app button.jupyter-button.mod-primary:hover:enabled{background:transparent;border-color:var(--sft-accent);color:var(--sft-accent);font-weight:700;filter:none}
+.sfx-app.sfx-app .widget-text input,.sfx-app.sfx-app .jupyter-widget-text input,.sfx-app.sfx-app .widget-dropdown>select,.sfx-app.sfx-app .jupyter-widget-dropdown>select{height:28px;border-radius:6px;font-size:12.5px}
+.sfx-app.sfx-app .widget-text input:focus,.sfx-app.sfx-app .jupyter-widget-text input:focus,.sfx-app.sfx-app .widget-dropdown>select:focus,.sfx-app.sfx-app .jupyter-widget-dropdown>select:focus{box-shadow:none}
+.sfx-app.sfx-app .widget-toggle-buttons,.sfx-app.sfx-app .jupyter-widget-toggle-buttons{padding:0;gap:4px;border-radius:0;background:transparent}
+.sfx-app.sfx-app .widget-toggle-buttons .widget-toggle-button,.sfx-app.sfx-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{border:1px solid var(--sft-line);border-radius:6px;opacity:1;color:var(--sft-dim)}
+.sfx-app.sfx-app .widget-toggle-buttons .widget-toggle-button.mod-active,.sfx-app.sfx-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button.mod-active{background:transparent;border-color:var(--sft-accent);color:var(--sft-accent);font-weight:700;box-shadow:none}
+.sfx-app .sfx-logo{width:30px;height:30px;border-radius:7px;color:""" + _STEP_FUNCTIONS_PINK + """;background:transparent;box-shadow:inset 0 0 0 1px var(--sft-line)}
+.sfx-app .sfx-name{font-size:14px;font-weight:700}
+.sfx-app .sfx-name::before{content:"\\276F  ";color:var(--sft-prompt)}
+.sfx-app .sfx-name span{color:var(--sft-comment);opacity:1;font-size:12px}
+.sfx-app .sfx-sub{color:var(--sft-comment);opacity:1;font-size:11.5px}
+.sfx-app .sfx-stat{border-radius:6px;background:transparent;padding:4px 10px}
+.sfx-app .sfx-stat .l{font-size:10.5px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1}
+.sfx-app .sfx-stat .l::before{content:"# "}
+.sfx-app .sfx-stat b{font-size:14px}
+.sfx-app .sfx-stat.warn{border-color:var(--sft-warn);background:transparent}
+.sfx-app .sfx-stat.warn b{color:var(--sft-warn)}
+.sfx-app .sfx-stat.bad{border-color:var(--sft-bad);background:transparent}
+.sfx-app .sfx-stat.bad b{color:var(--sft-bad)}
+.sfx-app .sfx-stat.ok{border-color:var(--sft-line)}
+.sfx-app .sfx-stat.ok b{color:var(--sft-ok)}
+.sfx-app.sfx-app .sfx-trig>.sfx-trig-b{border-radius:6px;box-shadow:none}
+.sfx-app.sfx-app .sfx-open .sfx-trig>.sfx-trig-b{box-shadow:none}
+.sfx-app .fxl{font-size:10.5px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1}
+.sfx-app .fxl::before{content:"# "}
+.sfx-app .fxi,.sfx-app .opi{font-family:var(--sft-mono);color:var(--sft-comment);opacity:1}
+.sfx-app.sfx-app .sfx-pop{border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18)}
+.sfx-app.sfx-app .sfx-opt>.sfx-opt-b,.sfx-app.sfx-app .sfx-row>.sfx-row-b{border-radius:5px}
+.sfx-app.sfx-app .sfx-opt.sfx-on>.sfx-opt-b{border-color:transparent;box-shadow:inset 2px 0 0 var(--sft-accent)}
+.sfx-app.sfx-app .sfx-tabs{gap:4px;padding:0;border-radius:0;background:transparent;border-bottom:1px solid var(--sft-line)}
+.sfx-app.sfx-app button.sfx-tab{height:30px;border-radius:0;border:0;opacity:.7;color:var(--sft-dim)}
+.sfx-app.sfx-app button.sfx-tab:hover:enabled{background:transparent;color:var(--sft-accent);opacity:1}
+.sfx-app.sfx-app button.sfx-tab.sfx-on,.sfx-app.sfx-app button.sfx-tab.sfx-on:hover:enabled{background:transparent;box-shadow:inset 0 -2px 0 var(--sft-accent);color:var(--sft-accent);font-weight:700}
+.sfx-app.sfx-app button.sfx-small,.sfx-app.sfx-app button.sfx-chip,.sfx-app.sfx-app button.sfx-x{border-radius:6px}
+.sfx-app.sfx-app button.sfx-chip.sfx-on,.sfx-app.sfx-app button.sfx-chip.sfx-on:hover:enabled{background:transparent;border-color:var(--sft-accent);font-weight:700}
+.sfx-app.sfx-app .sfx-left,.sfx-app.sfx-app .sfx-machines{border-radius:8px}
+.sfx-app.sfx-app .sfx-machines{border:1px solid var(--sft-line);padding:0 4px 4px 0;overflow:visible}
+.sfx-app .sfx-cols{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1;padding:8px 10px 8px 8px;border-bottom:1px solid var(--sft-line);margin:0 0 4px}
+.sfx-app .sfx-cols span:nth-child(2)::before{content:"# "}
+.sfx-app .sfx-cols span:nth-child(n+3){text-align:right}
+.sfx-app.sfx-app .sfx-row.sfx-on>.sfx-row-b,.sfx-app.sfx-app .sfx-row.sfx-on>.sfx-row-b:hover:enabled{background:transparent;border-color:transparent;box-shadow:inset 2px 0 0 var(--sft-accent)}
+.sfx-app .tag,.sfx-app .ei{border-radius:4px}
+.sfx-app .tag{font-weight:400;letter-spacing:0;color:var(--sft-comment)}
+.sfx-app .tag.x{background:rgba(231,21,123,.1);color:""" + _STEP_FUNCTIONS_PINK + """}
+.sfx-app .ef,.sfx-app .ff,.sfx-app .ez,.sfx-app .fz{color:var(--sft-comment);opacity:1}
+.sfx-app .sfx-pager .widget-html-content,.sfx-app .sfx-pager .jupyter-widget-html-content{color:var(--sft-dim);opacity:1}
+.sfx-app.sfx-app .sfx-pager{border-top:0}
+.sfx-app .sfx-label{font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1}
+.sfx-app .sfx-label::before{content:"# "}
+.sfx-app .sfn .card{border-radius:6px}
+.sfx-app .sfn .note,.sfx-app .sfn .fi{border-radius:3px 6px 6px 3px}
+.sfx-app .sfn pre{border-radius:6px}
+.sfx-app .sfx-status{color:var(--sft-dim)}
+.sfx-app .sfx-status .st{opacity:1}
+.sfx-app .sfx-status .st:not(.warn):not(.ok):not(:has(.spin))::before{content:"\\25CF  ";color:var(--sft-ok)}
+.sfx-app .sfx-status code{border-radius:4px;color:var(--sft-s)}
+.sfx-app .sfx-hint{border-radius:6px}
+.sfx-app .spin{border-top-color:var(--sft-accent)}"""
 
 _EXPLORER_CSS = """<style>
 .sfx-app{--sx-accent:#2563eb;--sx-button:#2563eb;--sx-accent-2:#db2777;--sx-soft:rgba(37,99,235,.10);--sx-ring:rgba(37,99,235,.28);--sx-line:rgba(127,127,127,.22);--sx-line-2:rgba(127,127,127,.36);--sx-tint:rgba(127,127,127,.06);--sx-tint-2:rgba(127,127,127,.11);--sx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--sx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--sx-raised:var(--sx-surface);--sx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--sx-ok:#10b981;--sx-warn:#f59e0b;--sx-bad:#ef4444;--sx-ink-bad:#dc2626;--sx-ink-warn:#b45309;--sx-ink-ok:#047857}
@@ -235,7 +309,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .sfx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--sx-tint-2);margin-left:6px;vertical-align:1px}
 .sfx-app .tag.x{background:rgba(219,39,119,.12);color:var(--sx-accent-2)}
-.sfx-app .sfx-cols{display:grid;grid-template-columns:minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;padding:4px 18px 6px 40px;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.55}
+.sfx-app .sfx-cols{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;padding:4px 10px 6px 8px;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.55}
 .sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .sfx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .sfx-app .mr .num.bad{color:var(--sx-ink-bad);font-weight:650}
@@ -270,7 +344,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ei.m-h3{background:rgba(239,68,68,.32)}
 .sfx-app .ei{width:14px;height:14px}
 .sfx-app .sfx-states .sfn .tt{margin-top:8px}
-""" + _explorer_rules() + "\n</style>"
+""" + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
 
 
 _IN_WINDOW = {
