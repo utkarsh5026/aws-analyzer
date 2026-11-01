@@ -706,6 +706,21 @@ How the View layer works:
   followed) every `_WATCH_SECONDS`, from where its last read ended. Its pure side is `analysis/live.py`
   (`LiveFunction`, `in_flight`: a START line without a REPORT line, younger than the timeout; `live_rank`,
   `timeout_warning`), and `x.board` holds what it read.
+- `stepfunctions`' explorer window, `StepFunctionsExplorer` (`stepfunctions/explorer/`: `window.py` with `explore()`,
+  `frame.py` its tabs, stylesheet (`.sfx-app`, derived from the KB explorer's), faces and `_window_text`, `widgets.py`
+  the `_MachineField` (a `_Picker`) and `_Line` rows; `StepFunctionsView.explore()` imports it lazily and keeps it in
+  `view.explorer`), is the fifth interactive UI, built on the windows' kit like `KBExplorer`. Tabs: State machines
+  (`overview()` in the background, rows from `_machine_face`, the failing ones first), Overview (`_machine_blocks`),
+  Executions (a list of `ListExecutions` with status chips, search, `since_pick` and a pager; a click is the
+  `execution` job, `core.execution(logs=False)`, drawn at once, then the `story` job, `core.execution_story()`),
+  Failures (read when first opened; a button per group opens its newest execution) and Definition (`_graph_blocks`).
+  An execution's waterfall and log are report blocks, so `execution()` draws them too: `analysis/story.py` (pure:
+  `waterfall()` into `WaterfallRow`s of `Segment`s, `step_lines()`, `merge_log()`, `lambda_steps()`, `ExecutionStory`)
+  and `blocks.py` (`_Waterfall`, `_Story`, with `_EXTRA_CSS` in `style.py`); `StepFunctionsAnalyzer.execution_story()`
+  reads each Lambda step's run with `lambda_run()` side by side (`_STORY_STEPS`, the failed first) and turns its lines
+  into `LogLine`s with Lambda's `readable_line`. `tests/fake_stepfunctions.py`'s `holds` hold a call back for the
+  background tests; `story_logs()` and `ok_run_lines()` give the Lambda steps' runs, and
+  `.claude/skills/demo/sfn_explorer_shots.py` makes the guide's `sfn-explorer*` figures in a real JupyterLab.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,

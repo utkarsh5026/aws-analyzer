@@ -16,6 +16,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `execution("order-pipeline/ord-7f3a")` shows each step, and for a failed Lambda step the log lines of that very run.
   - `failures()` groups failed executions by the state they stopped at and the error, and shows the redrive command.
 
+- 🔀 **Step Functions: an explorer window, and one log per execution** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `sfn.explore()`: every state machine, then its executions to click through, its failures and its definition.
+  - `execution()` draws a waterfall of the states, with tries and back-off, and one log merging every Lambda run's lines.
+
 - 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
   - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
   - `x.console_url` is the link, and `console_url("s3://bucket/key")` makes one for any path.

@@ -91,6 +91,14 @@ Four questions people bring to a workflow, and the one line that answers each. N
 
     [One state machine](#state-machine)
 
+-   **I'd rather click than type.**
+
+    ```python
+    sfn.explore()
+    ```
+
+    [Explore by clicking](#explorer)
+
 </div>
 
 An execution is named by its ARN, a link copied from the console, or `"state-machine/execution-name"`.
@@ -137,7 +145,7 @@ sfn.execution("arn:aws:states:us-east-1:123456789012:execution:order-pipeline:or
 sfn.execution("ord-7f3a", machine="order-pipeline", logs=False)    # skip the Lambda logs
 ```
 
-When the failed step called Lambda, the report shows **what that function logged in that very run**: its lines, its run time and the memory it used. The run is found by the request ID Step Functions records in the step's result or error, so the lines are that run's and no other's. An older task that names a function's ARN as its resource records no request ID; then the run that started just after the step was scheduled is shown, and the report says it was matched by time.
+A **waterfall** puts each state on one time axis, with a task's tries, the back-off between them and a Map's iterations in place. Then comes **one log of what happened**: Step Functions' own events and **what each Lambda function logged in that very run**, merged by time. Each run is found by the request ID Step Functions records in the step's result or error, so the lines are that run's and no other's. An older task that names a function's ARN as its resource records no request ID; then the run that started just after the step was scheduled is shown, and the report says it was matched by time.
 
 The states inside a Map or Parallel are summed up under it (`×12`, how many failed, the longest), retries show as tries, and a Catch that moved on is said in a finding.
 
@@ -156,6 +164,43 @@ sfn.graph("order-pipeline")        # how it flows, and a Mermaid flowchart to pa
 ```
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
+
+## Explore by clicking { #explorer }
+
+`explore()` opens a window with every state machine; click one to read its executions, each with its waterfall and one log of what happened.
+{ .gist }
+
+```python
+sfn.explore()                                       # the state machine failing most, or the first
+sfn.explore("order-pipeline", execution="ord-7f3a") # with one execution open
+sfn.explore("order-pipeline", tab="failures", since="30d")
+```
+
+![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-light.webp#only-light){ width="984" height="880" loading=lazy }
+![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+/// caption
+`sfn.explore()`: every state machine, the failing ones first; the cards say how the one picked is doing.
+///
+
+The **Executions** tab lists them newest first. Pick a time range, filter by outcome or search by name, and click one. Its page opens with the findings and the waterfall as soon as its history is read, then the log once its Lambda runs are.
+
+![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="880" loading=lazy }
+![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+/// caption
+ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with `KeyError`.
+///
+
+![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-light.webp#only-light){ width="984" height="880" loading=lazy }
+![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+/// caption
+Lower on the same page: Step Functions' events and each function's lines, one log in time order.
+///
+
+The **Failures** tab is `failures()`, with a button per group that opens its newest execution. **Overview** is `state_machine()` and **Definition** is `graph()`. The window only reads, like the reports, and outside Jupyter `explore()` shows the reports instead.
+
+??? more "How the window reads"
+
+    AWS is read off the notebook's event loop, so a click returns at once: the state machines and their CloudWatch numbers first, then the one you pick, then its executions. An execution's history is one read and its log another, the Lambda runs read side by side (at most 12, the failed ones first). Pick another execution while one is still being read and the first one's result is dropped when it comes back.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
@@ -254,8 +299,9 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 | `state_machine(name, days=7)` | One state machine: its numbers, every state, what its definition risks, the definition |
 | `graph(name)` | How it flows, and a Mermaid flowchart to paste |
 | `executions(name, status=None, since="7d", n=25)` | Its latest executions, newest first |
-| `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step, and a failed Lambda step's run |
+| `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step: its waterfall, and one log with every Lambda run's lines |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |
+| `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The explorer window: every state machine, its executions with their waterfall and log, failures and definition |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

@@ -9,6 +9,8 @@ import statistics
 from typing import Any
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from .._kit.deps import _require
+from .._kit.errors import _Hint
 from .._kit.fmt import _count, _duration, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
@@ -22,7 +24,9 @@ from .analysis import (
 )
 from .analysis.cost import free_tier_note
 from .analysis.findings import lambda_logs_call
-from .analyzer import StepFunctionsAnalyzer, _lambda_module
+from .analysis.story import ExecutionStory, waterfall
+from .analyzer import StepFunctionsAnalyzer
+from .blocks import _Story, _Waterfall
 from .style import _render_html
 
 
@@ -31,8 +35,6 @@ _STEP_TONES = {"ok": "ok", "failed": "bad", "running": "warn", "ended": ""}
 _STEP_WORDS = {"ok": "ok", "failed": "failed", "running": "never finished", "ended": "end"}
 
 _LOG_LEVELS = {"OFF": "off", "ALL": "everything", "ERROR": "errors only", "FATAL": "fatal errors only"}
-
-_LAMBDA_LINES = 60
 
 _INPUT_CHARS = 4_000
 
@@ -139,32 +141,44 @@ def _step_rows(detail: ExecutionDetail) -> list[list[Any]]:
     return rows
 
 
-def _lambda_run_blocks(detail: ExecutionDetail) -> list[Any]:
+def _missing_run_note(detail: ExecutionDetail) -> list[Any]:
     """
-    The Lambda run behind the failed step: its lines (the newest _LAMBDA_LINES), and what its REPORT line says.
+    Why the Lambda run behind the failed step isn't in the log, with the call that looks for it.
     """
-    step, run = detail.failed_step, detail.lambda_run
-    if step is None or not step.function or not detail.lambda_note:
+    step = detail.failed_step
+    if step is None or not step.function or not detail.lambda_note or detail.lambda_run is not None:
         return []
-    if run is None:
-        why = detail.lambda_note
-        call = lambda_logs_call(step.function, step.request_id) if step.request_id else (
-            f"LambdaView().{_call('errors', step.function)}")
-        return [_Note(f"The Lambda run behind {step.name} couldn't be shown: {why}. Look for it with {call}.")]
-    lambda_functions = _lambda_module()
-    failing = {id(event) for event, _, _ in run.failures}
-    rows = []
-    for event in run.events[-_LAMBDA_LINES:]:
-        kind = _Tone("error", "bad") if id(event) in failing else ("report" if lambda_functions.parse_report(
-            event.message) else "")
-        rows.append([_fmt_dt(event.time, seconds=True), kind, lambda_functions.readable_line(event.message)])
-    facts = [f"run {run.request_id}", detail.lambda_note]
-    if run.report is not None:
-        facts.append(f"ran {_ms(run.report.duration)}, {run.report.max_memory:,} of {run.report.memory:,} MB used")
-    if run.cold:
-        facts.append("a cold start")
-    title = f"What {step.function} logged in that run ({'; '.join(f for f in facts if f)})"
-    return [_Table([f"Time ({_tz_label()})", "Kind", "Line"], rows, title=title, max_rows=0, sortable=False)]
+    call = lambda_logs_call(step.function, step.request_id) if step.request_id else (
+        f"LambdaView().{_call('errors', step.function)}")
+    return [_Note(f"The Lambda run behind {step.name} couldn't be shown: {detail.lambda_note}. Look for it with "
+                  f"{call}.")]
+
+
+def _story_blocks(story: ExecutionStory | None) -> list[Any]:
+    """
+    The execution's log, Step Functions' lines and every Lambda run's merged by time, with what wasn't read.
+    """
+    if story is None:
+        return []
+    missing = [f"{r.step.function} ({r.note})" for r in story.runs if r.run is None and r.note]
+    notes = []
+    if missing:
+        notes.append(f"Not in the log: {', '.join(missing)}.")
+    if story.skipped:
+        notes.append(f"{_plural(story.skipped, 'more Lambda step')} not read (the failed ones and the first "
+                     f"{len(story.runs)} were).")
+    return [_Story(story.lines, story.sources, title="What happened, in order: Step Functions and every Lambda run "
+                                                     "it called", note=" ".join(notes))]
+
+
+def _with_story_run(detail: ExecutionDetail, story: ExecutionStory) -> None:
+    """
+    Puts the failed step's run from the story on the detail, so the findings say where its lines are.
+    """
+    failed = detail.failed_step
+    found = next((r for r in story.runs if r.step is failed), None)
+    if found is not None:
+        detail.lambda_run, detail.lambda_note = found.run, found.note
 
 
 class StepFunctionsView(_BaseView):
@@ -177,6 +191,7 @@ class StepFunctionsView(_BaseView):
     _GROUPS = {
         "🔀 State machines": ("overview", "state_machine", "graph"),
         "🏃 Executions": ("executions", "execution", "failures"),
+        "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
     _START = (
@@ -398,12 +413,14 @@ class StepFunctionsView(_BaseView):
         the states inside a Map or Parallel under it, and the whole thing as a Mermaid flowchart to paste into a
         Markdown cell.
         """
-        machine = self.core.state_machine(name)
+        self._show(self._graph_blocks(self.core.state_machine(name)))
+
+    def _graph_blocks(self, machine: StateMachine) -> list[Any]:
         top = sum(1 for s in machine.states if s.depth == 0)
         nested = len(machine.states) - top
         sub = f"starts at {machine.start_at} · {_plural(top, 'state')}" + (
             f", and {_plural(nested, 'state')} inside a Map or Parallel" if nested else "")
-        blocks = [
+        return [
             _Title(f"How {machine.name} flows", sub),
             self._states_table(machine, title="Each state, what it does, and where it goes next"),
             _Text(mermaid(machine), title="As a Mermaid flowchart: paste it into a Markdown cell (```mermaid) or "
@@ -411,7 +428,6 @@ class StepFunctionsView(_BaseView):
             _Next([(_call("state_machine", machine.name), "its numbers, findings and cost")]
                   + ([] if machine.is_express else [(_call("executions", machine.name), "its latest executions")])),
         ]
-        self._show(blocks)
 
     @_friendly_errors
     def executions(self, name: str, *, status: str | None = None, since: Any = "7d", n: Any = 25) -> None:
@@ -466,15 +482,19 @@ class StepFunctionsView(_BaseView):
     @_friendly_errors
     def execution(self, ref: str, *, machine: str | None = None, logs: bool = True, max_events: Any = 5_000) -> None:
         """
-        One execution step by step: each state it passed through, what it called, when, how long it took and how
-        many tries, where it failed and why, and for a failed Lambda step that run's own log lines. Name it by its
-        ARN, a console link, or 'state-machine/execution-name'; logs=False skips reading the Lambda logs.
+        One execution step by step: each state on a time axis with its tries and back-off, what it called, how
+        long it took, where it failed and why, and one log of what happened, Step Functions' own events and the log
+        lines of every Lambda run it called, merged by time. Name it by its ARN, a console link, or
+        'state-machine/execution-name'; logs=False skips reading the Lambda logs.
         """
         with self._progress("Reading the execution", unit="events"):
-            detail = self.core.execution(ref, machine=machine, logs=logs, max_events=max_events)
-        self._show(self._execution_blocks(detail))
+            detail = self.core.execution(ref, machine=machine, logs=False, max_events=max_events)
+            story = self.core.execution_story(detail) if logs else None
+        if story is not None:
+            _with_story_run(detail, story)
+        self._show(self._execution_blocks(detail, story))
 
-    def _execution_blocks(self, detail: ExecutionDetail) -> list[Any]:
+    def _execution_blocks(self, detail: ExecutionDetail, story: ExecutionStory | None = None) -> list[Any]:
         execution, step = detail.execution, detail.failed_step
         status_word = STATUS_WORDS.get(execution.status, execution.status)
         retries = sum(s.retries for s in detail.steps)
@@ -497,10 +517,11 @@ class StepFunctionsView(_BaseView):
             _Title(f"Execution {execution.name}", sub),
             _Cards([_card(c) for c in cards]),
             _Findings(execution_findings(detail, _utcnow())),
+            _Waterfall(waterfall(detail), title="When each state ran"),
             _Table(["State", "Type", "Does", "Entered", "Took", "Tries", "Result"], _step_rows(detail),
                    title="The states it passed through, in order", max_rows=0, sortable=False),
         ]
-        blocks += _lambda_run_blocks(detail)
+        blocks += _story_blocks(story) + _missing_run_note(detail)
         if step is not None and step.cause and detail.lambda_run is None:
             blocks.append(_Text(_pretty_json(step.cause), title=f"The error {step.name} returned", collapsed=True))
         if step is not None and step.input and step.input != execution.input:
@@ -579,6 +600,27 @@ class StepFunctionsView(_BaseView):
             steps.append((f"LambdaView().{_call('errors', top.function)}", f"every error {top.function} logged"))
         steps.append((_call("graph", report.machine.name), "how it flows, and where errors go"))
         return steps[:3]
+
+    @_friendly_errors
+    def explore(self, name: str | None = None, *, execution: str | None = None, tab: str | None = None,
+                since: str = "7d", height: int | str | None = None) -> None:
+        """
+        The explorer window: every state machine and how it's doing, and for the one you click its executions to
+        click through, each with its waterfall and one log of what happened (Step Functions' events and every Lambda
+        run's lines, merged by time), its failures by cause and its definition. Needs Jupyter and ipywidgets;
+        view.explorer is the window.
+        """
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, overview() lists every "
+                "state machine, failures('name') says where and why one fails, and execution('name/execution') "
+                "shows one step by step."
+            )
+        _require("ipywidgets", "The explorer window")
+        from .explorer.window import StepFunctionsExplorer
+
+        self.explorer = StepFunctionsExplorer(name, execution=execution, tab=tab, since=since, view=self,
+                                              height=height, mode="widgets")
 
 
 def _needs_attention(machine: StateMachine, numbers: MachineNumbers | None) -> bool:

@@ -1,11 +1,15 @@
+import asyncio
+import html as html_lib
 import json
+import re
+import threading
 from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
 from fake_stepfunctions import (
     FAILED_RUN, ORDER_PIPELINE, REFUND_APPROVALS, FakeCloudWatch, FakeStepFunctions, History, Try, clients,
-    lambda_lines, machine_arn, run_arn, scene,
+    lambda_lines, machine_arn, run_arn, scene, story_logs,
 )
 from moto import mock_aws
 from test_lambda_functions import create, lambda_clients, put_logs
@@ -20,6 +24,9 @@ from aws_analyzer.stepfunctions import (
     mermaid, monthly_cost, parse_definition, parse_execution_ref, parse_state_machine, request_id_of_cause,
     request_id_of_output, short_cause, transitions_per_execution, unbounded_waits, unretried_lambda_states,
 )
+from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
+from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
+from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
 
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
@@ -342,8 +349,9 @@ def test_execution_report_with_the_lambda_run(fakes, lambda_logs, capsys):
     scheduled = core.execution("order-pipeline/ord-7f3a", logs=False).failed_step.attempts[-1].scheduled
     put_logs("/aws/lambda/orders-etl", lambda_lines(scheduled))
     out = run(capsys, StepFunctionsView(core, mode="text").execution, "order-pipeline/ord-7f3a")
-    assert "What orders-etl logged in that run" in out and "found by its request ID" in out
-    assert "reading s3://acme-uploads" in out and "REPORT: run 1.73 s" in out and "Its Lambda run's lines" in out
+    assert "orders-etl      reading s3://acme-uploads" in out and "REPORT: run 1.73 s" in out
+    assert "Its Lambda run's lines are in the log below" in out
+    assert "Not in the log: validate-order (validate-order no longer exists in this region)" in out
 
 
 def test_failures_report(ui, capsys):
@@ -387,3 +395,226 @@ def test_history_builder_makes_valid_chains():
     history = History(NOW).lambda_task("A", "fn", [Try(0.1, request_id="r")]).succeed()
     ids = {e["id"] for e in history.events}
     assert all(e.get("previousEventId", 0) in ids | {0} for e in history.events)
+
+
+def story_core(fakes, lambda_logs):
+    """
+    An analyzer whose Lambda steps' runs are in moto: validate-order, charge-card and orders-etl, with the lines
+    they logged in ord-7f3a.
+    """
+    role = boto3.client("iam").create_role(RoleName="steps", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
+    for function in ("validate-order", "charge-card"):
+        create(function, role)
+    failed = next(r for r in fakes["stepfunctions"].runs if r.name == "ord-7f3a")
+    for function, lines in story_logs(failed.history).items():
+        put_logs(f"/aws/lambda/{function}", lines, stream=f"2026/11/01/[$LATEST]{function}")
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes, lambda_core=lambda_logs)
+    core.max_workers = 1
+    return core
+
+
+def test_waterfall_places_tries_and_back_off():
+    chart = waterfall(detail_of("ord-7f3a"))
+    names = [row.name for row in chart.rows]
+    assert names == ["ValidateOrder", "IsPriority", "ReserveStock", "ChargeCard", "LoadOrders", "OrderFailed"]
+    charge = chart.rows[3]
+    assert [seg.kind for seg in charge.segments] == ["retry", "wait", "retry", "wait", "ok"]
+    assert chart.rows[4].segments[0].kind == "failed" and chart.rows[4].segments[0].label == "KeyError"
+    assert all(0 <= seg.start <= 1 and seg.start + seg.width <= 1.0001 for row in chart.rows for seg in row.segments)
+    mapped = waterfall(detail_of("ord-25a8"))
+    resize = next(row for row in mapped.rows if row.name == "ResizeImage")
+    assert resize.depth == 1 and resize.count == 3 and len(resize.segments) == 3
+    assert waterfall(ExecutionDetail(Execution("a", "a", "m", "RUNNING"))).rows == []
+
+
+def test_step_lines_and_merging():
+    lines = step_lines(detail_of("ord-7f3a"))
+    texts = [line.text for line in lines]
+    assert texts[0] == "Execution ord-7f3a started" and texts[-1] == "Execution failed: OrderFailed"
+    assert "ChargeCard failed: Rate Exceeded, retried" in texts
+    assert any(t.startswith("LoadOrders scheduled · orders-etl · request c0ffee00") for t in texts)
+    late = LogLine(lines[1].time, "orders-etl", "hello")
+    merged = merge_log([late], lines)
+    assert merged.index(late) > merged.index(lines[1])
+
+
+def test_execution_story_reads_every_lambda_step(fakes, lambda_logs):
+    core = story_core(fakes, lambda_logs)
+    detail = core.execution("order-pipeline/ord-7f3a", logs=False)
+    story = core.execution_story(detail)
+    assert [r.step.name for r in story.runs] == ["LoadOrders", "ValidateOrder", "ChargeCard"]
+    assert all(r.run is not None for r in story.runs) and story.skipped == 0
+    assert story.sources == ["step functions", "validate-order", "charge-card", "orders-etl"]
+    texts = [line.text for line in story.lines]
+    assert "validated order 88219: 3 items, total $184.20" in texts and "charged: ch_3Q8xk2" in texts
+    assert texts.index("charged: ch_3Q8xk2") < next(i for i, t in enumerate(texts) if t.startswith("LoadOrders"))
+    assert [line.kind for line in story.lines if line.source == "orders-etl"].count("error") == 1
+    small = core.execution_story(detail, most=1)
+    assert [r.step.name for r in small.runs] == ["LoadOrders"] and small.skipped == 2
+
+
+def test_execution_report_draws_the_waterfall_and_the_log(fakes, lambda_logs, capsys):
+    core = story_core(fakes, lambda_logs)
+    out = run(capsys, StepFunctionsView(core, mode="text").execution, "order-pipeline/ord-7f3a")
+    for expected in ("-- When each state ran --", "ChargeCard", "·······", "-- What happened, in order",
+                     "validate-order  validated order 88219", "charge-card     charged: ch_3Q8xk2",
+                     "Its Lambda run's lines are in the log below"):
+        assert expected in out, expected
+    view = StepFunctionsView(core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.execution("order-pipeline/ord-7f3a")
+    html = sfnmod.view._render_html(shown[0], 50)
+    assert 'class="wfs retry"' in html and 'class="src sf"' in html and "charged: ch_3Q8xk2" in html
+
+
+def explorer(fakes, machine=None, **kwargs):
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    core.max_workers = 1
+    return StepFunctionsExplorer(machine, core=core, mode="widgets", **kwargs)
+
+
+def plain(value):
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", value)).split())
+
+
+def test_window_wording():
+    assert window_text("See where and why: failures('order-pipeline')") == "See where and why: the Failures tab"
+    assert window_text("See one: execution('order-pipeline/ord-0b17')") == "See one: ord-0b17 in the Executions tab"
+    assert window_text("$1 a month. state_machine('x') shows it.") == "$1 a month. The Overview tab shows it."
+    assert window_text("Read it: LambdaView().logs('etl', request_id='x')") == (
+        "Read it: LambdaView().logs('etl', request_id='x')")
+
+
+def test_explorer_opens_the_failing_state_machine(fakes):
+    x = explorer(fakes)
+    assert x.machine.name == "order-pipeline" and x._tab == "machines"
+    assert [m.name for m in x.field.choices] == ["image-resize-express", "kb-sync", "order-pipeline",
+                                                 "refund-approvals"]
+    assert "Executions · 7d 1,239 Didn't succeed 49 (4.0%)" in plain(x.stats.value)
+    assert "order-pipeline" in plain(x.machines_box.children[2].children[1].value)
+    assert len(x.page.executions) == 9 and len(x._visible) == 9
+    assert "9 executions in the last 7 days · 5 didn't succeed" == plain(x.status.value)
+    assert "sfx-alarm" in x.tab_buttons["executions"]._dom_classes
+    assert "Executions of order-pipeline" in plain(x.execution_view.value)
+    assert "How order-pipeline flows" in plain(x.definition_view.value)
+    assert "LoadOrders calls Lambda with no Retry" in plain(x.overview_view.value)
+
+
+def test_explorer_opens_an_execution_with_its_log(fakes, lambda_logs):
+    core = story_core(fakes, lambda_logs)
+    x = StepFunctionsExplorer("order-pipeline", core=core, mode="widgets")
+    x.tab_buttons["executions"].click()
+    row = next(line for line in x._rows if line.key.endswith(":ord-7f3a"))
+    row.button.click()
+    assert x.detail.execution.name == "ord-7f3a" and "sfx-on" in row.box._dom_classes
+    page = plain(x.execution_view.value)
+    assert "Execution ord-7f3a" in page and "When each state ran" in page and "charged: ch_3Q8xk2" in page
+    assert "ord-7f3a: failed · 3 Lambda runs in its log" == plain(x.status.value)
+    assert x.shown["execution"][0].text == "Execution ord-7f3a"
+    x.execution("ord-25a8")
+    assert x.detail.execution.name == "ord-25a8" and "×3" in plain(x.execution_view.value)
+
+
+def test_explorer_filters_searches_and_reads_another_range(fakes):
+    x = explorer(fakes, "order-pipeline")
+    chips = {c.description.rsplit(" ", 1)[0]: c for c in x.chips.children}
+    assert sorted(chips) == ["All", "Failed", "Running", "Succeeded", "Timed out"]
+    chips["Failed"].click()
+    assert {e.status for e in x._visible} == {"FAILED"} and len(x._visible) == 4
+    x.chips.children[1].click()
+    assert len(x._visible) == 9
+    x.find.value = "ord-7"
+    assert [e.name for e in x._visible] == ["ord-7f3a", "ord-77e0"]
+    x.find.value = "nothing"
+    assert "No execution matches" in plain(x.rows_box.children[0].value)
+    x.find.value = ""
+    x.since_pick.value = "30d"
+    assert len(x.page.executions) == 10 and x.report is None
+
+
+def test_explorer_failures_tab_opens_the_newest_of_each_group(fakes):
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["failures"].click()
+    assert x.report is not None and "Why order-pipeline fails" in plain(x.failures_view.value)
+    assert "ord-0b17 in the Executions tab" in plain(x.failures_view.value)
+    labels = [b.description for b in x.failure_opens.children]
+    assert labels[0] == "Open ord-7f3a (LoadOrders: KeyError)" and len(labels) == 3
+    x.failure_opens.children[1].click()
+    assert x._tab == "executions" and x.detail.execution.name == "ord-0b17"
+
+
+def test_explorer_express_and_picking(fakes):
+    x = explorer(fakes, "image-resize-express")
+    assert x.machine.is_express and "Express workflow" in plain(x.execution_view.value)
+    x.field.open()
+    x.field.search.value = "order"
+    assert x.field.shown == [machine_arn("order-pipeline")]
+    x.field._entered()
+    assert x.machine.name == "order-pipeline" and not x.field.is_open
+    x._machine_rows[2].button.click()
+    assert x._tab == "overview" and x.machine.name == "kb-sync"
+    x.open("order-pipelin")
+    assert "No state machine named 'order-pipelin'" in plain(x.status.value)
+
+
+def test_explorer_starts_where_asked(fakes):
+    x = explorer(fakes, "order-pipeline", execution="ord-0b17", tab="definition")
+    assert x._tab == "executions" and x.detail.execution.name == "ord-0b17"
+    with pytest.raises(ValueError, match="tab is one of"):
+        explorer(fakes, tab="logs")
+    fakes["stepfunctions"].denied.add("list_state_machines")
+    blocked = explorer(fakes)
+    assert "Couldn't list the state machines" in plain(blocked.status.value) and blocked.machine is None
+
+
+def test_explorer_reads_in_the_background(fakes):
+    history = fakes["stepfunctions"].holds["get_execution_history"] = threading.Event()
+
+    async def settle(x, *keys):
+        while any(key in x._tasks for key in keys or list(x._tasks)):
+            await asyncio.gather(*[task for key, task in x._tasks.items() if not keys or key in keys])
+
+    async def main():
+        x = explorer(fakes, "order-pipeline")
+        assert list(x._tasks) == ["list"] and x.machine is None
+        await settle(x)
+        first = next(line for line in x._rows if line.key.endswith(":ord-7f3a"))
+        second = next(line for line in x._rows if line.key.endswith(":ord-25a8"))
+        first.button.click()
+        assert "execution" in x._tasks and "skw" in x.execution_view.value
+        second.button.click()
+        history.set()
+        await settle(x)
+        assert x.detail.execution.name == "ord-25a8"
+
+    asyncio.run(main())
+
+
+def test_explorer_without_widgets_shows_reports(fakes, capsys):
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    StepFunctionsExplorer("order-pipeline", core=core, mode="text")
+    out = capsys.readouterr().out
+    assert "order-pipeline" in out and "Its states" in out
+    view = StepFunctionsView(core, mode="text")
+    assert "needs Jupyter" in run(capsys, view.explore)
+    html_view = StepFunctionsView(core, mode="html")
+    html_view._show = lambda blocks: None
+    html_view.explore("order-pipeline")
+    assert html_view.explorer.machine.name == "order-pipeline"
+
+
+def test_explorer_shows_its_window_once_per_cell(fakes, monkeypatch):
+    import IPython.display
+
+    from aws_analyzer._kit import window as kit_window
+
+    shown, cell = [], [1]
+    monkeypatch.setattr(kit_window, "_cell_number", lambda: cell[0])
+    monkeypatch.setattr(IPython.display, "display", lambda obj: shown.append(obj))
+    x = explorer(fakes, "order-pipeline")
+    x._ipython_display_()
+    assert shown == [x.root]
+    cell[0] = 2
+    x._ipython_display_()
+    assert shown == [x.root, x.root]

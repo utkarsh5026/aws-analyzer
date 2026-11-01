@@ -17,8 +17,13 @@ from .findings import (
     numbers_findings, overview_findings,
 )
 from .history import fill_detail, request_id_of_cause, request_id_of_output
+from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
+    "ExecutionStory",
+    "LogLine",
+    "Waterfall",
+    "WaterfallRow",
     "LAMBDA_SERVICE_ERRORS",
     "REDRIVE_DAYS",
     "can_redrive",
@@ -30,6 +35,7 @@ __all__ = [
     "idle_findings",
     "group_failures",
     "logging_findings",
+    "merge_log",
     "machine_findings",
     "mermaid",
     "monthly_cost",
@@ -42,7 +48,9 @@ __all__ = [
     "request_id_of_output",
     "resource_label",
     "retry_label",
+    "step_lines",
     "transitions_per_execution",
     "unbounded_waits",
     "unretried_lambda_states",
+    "waterfall",
 ]

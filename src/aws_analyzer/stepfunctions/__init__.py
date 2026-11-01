@@ -27,6 +27,7 @@ Quick start
     sfn.execution("order-pipeline/ord-7f3a")       # one execution step by step, and the Lambda lines that broke it
     sfn.executions("order-pipeline", status="failed")
     sfn.graph("order-pipeline")                    # how it flows, and a Mermaid flowchart to paste
+    sfn.explore("order-pipeline")                  # a window to click through it all (Jupyter, ipywidgets)
 
     core = sfn.core                                # the same analyzer, raw data
     detail = core.execution("order-pipeline/ord-7f3a")
@@ -46,10 +47,12 @@ from .analysis import (
     failure_findings, fill_detail, group_failures, idle_findings, logging_findings, machine_findings, mermaid,
     monthly_cost, numbers_findings, overview_findings, parse_definition, parse_execution, parse_state_machine,
     request_id_of_cause, request_id_of_output, resource_label, retry_label, transitions_per_execution,
-    unbounded_waits, unretried_lambda_states,
+    unbounded_waits, unretried_lambda_states, ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines,
+    waterfall,
 )
 from .analyzer import StepFunctionsAnalyzer
 from .view import StepFunctionsView
+from .explorer.window import StepFunctionsExplorer, explore
 
 __all__ = [
     "LAMBDA_SERVICE_ERRORS",
@@ -59,20 +62,26 @@ __all__ = [
     "Execution",
     "ExecutionDetail",
     "ExecutionPage",
+    "ExecutionStory",
     "FailureGroup",
     "FailureReport",
+    "LogLine",
     "MachineNumbers",
     "Overview",
     "StateDef",
     "StateMachine",
     "StepFunctionsAnalyzer",
+    "StepFunctionsExplorer",
     "StepFunctionsView",
     "StepRun",
+    "Waterfall",
+    "WaterfallRow",
     "can_redrive",
     "catch_label",
     "definition_findings",
     "execution_findings",
     "execution_name",
+    "explore",
     "failure_findings",
     "fill_detail",
     "group_failures",
@@ -81,6 +90,7 @@ __all__ = [
     "logging_findings",
     "machine_findings",
     "machine_name",
+    "merge_log",
     "mermaid",
     "monthly_cost",
     "numbers_findings",
@@ -94,7 +104,9 @@ __all__ = [
     "resource_label",
     "retry_label",
     "short_cause",
+    "step_lines",
     "transitions_per_execution",
     "unbounded_waits",
     "unretried_lambda_states",
+    "waterfall",
 ]

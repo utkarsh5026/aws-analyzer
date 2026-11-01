@@ -189,7 +189,7 @@ def execution_findings(detail: ExecutionDetail, now: datetime) -> list[Finding]:
         where = f" ({step.function})" if step.function else ""
         nxt = ""
         if step.function and step.request_id:
-            nxt = (" Its Lambda run's lines are below." if detail.lambda_run is not None
+            nxt = (" Its Lambda run's lines are in the log below." if detail.lambda_run is not None
                    else f" Read the Lambda run: {lambda_logs_call(step.function, step.request_id)}")
         found.append(("warn", f"{step.name}{where} failed and ended the execution. It returned {error}.{nxt}"))
         later = [s for s in detail.steps if s.entered > step.entered and s.depth <= step.depth]

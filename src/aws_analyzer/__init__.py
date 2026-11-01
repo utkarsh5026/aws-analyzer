@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from .opensearch import OpenSearchAnalyzer, OpenSearchView
     from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
-    from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsView
+    from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
 __version__ = "0.42.0"
 
@@ -88,6 +88,7 @@ __all__ = [
     "LambdaExplorer",
     "StepFunctionsAnalyzer",
     "StepFunctionsView",
+    "StepFunctionsExplorer",
     "AgentAnalyzer",
     "AgentView",
     "set_timezone",
@@ -117,6 +118,7 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaExplorer": "lambda_functions",
     "StepFunctionsAnalyzer": "stepfunctions",
     "StepFunctionsView": "stepfunctions",
+    "StepFunctionsExplorer": "stepfunctions",
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",

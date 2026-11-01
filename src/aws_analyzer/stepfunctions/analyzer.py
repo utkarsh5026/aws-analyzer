@@ -24,6 +24,7 @@ from .models import (
 )
 from .prices import STEPFUNCTIONS_PRICES
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
+from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
 
 
 _METRIC_STAT_AND_FIELD = {
@@ -48,6 +49,8 @@ _LOG_PAD = timedelta(minutes=2)
 
 _TIME_MATCH_LINES = 2_000
 
+_STORY_STEPS = 12
+
 
 def _lambda_module() -> Any:
     """
@@ -57,6 +60,22 @@ def _lambda_module() -> Any:
     from .. import lambda_functions
 
     return lambda_functions
+
+
+def _run_lines(story_run: StoryRun) -> list[LogLine]:
+    """
+    A Lambda run's lines for an execution's log, as the Lambda reports show them (readable_line): the lines that
+    report an error marked, and the REPORT line summed up.
+    """
+    lambda_functions = _lambda_module()
+    run, step = story_run.run, story_run.step
+    failing = {id(event) for event, _, _ in run.failures}
+    lines = []
+    for event in run.events:
+        is_report = lambda_functions.parse_report(event.message) is not None
+        kind = "error" if id(event) in failing else ("report" if is_report else "")
+        lines.append(LogLine(event.time, step.function, lambda_functions.readable_line(event.message), step.name, kind))
+    return lines
 
 
 def _midnight_after(now: datetime) -> datetime:
@@ -350,6 +369,17 @@ class StepFunctionsAnalyzer(_BaseAnalyzer):
             return None, _log_failure(exc, step.function)
         except BotoCoreError as exc:
             return None, f"its logs couldn't be read ({type(exc).__name__})"
+
+    def execution_story(self, detail: ExecutionDetail, *, most: int = _STORY_STEPS) -> ExecutionStory:
+        """
+        An execution's whole log: Step Functions' own lines and the log lines of the Lambda run behind each Lambda
+        step (at most `most` steps, the failed ones first, read side by side), merged by time.
+        """
+        steps, skipped = lambda_steps(detail, most)
+        found = self._map(self.lambda_run, steps)
+        runs = [StoryRun(step, run, note) for step, (run, note) in zip(steps, found)]
+        lambda_lines = [_run_lines(story_run) for story_run in runs if story_run.run is not None]
+        return ExecutionStory(merge_log(step_lines(detail), *lambda_lines), runs, skipped)
 
     def _run_by_request(self, step: StepRun, attempt: Attempt, region: str | None) -> Any:
         ended = attempt.ended or attempt.scheduled

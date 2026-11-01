@@ -8,6 +8,7 @@ model, as a real client's would be. moto has state machines, but its execution h
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -228,7 +229,8 @@ class FakeRun:
 class _Checked:
     """
     A boto3 client stand-in answering from methods of its own, every request and answer checked against the
-    service model. An operation it has no method for doesn't exist on it.
+    service model. An operation it has no method for doesn't exist on it. denied: operations refused as
+    AccessDenied; holds: an Event per operation that its calls wait for (the background tests hold one back).
     """
 
     service = ""
@@ -239,6 +241,7 @@ class _Checked:
         self._ops = {xform_name(op): model.operation_model(op) for op in model.operation_names}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.denied: set[str] = set()
+        self.holds: dict[str, threading.Event] = {}
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_") or not hasattr(type(self), f"_{name}"):
@@ -250,6 +253,9 @@ class _Checked:
         report = ParamValidator().validate(params, operation.input_shape)
         assert not report.has_errors(), report.generate_report()
         self.calls.append((name, params))
+        hold = self.holds.get(name)
+        if hold is not None:
+            hold.wait(5)
         if name in self.denied:
             raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}},
                               operation.name)
@@ -578,3 +584,50 @@ def lambda_lines(start: datetime, request_id: str = FAILED_RUN) -> list[tuple[da
         (at(1.73), f"REPORT RequestId: {request_id}\tDuration: 1730.00 ms\tBilled Duration: 1731 ms\tMemory Size: "
                    "1024 MB\tMax Memory Used: 151 MB"),
     ]
+
+
+def _stamp(moment: datetime) -> str:
+    return f"{moment.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z"
+
+
+def ok_run_lines(start: datetime, request_id: str, said: list[str], *, ms: float, used: int,
+                 init_ms: float | None = None) -> list[tuple[datetime, str]]:
+    """
+    A run that went well, as Lambda logs it: a start-up line on a cold start, START, what it said, END and REPORT.
+    """
+    at = lambda seconds: start + timedelta(seconds=seconds)  # noqa: E731
+    lines = []
+    if init_ms:
+        lines.append((at(-init_ms / 1000), "INIT_START Runtime Version: python:3.12.v40\tRuntime Version ARN: "
+                                           "arn:aws:lambda:us-east-1::runtime:abc"))
+    lines.append((at(0), f"START RequestId: {request_id} Version: $LATEST"))
+    step = ms / 1000 / (len(said) + 1)
+    for i, text in enumerate(said, start=1):
+        lines.append((at(step * i), f"{_stamp(at(step * i))}\t{request_id}\t{text}"))
+    end = at(ms / 1000)
+    init = f"\tInit Duration: {init_ms:.2f} ms" if init_ms else ""
+    lines += [(end, f"END RequestId: {request_id}"),
+              (end, f"REPORT RequestId: {request_id}\tDuration: {ms:.2f} ms\tBilled Duration: {int(ms) + 1} ms\t"
+                    f"Memory Size: 512 MB\tMax Memory Used: {used} MB{init}")]
+    return lines
+
+
+def story_logs(history: History) -> dict[str, list[tuple[datetime, str]]]:
+    """
+    What validate-order, charge-card and orders-etl logged in ord-7f3a's runs (each function's log lines, by
+    function), timed from its history: charge-card's last try a cold start, orders-etl's run the KeyError.
+    """
+    scheduled = {}
+    for event in history.events:
+        if event["type"] == "TaskScheduled":
+            parameters = json.loads(event["taskScheduledEventDetails"]["parameters"])
+            name = str(parameters.get("FunctionName", "")).rsplit(":", 1)[-1]
+            scheduled.setdefault(name, []).append(event["timestamp"])
+    return {
+        "validate-order": ok_run_lines(scheduled["validate-order"][0] + timedelta(seconds=0.03), _rid(1),
+                                       ["validated order 88219: 3 items, total $184.20"], ms=180, used=71),
+        "charge-card": ok_run_lines(scheduled["charge-card"][-1] + timedelta(seconds=0.33), _rid(2),
+                                    ["charging card ••4242 $184.20", "charged: ch_3Q8xk2"], ms=520, used=96,
+                                    init_ms=310),
+        "orders-etl": lambda_lines(scheduled["orders-etl"][0]),
+    }

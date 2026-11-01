@@ -2185,7 +2185,7 @@ def seed_stepfunctions() -> dict:
     import boto3
 
     sys.path.insert(0, str(ROOT / "tests"))
-    from fake_stepfunctions import ACCOUNT, FAILED_RUN, clients, lambda_lines
+    from fake_stepfunctions import ACCOUNT, clients, story_logs
 
     from aws_analyzer.lambda_functions import LambdaAnalyzer
 
@@ -2196,13 +2196,17 @@ def seed_stepfunctions() -> dict:
         FunctionName="orders-etl", Runtime="python3.12", Role=role, Handler="etl.handler",
         Code={"ZipFile": _lambda_package({"etl.py": "def handler(event, context):\n    return event\n"})})
     failed = next(r for r in fakes["stepfunctions"].runs if r.name == "ord-7f3a")
-    scheduled = next(e for e in reversed(failed.history.events) if e["type"] == "TaskScheduled")["timestamp"]
     logs = boto3.client("logs", region_name=REGION)
-    group, stream = "/aws/lambda/orders-etl", f"{scheduled:%Y/%m/%d}/[$LATEST]{ACCOUNT[:8]}{FAILED_RUN[:8]}"
-    logs.create_log_group(logGroupName=group)
-    logs.create_log_stream(logGroupName=group, logStreamName=stream)
-    logs.put_log_events(logGroupName=group, logStreamName=stream, logEvents=[
-        {"timestamp": int(moment.timestamp() * 1000), "message": message} for moment, message in lambda_lines(scheduled)])
+    for function, lines in story_logs(failed.history).items():
+        if function != "orders-etl":
+            boto3.client("lambda", region_name=REGION).create_function(
+                FunctionName=function, Runtime="python3.12", Role=role, Handler="app.handler",
+                Code={"ZipFile": _lambda_package({"app.py": "def handler(event, context):\n    return event\n"})})
+        group, stream = f"/aws/lambda/{function}", f"{lines[0][0]:%Y/%m/%d}/[$LATEST]{ACCOUNT[:8]}{function[:6]}"
+        logs.create_log_group(logGroupName=group)
+        logs.create_log_stream(logGroupName=group, logStreamName=stream)
+        logs.put_log_events(logGroupName=group, logStreamName=stream, logEvents=[
+            {"timestamp": int(moment.timestamp() * 1000), "message": message} for moment, message in lines])
     return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
 
 

@@ -92,6 +92,7 @@ report still renders.
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• What's running now, every few seconds: runs in flight and their lines<br>• Its logs run by run, failed runs in red: search them, pick a time range (or any From and To), or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions**             | • Every state machine's executions, failures, cost and logging<br>• Where and why executions fail, grouped by the state they stopped at<br>• One execution step by step: each state, its tries and how long it took<br>• For a failed Lambda step, the log lines of that very run<br>• What a definition risks: Lambda tasks with no retry, waits with no timeout | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) |
+| <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **Step Functions explorer**          | • Every state machine and how it's doing, failing ones first: click one to open it<br>• Its executions: filter by outcome, search, pick a time range<br>• An execution's waterfall: each state on one time axis, tries and back-off in place<br>• One log of what happened: Step Functions' events and every Lambda run's lines, merged by time | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -2014,6 +2015,17 @@ sfn.state_machine("order-pipeline")          # its numbers, what its definition 
 
 Executions are named by their ARN, a console link, or `"state-machine/execution-name"`.
 
+### Explore state machines by clicking
+
+`sfn.explore()` opens a window (Jupyter and ipywidgets) with every state machine, the failing ones first. Click one
+for its **Overview**, **Executions** (filter by outcome, search, pick a time range, and click one for its waterfall
+and one log with every Lambda run's lines), **Failures** (each group's newest execution a click away) and
+**Definition**. It reads in the background, so the window answers while AWS is read, and it only reads.
+
+```python
+sfn.explore("order-pipeline", execution="ord-7f3a")   # or explore(tab="failures", since="30d")
+```
+
 ### Commands (`StepFunctionsView`)
 
 Grouped the way `sfn.help()` lists them.
@@ -2026,12 +2038,18 @@ Grouped the way `sfn.help()` lists them.
 | `state_machine(name, days=7)`            | One state machine: the same numbers, every state with what it calls, where it goes next, its retries and where an error sends it, the Lambda functions it calls, how the cost was worked out, and the definition. Findings: **Lambda tasks with no retry for Lambda's own errors** (with the Retry rule AWS recommends, to paste), waits for a callback with no timeout, logging that hides Express executions |
 | `graph(name)`                            | How it flows: each state, what it does and where it goes next, the states inside a Map or Parallel under it, and the whole thing as a **Mermaid flowchart** to paste into a Markdown cell |
 
+#### Explore by clicking
+
+| Command                                                                 | Shows                                                                                                                                                                       |
+| :---------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The [explorer window](#explore-state-machines-by-clicking): every state machine, its executions with their waterfall and log, its failures and its definition. `view.explorer` is the window |
+
 #### Executions
 
 | Command                                                   | Shows                                                                                                                                                                                                                                       |
 | :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `executions(name, status=None, since="7d", n=25)`         | A Standard state machine's latest executions, newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
-| `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: each state it passed through, what it called, when it started, how long it took and how many tries, a Map's iterations summed up under it, and where it failed and why. **For a failed Lambda step, that run's own log lines** (found by its request ID, or by time when the history has none), with its run time and memory. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run) |
+| `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: a **waterfall** of each state on one time axis (a task's tries and the back-off between them, a Map's iterations in place), each state with what it called, how long it took and how many tries, and where it failed and why. Then **one log of what happened**: Step Functions' events and **the log lines of every Lambda run it called** (each found by its request ID, or by time when the history has none), merged by time. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run) |
 | `failures(name, since="7d", limit=50)`                    | Why a Standard state machine fails: the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
 
 ### Reference
@@ -2050,12 +2068,14 @@ core.executions("order-pipeline", status="failed").to_df()
 detail = core.execution("order-pipeline/ord-7f3a")     # ExecutionDetail: .steps, .failed_step, .lambda_run
 step = detail.failed_step                              # StepRun: .name, .function, .attempts, .request_id, .error
 detail.lambda_run.events                               # the Lambda run's lines (a LogRun from lambda_functions)
+story = core.execution_story(detail)                   # ExecutionStory: .lines (LogLine, merged), .runs, .sources
+waterfall(detail).rows                                 # WaterfallRow: name, depth, segments (each try, back-off)
 core.failures("order-pipeline").groups                 # FailureGroup: state, error, count, newest, request_id
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on definitions and histories you already have:
 `parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
-steps an execution took), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
+steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
 `resource_label`, `retry_label`, `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
