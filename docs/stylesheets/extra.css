@@ -258,6 +258,7 @@
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="opensearch.html"]::before { background-image: url("../images/aws/opensearch.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="lambda_functions.html"]::before { background-image: url("../images/aws/lambda.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="stepfunctions.html"]::before { background-image: url("../images/aws/stepfunctions.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="apigateway.html"]::before { background-image: url("../images/aws/apigateway.svg"); }
 }
 
 /* Contents: a track down the side, the section you're reading marked on it */

@@ -9,8 +9,8 @@ Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzers it
     builds on (COMPANIONS: the agent/ package on lambda_functions/, s3/ and bedrock_kb/, stepfunctions/ on
-    lambda_functions/ for a Lambda step's logs); an import of a
-    module a few analyzers share by any other analyzer (SHARED: _bedrock/, for bedrock_kb.py, bedrock_chat.py and
+    lambda_functions/ for a Lambda step's logs, apigateway/ on lambda_functions/ for the run behind a call); an
+    import of a module a few analyzers share by any other analyzer (SHARED: _bedrock/, for bedrock_kb.py, bedrock_chat.py and
     agent/); a shared module importing an analyzer;
     and _kit/ importing any of them
   - an analyzer defining a name that _kit/ has, or the shared module it imports (a copy of a shared helper: import
@@ -58,7 +58,8 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
 # S3Toolkit on S3Analyzer).
-COMPANIONS = {"agent": ("lambda_functions", "s3", "bedrock_kb"), "stepfunctions": ("lambda_functions",)}
+COMPANIONS = {"agent": ("lambda_functions", "s3", "bedrock_kb"), "stepfunctions": ("lambda_functions",),
+              "apigateway": ("lambda_functions",)}
 ALIASES = {"s3_explorer": "s3"}
 # Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
@@ -102,6 +103,17 @@ IAM_ACTION = {
     "dynamodb:ExecuteStatement": "dynamodb:PartiQLSelect",
     "bedrock-runtime:Converse": "bedrock:InvokeModel",
     "bedrock-agent-runtime:RetrieveAndGenerateStream": "bedrock:RetrieveAndGenerate",  # one permission for both
+    "apigateway:GetRestApis": "apigateway:GET",
+    "apigateway:GetAuthorizers": "apigateway:GET",
+    "apigateway:GetResources": "apigateway:GET",
+    "apigateway:GetStages": "apigateway:GET",
+    "apigatewayv2:GetApis": "apigateway:GET",
+    "apigatewayv2:GetIntegrations": "apigateway:GET",
+    "apigatewayv2:GetRoutes": "apigateway:GET",
+    "apigatewayv2:GetAuthorizer": "apigateway:GET",
+    "apigatewayv2:GetAuthorizers": "apigateway:GET",
+    "apigateway:GetAuthorizer": "apigateway:GET",
+    "apigatewayv2:GetStages": "apigateway:GET",
     "sts:GetCallerIdentity": None,  # needs no permission
 }
 # boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:,

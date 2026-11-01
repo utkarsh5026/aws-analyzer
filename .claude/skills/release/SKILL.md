@@ -67,7 +67,8 @@ each change from a glance, so keep a bullet small:
   works inside belong in README and the guide, not here; link the guide section when there's more to tell.
 - A fix or a small change can be the headline alone.
 - The service emojis: 🪣 S3, 🧭 S3 explorer, 📊 DynamoDB, 📚 Bedrock Knowledge Bases, 💬 Bedrock chat,
-  🧪 SageMaker, 🔎 OpenSearch, ⚡ Lambda, 🔀 Step Functions, 🤖 Agent, 🧰 every service (themes, time zones, install).
+  🧪 SageMaker, 🔎 OpenSearch, ⚡ Lambda, 🔀 Step Functions, 🚪 API Gateway, 🤖 Agent, 🧰 every service (themes,
+  time zones, install).
 - Group the bullets under `### Added` (new commands, arguments, file types, services), `### Changed` (output,
   defaults or behaviour that's different), `### Fixed`, `### Removed`, in that order, and leave out empty groups.
   Write the headings plain: `notes` adds their emojis (✨ 🔄 🐛 🗑️).

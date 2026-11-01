@@ -35,6 +35,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a href="opensearch.html" title="Amazon OpenSearch"><img src="images/aws/opensearch.svg" alt="Amazon OpenSearch" width="32" height="32"></a>
 <a href="lambda_functions.html" title="AWS Lambda"><img src="images/aws/lambda.svg" alt="AWS Lambda" width="32" height="32"></a>
 <a href="stepfunctions.html" title="AWS Step Functions"><img src="images/aws/stepfunctions.svg" alt="AWS Step Functions" width="32" height="32"></a>
+<a href="apigateway.html" title="Amazon API Gateway"><img src="images/aws/apigateway.svg" alt="Amazon API Gateway" width="32" height="32"></a>
 </p>
 
 </div>
@@ -179,6 +180,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <img class="aws-icon" src="images/aws/stepfunctions.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">AWS Step Functions</span><code>stepfunctions</code></span>
 <span class="asks"><span>Which step of my workflow failed, and why?</span><span>What did that Lambda log in the run that broke it?</span><span>Can I redrive the failed ones?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="apigateway.html">
+<img class="aws-icon" src="images/aws/apigateway.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon API Gateway</span><code>apigateway</code></span>
+<span class="asks"><span>Which calls to my API fail, and why?</span><span>Who can call this route without signing in?</span><span>Did the Lambda behind that 504 finish anyway?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="agent.html">

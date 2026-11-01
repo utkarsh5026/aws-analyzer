@@ -2225,9 +2225,26 @@ def seed_stepfunctions() -> dict:
     return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
 
 
+def seed_apigateway() -> dict:
+    """
+    acme's six APIs from tests/fake_apigateway.py, in moto (REST, HTTP and WebSocket), with their access logs and
+    orders-etl's runs behind the failed calls, and its fake CloudWatch (moto keeps no API Gateway metrics).
+    """
+    from datetime import datetime, timezone
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_apigateway import cloudwatch, seed
+
+    from aws_analyzer.lambda_functions import LambdaAnalyzer
+
+    ids = seed(datetime.now(timezone.utc).replace(microsecond=0))
+    return {"clients": {"cloudwatch": cloudwatch(ids)}, "lambda_core": LambdaAnalyzer(region=REGION)}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
-           "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions, "agent": seed_agent}
+           "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions,
+           "apigateway": seed_apigateway, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run
