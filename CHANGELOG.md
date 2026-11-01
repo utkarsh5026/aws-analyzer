@@ -9,8 +9,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
-## [0.43.0] - 2026-11-01
-
 ### Added
 
 - 🔀 **Step Functions: a new analyzer for state machines** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
@@ -29,6 +27,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🔀 **Step Functions: Express executions, from their log group** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
   - `executions()`, `execution()` and `failures()` now read Express workflows from the log group their logging writes.
   - The reports say what a log group at `ERROR` level leaves out; with logging off they show how to turn it on.
+
+## [0.43.0] - 2026-11-01
+
+### Added
 
 - 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
   - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
