@@ -120,7 +120,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/lambda_functions/models.py": 97,
     "src/aws_analyzer/lambda_functions/prices.py": 14,
     "src/aws_analyzer/lambda_functions/style.py": 2,
-    "src/aws_analyzer/lambda_functions/view.py": 20,
+    "src/aws_analyzer/lambda_functions/view.py": 18,
     "src/aws_analyzer/opensearch/analysis/parsing.py": 9,
     "src/aws_analyzer/opensearch/analyzer.py": 14,
     "src/aws_analyzer/opensearch/embeddings.py": 1,

@@ -2174,9 +2174,60 @@ class _Patched:
         return self._handlers.get(name) or getattr(self._client, name)
 
 
+def seed_stepfunctions() -> dict:
+    """
+    acme's state machines from tests/fake_stepfunctions.py (fake Step Functions and CloudWatch clients, since moto's
+    execution histories are canned), and orders-etl in moto with the log lines of the run that broke ord-7f3a, so
+    execution() shows them through the Lambda analyzer.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    import boto3
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_stepfunctions import (
+        ACCOUNT, RESIZE_FAILED_RUN, clients, express_arn, express_runs, ok_run_lines, story_logs,
+    )
+
+    from aws_analyzer.lambda_functions import LambdaAnalyzer
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    fakes = clients(now)
+    role = boto3.client("iam").create_role(RoleName="acme-lambda-role", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
+    boto3.client("lambda", region_name=REGION).create_function(
+        FunctionName="orders-etl", Runtime="python3.12", Role=role, Handler="etl.handler",
+        Code={"ZipFile": _lambda_package({"etl.py": "def handler(event, context):\n    return event\n"})})
+    failed = next(r for r in fakes["stepfunctions"].runs if r.name == "ord-7f3a")
+    logs = boto3.client("logs", region_name=REGION)
+    for function, lines in story_logs(failed.history).items():
+        if function != "orders-etl":
+            boto3.client("lambda", region_name=REGION).create_function(
+                FunctionName=function, Runtime="python3.12", Role=role, Handler="app.handler",
+                Code={"ZipFile": _lambda_package({"app.py": "def handler(event, context):\n    return event\n"})})
+        group, stream = f"/aws/lambda/{function}", f"{lines[0][0]:%Y/%m/%d}/[$LATEST]{ACCOUNT[:8]}{function[:6]}"
+        logs.create_log_group(logGroupName=group)
+        logs.create_log_stream(logGroupName=group, logStreamName=stream)
+        logs.put_log_events(logGroupName=group, logStreamName=stream, logEvents=[
+            {"timestamp": int(moment.timestamp() * 1000), "message": message} for moment, message in lines])
+    broken = express_runs(now)[express_arn("rsz-0099")]
+    scheduled = next(e for e in broken.events if e["type"] == "TaskScheduled")["timestamp"]
+    rid = RESIZE_FAILED_RUN
+    oom = ok_run_lines(scheduled + timedelta(seconds=0.04), rid, ["resizing photos/huge.tiff (412 MB) to 2048px"],
+                       ms=2850, used=512)
+    oom[-1] = (oom[-1][0], oom[-1][1] + "\tStatus: error\tError Type: Runtime.OutOfMemory")
+    boto3.client("lambda", region_name=REGION).create_function(
+        FunctionName="resize-image", Runtime="python3.12", Role=role, Handler="app.handler", MemorySize=512,
+        Code={"ZipFile": _lambda_package({"app.py": "def handler(event, context):\n    return event\n"})})
+    logs.create_log_group(logGroupName="/aws/lambda/resize-image")
+    logs.create_log_stream(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize")
+    logs.put_log_events(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize",
+                        logEvents=[{"timestamp": int(m.timestamp() * 1000), "message": text} for m, text in oom])
+    return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
-           "lambda_functions": seed_lambda_functions, "agent": seed_agent}
+           "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run

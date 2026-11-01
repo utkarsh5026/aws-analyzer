@@ -5,10 +5,8 @@ LambdaView: the notebook UI, which renders what LambdaAnalyzer returns as cards 
 from __future__ import annotations
 
 import difflib
-import json
 import math
 import os
-import re
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import datetime
@@ -42,7 +40,7 @@ from .analysis.functions import runtime_status
 from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
-from .analysis.logs import parse_report
+from .analysis.logs import parse_report, readable_line
 from .analysis.performance import percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
@@ -203,40 +201,6 @@ def _concurrency_cell(fn: Function) -> tuple[Any, str]:
         return _Tone("0: switched off", "bad"), "Every call is throttled"
     return (f"{fn.reserved_concurrency:,} reserved",
             f"At most {fn.reserved_concurrency:,} run at once (more are throttled), and that many are kept for it")
-
-
-def _log_line(message: str) -> str:
-    """
-    A log line for a table: a REPORT line summed up, JSON shown as its level and message, the rest as written.
-    """
-    run = parse_report(message)
-    if run is not None:
-        parts = [f"run {human_ms(run.duration)} (billed {human_ms(run.billed)})",
-                 f"{run.max_memory:,} of {run.memory:,} MB used"]
-        if run.init is not None:
-            parts.append(f"cold start {human_ms(run.init)}")
-        if run.status:
-            parts.append(f"status {run.status}" + (f" ({run.error_type})" if run.error_type else ""))
-        return "REPORT: " + ", ".join(parts)
-    text = message.rstrip()
-    if text.startswith("{"):
-        try:
-            doc = json.loads(text)
-        except ValueError:
-            doc = None
-        if isinstance(doc, dict) and "message" in doc:
-            inner = doc["message"]
-            body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
-            return f"[{doc.get('level', '-')}] {body}"
-    return _LINE_PREFIX_RE.sub(r"\g<level>", text, count=1)[:2000]
-
-
-# What Lambda writes before each line it adds ('<time> <request ID> ', '[ERROR]\t<time>\t<request ID>\t', Node's
-# '<time>\t<request ID>\tERROR\t'): the report's Time and Request ID columns say it already.
-_LINE_PREFIX_RE = re.compile(
-    r"^(?P<level>\[[A-Z]+\]\s*)?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s+"
-)
 
 
 def _lifecycle(message: str) -> bool:
@@ -817,7 +781,7 @@ class LambdaView(_BaseView):
             ))
             blocks.append(_Table(
                 [f"Time ({_tz_label()})", "Request ID", "Line"],
-                [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
+                [[_stamp(e.time), e.request_id or "-", _clip(readable_line(e.message).strip().splitlines()[0], 300)]
                  for e in report.newest],
                 title="The newest error lines", max_rows=0,
             ))
@@ -940,7 +904,7 @@ class LambdaView(_BaseView):
                     _stamp(e.time),
                     e.request_id or "-",
                     _Tone(kind[0], "bad") if kind else ("report" if parse_report(e.message) else ""),
-                    _log_line(e.message),
+                    readable_line(e.message),
                 ])
             blocks.append(_Table([f"Time ({_tz_label()})", "Request ID", "Kind", "Line"], rows, max_rows=0,
                                  title="Oldest first, the newest at the bottom"))

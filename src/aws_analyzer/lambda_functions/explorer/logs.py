@@ -29,7 +29,8 @@ from ..analysis.performance import percentile
 from ..analysis.query import QueryError, RunQuery, parse_query
 from ..analysis.runs import LoggedEvent, RunRow, RunTable, logged_event, run_fields
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
-from ..view import _LINE_PREFIX_RE, _stamp
+from ..analysis.logs import _LINE_PREFIX_RE
+from ..view import _stamp
 from .frame import _RUN_PAGE, _RUN_STATES, _run_clock, _seconds
 from .widgets import _RunRow
 

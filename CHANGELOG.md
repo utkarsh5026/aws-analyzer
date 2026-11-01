@@ -9,6 +9,26 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔀 **Step Functions: a new analyzer for state machines** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `StepFunctionsView()`: `overview()`, `state_machine()`, `graph()`, `executions()`, `execution()` and `failures()`.
+  - `execution("order-pipeline/ord-7f3a")` shows each step, and for a failed Lambda step the log lines of that very run.
+  - `failures()` groups failed executions by the state they stopped at and the error, and shows the redrive command.
+
+- 🔀 **Step Functions: an explorer window, and one log per execution** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `sfn.explore()`: every state machine, then its executions to click through, its failures and its definition.
+  - The State machines list has a search box, chips (Failing, Express, Logging off, ...) and columns that sort.
+  - `execution()` draws a waterfall of the states, with tries and back-off, and one log merging every Lambda run's lines.
+
+- 🔀 **Step Functions: the workflow drawn as a graph** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `graph("order-pipeline", execution="ord-7f3a")` colours the path an execution took; `failures="7d"` where they stop.
+  - The explorer's Graph tab draws the same: pick a state for its tries, its Lambda run's lines or its failures.
+
+- 🔀 **Step Functions: Express executions, from their log group** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `executions()`, `execution()` and `failures()` now read Express workflows from the log group their logging writes.
+  - The reports say what a log group at `ERROR` level leaves out; with logging off they show how to turn it on.
+
 ## [0.43.0] - 2026-11-01
 
 ### Added

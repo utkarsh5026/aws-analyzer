@@ -1,6 +1,6 @@
 """
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
-OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook, and an agent that answers
+OpenSearch vector indexes, Lambda functions and Step Functions workflows, from a SageMaker / Jupyter notebook, and an agent that answers
 questions about them in plain English.
 
 Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
@@ -11,7 +11,7 @@ Quick start
     %pip install aws-analyzer               # only boto3 is required; aws-analyzer[all] adds every optional package
 
     from aws_analyzer import S3View          # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView,
-                                             # S3Explorer
+                                             # StepFunctionsView, S3Explorer
     ui = S3View()
     ui.help()                                # every command, grouped by task
 
@@ -40,7 +40,8 @@ Quick start
 
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
-Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions, agent.
+Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions,
+stepfunctions, agent.
 Importing this package loads none of them; each loads the first time one of its names is used.
 """
 
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
     from .opensearch import OpenSearchAnalyzer, OpenSearchView
     from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
+    from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
 __version__ = "0.43.0"
 
@@ -87,6 +89,9 @@ __all__ = [
     "LambdaAnalyzer",
     "LambdaView",
     "LambdaExplorer",
+    "StepFunctionsAnalyzer",
+    "StepFunctionsView",
+    "StepFunctionsExplorer",
     "AgentAnalyzer",
     "AgentView",
     "set_timezone",
@@ -115,6 +120,9 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
     "LambdaExplorer": "lambda_functions",
+    "StepFunctionsAnalyzer": "stepfunctions",
+    "StepFunctionsView": "stepfunctions",
+    "StepFunctionsExplorer": "stepfunctions",
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",
@@ -124,7 +132,7 @@ _EXPORTS = {  # name -> the module it comes from
     "clean_up": "_kit.housekeeping",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-            "lambda_functions", "agent")
+            "lambda_functions", "stepfunctions", "agent")
 
 
 def __getattr__(name: str) -> Any:
