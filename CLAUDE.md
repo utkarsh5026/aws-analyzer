@@ -729,7 +729,7 @@ How the View layer works:
   `frame.py` its tabs, stylesheet (`.sfx-app`, derived from the KB explorer's, with `_TERMINAL_CSS` over it, the S3 and Lambda explorers' console look on `_terminal_theme`), faces and `_window_text`, `widgets.py`
   the `_MachineField` (a `_Picker`) and `_Line` rows; `StepFunctionsView.explore()` imports it lazily and keeps it in
   `view.explorer`), is the fifth interactive UI, built on the windows' kit like `KBExplorer`. Tabs: State machines
-  (`overview()` in the background, rows from `_machine_face`, the failing ones first), Overview (`_machine_blocks`),
+  (`explorer/machines.py`'s `_MachinesTab`: `overview()` in the background, the region's findings, then rows from `_machine_face` with a search box (`search_rank`), `_MACHINE_CHIPS` and `_MACHINE_COLUMNS` that sort by a click, `_column_value`; by the share that didn't succeed at first), Overview (`_machine_blocks`),
   Executions (a list of `ListExecutions` with status chips, search, `since_pick` and a pager; a click is the
   `execution` job, `core.execution(logs=False)`, drawn at once, then the `story` job, `core.execution_story()`),
   Failures (read when first opened; a button per group opens its newest execution) and Definition (`_graph_blocks`).

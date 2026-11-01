@@ -117,9 +117,11 @@ _TERMINAL_CSS = _terminal_theme((".sfx-app",), "sft") + """
 .sfx-app.sfx-app button.sfx-chip.sfx-on,.sfx-app.sfx-app button.sfx-chip.sfx-on:hover:enabled{background:transparent;border-color:var(--sft-accent);font-weight:700}
 .sfx-app.sfx-app .sfx-left,.sfx-app.sfx-app .sfx-machines{border-radius:8px}
 .sfx-app.sfx-app .sfx-machines{border:1px solid var(--sft-line);padding:0 4px 4px 0;overflow:visible}
-.sfx-app .sfx-cols{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1;padding:8px 10px 8px 8px;border-bottom:1px solid var(--sft-line);margin:0 0 4px}
-.sfx-app .sfx-cols span:nth-child(2)::before{content:"# "}
-.sfx-app .sfx-cols span:nth-child(n+3){text-align:right}
+.sfx-app.sfx-app .sfx-lhead{border-bottom:1px solid var(--sft-line);padding:6px 10px 6px 8px;margin:0 0 4px}
+.sfx-app.sfx-app button.sfx-col{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sft-comment);opacity:1}
+.sfx-app.sfx-app button.sfx-col.sfx-c-name::before{content:"# "}
+.sfx-app.sfx-app button.sfx-col:hover:enabled{background:transparent;color:var(--sft-accent)}
+.sfx-app.sfx-app button.sfx-col.sfx-on{color:var(--sft-accent);font-weight:700}
 .sfx-app.sfx-app .sfx-row.sfx-on>.sfx-row-b,.sfx-app.sfx-app .sfx-row.sfx-on>.sfx-row-b:hover:enabled{background:transparent;border-color:transparent;box-shadow:inset 2px 0 0 var(--sft-accent)}
 .sfx-app .tag,.sfx-app .ei{border-radius:4px}
 .sfx-app .tag{font-weight:400;letter-spacing:0;color:var(--sft-comment)}
@@ -309,7 +311,12 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .sfx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--sx-tint-2);margin-left:6px;vertical-align:1px}
 .sfx-app .tag.x{background:rgba(219,39,119,.12);color:var(--sx-accent-2)}
-.sfx-app .sfx-cols{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;padding:4px 10px 6px 8px;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.55}
+.sfx-app.sfx-app .sfx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--sx-line)}
+.sfx-app.sfx-app .sfx-lhead>*{margin:0;min-width:0}
+.sfx-app.sfx-app button.sfx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sfx-app.sfx-app button.sfx-col.sfx-c-name{text-align:left;justify-content:flex-start}
+.sfx-app.sfx-app button.sfx-col:hover:enabled{background:transparent;opacity:1;color:var(--sx-accent)}
+.sfx-app.sfx-app button.sfx-col.sfx-on{opacity:1;color:var(--sx-accent)}
 .sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .sfx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .sfx-app .mr .num.bad{color:var(--sx-ink-bad);font-weight:650}

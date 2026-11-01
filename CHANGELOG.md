@@ -18,6 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - 🔀 **Step Functions: an explorer window, and one log per execution** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
   - `sfn.explore()`: every state machine, then its executions to click through, its failures and its definition.
+  - The State machines list has a search box, chips (Failing, Express, Logging off, ...) and columns that sort.
   - `execution()` draws a waterfall of the states, with tries and back-off, and one log merging every Lambda run's lines.
 
 - 🔀 **Step Functions: the workflow drawn as a graph** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))

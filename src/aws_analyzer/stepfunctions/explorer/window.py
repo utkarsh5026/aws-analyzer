@@ -24,9 +24,10 @@ from ..style import _CSS, _render_html
 from ..view import StepFunctionsView, _with_story_run
 from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
-    _execution_face, _machine_face, _window_text,
+    _execution_face, _window_text,
 )
 from .graph import _GraphTab
+from .machines import _MachinesTab
 from .widgets import _Line, _MachineField
 
 
@@ -37,7 +38,7 @@ _OVERVIEW_DAYS = 7
 _FAILURE_BUTTONS = 6
 
 
-class StepFunctionsExplorer(_GraphTab, _Explorer):
+class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
     """
     The Step Functions explorer: a window to look through your state machines by clicking. The state machine field at
     the top switches to another one; the cards beside it say how it's doing.
@@ -197,16 +198,13 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("sfx-head")
         tabs = self._tab_bar(_EXPLORER_TABS)
-        self.machine_view = w.HTML(layout=layout(width="100%"))
-        self.machines_box = w.VBox(layout=layout(width="100%"))
-        self.machines_box.add_class("sfx-machines")
         self.overview_view = w.HTML(layout=layout(width="100%"))
         self.failure_opens = w.HBox(layout=layout(width="100%"))
         self.failure_opens.add_class("sfx-opens")
         self.failures_view = w.HTML(layout=layout(width="100%"))
         self.definition_view = w.HTML(layout=layout(width="100%"))
         self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
-            "machines": w.VBox([self.machine_view, self.machines_box]),
+            "machines": self._machines_page(),
             "overview": w.VBox([self.overview_view]),
             "executions": self._executions_page(),
             "graph": self._graph_page(),
@@ -386,38 +384,6 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
         return [("State machines", f"{len(self.overview.machines):,}", ""),
                 (f"Executions · {_OVERVIEW_DAYS}d", f"{sum(n.started for n in numbers):,}", ""),
                 ("Didn't succeed", f"{unsuccessful:,}", "bad" if unsuccessful else "")]
-
-    def _draw_machines(self) -> None:
-        """
-        The State machines tab: a line per state machine, the failing ones first, each a click away.
-        """
-        overview = self.overview
-        if overview is None:
-            return
-        machines = sorted(overview.machines, key=lambda m: (-(self.numbers[m.arn].unsuccessful
-                                                               if m.arn in self.numbers else 0), m.name.lower()))
-        blocks = self.ui._overview_blocks(overview) if overview.machines else [_Note(
-            f"No state machines in {overview.region}. They're regional: explore(region='us-west-2') looks in another "
-            "region.")]
-        findings = [b for b in blocks if type(b).__name__ in ("_Title", "_Findings")]
-        self._draw("machines", self.machine_view, findings)
-        while len(self._machine_rows) < len(machines):
-            self._machine_rows.append(_Line(self, self._clicked_machine))
-        header = self._w.HTML('<div class="sfx-cols"><span></span><span>State machine</span><span>Executions</span>'
-                              "<span>Didn't succeed</span><span>Avg run</span><span>$ / month</span>"
-                              "<span>Logging</span></div>")
-        for line, machine in zip(self._machine_rows, machines):
-            line.key = machine.arn
-            numbers = self.numbers.get(machine.arn)
-            cost = monthly_cost(machine, numbers, self.core.prices)
-            self._set(line.face, _machine_face(machine, numbers, cost, []))
-            _class_if(line.box, "sfx-on", self.machine is not None and machine.arn == self.machine.arn)
-        self.machines_box.children = [header] + [line.box for line in self._machine_rows[:len(machines)]]
-
-    def _clicked_machine(self, line: _Line) -> None:
-        if line.key:
-            self._open_machine(line.key)
-            self._show_tab("overview")
 
     def _open_machine(self, arn: str) -> None:
         """

@@ -2023,8 +2023,8 @@ Their ARNs carry an ID beside the name, so `executions()` lists each one's, read
 
 ### Explore state machines by clicking
 
-`sfn.explore()` opens a window (Jupyter and ipywidgets) with every state machine, the failing ones first. Click one
-for its **Overview**, **Executions** (filter by outcome, search, pick a time range, and click one for its waterfall
+`sfn.explore()` opens a window (Jupyter and ipywidgets) with every state machine, the failing ones first, to search,
+filter by chip (Failing, Express, Logging off, ...) or sort by a click on a column. Click one for its **Overview**, **Executions** (filter by outcome, search, pick a time range, and click one for its waterfall
 and one log with every Lambda run's lines), **Graph** (the flow drawn, coloured by the open execution's path or by
 where executions stop; pick a state for its tries, its Lambda run's lines or the failures that stopped there),
 **Failures** (each group's newest execution a click away) and **Definition**. It reads in the background, so the window answers while AWS is read, and it only reads.

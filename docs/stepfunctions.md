@@ -182,10 +182,10 @@ sfn.explore("order-pipeline", execution="ord-7f3a") # with one execution open
 sfn.explore("order-pipeline", tab="failures", since="30d")
 ```
 
-![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Step Functions explorer: four state machines with their executions, failures, average run, cost and logging, and the findings](images/sfn-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+![The Step Functions explorer: the findings, then a search box, chips and four state machines with their executions, failures, average run, cost and logging under column headers that sort](images/sfn-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Step Functions explorer: the findings, then a search box, chips and four state machines with their executions, failures, average run, cost and logging under column headers that sort](images/sfn-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
-`sfn.explore()`: every state machine, the failing ones first; the cards say how the one picked is doing.
+`sfn.explore()`: every state machine, the failing ones first; search them, pick a chip (Failing, Express, Logging off, ...) or click a column to sort. The cards say how the one picked is doing.
 ///
 
 The **Executions** tab lists them newest first. Pick a time range, filter by outcome or search by name, and click one. Its page opens with the findings and the waterfall as soon as its history is read, then the log once its Lambda runs are.

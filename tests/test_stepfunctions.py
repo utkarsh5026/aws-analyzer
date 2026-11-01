@@ -497,7 +497,7 @@ def test_explorer_opens_the_failing_state_machine(fakes):
     assert [m.name for m in x.field.choices] == ["image-resize-express", "kb-sync", "order-pipeline",
                                                  "refund-approvals"]
     assert "Executions · 7d 1,239 Didn't succeed 49 (4.0%)" in plain(x.stats.value)
-    assert "order-pipeline" in plain(x.machines_box.children[2].children[1].value)
+    assert "order-pipeline" in plain(x.machines_box.children[1].children[1].value)
     assert len(x.page.executions) == 9 and len(x._visible) == 9
     assert "9 executions in the last 7 days · 5 didn't succeed" == plain(x.status.value)
     assert "sfx-alarm" in x.tab_buttons["executions"]._dom_classes
@@ -561,6 +561,46 @@ def test_explorer_express_and_picking(fakes):
     assert x._tab == "overview" and x.machine.name == "kb-sync"
     x.open("order-pipelin")
     assert "No state machine named 'order-pipelin'" in plain(x.status.value)
+
+
+def test_explorer_state_machines_search_chips_and_sorting(fakes):
+    x = explorer(fakes)
+
+    def names():
+        return [line.machine.name for line in x.machines_shown]
+
+    assert names() == ["order-pipeline", "image-resize-express", "kb-sync", "refund-approvals"]
+    assert x.column_buttons["unsuccessful"].description == "Didn't succeed ▾"
+    chips = {c.description.rsplit(" ", 1)[0]: c for c in x.machine_chips.children}
+    assert sorted(chips) == ["All", "Express", "Failing", "Logging off", "Not run", "Standard"]
+    assert chips["Failing"].description == "Failing 2" and chips["Logging off"].description == "Logging off 2"
+    chips["Express"].click()
+    assert names() == ["image-resize-express"] and "sfx-on" in x.machine_chips.children[2]._dom_classes
+    assert plain(x.machine_count.value) == "1 of 4 state machines"
+    x.machine_chips.children[2].click()
+    assert len(names()) == 4 and plain(x.machine_count.value) == "4 state machines"
+
+    x.column_buttons["name"].click()
+    assert names() == ["image-resize-express", "kb-sync", "order-pipeline", "refund-approvals"]
+    assert x.column_buttons["name"].description == "State machine ▴"
+    assert x.column_buttons["unsuccessful"].description == "Didn't succeed"
+    x.column_buttons["name"].click()
+    assert names() == ["refund-approvals", "order-pipeline", "kb-sync", "image-resize-express"]
+    x.column_buttons["started"].click()
+    assert names()[0] == "image-resize-express" and names()[-1] == "kb-sync"
+    x.column_buttons["logging"].click()
+    assert [line.machine.log_level for line in x.machines_shown] == ["OFF", "OFF", "ERROR", "ALL"]
+
+    x.machine_find.value = "charge-card"
+    assert names() == ["order-pipeline"]
+    assert "<mark>" not in x._machine_rows[0].face.value
+    x.machine_find.value = "refund"
+    assert names() == ["refund-approvals"] and "<mark>refund</mark>" in x._machine_rows[0].face.value
+    x.machine_find.value = "nothing"
+    assert names() == [] and "No state machine matches 'nothing'" in plain(x.machines_box.children[-1].value)
+    x.machine_find.value = ""
+    x._machine_rows[0].button.click()
+    assert x._tab == "overview" and x.machine.name == x.machines_shown[0].machine.name
 
 
 def test_explorer_starts_where_asked(fakes):
