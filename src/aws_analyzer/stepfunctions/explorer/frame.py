@@ -24,6 +24,10 @@ _EXPLORER_TABS = (
      "<path d='M3.5 12.5h3.8l2.4-6.5 4.6 12 2.4-5.5h3.8'/>"),
     ("executions", "Executions", "Its executions: click one for its waterfall and one log of what happened",
      "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/><path d='M7 9h6M7 12.5h10M7 16h4'/>"),
+    ("graph", "Graph", "The state machine drawn as a graph, coloured by an execution's path or by where executions "
+     "stop: click a state to see what happened there",
+     "<rect x='8.5' y='3' width='7' height='5' rx='1.3'/><rect x='3' y='16' width='7' height='5' rx='1.3'/>"
+     "<rect x='14' y='16' width='7' height='5' rx='1.3'/><path d='M12 8v4M6.5 16v-2h11v2'/>"),
     ("failures", "Failures", "Where and why its executions fail, the most common first",
      "<path d='M12 4.2 20.8 19.5H3.2z'/><path d='M12 10v4.2M12 17h.01'/>"),
     ("definition", "Definition", "How it flows: each state, what it does and where it goes next, and a Mermaid "
@@ -31,7 +35,7 @@ _EXPLORER_TABS = (
                   "<path d='M6 8.5v7M8.4 7.2l7.2 3.6M8.4 16.8l7.2-3.6'/>"),
 )
 
-_MACHINE_TABS = ("overview", "executions", "failures", "definition")
+_MACHINE_TABS = ("overview", "executions", "graph", "failures", "definition")
 
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" '
          'stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6" height="5" rx="1.4"/>'
@@ -249,6 +253,23 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .note,.sfx-app .sfn .fi{border-radius:4px 10px 10px 4px}
 .sfx-app .sfn pre{border-radius:10px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
+.sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
+.sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
+.sfx-app.sfx-app .sfx-states{flex:0 0 360px;overflow:hidden auto}
+.sfx-app.sfx-app .sfx-states .sfx-rows{flex:0 0 auto;overflow:visible;max-height:none}
+.sfx-app.sfx-app .sfx-states .sfx-row{height:38px;margin:0}
+.sfx-app .sfx-states .er{height:38px;gap:9px}
+.sfx-app .sfx-states .en{font-size:12.5px}
+.sfx-app .sfx-states .ef{margin-top:0}
+.sfx-app .ei.m-ok{background:rgba(16,185,129,.18)}
+.sfx-app .ei.m-failed{background:rgba(239,68,68,.2)}
+.sfx-app .ei.m-running{background:rgba(59,130,246,.2)}
+.sfx-app .ei.m-skip{background:transparent;border:1.5px dashed rgba(127,127,127,.5)}
+.sfx-app .ei.m-h1{background:rgba(245,158,11,.2)}
+.sfx-app .ei.m-h2{background:rgba(249,115,22,.28)}
+.sfx-app .ei.m-h3{background:rgba(239,68,68,.32)}
+.sfx-app .ei{width:14px;height:14px}
+.sfx-app .sfx-states .sfn .tt{margin-top:8px}
 """ + _explorer_rules() + "\n</style>"
 
 
@@ -257,7 +278,7 @@ _IN_WINDOW = {
     "state_machine": "the Overview tab",
     "executions": "the Executions tab",
     "failures": "the Failures tab",
-    "graph": "the Definition tab",
+    "graph": "the Graph tab",
 }
 
 _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(t)(?=he \w+ tab)")

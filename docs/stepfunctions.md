@@ -160,7 +160,9 @@ The states inside a Map or Parallel are summed up under it (`×12`, how many fai
 
 ```python
 sfn.state_machine("order-pipeline")
-sfn.graph("order-pipeline")        # how it flows, and a Mermaid flowchart to paste into a Markdown cell
+sfn.graph("order-pipeline")                         # the flow drawn as a graph, and Mermaid to paste
+sfn.graph("order-pipeline", execution="ord-7f3a")   # coloured by the path that execution took
+sfn.graph("order-pipeline", failures="7d")          # shaded by where executions stopped
 ```
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
@@ -194,6 +196,14 @@ ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with `KeyErro
 ![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-dark.webp#only-dark){ width="984" height="880" loading=lazy }
 /// caption
 Lower on the same page: Step Functions' events and each function's lines, one log in time order.
+///
+
+The **Graph** tab draws the state machine from its definition. It is coloured by the path the open execution took, or by where executions stopped in the time range. Pick a state beside the graph to see its tries, its Lambda run's lines, or the failures that stopped there.
+
+![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-light.webp#only-light){ width="984" height="880" loading=lazy }
+![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-dark.webp#only-dark){ width="984" height="880" loading=lazy }
+/// caption
+The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed.
 ///
 
 The **Failures** tab is `failures()`, with a button per group that opens its newest execution. **Overview** is `state_machine()` and **Definition** is `graph()`. The window only reads, like the reports, and outside Jupyter `explore()` shows the reports instead.
@@ -297,7 +307,7 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 |---|---|
 | `overview(days=7)` | Every state machine: executions, how many didn't succeed, average run, cost, logging |
 | `state_machine(name, days=7)` | One state machine: its numbers, every state, what its definition risks, the definition |
-| `graph(name)` | How it flows, and a Mermaid flowchart to paste |
+| `graph(name, execution=None, failures=None)` | The flow drawn as a graph, coloured by an execution's path or where executions stop, and Mermaid to paste |
 | `executions(name, status=None, since="7d", n=25)` | Its latest executions, newest first |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step: its waterfall, and one log with every Lambda run's lines |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |

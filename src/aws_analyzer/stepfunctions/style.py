@@ -1,6 +1,6 @@
 """
-The look of Step Functions reports: their CSS root class, stylesheet (the shared rules, then the waterfall's and the
-execution log's) and badge.
+The look of Step Functions reports: their CSS root class, stylesheet (the shared rules, then the waterfall's, the
+execution log's and the graph's) and badge.
 """
 
 from __future__ import annotations
@@ -52,6 +52,47 @@ _EXTRA_CSS = """\
 .sfn .src.l4{background:rgba(2,132,199,.13);color:#0369a1}
 .sfn .src.l5{background:rgba(161,98,7,.13);color:#a16207}
 body[data-jp-theme-light="false"] .sfn .story .sl.error{color:#f87171}
+.sfn .fg{max-width:100%;overflow-x:auto;margin:4px 0 12px}
+.sfn .fg svg{display:block;max-width:100%;height:auto;font-family:inherit}
+.sfn .fgk{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11.5px;margin:0 0 6px}
+.sfn .fgk b{font-weight:650}
+.sfn .fgk span{display:inline-flex;align-items:center;gap:5px;opacity:.8}
+.sfn .fgk i{display:inline-block;width:12px;height:9px;border-radius:3px;border:1.5px solid rgba(127,127,127,.55)}
+.sfn .fe path{fill:none;stroke:rgba(127,127,127,.55);stroke-width:1.6}
+.sfn path.fe{fill:none;stroke:rgba(127,127,127,.55);stroke-width:1.6}
+.sfn .fe path.fh,.sfn path.fh{fill:rgba(127,127,127,.65);stroke:none}
+.sfn .fe.catch path:first-child{stroke-dasharray:5 4}
+.sfn .fe.loop path:first-child{stroke-dasharray:2 3}
+.sfn .fe.on path:first-child,.sfn path.fe.on{stroke:#10b981;stroke-width:2.4}
+.sfn .fe.on path.fh{fill:#10b981}
+.sfn .fe.catch.on path:first-child{stroke:#ef4444}
+.sfn .fe.catch.on path.fh{fill:#ef4444}
+.sfn .fl{font-size:10px;fill:currentColor;opacity:.6}
+.sfn .fn rect{fill:var(--jp-layout-color0,#fff);stroke:rgba(127,127,127,.5);stroke-width:1.3}
+.sfn .fn text{fill:currentColor}
+.sfn .fnm{font-size:12.5px;font-weight:650}
+.sfn .fns{font-size:10.5px;opacity:.65}
+.sfn .fni{font-size:10.5px;opacity:.75}
+.sfn .fn.t-choice rect{stroke-dasharray:0}
+.sfn .fn.t-fail rect{stroke:rgba(239,68,68,.55)}
+.sfn .fn.m-ok rect{fill:rgba(16,185,129,.12);stroke:#10b981}
+.sfn .fn.m-failed rect{fill:rgba(239,68,68,.12);stroke:#ef4444}
+.sfn .fn.m-running rect{fill:rgba(59,130,246,.12);stroke:#3b82f6}
+.sfn .fn.m-skip rect{stroke-dasharray:4 3;fill:transparent}
+.sfn .fn.m-skip text{opacity:.5}
+.sfn .fn.m-h1 rect{fill:rgba(245,158,11,.10);stroke:#f59e0b}
+.sfn .fn.m-h2 rect{fill:rgba(249,115,22,.16);stroke:#f97316}
+.sfn .fn.m-h3 rect{fill:rgba(239,68,68,.18);stroke:#ef4444}
+.sfn .fgk i.m-ok{background:rgba(16,185,129,.12);border-color:#10b981}
+.sfn .fgk i.m-failed{background:rgba(239,68,68,.12);border-color:#ef4444}
+.sfn .fgk i.m-running{background:rgba(59,130,246,.12);border-color:#3b82f6}
+.sfn .fgk i.m-skip{border-style:dashed}
+.sfn .fgk i.m-h1{background:rgba(245,158,11,.10);border-color:#f59e0b}
+.sfn .fgk i.m-h2{background:rgba(249,115,22,.16);border-color:#f97316}
+.sfn .fgk i.m-h3{background:rgba(239,68,68,.18);border-color:#ef4444}
+.sfn .fn.sel rect{stroke:#2563eb;stroke-width:3}
+.sfn .fstart{fill:currentColor;opacity:.75}
+.sfn .fend{fill:none;stroke:currentColor;stroke-width:2;opacity:.75}
 """
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS)

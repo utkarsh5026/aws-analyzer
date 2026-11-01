@@ -9,7 +9,8 @@ and dark.
 The explorer is ipywidgets, which only draw in a browser connected to a kernel, so this starts JupyterLab on a
 notebook that opens the window on demo.py's state machines (order-pipeline, its executions, and the Lambda functions
 ord-7f3a called, in moto), then uses it the way a person would: reads the State machines tab, opens the Executions tab
-and clicks ord-7f3a (its waterfall, then its log with every Lambda run's lines). Each
+and clicks ord-7f3a (its waterfall, then its log with every Lambda run's lines), then opens the Graph tab with
+LoadOrders picked. Each
 figure is the window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp,
 and the height= of both its images is set in docs/stepfunctions.md, by shots.py's set_height.
 
@@ -40,7 +41,7 @@ import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-log")
+FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-log", "sfn-explorer-graph")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -119,12 +120,17 @@ def shoot_theme(page: Any, lab: Lab, theme: str, wanted: list[str], out: Path) -
     page.locator(".sfx-app .sfx-row", has_text="ord-7f3a").locator("button.sfx-row-b").first.click()
     settled()
     shot("sfn-explorer-run")
+    page.wait_for_selector(".sfx-app .sfx-right .story", timeout=60_000)
     page.evaluate("""() => {
         const pane = document.querySelector('.sfx-app .sfx-right');
         const log = pane.querySelector('.story');
         pane.scrollTop += log.getBoundingClientRect().top - pane.getBoundingClientRect().top - 40;
     }""")
     shot("sfn-explorer-log")
+    tab("Graph")
+    page.locator(".sfx-app .sfx-states .sfx-row", has_text="LoadOrders").locator("button.sfx-row-b").first.click()
+    settled()
+    shot("sfn-explorer-graph")
     return taken
 
 

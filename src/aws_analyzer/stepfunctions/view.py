@@ -24,9 +24,10 @@ from .analysis import (
 )
 from .analysis.cost import free_tier_note
 from .analysis.findings import lambda_logs_call
+from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks
 from .analysis.story import ExecutionStory, waterfall
 from .analyzer import StepFunctionsAnalyzer
-from .blocks import _Story, _Waterfall
+from .blocks import _FlowGraph, _Story, _Waterfall
 from .style import _render_html
 
 
@@ -407,26 +408,43 @@ class StepFunctionsView(_BaseView):
                       sortable=False)
 
     @_friendly_errors
-    def graph(self, name: str) -> None:
+    def graph(self, name: str, *, execution: str | None = None, failures: Any = None) -> None:
         """
-        How a state machine flows: every state with what it does, where it goes next and where an error sends it,
-        the states inside a Map or Parallel under it, and the whole thing as a Mermaid flowchart to paste into a
-        Markdown cell.
+        How a state machine flows, drawn as a graph: a box per state (the states inside a Map or Parallel listed
+        in it), an arrow per transition, dashed where an error goes. execution='ord-7f3a' colours the path that
+        execution took (green ran, red failed, dashed not reached, each with its time and tries); failures='7d'
+        shades the states where executions stopped. Then every state with where it goes next, and the flow as
+        Mermaid to paste into a Markdown cell.
         """
-        self._show(self._graph_blocks(self.core.state_machine(name)))
+        machine = self.core.state_machine(name)
+        layout = flow_layout(machine)
+        marks = FlowMarks()
+        if execution is not None:
+            with self._progress("Reading the execution", unit="events"):
+                detail = self.core.execution(execution, machine=machine.arn, logs=False)
+            marks = path_marks(layout, detail)
+        elif failures is not None:
+            with self._progress("Reading failed executions", unit="executions") as tick:
+                report = self.core.failures(machine.arn, since=failures, progress=tick)
+            marks = failure_marks(layout, report)
+        self._show(self._graph_blocks(machine, marks))
 
-    def _graph_blocks(self, machine: StateMachine) -> list[Any]:
+    def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None) -> list[Any]:
         top = sum(1 for s in machine.states if s.depth == 0)
         nested = len(machine.states) - top
         sub = f"starts at {machine.start_at} · {_plural(top, 'state')}" + (
             f", and {_plural(nested, 'state')} inside a Map or Parallel" if nested else "")
+        steps = [(_call("state_machine", machine.name), "its numbers, findings and cost")]
+        if not machine.is_express:
+            steps.append((_call("graph", machine.name, failures="7d"), "where its executions stop, in the last 7 "
+                                                                       "days"))
         return [
             _Title(f"How {machine.name} flows", sub),
+            _FlowGraph(flow_layout(machine), marks or FlowMarks()),
             self._states_table(machine, title="Each state, what it does, and where it goes next"),
             _Text(mermaid(machine), title="As a Mermaid flowchart: paste it into a Markdown cell (```mermaid) or "
-                                          "mermaid.live", code=True),
-            _Next([(_call("state_machine", machine.name), "its numbers, findings and cost")]
-                  + ([] if machine.is_express else [(_call("executions", machine.name), "its latest executions")])),
+                                          "mermaid.live", code=True, collapsed=True),
+            _Next(steps),
         ]
 
     @_friendly_errors

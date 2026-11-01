@@ -26,6 +26,7 @@ from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
     _execution_face, _machine_face, _window_text,
 )
+from .graph import _GraphTab
 from .widgets import _Line, _MachineField
 
 
@@ -36,7 +37,7 @@ _OVERVIEW_DAYS = 7
 _FAILURE_BUTTONS = 6
 
 
-class StepFunctionsExplorer(_Explorer):
+class StepFunctionsExplorer(_GraphTab, _Explorer):
     """
     The Step Functions explorer: a window to look through your state machines by clicking. The state machine field at
     the top switches to another one; the cards beside it say how it's doing.
@@ -47,6 +48,9 @@ class StepFunctionsExplorer(_Explorer):
         Executions      its executions, newest first: pick a time range, filter by outcome, search by name, and click
                         one for its waterfall (each state on one time axis, with its tries and back-off) and one log
                         of what happened, Step Functions' events and every Lambda run's lines merged by time
+        Graph           the state machine drawn as a graph: the path the execution open took (green ran, red
+                        failed, dashed never reached), or where executions stop in the time range, shaded; pick a
+                        state beside it for its tries, its Lambda run's lines, or the failures that stopped there
         Failures        where and why its executions fail, grouped by the state they stopped at and the error, each
                         group's newest execution a click away
         Definition      each state, what it does and where it goes next, and the flow as Mermaid to paste
@@ -205,6 +209,7 @@ class StepFunctionsExplorer(_Explorer):
             "machines": w.VBox([self.machine_view, self.machines_box]),
             "overview": w.VBox([self.overview_view]),
             "executions": self._executions_page(),
+            "graph": self._graph_page(),
             "failures": w.VBox([self.failure_opens, self.failures_view]),
             "definition": w.VBox([self.definition_view]),
         })
@@ -250,7 +255,8 @@ class StepFunctionsExplorer(_Explorer):
         for name, button in self.tab_buttons.items():
             _class_if(button, "sfx-on", name == key)
             self.pages[name].layout.display = "" if name == key else "none"
-        if key == "failures" and self.report is None and self.machine is not None:
+        wants_failures = key == "failures" or (key == "graph" and self.graph_mode == "failures")
+        if wants_failures and self.report is None and self.machine is not None and not self.machine.is_express:
             self._load_failures()
         elif not self._said[2] and self._said[1] != "warn":
             self._status(self._tab_line(key))
@@ -417,7 +423,8 @@ class StepFunctionsExplorer(_Explorer):
         name = arn.rsplit(":", 1)[-1]
         for widget, text in ((self.overview_view, f"Reading {name}…"), (self.definition_view, "Reading its definition…"),
                              (self.failures_view, "The Failures tab reads when it's opened."),
-                             (self.execution_view, "Listing its executions…")):
+                             (self.execution_view, "Listing its executions…"),
+                             (self.graph_view, "Drawing its graph…")):
             self._set(widget, _skeleton(text))
         self.failure_opens.children = []
         self.rows_box.children, self.chips.children = [], []
@@ -437,6 +444,7 @@ class StepFunctionsExplorer(_Explorer):
         self._draw_stats()
         self._draw("overview", self.overview_view, self.ui._machine_blocks(machine, self.numbers.get(machine.arn)))
         self._draw("definition", self.definition_view, self.ui._graph_blocks(machine))
+        self._graph_machine()
         want_tab, self._want_tab = self._want_tab, None
         if want_tab:
             self._show_tab(want_tab)
@@ -444,7 +452,7 @@ class StepFunctionsExplorer(_Explorer):
             self._express_executions(machine)
             return
         self._load_executions()
-        if self._tab == "failures":
+        if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
             self._load_failures()
 
     def _express_executions(self, machine: StateMachine) -> None:
@@ -502,7 +510,7 @@ class StepFunctionsExplorer(_Explorer):
         self.report = None
         if self.machine is not None and not self.machine.is_express:
             self._load_executions()
-            if self._tab == "failures":
+            if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
                 self._load_failures()
 
     def _find_typed(self, change: dict[str, Any]) -> None:
@@ -622,6 +630,7 @@ class StepFunctionsExplorer(_Explorer):
 
     def _got_execution(self, detail: ExecutionDetail) -> None:
         self.detail = detail
+        self._draw_graph()
         steps, _ = lambda_steps(detail, 1)
         reading = [_Note("Reading the Lambda runs it called, for its log…")] if steps else []
         self._draw("execution", self.execution_view, self.ui._execution_blocks(detail) + reading)
@@ -638,6 +647,7 @@ class StepFunctionsExplorer(_Explorer):
             return
         self.story = story
         _with_story_run(detail, story)
+        self._draw_graph()
         self._draw("execution", self.execution_view, self.ui._execution_blocks(detail, story))
         read = sum(1 for r in story.runs if r.run is not None)
         execution = detail.execution
@@ -662,6 +672,7 @@ class StepFunctionsExplorer(_Explorer):
 
     def _got_failures(self, report: FailureReport) -> None:
         self.report = report
+        self._draw_graph()
         self._draw("failures", self.failures_view, self.ui._failure_blocks(report))
         w, layout = self._w, self._w.Layout
         buttons = []

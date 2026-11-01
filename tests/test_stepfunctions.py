@@ -24,6 +24,7 @@ from aws_analyzer.stepfunctions import (
     mermaid, monthly_cost, parse_definition, parse_execution_ref, parse_state_machine, request_id_of_cause,
     request_id_of_output, short_cause, transitions_per_execution, unbounded_waits, unretried_lambda_states,
 )
+from aws_analyzer.stepfunctions.analysis.layout import failure_marks, flow_layout, path_marks
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -618,3 +619,90 @@ def test_explorer_shows_its_window_once_per_cell(fakes, monkeypatch):
     cell[0] = 2
     x._ipython_display_()
     assert shown == [x.root, x.root]
+
+
+def test_flow_layout_puts_states_in_layers_under_their_parents():
+    layout = flow_layout(order_pipeline())
+    layer = {n.name: n.layer for n in layout.nodes}
+    assert layer["ValidateOrder"] == 0 and layer["IsPriority"] == 1
+    assert layer["BackorderWait"] == layer["ReserveStock"] == 2 and layer["ChargeCard"] == 3
+    assert layer["ProcessItems"] == layer["OrderFailed"] == 5 and layer["NotifyCustomer"] == 6
+    process, notify = layout.node("ProcessItems"), layout.node("NotifyCustomer")
+    assert process.inner == ["ResizeImage"] and process.height > layout.node("LoadOrders").height
+    assert notify.x == process.x and notify.ends and not layout.node("OrderFailed").ends
+    kinds = {(e.source, e.target): e.kind for e in layout.edges}
+    assert kinds[("LoadOrders", "OrderFailed")] == "catch" and kinds[("IsPriority", "ReserveStock")] == "choice"
+    boxes = [(n.x, n.y, n.x + n.width, n.y + n.height) for n in layout.nodes]
+    assert all(not (a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3])
+               for i, a in enumerate(boxes) for b in boxes[i + 1:])
+    assert all(0 <= n.x and n.x + n.width <= layout.width for n in layout.nodes)
+
+
+def test_flow_layout_draws_a_loop_beside_it():
+    definition = {"StartAt": "Check", "States": {
+        "Check": {"Type": "Task", "Resource": "arn:aws:states:::lambda:invoke",
+                  "Parameters": {"FunctionName": "poll"}, "Next": "Done?"},
+        "Done?": {"Type": "Choice", "Choices": [{"Variable": "$.done", "BooleanEquals": True, "Next": "Finish"}],
+                  "Default": "Wait"},
+        "Wait": {"Type": "Wait", "Seconds": 30, "Next": "Check"},
+        "Finish": {"Type": "Succeed"}}}
+    layout = flow_layout(parse_state_machine(described("poller", json.dumps(definition))))
+    loops = [(e.source, e.target) for e in layout.edges if e.kind == "loop"]
+    assert loops == [("Wait", "Check")] and layout.node("Wait").layer > layout.node("Check").layer
+
+
+def test_path_and_failure_marks():
+    layout = flow_layout(order_pipeline())
+    marks = path_marks(layout, detail_of("ord-7f3a"))
+    assert marks.states["LoadOrders"] == "failed" and marks.states["ChargeCard"] == "ok"
+    assert marks.states["BackorderWait"] == "skip" and marks.states["OrderFailed"] == "failed"
+    assert ("LoadOrders", "OrderFailed") in marks.taken and ("IsPriority", "BackorderWait") not in marks.taken
+    assert marks.notes["ChargeCard"] == "4.00s · 3 tries"
+    mapped = path_marks(layout, detail_of("ord-0b17"))
+    assert mapped.states["ProcessItems"] == "running" and mapped.notes["ProcessItems"] == "never finished"
+    report = sfnmod.FailureReport(order_pipeline(), NOW, failed=[detail_of(n).execution for n in
+                                                                  ("ord-7f3a", "ord-5d21", "ord-3c9b", "ord-0b17")])
+    report.groups = group_failures([detail_of(n) for n in ("ord-7f3a", "ord-5d21", "ord-3c9b", "ord-0b17")], NOW)
+    heat = failure_marks(layout, report)
+    assert heat.states == {"LoadOrders": "h3", "ProcessItems": "h2"}
+    assert heat.notes["ProcessItems"] == "1 stopped here (25%)"
+
+
+def test_graph_report_colours_a_path_or_failures(ui, capsys):
+    out = run(capsys, ui.graph, "order-pipeline", execution="ord-7f3a")
+    assert "The path ord-7f3a took" in out and "LoadOrders (Task) [failed]" in out
+    assert "BackorderWait (Wait) [not reached]" in out and "OrderFailed (on error)" in out
+    out = run(capsys, ui.graph, "order-pipeline", failures="7d")
+    assert "Where 5 executions stopped" in out and "LoadOrders (Task) [most stopped here]" in out
+    view = StepFunctionsView(ui.core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.graph("order-pipeline", execution="ord-7f3a")
+    html = sfnmod.view._render_html(shown[0], 50)
+    assert "<svg" in html and 'class="fn t-task m-failed"' in html and 'class="fe catch on"' in html
+    assert "<script" not in html
+
+
+def test_explorer_graph_tab(fakes):
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["graph"].click()
+    assert "Open an execution in the Executions tab" in plain(x.graph_view.value)
+    assert [line.key for line in x._state_lines][:3] == ["ValidateOrder", "IsPriority", "BackorderWait"]
+    assert x.picked_state == "ValidateOrder" and "What the definition says" in plain(x.state_view.value)
+    x.execution("ord-7f3a")
+    x.tab_buttons["graph"].click()
+    assert "The path ord-7f3a took" in plain(x.graph_view.value)
+    line = next(line for line in x._state_lines if line.key == "ChargeCard")
+    line.button.click()
+    assert x.picked_state == "ChargeCard" and "sfx-on" in line.box._dom_classes
+    inspector = plain(x.state_view.value)
+    assert "Its tries in ord-7f3a" in inspector and "Lambda.TooManyRequestsException" in inspector
+    x.mode_pick.value = "failures"
+    assert x.report is not None and "Where 5 executions stopped" in plain(x.graph_view.value)
+    next(line for line in x._state_lines if line.key == "LoadOrders").button.click()
+    assert "The executions that stopped here" in plain(x.state_view.value)
+    x.mode_pick.value = "plain"
+    assert "The path" not in plain(x.graph_view.value) and "Where" not in plain(x.graph_view.value)
+    x.open("image-resize-express")
+    x.mode_pick.value = "failures"
+    assert "Express workflows keep no history" in plain(x.graph_view.value)

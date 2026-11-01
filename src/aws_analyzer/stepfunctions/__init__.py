@@ -26,7 +26,7 @@ Quick start
     sfn.failures("order-pipeline")                 # where and why it fails, with the Lambda run to read
     sfn.execution("order-pipeline/ord-7f3a")       # one execution step by step, and the Lambda lines that broke it
     sfn.executions("order-pipeline", status="failed")
-    sfn.graph("order-pipeline")                    # how it flows, and a Mermaid flowchart to paste
+    sfn.graph("order-pipeline", execution="ord-7f3a")  # the flow drawn, coloured by the path one execution took
     sfn.explore("order-pipeline")                  # a window to click through it all (Jupyter, ipywidgets)
 
     core = sfn.core                                # the same analyzer, raw data
@@ -48,7 +48,7 @@ from .analysis import (
     monthly_cost, numbers_findings, overview_findings, parse_definition, parse_execution, parse_state_machine,
     request_id_of_cause, request_id_of_output, resource_label, retry_label, transitions_per_execution,
     unbounded_waits, unretried_lambda_states, ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines,
-    waterfall,
+    waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks,
 )
 from .analyzer import StepFunctionsAnalyzer
 from .view import StepFunctionsView
@@ -65,6 +65,9 @@ __all__ = [
     "ExecutionStory",
     "FailureGroup",
     "FailureReport",
+    "FlowLayout",
+    "FlowMarks",
+    "FlowNode",
     "LogLine",
     "MachineNumbers",
     "Overview",
@@ -83,7 +86,9 @@ __all__ = [
     "execution_name",
     "explore",
     "failure_findings",
+    "failure_marks",
     "fill_detail",
+    "flow_layout",
     "group_failures",
     "idle_findings",
     "lambda_name",
@@ -99,6 +104,7 @@ __all__ = [
     "parse_execution",
     "parse_execution_ref",
     "parse_state_machine",
+    "path_marks",
     "request_id_of_cause",
     "request_id_of_output",
     "resource_label",

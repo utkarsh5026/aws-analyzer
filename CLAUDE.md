@@ -721,6 +721,14 @@ How the View layer works:
   into `LogLine`s with Lambda's `readable_line`. `tests/fake_stepfunctions.py`'s `holds` hold a call back for the
   background tests; `story_logs()` and `ok_run_lines()` give the Lambda steps' runs, and
   `.claude/skills/demo/sfn_explorer_shots.py` makes the guide's `sfn-explorer*` figures in a real JupyterLab.
+  The Graph tab (`explorer/graph.py`'s `_GraphTab` mixin) and `graph()` draw `_FlowGraph` (`blocks.py`: an inline
+  SVG of boxes and arrows, arrowheads as paths, a `<title>` per box; text lists the states by layer) from
+  `analysis/layout.py` (pure): `flow_layout()` puts the top-level states in layers by the longest way from StartAt,
+  a loop's back edge (`_loops`, depth first) left out and drawn round the side, each layer under its parents
+  (`_wanted_lefts`, `_spread`) with a Map's or Parallel's inner states written in its box; `FlowMarks` colours it,
+  `path_marks()` from an ExecutionDetail or `failure_marks()` from a FailureReport. The tab's mode toggle
+  (`mode_pick`) picks the open execution, the failures (read when needed) or the plain flow; its state lines pick
+  `picked_state`, whose definition, tries and Lambda lines or failure groups `_draw_state` shows.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,

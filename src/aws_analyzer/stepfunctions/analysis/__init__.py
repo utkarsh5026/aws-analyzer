@@ -16,10 +16,14 @@ from .findings import (
     definition_findings, execution_findings, failure_findings, idle_findings, logging_findings, machine_findings,
     numbers_findings, overview_findings,
 )
+from .layout import FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks
 from .history import fill_detail, request_id_of_cause, request_id_of_output
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
+    "FlowLayout",
+    "FlowMarks",
+    "FlowNode",
     "ExecutionStory",
     "LogLine",
     "Waterfall",
@@ -31,7 +35,9 @@ __all__ = [
     "definition_findings",
     "execution_findings",
     "failure_findings",
+    "failure_marks",
     "fill_detail",
+    "flow_layout",
     "idle_findings",
     "group_failures",
     "logging_findings",
@@ -44,6 +50,7 @@ __all__ = [
     "parse_definition",
     "parse_execution",
     "parse_state_machine",
+    "path_marks",
     "request_id_of_cause",
     "request_id_of_output",
     "resource_label",
