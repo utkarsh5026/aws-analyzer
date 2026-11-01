@@ -729,6 +729,14 @@ How the View layer works:
   `path_marks()` from an ExecutionDetail or `failure_marks()` from a FailureReport. The tab's mode toggle
   (`mode_pick`) picks the open execution, the failures (read when needed) or the plain flow; its state lines pick
   `picked_state`, whose definition, tries and Lambda lines or failure groups `_draw_state` shows.
+  Express workflows keep no history, so `executions()`, `execution()` and `failures()` read them from the log group
+  their logging names (`StateMachine.has_executions`: Standard, or Express with logging on): `express.py`'s
+  `_ExpressReads` mixin (`_read_lines`, FilterLogEvents back from now in doubling slices, keeping the newest
+  `_LINE_BUDGET`; an execution's lines by `arn_pattern` within `EXPRESS_LONGEST`, around `started=` when the window
+  knows it), and `analysis/express.py` (pure: `parse_log_line` turns a JSON line back into a history event,
+  `group_log_lines`, `execution_of`, `logging_gaps`), so `fill_detail` and the rest read them as they read a history.
+  Express ARNs carry an ID, so calls name them by ARN (`helpers.execution_ref`). `tests/fake_stepfunctions.py`'s
+  `FakeLogs` answers FilterLogEvents with those filter patterns, over `express_runs()` / `express_log_lines()`.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,

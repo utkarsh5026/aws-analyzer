@@ -23,6 +23,7 @@ from .models import (
     StepRun,
 )
 from .prices import STEPFUNCTIONS_PRICES
+from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
 
@@ -86,7 +87,7 @@ def _midnight_after(now: datetime) -> datetime:
     return today + timedelta(days=1)
 
 
-class StepFunctionsAnalyzer(_BaseAnalyzer):
+class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
     """
     Pure-logic Step Functions analysis: every method returns data; nothing is printed, started or changed.
 
@@ -263,13 +264,15 @@ class StepFunctionsAnalyzer(_BaseAnalyzer):
         limit: Any = 200,
     ) -> ExecutionPage:
         """
-        A Standard state machine's executions started since `since`, newest first, at most `limit` (truncated says
-        when it stopped there). status= keeps one outcome: 'failed', 'running', 'succeeded', 'timed_out', 'aborted'.
+        A state machine's executions started since `since`, newest first, at most `limit` (truncated says when it
+        stopped there). status= keeps one outcome: 'failed', 'running', 'succeeded', 'timed_out', 'aborted'. An
+        Express workflow's come from its log group (page.source is 'logs').
         """
         machine = self.state_machine(ref)
-        _refuse_express(machine, "executions()")
         start = parse_time(since) if since is not None else None
         cap = _as_count(limit, "limit")
+        if machine.is_express:
+            return self._express_page(machine, _status_filter(status), start, cap)
         page = ExecutionPage(machine, since=start)
         page.executions, page.truncated = self._list_executions(machine, _status_filter(status), start, cap)
         return page
@@ -307,20 +310,32 @@ class StepFunctionsAnalyzer(_BaseAnalyzer):
         if not machine:
             raise _Hint(f"Which state machine is {name!r} from? Name it too: execution('<state machine>/{name}'), "
                         "or pass the execution's ARN (executions('<state machine>') lists them).")
-        return execution_arn(self.resolve(machine), name)
+        state_machine = self.state_machine(machine)
+        if state_machine.is_express:
+            raise _Hint(f"{state_machine.name} is an Express workflow, whose executions are named by their ARN: "
+                        f"executions('{state_machine.name}') lists them with it.")
+        return execution_arn(state_machine.arn, name)
 
     def execution(self, ref: str, *, machine: str | None = None, max_events: Any = 5_000,
-                  logs: bool = True) -> ExecutionDetail:
+                  logs: bool = True, started: datetime | None = None) -> ExecutionDetail:
         """
         One execution with every step it took, read from its history (up to max_events events), and for a failed
-        Lambda step that run's log lines (logs=False skips them).
+        Lambda step that run's log lines (logs=False skips them). An Express execution is read from its state
+        machine's log group: around `started` when it's known (as executions() lists it), else the last 14 days.
         """
         arn = self.execution_arn(ref, machine=machine)
+        express = EXECUTION_ARN_RE.match(arn)
+        if express and express.group("kind") == "express":
+            detail = self._express_detail(self.state_machine(express.group("machine")), arn, started)
+            return self._with_lambda_run(detail, logs)
         described = self.client.describe_execution(executionArn=arn)
         state_machine = self.state_machine(described["stateMachineArn"])
         detail = ExecutionDetail(parse_execution(described, state_machine.name), machine=state_machine)
         events, detail.partial = self._history(arn, _as_count(max_events, "max_events"))
         fill_detail(detail, events)
+        return self._with_lambda_run(detail, logs)
+
+    def _with_lambda_run(self, detail: ExecutionDetail, logs: bool) -> ExecutionDetail:
         step = detail.failed_step
         if logs and step is not None and step.function:
             detail.lambda_run, detail.lambda_note = self.lambda_run(step)
@@ -408,24 +423,21 @@ class StepFunctionsAnalyzer(_BaseAnalyzer):
         progress: Callable[..., None] | None = None,
     ) -> FailureReport:
         """
-        Why a Standard state machine's executions failed since `since`: the newest `limit` that failed, timed out or
-        were aborted, each history's end read (one request each), grouped by the state they stopped at and the error.
+        Why a state machine's executions failed since `since`: the newest `limit` that failed, timed out or were
+        aborted, each history's end read (one request each), grouped by the state they stopped at and the error. An
+        Express workflow's are read from its log group.
         """
         machine = self.state_machine(ref)
-        _refuse_express(machine, "failures()")
         start = parse_time(since) or _utcnow() - timedelta(days=7)
         cap = _as_count(limit, "limit")
-        failed, truncated = self._failed_executions(machine, start, cap)
-        report = FailureReport(machine, start, failed=failed, truncated=truncated)
-
-        def read(execution: Execution) -> ExecutionDetail:
-            return fill_detail(ExecutionDetail(execution, machine=machine), self._history_tail(execution.arn))
-
-        details = []
-        for detail in self._map(read, failed):
-            details.append(detail)
-            if progress is not None:
-                progress(len(details), len(failed))
+        if machine.is_express:
+            details, truncated = self._express_failures(machine, start, cap)
+            report = FailureReport(machine, start, failed=[d.execution for d in details], truncated=truncated,
+                                   source="logs")
+        else:
+            failed, truncated = self._failed_executions(machine, start, cap)
+            report = FailureReport(machine, start, failed=failed, truncated=truncated)
+            details = self._standard_failures(machine, failed, progress)
         report.read = len(details)
         report.groups = group_failures(details, _utcnow(), express=machine.is_express)
         try:
@@ -434,6 +446,18 @@ class StepFunctionsAnalyzer(_BaseAnalyzer):
         except (ClientError, BotoCoreError):
             report.numbers = None
         return report
+
+    def _standard_failures(self, machine: StateMachine, failed: list[Execution],
+                           progress: Callable[..., None] | None) -> list[ExecutionDetail]:
+        def read(execution: Execution) -> ExecutionDetail:
+            return fill_detail(ExecutionDetail(execution, machine=machine), self._history_tail(execution.arn))
+
+        details = []
+        for detail in self._map(read, failed):
+            details.append(detail)
+            if progress is not None:
+                progress(len(details), len(failed))
+        return details
 
     def _failed_executions(self, machine: StateMachine, start: datetime,
                            cap: int | None) -> tuple[list[Execution], bool]:
@@ -489,14 +513,6 @@ def _status_filter(status: str | None) -> str | None:
     if value not in allowed:
         raise ValueError(f"status= is one of {', '.join(a.lower() for a in allowed)}, not {status!r}")
     return value
-
-
-def _refuse_express(machine: StateMachine, command: str) -> None:
-    if machine.is_express:
-        where = (f"its log group ({machine.log_groups[0]})" if machine.log_groups
-                 else "its logs, once logging is on (state_machine() shows how)")
-        raise _Hint(f"{machine.name} is an Express workflow: Step Functions keeps no list or history of its "
-                    f"executions, so {command} can't read them. They're in {where}.")
 
 
 def _raise_log_error(page: Any) -> None:

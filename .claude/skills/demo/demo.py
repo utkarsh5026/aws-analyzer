@@ -2180,12 +2180,14 @@ def seed_stepfunctions() -> dict:
     execution histories are canned), and orders-etl in moto with the log lines of the run that broke ord-7f3a, so
     execution() shows them through the Lambda analyzer.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     import boto3
 
     sys.path.insert(0, str(ROOT / "tests"))
-    from fake_stepfunctions import ACCOUNT, clients, story_logs
+    from fake_stepfunctions import (
+        ACCOUNT, RESIZE_FAILED_RUN, clients, express_arn, express_runs, ok_run_lines, story_logs,
+    )
 
     from aws_analyzer.lambda_functions import LambdaAnalyzer
 
@@ -2207,6 +2209,19 @@ def seed_stepfunctions() -> dict:
         logs.create_log_stream(logGroupName=group, logStreamName=stream)
         logs.put_log_events(logGroupName=group, logStreamName=stream, logEvents=[
             {"timestamp": int(moment.timestamp() * 1000), "message": message} for moment, message in lines])
+    broken = express_runs(now)[express_arn("rsz-0099")]
+    scheduled = next(e for e in broken.events if e["type"] == "TaskScheduled")["timestamp"]
+    rid = RESIZE_FAILED_RUN
+    oom = ok_run_lines(scheduled + timedelta(seconds=0.04), rid, ["resizing photos/huge.tiff (412 MB) to 2048px"],
+                       ms=2850, used=512)
+    oom[-1] = (oom[-1][0], oom[-1][1] + "\tStatus: error\tError Type: Runtime.OutOfMemory")
+    boto3.client("lambda", region_name=REGION).create_function(
+        FunctionName="resize-image", Runtime="python3.12", Role=role, Handler="app.handler", MemorySize=512,
+        Code={"ZipFile": _lambda_package({"app.py": "def handler(event, context):\n    return event\n"})})
+    logs.create_log_group(logGroupName="/aws/lambda/resize-image")
+    logs.create_log_stream(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize")
+    logs.put_log_events(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize",
+                        logEvents=[{"timestamp": int(m.timestamp() * 1000), "message": text} for m, text in oom])
     return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
 
 

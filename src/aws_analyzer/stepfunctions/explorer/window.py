@@ -256,7 +256,7 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
             _class_if(button, "sfx-on", name == key)
             self.pages[name].layout.display = "" if name == key else "none"
         wants_failures = key == "failures" or (key == "graph" and self.graph_mode == "failures")
-        if wants_failures and self.report is None and self.machine is not None and not self.machine.is_express:
+        if wants_failures and self.report is None and self.machine is not None and self.machine.has_executions:
             self._load_failures()
         elif not self._said[2] and self._said[1] != "warn":
             self._status(self._tab_line(key))
@@ -317,7 +317,8 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
 
     def _target(self, wanted: str | None) -> str | None:
         """
-        The state machine to open first: the one asked for, else the Standard one failing most, else the first.
+        The state machine to open first: the one asked for, else the one failing most whose executions can be read
+        (by share of executions, _failing_most), else the first.
         """
         machines = self.overview.machines if self.overview else []
         if wanted:
@@ -326,9 +327,19 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
             except (ValueError, ClientError, BotoCoreError) as exc:
                 self._status(self._error_text(exc), "warn")
                 return None
-        ranked = sorted(machines, key=lambda m: -(self.numbers[m.arn].unsuccessful if m.arn in self.numbers else 0))
-        standard = [m for m in ranked if not m.is_express]
+        ranked = sorted(machines, key=self._failing_most)
+        standard = [m for m in ranked if m.has_executions]
         return (standard or ranked)[0].arn if machines else None
+
+    def _failing_most(self, machine: StateMachine) -> tuple[float, int]:
+        """
+        How a state machine ranks for being opened first: the highest share of executions that didn't succeed, then
+        the most of them (a busy workflow with a few failures comes after a small one failing often).
+        """
+        numbers = self.numbers.get(machine.arn)
+        if numbers is None:
+            return (0.0, 0)
+        return (-numbers.failure_rate, -numbers.unsuccessful)
 
     def _typed_machine(self, text: str) -> None:
         self._open_machine(self.core.resolve(text))
@@ -448,21 +459,21 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
         want_tab, self._want_tab = self._want_tab, None
         if want_tab:
             self._show_tab(want_tab)
-        if machine.is_express:
-            self._express_executions(machine)
+        if not machine.has_executions:
+            self._unrecorded_executions(machine)
             return
         self._load_executions()
         if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
             self._load_failures()
 
-    def _express_executions(self, machine: StateMachine) -> None:
-        where = f"its log group ({machine.log_groups[0]})" if machine.log_groups else "its logs, once logging is on"
-        note = _Note(f"{machine.name} is an Express workflow: Step Functions keeps no list or history of its "
-                     f"executions, so this tab can't show them. They're in {where}; the Overview tab says how to "
-                     "turn logging on.")
+    def _unrecorded_executions(self, machine: StateMachine) -> None:
+        note = _Note(f"{machine.name} is an Express workflow with logging off: Step Functions keeps no list or "
+                     "history of its executions, so there's nothing to show here. The Overview tab has the command "
+                     "that turns logging on; executions after that show up here, read from its log group.")
         for widget in (self.execution_view, self.failures_view):
             self._set(widget, self._html([note]))
-        self._status(f"{machine.name} is an Express workflow: its executions are only in its logs.", owner="machine")
+        self._status(f"{machine.name} is an Express workflow with logging off: none of its executions are recorded.",
+                     owner="machine")
 
     def _load_executions(self) -> None:
         machine = self.machine
@@ -508,7 +519,7 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
     def _since_changed(self, change: dict[str, Any]) -> None:
         self._since = change["new"]
         self.report = None
-        if self.machine is not None and not self.machine.is_express:
+        if self.machine is not None and self.machine.has_executions:
             self._load_executions()
             if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
                 self._load_failures()
@@ -620,7 +631,9 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
         name = execution_name(arn)
         self._set(self.execution_view, _skeleton(f"Reading {name}'s history…"))
         self._status(f"Reading {name}…", busy=True, owner="execution")
-        self._later("execution", lambda: self.core.execution(arn, logs=False), self._got_execution,
+        listed = next((e for e in self.page.executions if e.arn == arn), None) if self.page else None
+        started = listed.start if listed else None
+        self._later("execution", lambda: self.core.execution(arn, logs=False, started=started), self._got_execution,
                     self._execution_failed)
 
     def _execution_failed(self, exc: BaseException) -> None:
@@ -656,7 +669,7 @@ class StepFunctionsExplorer(_GraphTab, _Explorer):
 
     def _load_failures(self) -> None:
         machine = self.machine
-        if machine is None or machine.is_express:
+        if machine is None or not machine.has_executions:
             return
         self._set(self.failures_view, _skeleton(f"Reading why {machine.name}'s executions fail…"))
         self.failure_opens.children = []

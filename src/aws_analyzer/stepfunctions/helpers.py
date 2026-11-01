@@ -29,7 +29,7 @@ STATUS_TONES = {"SUCCEEDED": "ok", "FAILED": "bad", "TIMED_OUT": "bad", "ABORTED
                 "PENDING_REDRIVE": "warn"}
 
 STATUS_WORDS = {"SUCCEEDED": "succeeded", "FAILED": "failed", "TIMED_OUT": "timed out", "ABORTED": "aborted",
-                "RUNNING": "running", "PENDING_REDRIVE": "waiting to redrive"}
+                "RUNNING": "running", "PENDING_REDRIVE": "waiting to redrive", "": "no ending logged"}
 
 
 def machine_name(arn: str) -> str:
@@ -80,6 +80,14 @@ def parse_execution_ref(ref: str) -> tuple[str | None, str]:
         machine, _, name = text.partition("/")
         return machine.strip() or None, name.strip()
     return None, text
+
+
+def execution_ref(machine: str, execution: str, arn: str) -> str:
+    """
+    How a call names an execution: 'machine/name' for a Standard one, its ARN for an Express one (whose ARN can't be
+    made from its name).
+    """
+    return arn if ":express:" in arn else f"{machine}/{execution}"
 
 
 def lambda_name(ref: str) -> str:

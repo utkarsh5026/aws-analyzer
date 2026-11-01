@@ -11,7 +11,7 @@ from datetime import datetime
 from ..._kit.fmt import _duration, _plural, human_money
 from ..._kit.render import _call
 
-from ..helpers import STATUS_WORDS, short_cause
+from ..helpers import STATUS_WORDS, execution_ref, short_cause
 from ..models import ExecutionDetail, FailureReport, MachineNumbers, Overview, StateMachine
 from .cost import monthly_cost
 from .definition import lambda_retry_block, unbounded_waits, unretried_lambda_states
@@ -108,8 +108,8 @@ def numbers_findings(machine: StateMachine, numbers: MachineNumbers | None) -> l
                  f"{numbers.timed_out:,} timed out" if numbers.timed_out else "",
                  f"{numbers.aborted:,} aborted" if numbers.aborted else ""]
         detail = ", ".join(p for p in parts if p)
-        where = (_call("failures", machine.name) if not machine.is_express
-                 else "its log group (Express workflows have no history to read)")
+        where = (_call("failures", machine.name) if machine.has_executions
+                 else "nowhere yet: an Express workflow with logging off leaves no record of its executions")
         found.append((level, f"{numbers.unsuccessful:,} of {numbers.started:,} {machine.name} executions didn't "
                              f"succeed in {window} ({numbers.failure_rate:.1%}, {detail}). See where and why: "
                              f"{where}"))
@@ -224,7 +224,8 @@ def failure_findings(report: FailureReport, now: datetime) -> list[Finding]:
         if group.function and group.request_id:
             read = f" Read the newest run: {lambda_logs_call(group.function, group.request_id)}"
         elif group.newest is not None:
-            read = f" See one: {_call('execution', f'{report.machine.name}/{group.newest.name}')}"
+            ref = execution_ref(report.machine.name, group.newest.name, group.newest.arn)
+            read = f" See one: {_call('execution', ref)}"
         cause = f" {group.cause.rstrip('.')}." if group.cause else ""
         what = (f"{group.state}{where} was still running when {_plural(group.count, 'execution')} timed out"
                 if group.error == "States.Timeout" else

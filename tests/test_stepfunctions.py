@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import boto3
 import pytest
 from fake_stepfunctions import (
-    FAILED_RUN, ORDER_PIPELINE, REFUND_APPROVALS, FakeCloudWatch, FakeStepFunctions, History, Try, clients,
+    FAILED_RUN, ORDER_PIPELINE, RESIZE_FAILED_RUN, express_arn, express_log_lines, express_runs, REFUND_APPROVALS, FakeCloudWatch, FakeStepFunctions, History, Try, clients,
     lambda_lines, machine_arn, run_arn, scene, story_logs,
 )
 from moto import mock_aws
@@ -23,6 +23,9 @@ from aws_analyzer.stepfunctions import (
     can_redrive, definition_findings, fill_detail, group_failures, lambda_name, logging_findings, machine_name,
     mermaid, monthly_cost, parse_definition, parse_execution_ref, parse_state_machine, request_id_of_cause,
     request_id_of_output, short_cause, transitions_per_execution, unbounded_waits, unretried_lambda_states,
+)
+from aws_analyzer.stepfunctions.analysis.express import (
+    LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
 )
 from aws_analyzer.stepfunctions.analysis.layout import failure_marks, flow_layout, path_marks
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
@@ -220,8 +223,8 @@ def test_executions_paging_filters_and_limits(core, fakes):
     assert len(cut.executions) == 2 and cut.truncated
     with pytest.raises(ValueError, match="status= is one of"):
         core.executions("order-pipeline", status="broken")
-    with pytest.raises(_Hint, match="Express workflow"):
-        core.executions("image-resize-express")
+    express = core.executions("image-resize-express", since="24h")
+    assert express.source == "logs" and len(express.executions) == 4
 
 
 def test_execution_by_reference(core):
@@ -307,7 +310,7 @@ def test_overview_report(ui, capsys):
     out = run(capsys, ui.overview)
     for expected in ("Step Functions in us-east-1", "Executions · 7d: 183,659", "Need attention: 1 (!)",
                      "[!] 49 of 1,239 order-pipeline executions didn't succeed",
-                     "failures('order-pipeline')", "image-resize-express logs at ERROR only",
+                     "failures('order-pipeline')",
                      "kb-sync was not started in the last 7 days", "Read 28 CloudWatch metrics"):
         assert expected in out, expected
     assert out.index("\norder-pipeline ") < out.index("\nkb-sync ")
@@ -367,8 +370,9 @@ def test_failures_report(ui, capsys):
 def test_reports_say_what_went_wrong_instead_of_a_traceback(ui, fakes, capsys):
     out = run(capsys, ui.state_machine, "orders")
     assert "No state machine named 'orders'" in out and "Traceback" not in out
-    out = run(capsys, ui.failures, "image-resize-express")
-    assert "Express workflow" in out
+    fakes["stepfunctions"].machines["kb-sync"]["type"] = "EXPRESS"
+    out = run(capsys, ui.failures, "kb-sync")
+    assert "Express workflow with logging off" in out and "Traceback" not in out
     out = run(capsys, ui.execution, "order-pipeline/nope")
     assert "ExecutionDoesNotExist" in out and "kept 90 days" in out
     fakes["stepfunctions"].denied.add("list_state_machines")
@@ -547,7 +551,7 @@ def test_explorer_failures_tab_opens_the_newest_of_each_group(fakes):
 
 def test_explorer_express_and_picking(fakes):
     x = explorer(fakes, "image-resize-express")
-    assert x.machine.is_express and "Express workflow" in plain(x.execution_view.value)
+    assert x.machine.is_express and x.page.source == "logs" and len(x._visible) == 4
     x.field.open()
     x.field.search.value = "order"
     assert x.field.shown == [machine_arn("order-pipeline")]
@@ -705,4 +709,96 @@ def test_explorer_graph_tab(fakes):
     assert "The path" not in plain(x.graph_view.value) and "Where" not in plain(x.graph_view.value)
     x.open("image-resize-express")
     x.mode_pick.value = "failures"
-    assert "Express workflows keep no history" in plain(x.graph_view.value)
+    assert "Where 1 execution stopped" in plain(x.graph_view.value)
+
+
+def test_log_lines_read_back_as_history_events():
+    runs = express_runs(NOW)
+    arn = express_arn("rsz-0099")
+    lines = [message for _, message in express_log_lines(arn, runs[arn])]
+    parsed = parse_log_line(lines[0])
+    assert parsed[0] == arn and parsed[1]["type"] == "ExecutionStarted" and "previousEventId" not in parsed[1]
+    entered = parse_log_line(next(m for m in lines if '"TaskStateEntered"' in m))[1]
+    assert entered["stateEnteredEventDetails"]["name"] == "Resize"
+    assert parse_log_line("START RequestId: x") is None and parse_log_line('{"type": "X"}') is None
+    grouped = group_log_lines(lines + [m for _, m in express_log_lines(express_arn("rsz-0000"),
+                                                                       runs[express_arn("rsz-0000")])])
+    assert [r.arn for r in grouped] == [express_arn("rsz-0000"), arn]
+    execution = execution_of(grouped[1], logs_everything=True)
+    assert (execution.name, execution.machine, execution.status) == ("rsz-0099", "image-resize-express", "FAILED")
+    assert execution.error == "Runtime.OutOfMemory" and execution.seconds > 2
+    started_only = grouped[1].events[:2]
+    assert execution_of(LoggedRun(arn, started_only), logs_everything=True).status == "RUNNING"
+    assert execution_of(LoggedRun(arn, started_only), logs_everything=False).status == ""
+    assert log_group_name("arn:aws:logs:us-east-1:1:log-group:/aws/states/resize:*") == "/aws/states/resize"
+    assert endings_pattern(("FAILED", "TIMED_OUT")) == '{ $.type = "ExecutionFailed" || $.type = "ExecutionTimedOut" }'
+
+
+def test_express_execution_from_its_log_group(core, fakes):
+    detail = core.execution(express_arn("rsz-0099"), logs=False)
+    assert detail.source == "logs" and detail.execution.status == "FAILED"
+    step = detail.failed_step
+    assert step.name == "Resize" and step.function == "resize-image" and step.request_id == RESIZE_FAILED_RUN
+    searched = fakes["logs"].called("filter_log_events")
+    assert all(call["filterPattern"] == arn_pattern(express_arn("rsz-0099")) for call in searched)
+    started = detail.execution.start
+    fakes["logs"].calls.clear()
+    core.execution(express_arn("rsz-0099"), logs=False, started=started)
+    window = fakes["logs"].called("filter_log_events")[0]
+    assert window["endTime"] - window["startTime"] <= 7 * 60 * 1000
+    with pytest.raises(_Hint, match="named by their ARN"):
+        core.execution("image-resize-express/rsz-0099")
+    with pytest.raises(_Hint, match="No lines for"):
+        core.execution(express_arn("rsz-9999"), logs=False)
+
+
+def test_express_failures_and_logging_gaps(core, fakes):
+    report = core.failures("image-resize-express")
+    assert report.source == "logs" and report.read == 1
+    assert report.groups[0].error == "Runtime.OutOfMemory" and report.groups[0].redrivable == 0
+    spec = fakes["stepfunctions"].machines["image-resize-express"]
+    spec["logging"] = {**spec["logging"], "level": "ERROR", "includeExecutionData": False}
+    group = fakes["logs"].groups["/aws/states/resize"]
+    group[:] = [(moment, line) for moment, line in group if re.search(r'"type": "\w*(Failed|TimedOut)"', line)]
+    fresh = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    page = fresh.executions("image-resize-express", since="24h")
+    assert "only executions that failed" in page.note and "inputs, outputs" in page.note
+    assert [(e.name, e.status) for e in page.executions] == [("rsz-0099", "FAILED")]
+    detail = fresh.execution(express_arn("rsz-0099"), logs=False)
+    assert detail.failed_step is None and detail.execution.error == "Runtime.OutOfMemory"
+    spec["logging"] = {"level": "OFF"}
+    with pytest.raises(_Hint, match="logging off"):
+        StepFunctionsAnalyzer(region="us-east-1", clients=fakes).executions("image-resize-express")
+
+
+def test_express_reads_back_in_slices_and_stops_at_the_budget(core, fakes, monkeypatch):
+    from aws_analyzer.stepfunctions import express as express_mod
+
+    monkeypatch.setattr(express_mod, "_LINE_BUDGET", 5)
+    page = core.executions("image-resize-express", since="24h")
+    assert page.truncated and page.covered_from is not None
+    assert [e.name for e in page.executions][0] == "rsz-0000"
+
+
+def test_express_reports(ui, capsys):
+    out = run(capsys, ui.executions, "image-resize-express", since="24h")
+    assert "from its log group (/aws/states/resize)" in out and "rsz-0099" in out
+    assert f"execution('{express_arn('rsz-0099')}')" in out
+    out = run(capsys, ui.execution, express_arn("rsz-0099"), logs=False)
+    assert "read from its log group" in out and "Resize (resize-image) failed and ended the execution" in out
+    out = run(capsys, ui.failures, "image-resize-express")
+    assert "read from its log group" in out and "Resize fails with Runtime.OutOfMemory" in out
+    out = run(capsys, ui.overview)
+    assert "See where and why: failures('image-resize-express')" in out
+
+
+def test_explorer_opens_an_express_execution(fakes):
+    x = explorer(fakes, "image-resize-express")
+    line = next(line for line in x._rows if line.key == express_arn("rsz-0099"))
+    line.button.click()
+    assert x.detail.execution.name == "rsz-0099" and x.detail.source == "logs"
+    assert "Execution rsz-0099" in plain(x.execution_view.value)
+    window = fakes["logs"].called("filter_log_events")[-1]
+    assert window["endTime"] - window["startTime"] <= 7 * 60 * 1000
+    x.tab_buttons["failures"].click()
+    assert "Why image-resize-express fails" in plain(x.failures_view.value)

@@ -8,6 +8,7 @@ model, as a real client's would be. moto has state machines, but its execution h
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -515,7 +516,7 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
                                                                                                     float]]]:
     """
     acme's state machines: order-pipeline (Standard, failing at LoadOrders on orders without a customer_id),
-    refund-approvals (waits for a manager with no timeout), image-resize-express (Express, logging errors only) and
+    refund-approvals (waits for a manager with no timeout), image-resize-express (Express, logging everything) and
     kb-sync (not started in a week); their executions; and their CloudWatch numbers for the last 7 days.
     """
     created = now - timedelta(days=200)
@@ -526,7 +527,7 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
                                                                           "log-group:/aws/vendedlogs/states/orders"}}]}},
         "refund-approvals": {"definition": REFUND_APPROVALS, "created": created + timedelta(days=90)},
         "image-resize-express": {"definition": IMAGE_RESIZE, "type": "EXPRESS", "created": created,
-                                 "logging": {"level": "ERROR", "includeExecutionData": False, "destinations": [
+                                 "logging": {"level": "ALL", "includeExecutionData": True, "destinations": [
                                      {"cloudWatchLogsLogGroup": {"logGroupArn": f"arn:aws:logs:{REGION}:{ACCOUNT}:"
                                                                                 "log-group:/aws/states/resize"}}]}},
         "kb-sync": {"definition": KB_SYNC, "created": created + timedelta(days=150),
@@ -562,10 +563,13 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
 
 def clients(now: datetime) -> dict[str, Any]:
     """
-    The fake Step Functions and CloudWatch clients over scene(now), for StepFunctionsAnalyzer(clients=...).
+    The fake Step Functions, CloudWatch and CloudWatch Logs clients over scene(now) (the Logs one holds
+    image-resize-express's log group), for StepFunctionsAnalyzer(clients=...).
     """
     machines, runs, daily = scene(now)
-    return {"stepfunctions": FakeStepFunctions(machines, runs), "cloudwatch": FakeCloudWatch(daily)}
+    lines = [line for arn, history in express_runs(now).items() for line in express_log_lines(arn, history)]
+    return {"stepfunctions": FakeStepFunctions(machines, runs), "cloudwatch": FakeCloudWatch(daily),
+            "logs": FakeLogs({"/aws/states/resize": lines})}
 
 
 def lambda_lines(start: datetime, request_id: str = FAILED_RUN) -> list[tuple[datetime, str]]:
@@ -631,3 +635,88 @@ def story_logs(history: History) -> dict[str, list[tuple[datetime, str]]]:
                                     init_ms=310),
         "orders-etl": lambda_lines(scheduled["orders-etl"][0]),
     }
+
+
+_PATTERN_TERM_RE = re.compile(r'\$\.(\w+) = "([^"]*)"')
+
+_LOG_PAGE = 50
+
+
+class FakeLogs(_Checked):
+    """
+    CloudWatch Logs' FilterLogEvents over `groups` (log group name -> [(time, message)]): the time window, and the
+    JSON filter patterns the Express reads use ('{ $.field = "value" || ... }'), a page of _LOG_PAGE at a time.
+    """
+
+    service = "logs"
+
+    def __init__(self, groups: dict[str, list[tuple[datetime, str]]], region: str = REGION):
+        super().__init__(region)
+        self.groups = groups
+
+    @staticmethod
+    def _matches(message: str, pattern: str | None) -> bool:
+        if not pattern:
+            return True
+        try:
+            line = json.loads(message)
+        except ValueError:
+            return False
+        return any(str(line.get(field)) == value for field, value in _PATTERN_TERM_RE.findall(pattern))
+
+    def _filter_log_events(self, logGroupName: str, startTime: int = 0, endTime: int = 2**62,
+                           filterPattern: str | None = None, nextToken: str | None = None,
+                           **params: Any) -> dict[str, Any]:
+        if logGroupName not in self.groups:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException",
+                                         "Message": "The specified log group does not exist."}}, "FilterLogEvents")
+        found = [(moment, message) for moment, message in sorted(self.groups[logGroupName])
+                 if startTime <= int(moment.timestamp() * 1000) < endTime and self._matches(message, filterPattern)]
+        begin = int(nextToken or 0)
+        page = found[begin: begin + _LOG_PAGE]
+        answer: dict[str, Any] = {"events": [
+            {"logStreamName": "states/x", "timestamp": int(m.timestamp() * 1000), "message": text,
+             "ingestionTime": int(m.timestamp() * 1000), "eventId": str(begin + i)}
+            for i, (m, text) in enumerate(page)]}
+        if begin + _LOG_PAGE < len(found):
+            answer["nextToken"] = str(begin + _LOG_PAGE)
+        return answer
+
+
+def express_arn(name: str, machine: str = "image-resize-express") -> str:
+    return f"arn:aws:states:{REGION}:{ACCOUNT}:express:{machine}:{name}:{name}-0000-4000-8000-{name[-4:]:0>12}"
+
+
+def express_log_lines(arn: str, history: History) -> list[tuple[datetime, str]]:
+    """
+    An execution's history as Step Functions logs it for an Express workflow: one JSON line per event.
+    """
+    lines = []
+    for event in history.events:
+        details = next((value for key, value in event.items() if key.endswith("EventDetails")), {})
+        lines.append((event["timestamp"], json.dumps({
+            "id": str(event["id"]), "type": event["type"], "details": details,
+            "previous_event_id": str(event.get("previousEventId", 0)),
+            "event_timestamp": str(int(event["timestamp"].timestamp() * 1000)), "execution_arn": arn})))
+    return lines
+
+
+RESIZE_FAILED_RUN = "beef0000-1d2e-4f3a-9b8c-7d6e5f4a3b2c"
+
+
+def express_runs(now: datetime) -> dict[str, History]:
+    """
+    image-resize-express's executions in the last hour, by ARN: three that resized their picture and one where
+    resize-image ran out of memory.
+    """
+    runs: dict[str, History] = {}
+    for i, minutes in enumerate((4, 18, 33)):
+        history = History(now - timedelta(minutes=minutes), {"key": f"photos/{i}.jpg"})
+        history.lambda_task("Resize", "resize-image", [Try(0.38, request_id=_rid(500 + i))])
+        runs[express_arn(f"rsz-{i:04d}")] = history.state("Succeed", "Done").succeed({"resized": True})
+    broken = History(now - timedelta(minutes=11), {"key": "photos/huge.tiff"})
+    cause = lambda_error("Runtime.OutOfMemory", "RequestId: beef0000 Error: Runtime exited with error: signal: killed",
+                         RESIZE_FAILED_RUN)
+    broken.lambda_task("Resize", "resize-image", [Try(2.9, "Runtime.OutOfMemory", cause)])
+    runs[express_arn("rsz-0099")] = broken.failed("Runtime.OutOfMemory", cause)
+    return runs

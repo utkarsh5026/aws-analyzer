@@ -2013,7 +2013,10 @@ sfn.execution("order-pipeline/ord-7f3a")     # one execution step by step, and t
 sfn.state_machine("order-pipeline")          # its numbers, what its definition risks, every state
 ```
 
-Executions are named by their ARN, a console link, or `"state-machine/execution-name"`.
+Executions are named by their ARN, a console link, or `"state-machine/execution-name"`. **Express workflows** keep no
+history in Step Functions, so their executions, failures and steps are read from the log group their logging writes to:
+every event at level `ALL`, only failures at `ERROR` (the reports say what that leaves out), nothing with logging off.
+Their ARNs carry an ID beside the name, so `executions()` lists each one's, ready to pass to `execution()`.
 
 ### Explore state machines by clicking
 
@@ -2049,9 +2052,9 @@ Grouped the way `sfn.help()` lists them.
 
 | Command                                                   | Shows                                                                                                                                                                                                                                       |
 | :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `executions(name, status=None, since="7d", n=25)`         | A Standard state machine's latest executions, newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
+| `executions(name, status=None, since="7d", n=25)`         | A state machine's latest executions (an Express workflow's from its log group), newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: a **waterfall** of each state on one time axis (a task's tries and the back-off between them, a Map's iterations in place), each state with what it called, how long it took and how many tries, and where it failed and why. Then **one log of what happened**: Step Functions' events and **the log lines of every Lambda run it called** (each found by its request ID, or by time when the history has none), merged by time. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run) |
-| `failures(name, since="7d", limit=50)`                    | Why a Standard state machine fails: the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
+| `failures(name, since="7d", limit=50)`                    | Why a state machine fails (an Express workflow's read from its log group): the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
 
 ### Reference
 
@@ -2110,6 +2113,7 @@ Read-only. Grant what you need:
 | `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution` and `failures`                         |
 | `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
 | `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
+| `logs:FilterLogEvents` on the state machine's log group           | An Express workflow's executions, steps and failures                          |
 
 Nothing here starts, stops or redrives an execution: findings show the `aws stepfunctions redrive-execution` command
 instead. Anything you can't read shows up as a note instead of an error. The

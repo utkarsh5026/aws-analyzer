@@ -16,7 +16,7 @@ from .._kit.render import _call
 from .._kit.text import _clip
 from .._kit.view import _BaseView, _friendly_errors
 
-from .helpers import STATUS_TONES, STATUS_WORDS, short_cause
+from .helpers import STATUS_TONES, STATUS_WORDS, execution_ref, short_cause
 from .models import ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine, StepRun
 from .analysis import (
     catch_label, execution_findings, failure_findings, logging_findings, machine_findings, mermaid, monthly_cost,
@@ -24,6 +24,7 @@ from .analysis import (
 )
 from .analysis.cost import free_tier_note
 from .analysis.findings import lambda_logs_call
+from .analysis.express import logging_gaps
 from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks
 from .analysis.story import ExecutionStory, waterfall
 from .analyzer import StepFunctionsAnalyzer
@@ -314,7 +315,7 @@ class StepFunctionsView(_BaseView):
 
     def _overview_next(self, overview: Overview) -> list[tuple[str, str]]:
         failing = [m for m in overview.machines if (n := overview.numbers.get(m.arn)) and n.unsuccessful
-                   and not m.is_express]
+                   and m.has_executions]
         failing.sort(key=lambda m: -overview.numbers[m.arn].unsuccessful)
         steps = []
         if failing:
@@ -322,7 +323,7 @@ class StepFunctionsView(_BaseView):
         busiest = max(overview.machines, key=lambda m: overview.numbers[m.arn].started
                       if m.arn in overview.numbers else 0)
         steps.append((_call("state_machine", busiest.name), "its states, findings and cost"))
-        if not busiest.is_express:
+        if busiest.has_executions:
             steps.append((_call("executions", busiest.name), "its latest executions"))
         return steps[:3]
 
@@ -387,7 +388,7 @@ class StepFunctionsView(_BaseView):
                 f"more), {self._price_basis()}. {free_tier_note()}")
 
     def _machine_next(self, machine: StateMachine, numbers: MachineNumbers | None) -> list[tuple[str, str]]:
-        if machine.is_express:
+        if not machine.has_executions:
             return [(_call("graph", machine.name), "how it flows, as a diagram to paste")]
         steps = []
         if numbers and numbers.unsuccessful:
@@ -435,7 +436,7 @@ class StepFunctionsView(_BaseView):
         sub = f"starts at {machine.start_at} · {_plural(top, 'state')}" + (
             f", and {_plural(nested, 'state')} inside a Map or Parallel" if nested else "")
         steps = [(_call("state_machine", machine.name), "its numbers, findings and cost")]
-        if not machine.is_express:
+        if machine.has_executions:
             steps.append((_call("graph", machine.name, failures="7d"), "where its executions stop, in the last 7 "
                                                                        "days"))
         return [
@@ -472,9 +473,15 @@ class StepFunctionsView(_BaseView):
             ("Median run", _seconds(statistics.median(durations)) if durations else "-"),
             ("Longest", _seconds(max(durations)) if durations else "-"),
         ]
-        blocks: list[Any] = [_Title(f"Executions of {machine.name}", f"{what}, {window}, newest first"),
+        where = f", from its log group ({machine.log_groups[0].split(':log-group:')[-1]})" if page.source == "logs" else ""
+        blocks: list[Any] = [_Title(f"Executions of {machine.name}", f"{what}, {window}, newest first{where}"),
                              _Cards([_card(c) for c in cards])]
-        if page.truncated:
+        if page.note:
+            blocks.append(_Note(page.note))
+        if page.covered_from is not None:
+            blocks.append(_Note(f"Its log group has more lines than one read holds: these go back to "
+                                f"{_fmt_dt(page.covered_from, zone=True)}. Pass since= for a shorter window."))
+        elif page.truncated:
             blocks.append(_Note(f"Stopped at {_plural(len(executions), 'execution')}: these are the newest. Pass "
                                 "n= for more, or since= for a shorter window."))
         if not executions:
@@ -488,11 +495,13 @@ class StepFunctionsView(_BaseView):
         steps = []
         newest_failed = next((e for e in executions if e.failed), None)
         if newest_failed is not None:
-            steps.append((_call("execution", f"{machine.name}/{newest_failed.name}"),
+            steps.append((_call("execution", execution_ref(machine.name, newest_failed.name, newest_failed.arn)),
                           "the newest failure, step by step"))
             steps.append((_call("failures", machine.name), "every failure, grouped by cause"))
         elif executions:
-            steps.append((_call("execution", f"{machine.name}/{executions[0].name}"), "the newest, step by step"))
+            newest = executions[0]
+            steps.append((_call("execution", execution_ref(machine.name, newest.name, newest.arn)),
+                          "the newest, step by step"))
         steps.append((_call("graph", machine.name), "how it flows"))
         blocks.append(_Next(steps[:3]))
         return blocks
@@ -529,6 +538,7 @@ class StepFunctionsView(_BaseView):
             f"{execution.machine}",
             f"started {_fmt_dt(execution.start, seconds=True, zone=True)}",
             f"redriven {execution.redrive_count}×" if execution.redrive_count else "",
+            "read from its log group" if detail.source == "logs" else "",
             _plural(detail.events, "history event"),
         ]))
         blocks: list[Any] = [
@@ -554,7 +564,7 @@ class StepFunctionsView(_BaseView):
         steps = []
         if step is not None and step.function:
             steps.append((f"LambdaView().{_call('errors', step.function)}", f"every error {step.function} logged"))
-        if detail.execution.failed and not (detail.machine and detail.machine.is_express):
+        if detail.execution.failed and (detail.machine is None or detail.machine.has_executions):
             steps.append((_call("failures", machine_name), "how often it fails like this"))
         steps.append((_call("executions", machine_name), "its other executions"))
         return steps[:3]
@@ -587,18 +597,24 @@ class StepFunctionsView(_BaseView):
         sub = f"{_plural(unsuccessful, 'execution')} that failed, timed out or were aborted {window}"
         if numbers is not None:
             sub += f" (CloudWatch counts {numbers.started:,} executions in {_plural(numbers.days, 'day')})"
+        if report.source == "logs":
+            sub += ", read from its log group"
+        gaps = logging_gaps(machine) if report.source == "logs" else ""
         blocks: list[Any] = [
             _Title(f"Why {machine.name} fails", sub),
             _Cards([_card(c) for c in cards]),
             _Findings(failure_findings(report, _utcnow()),
                       empty=f"No execution failed, timed out or was aborted {window}."),
         ]
+        if gaps:
+            blocks.insert(1, _Note(gaps))
         if report.groups:
             rows = []
             for group in report.groups:
                 newest = group.newest
                 read = (lambda_logs_call(group.function, group.request_id) if group.function and group.request_id
-                        else _call("execution", f"{machine.name}/{newest.name}") if newest is not None else "-")
+                        else _call("execution", execution_ref(machine.name, newest.name, newest.arn))
+                        if newest is not None else "-")
                 rows.append([group.state + (f" · λ {group.function}" if group.function else ""), group.error,
                              _clip(short_cause(group.cause), 120) or "-", f"{group.count:,}",
                              human_age(newest.start) if newest is not None else "-", read])
@@ -612,7 +628,7 @@ class StepFunctionsView(_BaseView):
         steps = []
         top = report.groups[0] if report.groups else None
         if top is not None and top.newest is not None:
-            steps.append((_call("execution", f"{report.machine.name}/{top.newest.name}"),
+            steps.append((_call("execution", execution_ref(report.machine.name, top.newest.name, top.newest.arn)),
                           "the newest failure of the most common kind, step by step"))
         if top is not None and top.function:
             steps.append((f"LambdaView().{_call('errors', top.function)}", f"every error {top.function} logged"))

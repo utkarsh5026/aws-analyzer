@@ -71,6 +71,14 @@ class StateMachine:
         return self.type == "EXPRESS"
 
     @property
+    def has_executions(self) -> bool:
+        """
+        Whether its executions can be read: a Standard workflow's history, or an Express workflow's log group when
+        logging is on.
+        """
+        return not self.is_express or (self.log_level != "OFF" and bool(self.log_groups))
+
+    @property
     def functions(self) -> list[str]:
         """
         The Lambda functions its states call, each once, in order.
@@ -144,13 +152,17 @@ class Execution:
 class ExecutionPage:
     """
     The executions of one state machine that list_executions read, newest first; truncated when it stopped at the
-    limit before `since`.
+    limit before `since`. source is 'history' (ListExecutions) or 'logs' (an Express workflow's log group, read back
+    to covered_from), and note says what the logs can't tell.
     """
 
     machine: StateMachine
     executions: list[Execution] = field(default_factory=list)
     since: datetime | None = None
     truncated: bool = False
+    source: str = "history"
+    covered_from: datetime | None = None
+    note: str = ""
 
     def to_df(self) -> Any:
         pd = _require("pandas", "to_df()")
@@ -241,6 +253,7 @@ class ExecutionDetail:
     failed_step: StepRun | None = None
     lambda_run: Any = None
     lambda_note: str = ""
+    source: str = "history"
 
     def step(self, name: str) -> StepRun | None:
         return next((s for s in reversed(self.steps) if s.name == name), None)
@@ -277,6 +290,7 @@ class FailureReport:
     read: int = 0
     truncated: bool = False
     numbers: MachineNumbers | None = None
+    source: str = "history"
 
 
 @dataclass

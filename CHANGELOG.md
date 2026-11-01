@@ -24,6 +24,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `graph("order-pipeline", execution="ord-7f3a")` colours the path an execution took; `failures="7d"` where they stop.
   - The explorer's Graph tab draws the same: pick a state for its tries, its Lambda run's lines or its failures.
 
+- 🔀 **Step Functions: Express executions, from their log group** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
+  - `executions()`, `execution()` and `failures()` now read Express workflows from the log group their logging writes.
+  - The reports say what a log group at `ERROR` level leaves out; with logging off they show how to turn it on.
+
 - 🧭 **S3 explorer: open it in the S3 console** ([#183](https://github.com/utkarsh5026/aws-analyzer/pull/183))
   - **↗ S3 console** above the right pane opens the file, folder or list of buckets in the AWS console, in a new tab.
   - `x.console_url` is the link, and `console_url("s3://bucket/key")` makes one for any path.

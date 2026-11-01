@@ -116,11 +116,15 @@ An execution is named by its ARN, a link copied from the console, or `"state-mac
 sfn.overview()            # or overview(days=30)
 ```
 
-The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command: `failures('order-pipeline')` for a Standard workflow that fails, and the log group for an Express one.
+The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command, such as `failures('order-pipeline')`.
 
 !!! tip "Worth knowing"
 
-    An Express workflow keeps no history. With logging off, its executions leave no record at all, and at `ERROR` only its failures do. The finding shows the `aws stepfunctions update-state-machine` command that turns logging on.
+    An Express workflow keeps no history in Step Functions, so its executions are read from its log group. With logging off they leave no record at all, and at `ERROR` only its failures do (without even the state that failed). The finding shows the `aws stepfunctions update-state-machine` command that turns logging on, at `ALL`.
+
+??? more "How Express executions are read"
+
+    Step Functions writes each event of an Express execution to the log group as one JSON line, the same events a Standard execution's history holds. `executions()` reads the window's lines (the newest 20,000, read back from now in slices that double) and groups them by execution; `execution()` and `failures()` search for one execution's lines with a filter pattern, in the five minutes an Express execution can last. The lines turned back into history events go through the same reader, so the waterfall, the log and the failure groups work the same way. Express ARNs carry an ID beside the name, so `executions()` lists each ARN.
 
 ## Why it fails { #failures }
 
@@ -285,9 +289,13 @@ The last statement is only for the Lambda lines in `execution()`; without it the
 
     Names are case-sensitive and state machines are regional. The note lists the closest names; `overview()` lists them all. Use `StepFunctionsView(StepFunctionsAnalyzer(region="eu-west-1"))` for another region.
 
-??? question "“… is an Express workflow”"
+??? question "“… is an Express workflow with logging off”"
 
-    Step Functions keeps no list or history of Express executions, so `executions()`, `execution()` and `failures()` can't read them. They're in the workflow's log group when logging is on; `state_machine()` shows how to turn it on.
+    Step Functions keeps no list or history of Express executions: they're read from the workflow's log group, so with logging off there's nothing to read. `state_machine()` shows the command that turns logging on; executions after that show up.
+
+??? question "An Express failure says “(unknown state)”"
+
+    At `ERROR` level, Step Functions logs the failed task's error but not the state it was in. Set the logging level to `ALL` to see every step.
 
 ??? question "The Lambda run behind a step couldn't be shown"
 

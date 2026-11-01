@@ -149,7 +149,7 @@ class _GraphTab:
 
     def _mode_changed(self: StepFunctionsExplorer, change: dict[str, Any]) -> None:
         self.graph_mode = change["new"]
-        if self.graph_mode == "failures" and self.report is None and self.machine and not self.machine.is_express:
+        if self.graph_mode == "failures" and self.report is None and self.machine and self.machine.has_executions:
             self._load_failures()
         self._draw_graph()
 
@@ -166,7 +166,8 @@ class _GraphTab:
                                                                "path it took.")
             marks = path_marks(layout, self.detail)
         elif self.report is None:
-            say = ("Express workflows keep no history of their failures." if self.machine and self.machine.is_express
+            unreadable = self.machine is not None and not self.machine.has_executions
+            say = ("An Express workflow with logging off leaves no record of its failures." if unreadable
                    else "Reading where executions stop…")
             return FlowMarks(selected=self.picked_state), say
         else:

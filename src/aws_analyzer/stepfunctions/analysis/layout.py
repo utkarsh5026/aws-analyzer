@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
+from ..._kit.fmt import _plural
+
 from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine
 from .definition import resource_label
 
@@ -284,7 +286,7 @@ def failure_marks(layout: FlowLayout, report: FailureReport) -> FlowMarks:
     Where executions stopped over the report's window: each top-level state (a state inside a Map or Parallel
     counts for it) shaded by its share of the failures, h3 for half or more, with how many under its name.
     """
-    marks = FlowMarks(legend=f"Where {len(report.failed):,} executions stopped")
+    marks = FlowMarks(legend=f"Where {_plural(len(report.failed), 'execution')} stopped")
     owners = _owners(layout, report)
     counts: Counter[str] = Counter()
     for group in report.groups:
