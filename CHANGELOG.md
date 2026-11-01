@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🔀 **Step Functions: a new analyzer for state machines** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🔀 **Step Functions: a new analyzer for state machines** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
   - `StepFunctionsView()`: `overview()`, `state_machine()`, `graph()`, `executions()`, `execution()` and `failures()`.
   - `execution("order-pipeline/ord-7f3a")` shows each step, and for a failed Lambda step the log lines of that very run.
   - `failures()` groups failed executions by the state they stopped at and the error, and shows the redrive command.
