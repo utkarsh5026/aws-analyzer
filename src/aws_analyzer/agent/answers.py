@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any, Callable, Iterable
 
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
+from .._kit.focus import Focus
 from .._kit.render import _call
 from .._kit.text import _clip
 from .budget import Budget, raised_limit
@@ -459,6 +460,7 @@ class AgentAnswer:
         runbooks      the runbooks it read to answer (read_runbook), by name, in the order it read them
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
+        focus         what the user had open in an explorer when they asked (ask(focus=)), or None
         exception     the error itself, to raise when debugging
     """
 
@@ -484,6 +486,7 @@ class AgentAnswer:
     error: str | None = None
     thread: str = ""
     asked: datetime | None = None
+    focus: Focus | None = None
     exception: BaseException | None = field(default=None, repr=False)
 
     @property

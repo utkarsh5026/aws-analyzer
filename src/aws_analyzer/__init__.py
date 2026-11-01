@@ -32,6 +32,8 @@ Quick start
 
     from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
     AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
+    from aws_analyzer import set_assistant   # an ✦ Ask button in every explorer, asking the agent about what it shows
+    set_assistant(AgentView(provider="bedrock"))
 
     from aws_analyzer import clean_up        # free the disk: remove the downloads and the agent sandbox's cache
     clean_up(dry_run=True)                   # aws-analyzer saved here (local_files() lists them); dry_run only says
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from ._kit.fmt import set_timezone
     from ._kit.housekeeping import clean_up, local_files
     from ._kit.themes import set_theme
+    from ._kit.window import set_assistant
     from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
@@ -63,7 +66,7 @@ if TYPE_CHECKING:
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
     from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
-__version__ = "0.42.0"
+__version__ = "0.43.0"
 
 __all__ = [
     "__version__",
@@ -93,6 +96,7 @@ __all__ = [
     "AgentView",
     "set_timezone",
     "set_theme",
+    "set_assistant",
     "local_files",
     "clean_up",
 ]
@@ -123,6 +127,7 @@ _EXPORTS = {  # name -> the module it comes from
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",
     "set_theme": "_kit.themes",
+    "set_assistant": "_kit.window",
     "local_files": "_kit.housekeeping",
     "clean_up": "_kit.housekeeping",
 }

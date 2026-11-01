@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-01
+
 ### Added
 
 - 🔀 **Step Functions: a new analyzer for state machines** ([#188](https://github.com/utkarsh5026/aws-analyzer/pull/188))
@@ -41,6 +43,28 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A **Live** tab: every function that ran in the last 10 minutes, the ones running now first, looked at every 5 s.
   - Click one to follow its runs as their lines come; a run nearing its timeout says so, with the fix.
   - `explore(tab="live")` or `x.live("orders-etl")`; CloudWatch's numbers cost about a cent per 15 minutes.
+
+- 🧰 **Explorers: what you're looking at, as data** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `x.focus` in the Lambda, S3 and knowledge base explorers: the function, folder or file, the tab, the time range and what's open.
+  - `x.focus.chips()` reads it as a row of chips, and `x.focus.value("request_id")` one part.
+
+- 🤖 **Agent: ask about what an explorer shows** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `agent.ask("Why does this fail?", focus=x)` with an explorer window: "this" is the function, run, folder or file open.
+  - The report says what the agent was told, under the question.
+
+- 🤖 **Agent: ✦ Ask in the explorers** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `explore(..., assistant=agent)` or `x.attach(agent)`: **✦ Ask** opens the chat beside the tabs, about what's open.
+  - It offers questions for the tab or file you're on, and `set_assistant(agent)` adds it to every explorer.
+  - Each answer ends in buttons that open what it points at: a run, a tab, a file.
+
+- 🧭 **S3 explorer: ✦ Ask about the folder you're in** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `S3Explorer(..., assistant=agent)` or `x.attach(agent)`: the agent's chat in the list's place, beside the preview.
+
+- 💬 **Bedrock chat: ✦ Ask the agent why an answer went that way** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - `chat(..., assistant=agent)`: the agent beside the conversation, about the question, its answer and the files cited.
+
+- ⚡ **Lambda explorer: search the logs in plain English** ([#185](https://github.com/utkarsh5026/aws-analyzer/pull/185))
+  - With an agent, **✦** beside the Logs search box: describe the runs, and it writes the query for you to use.
 
 ## [0.42.0] - 2026-10-31
 
@@ -1140,7 +1164,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.39.0...v0.40.0

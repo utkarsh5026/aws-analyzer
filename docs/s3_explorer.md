@@ -381,6 +381,7 @@ x.picked                                   # what's ticked in the list, as s3://
 x.location                                 # the folder you're in, such as 's3://acme-ml-data/raw/' ('' on your buckets)
 x.selected                                 # the file shown on the right, or ''
 x.console_url                              # the AWS console's page for that file, else the folder
+x.focus.chips()                            # what you're looking at, as a row of chips: the folder, the file, the search
 x.ui.summary(x.location)                   # any S3View report about where you are, in its own cell
 ```
 
@@ -504,6 +505,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `mode` | `"auto"`: the clickable explorer in Jupyter, a text listing elsewhere. `"widgets"` or `"text"` to choose |
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
 | `history` | Remember the folders you open, for the [Recent row](#recent): `True`, `False`, or a file to keep them in |
+| `assistant` | An `AgentView`: **✦ Ask** at the end of the top bar opens its chat in the list's place, asking about the folder or file you have open ([the agent's guide](agent.md#ask-drawer)); `x.attach(agent)` does it later |
 
 | Command | What it does |
 | --- | --- |
@@ -520,6 +522,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
 | `nav` | The `S3Navigator` behind the list |
 | `picked` | The files and folders ticked in the list, as `s3://` paths: `x.ui.download_zip(x.picked)` |
+| `focus` | What you're looking at, as data: the folder (what it holds, as far as it's listed), the file shown, the search and what's ticked. `x.focus.chips()` reads it as a row of chips, `x.focus.value("file")` one part |
 | `zip_max_size`, `zip_max_files` | The **⬇ Download .zip** and **⬇ Download selected** limits, which **⚙** edits |
 | `downloads` | Where **⬇ Download** and the zips save (the `S3Analyzer`'s downloads folder), which **⚙** edits; `zip_folder` is its old name |
 

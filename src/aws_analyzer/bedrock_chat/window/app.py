@@ -9,7 +9,7 @@ import threading
 from typing import Any
 
 from ..._kit.render import _prose
-from ..._kit.window import _Window, _class_if, _css_height
+from ..._kit.window import _AskSlot, _Window, _check_assistant, _class_if, _css_height, _drawer_css
 
 from ..models import Answer
 from ..analysis.batches import Batch, BatchItem, format_questions
@@ -24,6 +24,7 @@ from .settings import _SettingsTab
 from .request import _RequestTab
 from .test import _TestTab
 from .runs import _RunsTab
+from .focus import _FocusReads
 
 
 _SIDE_MAX_WIDTH = "580px"
@@ -33,7 +34,8 @@ _CHAT_MARGIN = "0 16px 8px 0"
 _CHAT_ALONE_MARGIN = "0 0 8px 0"
 
 
-class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _TestTab, _RunsTab, _Window):
+class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _TestTab, _RunsTab, _FocusReads, _AskSlot,
+               _Window):
     """
     The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
@@ -42,8 +44,15 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
 
     TEST_TAB, RUNS_TAB = _TAB_TITLES.index("Test"), _TAB_TITLES.index("Runs")  # where they are among the side tabs
 
-    def __init__(self, view: BedrockChatView, widgets: Any):
+    _PREFIX = "kbc"
+
+    def __init__(self, view: BedrockChatView, widgets: Any, *, assistant: Any = None):
         self.view, self.w = view, widgets
+        self._init_ask()
+        if assistant is not None:
+            _check_assistant(assistant)
+            self.assistant = assistant
+        self._tabs_were_shown = True
         self.schema = view.core.schema()
         self.inputs: dict[str, Any] = {}  # setting key -> the widget holding its value
         self.rows: dict[str, Any] = {}  # setting key -> its card
@@ -81,7 +90,7 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
 
     def _build(self) -> Any:
         w, layout = self.w, self.w.Layout
-        style = w.HTML(_CSS, layout=layout(display="none"))
+        style = w.HTML(_CSS + _drawer_css(self._PREFIX), layout=layout(display="none"))
         # over the window while a picker's list is open (under that picker), so a click anywhere else closes it
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("kbc-backdrop")
@@ -105,8 +114,8 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
         self.mode_pick.observe(self._safely(self._mode_changed), names="value")
         self.chat_toggle = self._pane_toggle("Chat", "Show or hide the conversation")
         self.side_toggle = self._pane_toggle("Settings", "Show or hide the side tabs: Settings, Test, Runs, ...")
-        top = w.HBox([self.title, self.mode_pick, self.new_button, self.chat_toggle, self.side_toggle],
-                     layout=layout(width="100%", align_items="center"))
+        top = w.HBox([self.title, self.mode_pick, self.new_button, self.chat_toggle, self.side_toggle,
+                      self._make_ask_button()], layout=layout(width="100%", align_items="center"))
         top.add_class("kbc-top")
         pickers = w.HBox([self.kb_pick.field, self.source_pick.field, self.model_pick.field, self.files_pick.field],
                          layout=layout(width="100%", flex_flow="row wrap", margin="12px 0 0 0"))
@@ -132,7 +141,8 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
         self.chat = w.VBox([self.log, self.composer, self.status], layout=layout(
             flex="1 1 460px", min_width="320px", margin=_CHAT_MARGIN))
         side = self._side()
-        body = w.HBox([self.chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
+        body = w.HBox([self.chat, side, self._make_drawer_box()],
+                      layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
         root = w.VBox([style, head, body, self.backdrop], layout=layout(width="100%"))
         root.add_class("kbc-app")
 
@@ -300,6 +310,26 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
 
     def _set_status(self, text: str, level: str = "") -> None:
         self.status.value = _wrap(f'<div class="st {level}">{_prose(text)}</div>') if text else ""
+        self._focus_moved()
+
+    def _ask_widgets(self) -> Any:
+        return self.w
+
+    def _ask_click(self, handler: Any) -> Any:
+        return self._safely(lambda _button: handler())
+
+    def _show_drawer(self, shown: bool) -> None:
+        """
+        The ✦ Ask drawer takes the side tabs' place, so the conversation stays beside it; closing it brings the tabs
+        back as they were.
+        """
+        if shown and self.drawer_box.layout.display == "none":
+            self._tabs_were_shown = self.tabs.layout.display != "none"
+        self.drawer_box.layout.display = "" if shown else "none"
+        if shown:
+            self.tabs.layout.display = "none"
+        elif self._tabs_were_shown:
+            self.tabs.layout.display = None
 
     def _add(self, inner: str) -> Any:
         bubble = self.w.HTML(_wrap(inner), layout=self.w.Layout(width="auto"))

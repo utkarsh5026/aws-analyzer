@@ -389,6 +389,7 @@ x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, fr
 x.filter(".parquet", subfolders=True)                 # the search box: every Parquet file below this folder
 x.filter(kind="folders")                              # only the folders here; x.filter() shows everything again
 x.ui.download_zip(x.picked)                           # what's ticked in the list, as one .zip
+x.focus.chips()                                       # what you're looking at: ['my-bucket/raw/', '12 files · 3.4 GB']
 x.ui.summary(x.location)                              # any S3View report about where you are, in its own cell
 
 nav = S3Navigator()                                   # the same navigation as data, with no UI
@@ -945,8 +946,9 @@ browser tab). Without it, or outside Jupyter, it shows the same as reports: `fil
 
 Everything is read in the background, so a click shows what's known at once and the rest as it arrives, and the
 window keeps answering. Like the rest of the file it only reads: where a sync would help, it shows the command.
-`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, and `x.ui`
-is a `BedrockKBView` for reports in other cells.
+`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is
+what you're looking at (the knowledge base, the tab and the file or search open), and `x.ui` is a `BedrockKBView` for
+reports in other cells.
 
 ### Commands (`BedrockKBView`)
 
@@ -1196,6 +1198,7 @@ chat("support-docs", data_source="faq")    # ask only one of its data sources (a
 chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
 chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
 chat("support-docs", height=800)           # an 800px conversation (else the window fills the browser's height)
+chat("support-docs", assistant=AgentView())   # ✦ Ask: the agent beside the chat, asking why an answer cited what it did
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
 ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])   # every combination on that list, the setups ranked
@@ -2155,6 +2158,10 @@ agent.ask("Which Lambda failed last night?")            # or ask in a cell: the 
 agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
 agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
+x = LambdaView().explore("orders-etl", tab="errors")
+agent.ask("Why does this fail?", focus=x)               # about what the explorer shows: the function, tab and window
+x.attach(agent)                                         # ✦ Ask in the explorer: the chat beside its tabs, asking about it
+S3Explorer("s3://acme-raw/incoming/", assistant=agent)  # the same in the S3 explorer, in the list's place
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
 agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
@@ -2429,7 +2436,7 @@ and `clean_up()` leaves the file alone.
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🗂 chats** lists the saved chats to open one again, rename it or delete it (with `chats=True`); **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
-| `ask(question, new=False)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
+| `ask(question, new=False, focus=None)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. `focus=` takes an explorer window (or its `x.focus`): the model is told what it shows, so "this" means the function, run, folder or file you have open. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
 | `memory()`                  | With `memory=True`: what the agent remembers about the account, each note and when it learned it, the notes old enough to check and how full its memory is, then your `notes=` file |
