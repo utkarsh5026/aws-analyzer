@@ -2322,11 +2322,11 @@ agent.runbooks()                                        # the runbooks it follow
 ```
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/agent-chat-dark.webp">
-  <img src="docs/images/agent-chat-light.webp" alt="The agent's chat window, drawn like a terminal in a monospace font: on the right, the question Which Lambda failed in the last 24 hours, and why?, marked with a person emoji; its plan, Plan · 3 of 3 done, every step ticked; a folded line 2 tool calls · 14s with badges for the services they read, lambda, logs and cloudwatch; then the answer, marked with a robot emoji: orders-etl failed 66 of its 2,226 calls with three causes (a KeyError on customer_id in etl.py line 22, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem), report-api's errors and throttles, and the call to look closer; then the model, 2 tool calls, 14s and $0.03, a details link, and a › prompt with a send button">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/agent-chat-tour-dark.webp">
+  <img src="docs/images/agent-chat-tour-light.webp" alt="The agent&#x27;s chat window in a notebook, animated: it starts on the greeting and the questions to start from; the pointer types Which Lambda failed in the last 24 hours, and why? and presses Enter; the agent writes a three-step plan under the question and ticks it off as it calls function_health and function_errors, each call shown with the services it reads; then it answers: orders-etl failed 66 of its 2,226 calls, from a KeyError on customer_id, timeouts and an AccessDeniedException; last the pointer opens the folded steps and the first tool call: the AWS operations it read, the window it covered and the calls to look closer">
 </picture>
 
-<p align="center"><sub><code>agent.chat()</code>: its plan ticks off and every call shows as it runs, with a badge for each AWS service it reads, then folds into one line above the answer. The <a href="docs/agent.md#chat">agent guide</a> shows it at work.</sub></p>
+<p align="center"><sub><code>agent.chat()</code>: a question asked, the plan ticked off as each read-only tool runs, with a badge for each AWS service it reads, then the answer and the steps behind it. The <a href="docs/agent.md#chat">agent guide</a> shows more.</sub></p>
 
 ### Which model
 

@@ -12,6 +12,8 @@ button, clicks it with a ring, types into search boxes a letter at a time, and s
 it. A frame is taken at every step of the way, and while the window is loading, so the tour shows what a user waits
 for. The frames become docs/images/<name>-{light,dark}.webp (lossless, looping), and the height= of both images is set
 in the window's guide, by shots.py's set_height. The S3 explorer's tour (explorer-tour) is made by explorer_shots.py.
+agent-chat-tour plays agent_chat_shots.py's scripted model, so like that script it needs Python 3.11 or newer with the
+agent's packages (agentenv/bin/python .claude/skills/demo/tour_shots.py agent-chat-tour).
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
 Playwright installs (playwright install chromium). In a cloud session, point $FONTCONFIG_FILE at a fontconfig without
@@ -35,6 +37,7 @@ from typing import Any, Callable
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE)]
 
+import agent_chat_shots  # noqa: E402
 import apigw_explorer_shots  # noqa: E402
 import chat_shots  # noqa: E402
 import kb_explorer_shots  # noqa: E402
@@ -50,6 +53,7 @@ LOADING_FRAME_MS = 160
 MAX_LOADING_FRAMES = 12
 KEY_FRAME_MS = 55
 LOADING_TIMEOUT_MS = 90_000
+AGENT_WORKING_FRAMES = 90
 POINTER_HTML = """() => {
   const pointer = document.createElement('div');
   pointer.id = 'tour-pointer';
@@ -78,13 +82,16 @@ class Tour:
     Records a visit to one window: each method moves the drawn pointer, acts, and adds frames of the window.
     """
 
-    def __init__(self, page: Any, app: Any, busy_js: str) -> None:
+    def __init__(self, page: Any, app: Any, busy_js: str, *, loading_frames: int = MAX_LOADING_FRAMES) -> None:
         """
-        `busy_js` is a JavaScript expression that's true while the window is loading something.
+        `busy_js` is a JavaScript expression that's true while the window is loading something; `loading_frames` is
+        how many frames a wait shows at most.
         """
         self.page = page
         self.app = app
         self.busy_js = busy_js
+        self.loading_frames = loading_frames
+        self.heights: list[float] = []
         box = app.bounding_box()
         self.clip = {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}
         self.x = box["x"] + box["width"] * 0.72
@@ -99,6 +106,7 @@ class Tour:
         from PIL import Image
 
         self.page.evaluate(MOVE_POINTER, [self.x, self.y, ring])
+        self.heights.append(self.app.bounding_box()["height"])
         picture = Image.open(io.BytesIO(self.page.screenshot(clip=self.clip))).convert("RGB")
         self.frames.append((picture, round(ms)))
 
@@ -114,7 +122,7 @@ class Tour:
         Adds a frame now and then while the window loads, and returns once it has finished.
         """
         time.sleep(0.25)
-        for _ in range(MAX_LOADING_FRAMES):
+        for _ in range(self.loading_frames):
             if not self.page.evaluate(f"() => {self.busy_js}"):
                 break
             self.frame(LOADING_FRAME_MS)
@@ -189,9 +197,13 @@ class Tour:
 
     def save(self, path: Path) -> Any:
         """
-        Writes the frames as a looping, lossless animated WebP and returns its first frame.
+        Writes the frames as a looping, lossless animated WebP and returns its first frame. Every frame is cut to the
+        window's shortest height, so a window that shrinks leaves no empty band under it.
         """
-        first, *others = [picture for picture, _ in self.frames]
+        shortest = min(self.heights) / self.clip["height"]
+        pictures = [picture for picture, _ in self.frames]
+        kept_rows = round(pictures[0].height * min(shortest, 1))
+        first, *others = [picture.crop((0, 0, picture.width, kept_rows)) for picture in pictures]
         durations = [ms for _, ms in self.frames]
         first.save(path, "WEBP", save_all=True, append_images=others, loop=0, lossless=True, quality=100, method=6,
                    duration=durations, minimize_size=True)
@@ -311,6 +323,30 @@ def chat_busy() -> str:
             "!!document.querySelector('.kbc-app .bq.wait')")
 
 
+def agent_busy() -> str:
+    """
+    The JavaScript test for the agent's chat window working on a question: its pulse shown, and no answer yet.
+    """
+    return "!!document.querySelector('.agc-app .ag-pulse') && !document.querySelector('.agc-app .ag-ans')"
+
+
+def play_agent(page: Any, tour: Tour) -> None:
+    """
+    The greeting and the questions to start from, a question typed and asked, the plan ticked off as two tools run, the
+    answer, then the steps behind it opened.
+    """
+    tour.hold(2.2)
+    box = page.locator(".agc-app .agc-composer input")
+    tour.type(box, agent_chat_shots.QUESTION, enter=False, hold=0.3)
+    box.press("Enter")
+    page.wait_for_selector(".agc-app .ag-pulse", timeout=LOADING_TIMEOUT_MS)
+    tour.wait()
+    page.wait_for_selector(".agc-app .ag-ans", timeout=LOADING_TIMEOUT_MS)
+    tour.hold(4.0)
+    tour.click(page.locator(".agc-app .ag-trail > summary").first, hold=1.6, at=0.2)
+    tour.click(page.locator(".agc-app .ag-trail .ag-step > details > summary").nth(0), hold=3.4, at=0.2)
+
+
 @dataclass
 class Window:
     """
@@ -323,6 +359,7 @@ class Window:
     root: str
     busy_js: str
     play: Callable[[Any, Tour], None]
+    loading_frames: int = MAX_LOADING_FRAMES
 
 
 TOURS = [
@@ -335,6 +372,8 @@ TOURS = [
     Window("apigw-explorer-tour", "apigateway", apigw_explorer_shots.NOTEBOOK_CODE, ".agx-app",
            busy_in(".agx-app", ".agx-status"), play_apigateway),
     Window("chat-tour", "bedrock_chat", chat_shots.NOTEBOOK_CODE, ".kbc-app", chat_busy(), play_chat),
+    Window("agent-chat-tour", "agent", agent_chat_shots.NOTEBOOK_CODE, ".agc-app", agent_busy(), play_agent,
+           loading_frames=AGENT_WORKING_FRAMES),
 ]
 
 
@@ -393,7 +432,7 @@ def record(page: Any, lab: Lab, window: Window, theme: str, out: Path) -> int:
     Records the window's tour in one theme into `out`, and returns its height in CSS px.
     """
     app = open_window(page, lab, window, theme)
-    tour = Tour(page, app, window.busy_js)
+    tour = Tour(page, app, window.busy_js, loading_frames=window.loading_frames)
     window.play(page, tour)
     first = tour.save(out / f"{window.name}-{theme}.webp")
     return round(first.height / shots.SCALE)

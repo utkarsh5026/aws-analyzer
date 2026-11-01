@@ -197,7 +197,8 @@ picks report-api for its JSON logs. Its figures are `lambda-explorer*`, in `docs
 ```
 
 Each of the other windows also has an animated tour, like the S3 explorer's `explorer-tour`: `lambda-explorer-tour`,
-`kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour` and `chat-tour`, at the top of each guide and in
+`kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `chat-tour` and `agent-chat-tour` (run with
+`agentenv/bin/python`: it needs the agent's packages), at the top of each guide and in
 README.md. `tour_shots.py` makes them: it opens the window on the notebook its screenshot script uses, then plays a
 scripted visit with a drawn pointer (`Tour`: `click`, `type` a letter at a time, `paste`, `choose`, `hold`), taking
 frames while the window loads too, and writes a looping, lossless animated WebP. A tour's visit is its `play_*`
