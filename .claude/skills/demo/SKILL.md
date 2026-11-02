@@ -196,6 +196,21 @@ picks report-api for its JSON logs. Its figures are `lambda-explorer*`, in `docs
 .venv/bin/python .claude/skills/demo/lambda_explorer_shots.py --out /tmp/look       # PNGs to look at, docs left alone
 ```
 
+Each of the other windows also has an animated tour, like the S3 explorer's `explorer-tour`: `lambda-explorer-tour`,
+`kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `chat-tour` and `agent-chat-tour` (run with
+`agentenv/bin/python`: it needs the agent's packages), at the top of each guide and in
+README.md. `tour_shots.py` makes them: it opens the window on the notebook its screenshot script uses, then plays a
+scripted visit with a drawn pointer (`Tour`: `click`, `type` a letter at a time, `paste`, `choose`, `hold`), taking
+frames while the window loads too, and writes a looping, lossless animated WebP. A tour's visit is its `play_*`
+function; when a window's look or its demo data changes, remake its tour with its stills, and check the alt text and
+caption in the guide and README still say what it shows. About five minutes a tour per theme.
+
+```bash
+.venv/bin/python .claude/skills/demo/tour_shots.py                        # every tour, light and dark
+.venv/bin/python .claude/skills/demo/tour_shots.py lambda-explorer-tour   # just this one
+.venv/bin/python .claude/skills/demo/tour_shots.py --out /tmp/look        # WebPs to look at, docs left alone
+```
+
 ## Real AWS
 
 Use `--live` (with optional `--region` / `--profile`) only when the user explicitly asks for it. It runs against

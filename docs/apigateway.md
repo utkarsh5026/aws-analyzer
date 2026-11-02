@@ -20,6 +20,12 @@ Find the APIs that fail or run out of time, see who can call each route, and fol
 The examples use acme's `orders-api`, a REST API whose `POST /orders` route calls the `orders-etl` Lambda function. Some of its calls take longer than API Gateway's 29 seconds and come back as a `504`, while `orders-etl` is still working.
 { .muted }
 
+![The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it](images/apigw-explorer-tour-light.webp#only-light){ width="984" height="865" loading=lazy }
+![The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it](images/apigw-explorer-tour-dark.webp#only-dark){ width="984" height="865" loading=lazy }
+/// caption
+**`explore()`**: from an API to its routes, then to a failed call, where its time went and the Lambda run that timed out.
+///
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
