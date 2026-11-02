@@ -40,6 +40,10 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 
 </div>
 
+<div class="hero-media">
+<video class="hero-video" muted playsinline preload="none" poster="images/hero-poster.webp" width="1280" height="960" aria-label="A 30-second demo: AWS's raw JSON turned into plain sentences, a notebook that could cost up to $773.07 a month less, a failed Lambda run and its traceback, an agent saying what to fix first, and a question for each of the eight AWS services. Click to replay.">
+<source src="images/hero-demo.mp4" type="video/mp4">
+</video>
 <div class="nb" role="img" aria-label="A notebook cell running ui.instance(): the space churn-analysis on an ml.g5.2xlarge at $1.52 an hour, with idle shutdown off and the GPU idle, and a finding that an ml.m5.2xlarge without a GPU would cost up to $773.07 a month less">
 <div class="nb-bar"><span class="tab">churn-analysis.ipynb</span><span class="kernel">Python 3</span></div>
 <div class="nb-in"><span class="prompt">[1]:</span><span class="call" style="--aa-chars:13">ui.instance()</span></div>
@@ -54,6 +58,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 </div>
 <p class="r-finding"><strong>This ml.g5.2xlarge costs $1.52/hour, and its GPU is idle right now.</strong> If this notebook doesn't use the GPU, ml.m5.2xlarge has as many vCPUs and as much memory without one: <mark>$1.06/hour less, up to $773.07/month</mark>. Switch when the notebook is stopped.</p>
 <p class="r-next">Next <code>disk('/home/sagemaker-user')</code> <code>running()</code></p>
+</div>
 </div>
 </div>
 
