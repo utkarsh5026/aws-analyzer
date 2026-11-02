@@ -24,6 +24,12 @@ Ask "Which Lambda failed last night?" in a notebook cell and get the answer: whi
 It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is yours to pick (one on Amazon Bedrock keeps everything in AWS), run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
 { .muted }
 
+![The agent's chat window in a notebook, animated: it starts on the greeting and the questions to start from; the pointer types Which Lambda failed in the last 24 hours, and why? and presses Enter; the agent writes a three-step plan under the question and ticks it off as it calls function_health and function_errors, each call shown with the services it reads; then it answers: orders-etl failed 66 of its 2,226 calls, from a KeyError on customer_id, timeouts and an AccessDeniedException; last the pointer opens the folded steps and the first tool call: the AWS operations it read, the window it covered and the calls to look closer](images/agent-chat-tour-light.webp#only-light){ width="984" height="726" loading=lazy }
+![The agent's chat window in a notebook, animated: it starts on the greeting and the questions to start from; the pointer types Which Lambda failed in the last 24 hours, and why? and presses Enter; the agent writes a three-step plan under the question and ticks it off as it calls function_health and function_errors, each call shown with the services it reads; then it answers: orders-etl failed 66 of its 2,226 calls, from a KeyError on customer_id, timeouts and an AccessDeniedException; last the pointer opens the folded steps and the first tool call: the AWS operations it read, the window it covered and the calls to look closer](images/agent-chat-tour-dark.webp#only-dark){ width="984" height="726" loading=lazy }
+/// caption
+**`agent.chat()`**: ask a question and watch the agent plan, call its read-only tools and answer, then open the steps behind the answer.
+///
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

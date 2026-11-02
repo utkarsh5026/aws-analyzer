@@ -20,6 +20,12 @@ Find the state machines that fail, see where and why their executions stop, and 
 The examples use acme's `order-pipeline`, a Standard workflow that validates an order, charges the card, loads the order with the `orders-etl` Lambda function and resizes its pictures in a Map. Some of its executions fail at `LoadOrders`, where `orders-etl` raises `KeyError: 'customer_id'`.
 { .muted }
 
+![The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step's time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state's definition and tries beside it](images/sfn-explorer-tour-light.webp#only-light){ width="984" height="865" loading=lazy }
+![The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step's time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state's definition and tries beside it](images/sfn-explorer-tour-dark.webp#only-dark){ width="984" height="865" loading=lazy }
+/// caption
+**`explore()`**: open a failed execution to see which step broke, then find that step on the workflow's graph.
+///
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
