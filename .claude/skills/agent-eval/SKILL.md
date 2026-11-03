@@ -44,11 +44,12 @@ A run passes when the answer (its text and its findings' messages):
 | wrong | `must_not`, regexes | one is matched: it said what a wrong answer says (the injected code, a cause for a function that isn't there) |
 | tools | `tools`, regexes of tool names | it never called one (a cause given without reading the logs) |
 | calls | `max_calls` | it took more tool calls than a sensible route |
-| grounding | the agent's `check_grounding()` | the answer it gave has a name, ID, number or region no tool returned, or "none" over an incomplete read |
+| grounding | the agent's `check_grounding()` | the answer it gave has a name, ID, number or region no tool returned, "none" over an incomplete read, or a citation ("[9]") that names no tool call |
 | error | | the model or the loop failed |
 
 The table gives each case's runs passed, its facts stated, runs that said something wrong, claims per answer that no
-tool returned, tool calls, seconds and cost. `--show` prints each failed run's reasons, its calls and its answer.
+tool returned, the share of sentences stating a fact that cite a tool call (`cited`: not graded, but a model that
+cites less is harder to check), tool calls, seconds and cost. `--show` prints each failed run's reasons, its calls and its answer.
 
 ## Comparing a change
 

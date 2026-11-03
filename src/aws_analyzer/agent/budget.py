@@ -110,6 +110,8 @@ class _Run:
         paused_at     when it paused for the user's choice on a big read (time.monotonic), or None: the wait doesn't
                       count against the time budget
         ask_more      a tool that runs out of a limit asks the user whether to raise it (AgentAnalyzer's ask_more)
+        first_ref     the ref its first tool call gets (record()): refs go on across a conversation's questions, so
+                      an answer can cite a call an earlier question made
 
     `budget` starts as the agent's and is replaced (never changed) when the user raises a limit, so a raise lasts
     for this question only.
@@ -128,6 +130,7 @@ class _Run:
     plan: list[PlanStep] = field(default_factory=list)
     paused_at: float | None = None
     ask_more: bool = False
+    first_ref: int = 1
 
     @property
     def elapsed(self) -> float:
@@ -146,6 +149,14 @@ class _Run:
         if self.paused_at is not None:
             self.started += time.monotonic() - self.paused_at
             self.paused_at = None
+
+    def record(self, call: ToolCall) -> None:
+        """
+        Keeps a new tool call on the question, numbered with the next ref (what the model cites it by: '[3]').
+        """
+        with self.lock:
+            call.ref = self.first_ref + len(self.calls)
+            self.calls.append(call)
 
     def paused_call(self, name: str, args: dict[str, Any]) -> ToolCall | None:
         """

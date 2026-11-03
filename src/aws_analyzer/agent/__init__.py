@@ -92,6 +92,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      regions it didn't read, and claims of none over an incomplete read (check_grounding), as
                      findings the report shows (grounding_findings), and the message that sends a draft that
                      doesn't check out back to the model once (recheck_request, verify=True; answer.recheck).
+                     Citations: each tool result starts with its ref (ToolCall.ref), the answer cites it ("[2]")
+                     and a finding names its evidence; check_citations checks each against the call it names.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
     workspace/       The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
@@ -127,10 +129,21 @@ from .answers import (
     limit_read,
     parse_plan,
     parse_reply,
+    refs_in,
     reply_findings,
 )
 from .budget import Budget
-from .grounding import Grounding, Recheck, UnbackedNone, check_grounding, grounding_findings, recheck_request
+from .grounding import (
+    Grounding,
+    Recheck,
+    UnbackedNone,
+    calls_by_ref,
+    check_citations,
+    check_grounding,
+    cited_refs,
+    grounding_findings,
+    recheck_request,
+)
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
     AZURE_API_VERSION,
@@ -295,6 +308,10 @@ __all__ = [
     "UnbackedNone",
     "Recheck",
     "recheck_request",
+    "cited_refs",
+    "check_citations",
+    "calls_by_ref",
+    "refs_in",
     "answer_next",
     "reply_findings",
     "parse_reply",

@@ -143,9 +143,9 @@ _FINDINGS_PROMPT = """
   costing money) or info (worth knowing), and reads "what's wrong: why it matters. What to do": "orders-etl fails on
   KeyError 'customer_id' since the 03:00 deploy: 14 orders weren't loaded. Check the field in the code that reads
   it." Put the number or price the tools gave in it, and name in `call` the one call below that shows more, with its
-  arguments filled in from what you read. Findings are the problems and risks the tools showed you, not a summary of
-  the answer: leave the list empty when nothing needs attention, and don't repeat the findings as a list in
-  `answer`."""
+  arguments filled in from what you read, and in `evidence` the refs of the tool results it comes from. Findings
+  are the problems and risks the tools showed you, not a summary of the answer: leave the list empty when nothing
+  needs attention, and don't repeat the findings as a list in `answer`."""
 
 
 def _finding_calls(toolkits: list[Toolkit]) -> str:
@@ -236,6 +236,10 @@ How to work
 How to answer
 - Lead with the answer in one or two sentences, with the numbers that matter (counts, times, error causes).
 - Then the details as a short list or table, in markdown. Keep it under about 250 words unless asked for more.
+- Cite where each fact comes from. Every tool result starts with its `ref`, a number. After a sentence or table row
+  whose numbers, names, causes or times came from tools, put their refs in square brackets: "orders-etl failed 35
+  times [2]." or "[2, 5]". Cite only refs your tool results carry, and only for what that result holds; what you
+  work out yourself needs no citation.
 - End with one line saying what you checked: the window (in the user's time zone) and the regions.
 - Then, when there's an obvious next step you could take for them, offer it in one short question ("Want me to read
   the code behind that KeyError?")."""

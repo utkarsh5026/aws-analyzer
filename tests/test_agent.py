@@ -3,6 +3,7 @@ import html
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -77,6 +78,8 @@ from aws_analyzer.agent import (
     answer_findings,
     chart_of,
     check_grounding,
+    cited_refs,
+    refs_in,
     recheck_request,
     grounding_findings,
     image_kind,
@@ -612,9 +615,10 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
 
     # The agent's runtime runs its tools: results made JSON-ready, errors turned into results.
-    assert tool(core, "read_note")("plan") == {"name": "plan", "text": "ship it"}
-    assert tool(core, "read_note")(name="plam") == {"error": "No note 'plam'.", "close_names": ["plan", "plans"]}
-    assert tool(core, "list_notes")() == {"error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
+    assert tool(core, "read_note")("plan") == {"ref": 1, "name": "plan", "text": "ship it"}
+    assert tool(core, "read_note")(name="plam") == {"ref": 1, "error": "No note 'plam'.",
+                                                    "close_names": ["plan", "plans"]}
+    assert tool(core, "list_notes")() == {"ref": 1, "error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
 
     # Its section of the prompt, after the shared rules; its reads and privacy note in tools().
     text = core.instructions()
@@ -1337,7 +1341,7 @@ def test_kb_passages_hide_what_looks_like_a_secret(world):
 def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     core = with_kb(world)
     assert tool(core, "kb_health")() == {
-        "error": "ValueError",
+        "ref": 1, "error": "ValueError",
         "message": "2 knowledge bases in us-east-1: name one with knowledge_base= (sales, support-docs)."}
     assert "Did you mean 'support-docs'?" in tool(core, "kb_syncs")("support-dcos")["message"]
     world.kbs = world.kbs[:1]
@@ -1348,10 +1352,10 @@ def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     world.errors["get_knowledge_base"] = ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "none"}},
                                                      "GetKnowledgeBase")
     gone = tool(with_kb(world), "kb_health")("KBID999999")
-    assert gone == {"error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
+    assert gone == {"ref": 1, "error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
                     "close_names": [], "hint": "Use one of close_names, or find_knowledge_bases to list them."}
     denied = tool(with_kb(world), "find_knowledge_bases")()
-    assert denied == {"error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
+    assert denied == {"ref": 1, "error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
 
 
 def test_kb_searches_keep_to_the_budget(world):
@@ -1769,6 +1773,95 @@ def test_the_recheck_request_lists_each_problem():
     nones = check_grounding(AgentAnswer("q", text="orders-etl had no errors.", calls=_overnight_calls(True)))
     assert ("- “orders-etl had no errors.” says there was none, but function_errors('orders-etl', "
             "since='2026-11-02T18:00Z') couldn't read everything") in recheck_request(nones)
+
+
+def _cited_calls():
+    """
+    A night's function_health and function_errors as the model was handed them, refs 1 and 2.
+    """
+    health, errors = _overnight_calls()
+    health.ref, errors.ref = 1, 2
+    return [health, errors]
+
+
+def test_citations_are_read_forgivingly():
+    assert cited_refs("orders-etl failed 35 times [2]. Its logs [1, 3] and runs [4-6] say why.") == [2, 1, 3, 4, 5, 6]
+    assert cited_refs("See [the docs](https://x.y) and `a[1]`.\n```\nx = y[2]\n```") == [1]
+    assert refs_in([3, "5", "[7]", "c8", None, True]) == [3, 5, 7, 8] and refs_in("c2, c4") == [2, 4]
+    assert refs_in(None) == [] and len(refs_in(list(range(20)))) == 8
+    _, findings = parse_reply({"answer": "a", "findings": [{"message": "m", "evidence": [2, "3"]}]})
+    assert findings[0].evidence == [2, 3]
+
+
+def test_citations_are_checked_against_the_calls_they_name():
+    text = ("**orders-etl** failed 35 times [1]; 31 were `KeyError: 'customer_id'` [2]. `report-api` had 2 errors "
+            "[1].\n\nIt costs $12.40/month. [1]")
+    grounding = check_grounding(AgentAnswer("q", text=text, calls=_cited_calls()))
+    assert grounding.ok and grounding.miscited == [] and grounding.cited == 1.0
+    wrong = check_grounding(AgentAnswer("q", text="orders-etl failed 35 times [9]. 31 were KeyErrors [1].",
+                                        calls=_cited_calls(), findings=[AgentFinding("warn", "x", evidence=[7])]))
+    assert wrong.unknown_refs == ["[9]", "[7]"] and not wrong.ok
+    assert wrong.miscited == ["'31 were' [1]"]
+    found = dict(grounding_findings(AgentAnswer("q", text="orders-etl failed 35 times [9].", calls=_cited_calls())))
+    assert found["warn"] == ("A citation in the answer points at no tool call: [9]. What it backs has no source, so "
+                             "check it in What it checked below, where # is each call's ref.")
+    some = check_grounding(AgentAnswer("q", text="orders-etl failed 35 times [1]. `report-api` had 2 errors.",
+                                       calls=_cited_calls()))
+    assert some.cited == 0.5 and some.ok, "an uncited fact is counted, not flagged"
+    assert check_grounding(AgentAnswer("q", text="It failed 37 times [37].",
+                                       calls=[ToolCall("x", result={"errors": 37}, ref=37)])).ok
+
+
+def test_a_follow_up_may_repeat_and_cite_what_an_earlier_question_read():
+    first = AgentAnswer("Which failed?", text="orders-etl [1]", calls=_cited_calls()[:1], thread="t")
+    later = ToolCall("function_logs", {"function": "orders-etl"}, ref=3, result={"runs": [{"status": "failed"}]})
+    follow_up = AgentAnswer("Why?", text="`orders-etl` failed 35 times [1]; its last run failed [3].",
+                            calls=[later], thread="t")
+    assert not check_grounding(follow_up).ok, "on its own, [1] and orders-etl's 35 come from nowhere"
+    assert check_grounding(follow_up, [first]).ok
+    assert check_grounding(AgentAnswer("q", text="It failed [1].", thread="t"), [first]).ok, "no calls of its own"
+
+
+def test_refs_go_on_across_a_conversation_and_the_model_reads_them(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("**etl-nightly** failed 40 times [1] on KeyError 'customer_id' [2]."),
+                     calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."))
+    core = make(model)
+    first, second = core.ask("Which Lambda failed?"), core.ask("Why?")
+    assert [c.ref for c in first.calls] == [1] and [c.ref for c in second.calls] == [2]
+    assert json.loads(model.prompts[1][-1].content)["ref"] == 1 and first.recheck is None and second.recheck is None
+    assert "put their refs in square brackets" in system_text(model)
+    assert core.earlier(second) == [first] and core.earlier(first) == []
+    assert [c.ref for c in core.ask("Again", new=True).calls] == [1]
+
+
+def test_the_report_and_the_window_show_what_each_citation_names(seeded, capsys):
+    from aws_analyzer.agent.window.chat import _answer_text_html, _tool_html
+
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."))
+    view = AgentView(make(model), mode="text", progress="off")
+    answer = view.core.ask("Which Lambda failed?")
+    out = run(capsys, view._show, view._answer_blocks(answer))
+    assert "failed 40 times [1]." in out and re.search(r"\n\s*1\s+function_health\(since='2h'\)", out)
+    html = viewmod._render_html(view._answer_blocks(answer), 50)
+    assert "failed 40 times <sup>[1]</sup>" in html
+    drawn = _answer_text_html(answer.text, {1: answer.calls[0]})
+    assert "<sup class=\"ag-cite\" title=\"[1] function_health(since=&#x27;2h&#x27;)\">[1]</sup>" in drawn
+    assert 'title="no tool call has this ref">[9]</sup>' in _answer_text_html("x [9]", {})
+    assert '<span class="ag-ref" title="what the answer cites it by">[1]</span>' in _tool_html(answer.calls[0],
+                                                                                              running=False)
+    found = [m for _, m in reply_findings(AgentAnswer("q", findings=[AgentFinding("warn", "It fails.", evidence=[1])]))]
+    assert found == ["It fails. [1]"]
+
+
+def test_a_draft_citing_a_call_that_isnt_there_is_corrected(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [4]."),
+                     says("**etl-nightly** failed 40 times [1]."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.recheck.refs == ["[4]"] and answer.recheck.fixed and answer.text.endswith("[1].")
+    assert "- Citations no tool result carries: [4]." in model.prompts[2][-1].content
+    assert "found a citation they didn't back up" in answer_findings(answer)[0][1]
 
 
 def test_findings_false_answers_in_plain_text(seeded):

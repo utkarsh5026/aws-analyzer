@@ -35,6 +35,7 @@ from .results import _plain
 if TYPE_CHECKING:
     from .toolkits import Toolkit
 
+REF_KEY = "ref"
 COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned", "stopped_at")
 _ERROR_CHARACTERS = 200
 _MESSAGE_CHARACTERS = 400
@@ -172,8 +173,7 @@ def _new_call(run: _Run, fn: Callable[..., Any], toolkit: Toolkit, arguments: di
     A tool call recorded on the question, and told to its listener.
     """
     call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn), reads=tuple(toolkit.reads.get(fn.__name__, ())))
-    with run.lock:
-        run.calls.append(call)
+    run.record(call)
     run.tell(AgentStep("tool", call=call))
     return call
 
@@ -240,8 +240,8 @@ def _aws_error(exc: ClientError, call: ToolCall, toolkit: Toolkit, arguments: di
 
 def _reported(call: ToolCall, result: dict[str, Any]) -> dict[str, Any]:
     """
-    Fills in the call from the tool's result, and returns the result as the model reads it: JSON-ready, with the
-    report's `_summary` and `_next` taken out. Sections the analyzer couldn't read (its `errors`) become the call's
+    Fills in the call from the tool's result, and returns the result as the model reads it: JSON-ready, led by the
+    call's ref (REF_KEY, what the answer cites it by), with the report's `_summary` and `_next` taken out. Sections the analyzer couldn't read (its `errors`) become the call's
     error, and the result's COVERAGE keys (its window, regions, whether it was cut short) are what the report shows.
     """
     unread = result.get("errors") if isinstance(result.get("errors"), dict) else None
@@ -250,7 +250,7 @@ def _reported(call: ToolCall, result: dict[str, Any]) -> dict[str, Any]:
     call.next = list(result.pop("_next", []) or [])
     call.summary = result.pop("_summary", None) or call.summary or (call.error or "")
     call.coverage = {k: result[k] for k in COVERAGE if k in result}
-    call.result = _plain(result)
+    call.result = _plain({REF_KEY: call.ref, **result})
     return call.result
 
 

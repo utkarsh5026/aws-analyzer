@@ -181,6 +181,14 @@ def _plan_lines(block: _Plan, report: _Report) -> list[str]:
     return ["", block.heading, *lines]
 
 
+def _ref_of(call: ToolCall, place: int) -> int:
+    """
+    What the report's # column shows for a call: its ref, what the answer cites it by ('[3]'), or its place in the
+    list for a call from before refs (a saved chat's).
+    """
+    return call.ref or place
+
+
 def _coverage_text(call: ToolCall) -> str:
     """
     '2026-10-15 18:00 to 2026-10-16 08:00 IST · us-east-1 · cut short' for the table of what it checked: the window
@@ -502,7 +510,7 @@ class AgentView(_BaseView):
             return self._waiting_blocks(answer)
         blocks: list[Any] = [_Title(answer.question, self._answer_line(answer)), *_focus_blocks(answer)]
         if answer.text:
-            blocks.append(_Answer(answer.text))
+            blocks.append(_Answer(answer.text, inline=True))
         if answer.charts:
             blocks.append(_Charts(answer.charts))
         if not answer.text and not answer.error:
@@ -570,15 +578,16 @@ class AgentView(_BaseView):
             ("Time", _duration(answer.seconds)),
             *([("Runbook", ", ".join(answer.runbooks))] if answer.runbooks else []),
         ]))
-        blocks.append(_Findings([*reply_findings(answer), *answer_findings(answer, core.budget)]))
+        earlier = core.earlier(answer)
+        blocks.append(_Findings([*reply_findings(answer), *answer_findings(answer, core.budget, earlier=earlier)]))
         if answer.plan:
             blocks.append(_Plan(answer.plan))
         if answer.calls:
-            rows = [[str(i), call.brief, _coverage_text(call), call.summary or "-", f"{call.seconds:.1f}s"]
-                    for i, call in enumerate(answer.calls, 1)]
+            rows = [[str(_ref_of(call, i)), call.brief, _coverage_text(call), call.summary or "-",
+                     f"{call.seconds:.1f}s"] for i, call in enumerate(answer.calls, 1)]
             blocks.append(_Table(["#", "Tool call", "Covered", "Found", "Time"], rows, title="What it checked",
                                  code_cols=(1,), prose_cols=(3,), sortable=False))
-            blocks += [_Text(call.code, title=f"Call {i}'s code", code=True, collapsed=True)
+            blocks += [_Text(call.code, title=f"Call {_ref_of(call, i)}'s code", code=True, collapsed=True)
                        for i, call in enumerate(answer.calls, 1) if call.code]
         if answer.aws_calls:
             rows = [[op, f"{n:,}"] for op, n in sorted(answer.aws_calls.items(), key=lambda kv: (-kv[1], kv[0]))]
@@ -674,7 +683,7 @@ class AgentView(_BaseView):
                 sub += f" · {human_money(answer.cost)}"
             blocks.append(_Title(answer.question, sub))
             blocks += _focus_blocks(answer)
-            blocks.append(_Answer(answer.text) if answer.text else
+            blocks.append(_Answer(answer.text, inline=True) if answer.text else
                           _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
             if answer.charts:
                 blocks.append(_Charts(answer.charts))
@@ -900,7 +909,7 @@ class AgentView(_BaseView):
                                                   f"asked {_fmt_dt(picked.updated, zone=True)}")]
         for answer in answers:
             blocks.append(_Title(answer.question, _fmt_dt(answer.asked) if answer.asked else ""))
-            blocks.append(_Answer(answer.text) if answer.text else
+            blocks.append(_Answer(answer.text, inline=True) if answer.text else
                           _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
             if answer.charts:
                 blocks.append(_Charts(answer.charts))

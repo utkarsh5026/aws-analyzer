@@ -1055,6 +1055,17 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
   `_WRAP_UP`, in which every tool is refused, so the model writes its answer), and catches a model or loop error into `AgentAnswer.error` with
   `.exception` kept. Everything about LangGraph's messages stays in this file.
+- **Grounding** (`grounding.py`, pure): `check_grounding(answer, earlier)` compares an answer with what the
+  conversation's tool calls returned (`earlier`: `AgentAnalyzer.earlier(answer)`, the answers before it in its thread):
+  names, IDs and numbers no tool gave (a number passes as a count, a column's total, a share, a rounding or a unit
+  change of one), regions it says it checked, "none" over a failed or cut-short read, and citations. Each tool result
+  starts with its `ref` (`ToolCall.ref`, numbered across the conversation by `_Run.record` from `first_ref`), the answer
+  cites it (`[2]`, `cited_refs`) and a finding names its `evidence`; `check_citations` flags refs that name no call
+  and facts citing a call that doesn't hold them (`miscited`, a note only). `answer_findings` shows what it finds.
+  With `verify=True` (the default) `AgentAnalyzer._recheck` sends a draft that doesn't check out back to the model once,
+  with its tools (`recheck_request`), keeping `answer.recheck` (`Recheck`, plain data). The report's `#` column and
+  the window's step lines show each call's ref, and `_Answer(inline=True)` / the window's `_cited_html` draw citations.
+  `/agent-eval` measures it all with a real model.
 - **`AgentAnalyzer`** (`analyzer.py`) holds the settings and puts the parts together: `ask()` makes the `_Run` and
   the `AgentAnswer`, calls `stream_turn()`, and fills in what the guard and the run counted. `AgentView` (`view.py`)
   draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its `_EXTRA_CSS`), cards, `answers.py`'s

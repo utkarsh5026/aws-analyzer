@@ -816,7 +816,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         shown = focus_of(focus)
         graph = self._harness()
         moment = now or _utcnow()
-        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more)
+        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more,
+                   first_ref=self._next_ref(self.thread))
         answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
                              asked=moment, focus=shown)
         self._guard.reset()
@@ -887,6 +888,25 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         call = next((c for c in answer.calls if c.key == key and c.asks), None)
         return (call.asks[-1].choice or "skip") if call is not None else "skip"
 
+    def earlier(self, answer: AgentAnswer) -> list[AgentAnswer]:
+        """
+        The answers asked before `answer` in its conversation, oldest first: what a follow-up may repeat and cite.
+        """
+        found: list[AgentAnswer] = []
+        for each in self.history:
+            if each is answer:
+                break
+            if each.thread == answer.thread:
+                found.append(each)
+        return found
+
+    def _next_ref(self, thread: str) -> int:
+        """
+        The ref the next question's first tool call gets in a conversation: one past the calls asked before it, so
+        the answer can cite an earlier question's calls by theirs.
+        """
+        return 1 + sum(len(each.calls) for each in self.history if each.thread == thread)
+
     def _can_recheck(self, run: _Run, answer: AgentAnswer) -> bool:
         """
         Whether a draft can be checked and corrected: verify is on, it's the question's first check, the model
@@ -912,7 +932,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         if not self._can_recheck(run, answer):
             return
         answer.calls = list(run.calls)
-        flagged = check_grounding(answer)
+        flagged = check_grounding(answer, self.earlier(answer))
         if flagged.ok:
             return
         draft_text, draft_findings, calls_before = answer.text, list(answer.findings), len(run.calls)
@@ -951,7 +971,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
                                   provider=self.provider)
         answer.seconds = run.elapsed
         if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
-            answer.recheck.fixed = check_grounding(answer).ok
+            answer.recheck.fixed = check_grounding(answer, self.earlier(answer)).ok
         pauses = harness.pauses(graph, answer.thread) if answer.waiting and answer.error is None else {}
         if pauses:
             run.pause()

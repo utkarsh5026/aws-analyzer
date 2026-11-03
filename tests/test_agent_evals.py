@@ -59,13 +59,14 @@ def test_a_right_answer_passes():
 
 def test_each_way_to_fail_is_named():
     case = cases.find_cases("which-failed")[0]
-    answer = AgentAnswer("q", text="orders-etl failed 99 times; churn-scoring failed too. `billing-sync` is fine.",
+    answer = AgentAnswer("q", text="orders-etl failed 99 times [9]; churn-scoring failed too. `billing-sync` is fine.",
                          calls=[health_call(failed=[{"name": "orders-etl", "errors": 35}])] * 6,
                          findings=[AgentFinding("warn", "report-api fails.")])
     reasons = evals.score(case, answer).reasons()
     assert "said: 'churn-scoring failed'" in reasons
     assert "took 6 tool calls (at most 5)" in reasons
     assert "not from the tools: billing-sync" in reasons and "not from the tools: 99 times" in reasons
+    assert "not from the tools: citation [9]" in reasons
     assert not any(r.startswith("missed:") for r in reasons), "a finding's message counts as said"
     missing = evals.score(case, AgentAnswer("q", text="report-api failed.", calls=[ToolCall("function_errors")]))
     assert missing.reasons()[:2] == ["missed: orders-etl", "didn't call: function_health"]

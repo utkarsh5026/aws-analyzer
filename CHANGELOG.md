@@ -21,6 +21,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `answer.recheck` keeps the draft and what was flagged; the findings say whether the answer now checks out.
   - `AgentView(verify=False)` turns it off.
 
+- 🤖 **Agent: cites the tool call behind each fact**
+  - The answer marks each fact with its source, `[2]`: the `#` of the call in What it checked.
+  - In the chat window, point at a citation to see the call; findings list theirs too.
+  - A citation that names no call is a warning, and the draft goes back to be corrected.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added

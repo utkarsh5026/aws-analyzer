@@ -248,7 +248,7 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 1. Turns "last night" into a window in your time zone (`set_timezone()`'s; 18:00 yesterday to 08:00 today, unless you say otherwise) and converts it to UTC, which CloudWatch uses. Each question is sent with the time it was asked, in your time zone and in UTC.
 2. Calls `function_health` for that window: CloudWatch's counts for every function at once, in a few seconds.
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
-4. Answers, and ends with the window and regions it checked.
+4. Answers, and ends with the window and regions it checked. After each fact it cites the tool call it came from, `[2]`: the number in the `#` column of the report's "What it checked" table, and in the chat window the number at the start of each step. Point at a citation in the window to see the call.
 5. Fills in its findings: each problem it found, why it matters and what to do, with the call that shows more. The report shows them in its findings panel, warnings first, and their calls lead the commands to run next.
 6. Is checked against what the tools returned before you see it. If a name, request ID, ARN, s3:// path or number in the draft came from no tool, or it says "no errors" over a read that failed or was cut short, the model gets one more turn to read what it needs or take the claim out. What still doesn't check out becomes a warning.
 
@@ -266,6 +266,8 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
     - **"None" over an incomplete read**: a sentence like "orders-etl had no errors overnight" when the call it rests on failed (a missing permission), was cut short or wasn't run. A sentence that says so itself ("of what I could read") is fine.
 
     It leaves alone what it can't read, so a warning is worth checking. It can still miss a made-up number that happens to equal an unrelated one in the results. `check_grounding(answer)` gives the same as data.
+
+    Citations are checked too: one that names no tool call is a warning (and sends the draft back), and a fact that cites a call that doesn't hold it, though another does, is noted. References go on across a conversation, so a follow-up can cite what an earlier question read, and its facts are checked against those calls as well.
 
     When the draft doesn't check out, the model is sent the list of problems once, in the same conversation and with its tools, and the answer it gives then is the one you see. The chat window shows it as a step ("Before I answer, I checked my draft…"), and the findings say what was flagged and whether the answer now checks out. `answer.recheck` keeps the draft, what was flagged, the tool calls it made to correct it, and whether it worked. It costs one more model call, only when the draft didn't check out, and only while the budget has time, cost and a tool call left. If that turn fails, you see the draft with its warnings. `AgentView(verify=False)` turns it off and shows the draft as it is, with the warnings.
 
@@ -665,7 +667,8 @@ answer.recheck                 # Recheck when its draft didn't check out: names,
 answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
-answer.calls[0].result         # the data the tool handed the model
+answer.calls[0].result         # the data the tool handed the model, led by its ref
+answer.calls[0].ref            # 3: what the answer cites it by ('[3]'), numbered across the conversation
 answer.plan                    # PlanStep: text, status ('pending', 'in_progress', 'completed'): the plan it wrote
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
 answer.provider, answer.model # who served it, and the model or profile that answered
@@ -719,7 +722,7 @@ core = AgentAnalyzer(
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings` and `recheck_request` (what in an answer its tools didn't return, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs` and `recheck_request` (what in an answer its tools didn't return, how it cites them, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 

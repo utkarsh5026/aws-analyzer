@@ -16,6 +16,15 @@ What it checks (Grounding):
     unbacked_nones     sentences saying there was none of something ("orders-etl had no errors overnight") that rest
                        on a tool call that failed, was cut short or wasn't run, so it couldn't have shown that. A
                        sentence that says so itself ("of what I could read") is fine.
+    unknown_refs       citations ('[9]') that name no tool call. Each tool result starts with its ref (the call's
+                       number in the conversation, ToolCall.ref), and the answer cites it after a fact, "[2]", and
+                       in a finding's evidence (check_citations, cited_refs).
+    miscited           names, IDs and numbers a sentence states that some tool returned but not the calls it cites:
+                       the fact may be right, so it's only noted, and `cited` is the share of sentences stating a
+                       fact that cite a call.
+
+`earlier` are the answers before this one in the same conversation: a follow-up may repeat their tools' results and
+cite their calls.
 
 It errs towards saying nothing: a claim it can't read is let through, so what it flags is worth checking.
 
@@ -65,6 +74,9 @@ _NAME_MARKS = re.compile(r"[-_.]")
 _RUNTIME = re.compile(r"(?:python|nodejs|java|ruby|dotnet|provided|go)[\d.]*(?:\.x)?(?:\.al2(?:023)?)?", re.I)
 _VERSION = re.compile(r"v?[\d.]+")
 _TRAILING = ".,;:!?"
+_CITATION = re.compile(r"\s?\[(\d+(?:\s*[,\-–]\s*\d+)*)\]")
+_RANGE = re.compile(r"(\d+)\s*[\-–]\s*(\d+)")
+_MAX_RANGE = 50
 _WORD = re.compile(r"[a-z0-9][\w.\-/:]*")
 _RESOURCE_KEY = re.compile(r"(?:^|_)(?:name|function|bucket|key|id|arn|uri|path|location|knowledge_base|data_source|"
                            r"file)s?$", re.I)
@@ -129,19 +141,26 @@ class UnbackedNone:
 class Grounding:
     """
     What in an answer didn't check out against its tool calls (see the module's docstring): names and IDs no tool
-    returned, numbers no tool returned or implies, regions it says it checked that no tool read, and claims of none
-    that rest on an incomplete read. Empty lists when everything checked out, or when nothing was checked (no tools
-    ran, so answer_findings() says that instead).
+    returned, numbers no tool returned or implies, regions it says it checked that no tool read, claims of none
+    that rest on an incomplete read, and citations that name no tool call. Empty lists when everything checked out,
+    or when nothing was checked (no tools ran, so answer_findings() says that instead). `ok` leaves out `miscited`
+    (a fact citing a call that doesn't hold it, which another call returned: the fact may be right) and `cited`
+    (the share of its sentences stating a fact that cite a call; None when none does), which say how well it cites.
     """
 
     unknown_names: list[str] = field(default_factory=list)
     unknown_numbers: list[str] = field(default_factory=list)
     unchecked_regions: list[str] = field(default_factory=list)
     unbacked_nones: list[UnbackedNone] = field(default_factory=list)
+    unknown_refs: list[str] = field(default_factory=list)
+    miscited: list[str] = field(default_factory=list)
+    cited: float | None = None
 
     @property
     def ok(self) -> bool:
-        return not (self.unknown_names or self.unknown_numbers or self.unchecked_regions or self.unbacked_nones)
+        flagged = (self.unknown_names, self.unknown_numbers, self.unchecked_regions, self.unbacked_nones,
+                   self.unknown_refs)
+        return not any(flagged)
 
 
 
@@ -268,23 +287,51 @@ def _call_regions(call: ToolCall) -> set[str]:
     return regions
 
 
-def _evidence(answer: AgentAnswer) -> _Evidence:
+def _evidence_of(calls: Iterable[ToolCall], asked: Iterable[str] = ()) -> _Evidence:
     """
-    What the model was shown for the question: every tool call's result and arguments, the question and what the
-    user had open.
+    What these tool calls handed the model (results, arguments and coverage), with `asked`: the questions and what
+    the user had open, which the model may repeat too.
     """
     found = _Evidence()
-    found.add_text(answer.question)
-    if answer.focus is not None:
-        for part in answer.focus.parts:
-            found.add_text(f"{part.key} {part.value} {part.text}")
-    for call in answer.calls:
+    for text in asked:
+        found.add_text(text)
+    for call in calls:
         _gather(call.args, found)
         _gather(call.result, found)
         _gather(call.coverage, found)
         found.regions |= _call_regions(call)
     found.finish()
     return found
+
+
+def _asked_of(answer: AgentAnswer) -> list[str]:
+    """
+    The question as the model was sent it: its words, and each part of what the user had open.
+    """
+    if answer.focus is None:
+        return [answer.question]
+    return [answer.question, *(f"{part.key} {part.value} {part.text}" for part in answer.focus.parts)]
+
+
+def _asked_in(answers: Iterable[AgentAnswer]) -> list[str]:
+    """
+    What the model was asked across these answers: each question and what the user had open.
+    """
+    asked: list[str] = []
+    for each in answers:
+        asked.extend(_asked_of(each))
+    return asked
+
+
+def _evidence(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> _Evidence:
+    """
+    What the model was shown in the conversation up to this answer: every tool call's result and arguments, each
+    question and what the user had open, this answer's and the earlier ones' in the same conversation.
+    """
+    calls: list[ToolCall] = []
+    for each in [*earlier, answer]:
+        calls.extend(each.calls)
+    return _evidence_of(calls, _asked_in([*earlier, answer]))
 
 
 
@@ -311,11 +358,18 @@ def _sentences(text: str) -> list[str]:
     return [part for part in parts if part]
 
 
+def _without_citations(text: str) -> str:
+    """
+    The text with its citations ('[3]', '[2, 5]') taken out: they name tool calls, not facts.
+    """
+    return _CITATION.sub("", text)
+
+
 def _claimed_text(answer: AgentAnswer) -> str:
     """
-    Everything the answer states: its markdown, then each finding's message.
+    Everything the answer states, citations left out: its markdown, then each finding's message.
     """
-    return "\n".join([answer.text, *(finding.message for finding in answer.findings)])
+    return _without_citations("\n".join([answer.text, *(finding.message for finding in answer.findings)]))
 
 
 def _is_name(token: str) -> bool:
@@ -331,18 +385,25 @@ def _is_name(token: str) -> bool:
     return not (is_other or _VERSION.fullmatch(token) or _RUNTIME.fullmatch(token))
 
 
+def _spans_named(spans: list[str]) -> list[str]:
+    cleaned = [span.strip().rstrip(_TRAILING) for span in spans]
+    return [span for span in cleaned if _is_name(span)]
+
+
+def _names_marked_in(text: str) -> list[str]:
+    """
+    The names a piece of text marks as code or bold.
+    """
+    plain = _without_code(text)
+    return _spans_named([*_CODE_SPAN.findall(plain), *_BOLD.findall(plain)])
+
+
 def _marked_names(text: str, answer: AgentAnswer) -> list[str]:
     """
     The names the answer marks as code or bold, and the first argument of each finding's call.
     """
-    plain = _without_code(text)
-    spans = [*_CODE_SPAN.findall(plain), *_BOLD.findall(plain)]
-    for finding in answer.findings:
-        first = _FIRST_ARG.search(finding.call or "")
-        if first:
-            spans.append(first.group(1))
-    cleaned = [span.strip().rstrip(_TRAILING) for span in spans]
-    return [span for span in cleaned if _is_name(span)]
+    calls = [_FIRST_ARG.search(finding.call or "") for finding in answer.findings]
+    return [*_names_marked_in(text), *_spans_named([first.group(1) for first in calls if first])]
 
 
 def _ids(text: str) -> list[str]:
@@ -622,18 +683,145 @@ def unbacked_nones(answer: AgentAnswer) -> list[UnbackedNone]:
     return found
 
 
+def _refs_of(marker: str) -> list[int]:
+    """
+    The refs one citation's text names: '3' -> [3], '2, 5' -> [2, 5], '2-4' -> [2, 3, 4] (a range of at most
+    _MAX_RANGE).
+    """
+    refs: list[int] = []
+    for part in marker.split(","):
+        span = _RANGE.fullmatch(part.strip())
+        if span and 0 <= int(span.group(2)) - int(span.group(1)) <= _MAX_RANGE:
+            refs.extend(range(int(span.group(1)), int(span.group(2)) + 1))
+        elif part.strip().isdigit():
+            refs.append(int(part.strip()))
+    return refs
 
-def check_grounding(answer: AgentAnswer) -> Grounding:
+
+def cited_refs(text: str) -> list[int]:
+    """
+    Every ref the text cites ('orders-etl failed 35 times [2]. Its logs [3, 5] ...' -> [2, 3, 5]), each once, in
+    order; code blocks left out.
+    """
+    refs: list[int] = []
+    for marker in _CITATION.findall(_without_code(text)):
+        refs.extend(_refs_of(marker))
+    return list(dict.fromkeys(refs))
+
+
+def _cited_pieces(answer: AgentAnswer) -> list[tuple[str, list[int]]]:
+    """
+    The answer's sentences (and table rows), each with the refs it cites, a citation that stands alone after a
+    sentence going with it; then each finding's message with its evidence.
+    """
+    pieces: list[tuple[str, list[int]]] = []
+    for sentence in _sentences(answer.text):
+        refs = cited_refs(sentence)
+        is_only_citations = not _without_citations(sentence).strip(_SENTENCE_EDGES + _TRAILING)
+        if is_only_citations and pieces:
+            pieces[-1] = (pieces[-1][0], [*pieces[-1][1], *refs])
+        else:
+            pieces.append((sentence, refs))
+    pieces += [(finding.message, list(finding.evidence)) for finding in answer.findings]
+    return pieces
+
+
+@dataclass
+class _Claims:
+    """
+    What a piece of an answer states as fact: the names and IDs it gives, and the numbers it reports.
+    """
+
+    names: list[str]
+    numbers: list[_Number]
+
+    @classmethod
+    def in_text(cls, text: str) -> _Claims:
+        plain = _without_citations(text)
+        prose = _number_text(plain)
+        numbers = [_number_claim(prose, match) for match in _NUMBER.finditer(prose)]
+        return cls([*_ids(plain), *_names_marked_in(plain)], [number for number in numbers if number is not None])
+
+    def __bool__(self) -> bool:
+        return bool(self.names or self.numbers)
+
+
+def calls_by_ref(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> dict[int, ToolCall]:
+    """
+    Every tool call the conversation made up to this answer, by its ref.
+    """
+    by_ref: dict[int, ToolCall] = {}
+    for each in [*earlier, answer]:
+        for call in each.calls:
+            if call.ref:
+                by_ref[call.ref] = call
+    return by_ref
+
+
+def _miscited(claims: _Claims, refs: list[int], cited: _Evidence, evidence: _Evidence) -> list[str]:
+    """
+    The claims a piece states that some tool returned but not the calls it cites, as "'35 failures' [2]".
+    """
+    marker = f"[{', '.join(map(str, refs))}]"
+    found = [f"'{name}' {marker}" for name in claims.names if _known(name, evidence) and not _known(name, cited)]
+    for number in claims.numbers:
+        if _supported(number, evidence) and not _supported(number, cited):
+            found.append(f"'{number.shown}' {marker}")
+    return found
+
+
+@dataclass
+class _Citations:
+    """
+    How an answer cites its tool calls: refs that name no call, claims that cite a call not holding them, and the
+    share of its sentences and findings stating a fact that cite one (None when none states one).
+    """
+
+    unknown: list[str] = field(default_factory=list)
+    miscited: list[str] = field(default_factory=list)
+    share: float | None = None
+
+
+def check_citations(answer: AgentAnswer, evidence: _Evidence, earlier: Iterable[AgentAnswer] = ()) -> _Citations:
+    """
+    The answer's citations checked against the conversation's tool calls: each ref it cites (in its text and its
+    findings' evidence) names a call, and each sentence's names, IDs and numbers are in the calls it cites.
+    """
+    earlier = list(earlier)
+    by_ref = calls_by_ref(answer, earlier)
+    asked = _asked_in([*earlier, answer])
+    found = _Citations()
+    stating = cited = 0
+    for text, refs in _cited_pieces(answer):
+        found.unknown += [f"[{ref}]" for ref in refs if ref not in by_ref]
+        claims = _Claims.in_text(text)
+        calls = [by_ref[ref] for ref in refs if ref in by_ref]
+        if claims and calls:
+            found.miscited += _miscited(claims, refs, _evidence_of(calls, asked), evidence)
+        stating += bool(claims)
+        cited += bool(claims and refs)
+    found.unknown = list(dict.fromkeys(found.unknown))
+    found.miscited = list(dict.fromkeys(found.miscited))
+    found.share = cited / stating if stating else None
+    return found
+
+
+def check_grounding(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> Grounding:
     """
     What in an answer doesn't match what its tools returned: names and IDs, numbers, regions it says it checked,
-    and claims of none over an incomplete read (Grounding). Nothing is checked for an answer that called no tool
-    or that failed.
+    claims of none over an incomplete read, and its citations (Grounding). `earlier` are the answers before it in
+    the same conversation, whose tool calls it may repeat and cite. Nothing is checked for an answer that failed, or
+    when no tool has been called in the conversation.
     """
-    if not answer.calls or answer.error or not (answer.text or answer.findings):
+    earlier = list(earlier)
+    has_calls = bool(answer.calls) or any(each.calls for each in earlier)
+    if not has_calls or answer.error or not (answer.text or answer.findings):
         return Grounding()
-    evidence = _evidence(answer)
+    evidence = _evidence(answer, earlier)
+    citations = check_citations(answer, evidence, earlier)
     return Grounding(unknown_names(answer, evidence), unknown_numbers(answer, evidence),
-                     unchecked_regions(answer, evidence), unbacked_nones(answer))
+                     unchecked_regions(answer, evidence), unbacked_nones(answer), citations.unknown,
+                     citations.miscited, citations.share)
 
 
 def _listed(items: list[str]) -> str:
@@ -701,13 +889,28 @@ def _regions_finding(regions: list[str]) -> tuple[str, str]:
                     f"the region, or all regions, to have {w.them} checked.")
 
 
-def grounding_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
+def _refs_finding(refs: list[str]) -> tuple[str, str]:
+    w = _Words.of(refs, "citation")
+    return ("warn", f"{w.some} in the answer {'points' if len(refs) == 1 else 'point'} at no tool call: "
+                    f"{', '.join(refs[:_NAMED])}. What {w.they.lower()} {'backs' if len(refs) == 1 else 'back'} has "
+                    "no source, so check it in What it checked below, where # is each call's ref.")
+
+
+def _miscited_finding(miscited: list[str]) -> tuple[str, str]:
+    w = _Words.of(miscited, "fact")
+    return ("info", f"{w.some} in the answer {'cites' if len(miscited) == 1 else 'cite'} a tool call that doesn't hold "
+                    f"{w.them}: {', '.join(miscited[:_NAMED])}. Another call returned {w.them}, so {w.they.lower()} "
+                    "may be right; find the source in What it checked below, where # is each call's ref.")
+
+
+def grounding_findings(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> list[tuple[str, str]]:
     """
     What check_grounding() found, as (level, message) pairs saying what to check: how its first draft was corrected
     (answer.recheck) first, then claims of none over an incomplete read, names and IDs no tool returned, numbers no
-    tool returned, and regions no tool read.
+    tool returned, regions no tool read, citations that name no tool call, and facts citing a call that doesn't hold
+    them. `earlier` are the answers before it in the conversation.
     """
-    grounding = check_grounding(answer)
+    grounding = check_grounding(answer, earlier)
     found = _recheck_findings(answer)
     found += [_none_finding(none) for none in grounding.unbacked_nones[:_NONES_SHOWN]]
     if grounding.unknown_names:
@@ -716,6 +919,10 @@ def grounding_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
         found.append(_numbers_finding(grounding.unknown_numbers))
     if grounding.unchecked_regions:
         found.append(_regions_finding(grounding.unchecked_regions))
+    if grounding.unknown_refs:
+        found.append(_refs_finding(grounding.unknown_refs))
+    if grounding.miscited:
+        found.append(_miscited_finding(grounding.miscited))
     return found
 
 
@@ -727,6 +934,7 @@ class Recheck:
 
         names, numbers, regions  what check_grounding() flagged in the draft (Grounding's lists)
         nones       the draft's sentences that claimed none over an incomplete read
+        refs        the citations in the draft that named no tool call ('[9]')
         first_text  the draft as the model first wrote it
         tool_calls  the tool calls the model made to correct it
         fixed       whether the answer it gave then checks out; None while unfinished, or when correcting failed
@@ -737,6 +945,7 @@ class Recheck:
     numbers: list[str] = field(default_factory=list)
     regions: list[str] = field(default_factory=list)
     nones: list[str] = field(default_factory=list)
+    refs: list[str] = field(default_factory=list)
     first_text: str = ""
     tool_calls: int = 0
     fixed: bool | None = None
@@ -745,7 +954,8 @@ class Recheck:
     @classmethod
     def of(cls, grounding: Grounding, first_text: str) -> Recheck:
         return cls(list(grounding.unknown_names), list(grounding.unknown_numbers), list(grounding.unchecked_regions),
-                   [none.sentence for none in grounding.unbacked_nones], first_text)
+                   [none.sentence for none in grounding.unbacked_nones], list(grounding.unknown_refs),
+                   first_text=first_text)
 
 
 _RECHECK = """[Before the user sees your answer, check it: part of it isn't in what your tools returned.
@@ -776,19 +986,22 @@ def recheck_request(grounding: Grounding, *, reply: bool = True) -> str:
     if grounding.unchecked_regions:
         problems.append(f"- You say you checked {_listed(grounding.unchecked_regions)}, but no tool read "
                         f"{_Words.of(grounding.unchecked_regions, 'region').them}.")
+    if grounding.unknown_refs:
+        problems.append(f"- Citations no tool result carries: {', '.join(grounding.unknown_refs)}. Cite only the "
+                        "refs your tool results start with.")
     return _RECHECK.format(problems="\n".join(problems), how=_RECHECK_REPLY if reply else "")
 
 
-def _flagged_parts(names: list[str], numbers: list[str], regions: list[str], nones: list[str]) -> str:
+def _flagged_parts(recheck: Recheck) -> str:
     """
     What a check flagged, in a few words: "2 names, a number and a claim of none over an incomplete read".
     """
-    parts = [_Words.of(items, noun).some.lower() for items, noun in ((names, "name"), (numbers, "number"))
-             if items]
-    if regions:
-        parts.append(f"{_Words.of(regions, 'region').some.lower()} said to be checked")
-    if nones:
-        parts.append(f"{_Words.of(nones, 'claim').some.lower()} of none over an incomplete read")
+    kinds = ((recheck.names, "name"), (recheck.numbers, "number"), (recheck.refs, "citation"))
+    parts = [_Words.of(items, noun).some.lower() for items, noun in kinds if items]
+    if recheck.regions:
+        parts.append(f"{_Words.of(recheck.regions, 'region').some.lower()} said to be checked")
+    if recheck.nones:
+        parts.append(f"{_Words.of(recheck.nones, 'claim').some.lower()} of none over an incomplete read")
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + f" and {parts[-1]}"
 
 
@@ -796,8 +1009,7 @@ def recheck_said(grounding: Grounding) -> str:
     """
     The line the agent says while it corrects its draft (the chat window shows it as one of its steps).
     """
-    flagged = _flagged_parts(grounding.unknown_names, grounding.unknown_numbers, grounding.unchecked_regions,
-                             [none.sentence for none in grounding.unbacked_nones])
+    flagged = _flagged_parts(Recheck.of(grounding, ""))
     return (f"Before I answer, I checked my draft against what the tools returned: {flagged} didn't match, so "
             "I'll correct it.")
 
@@ -810,7 +1022,7 @@ def _recheck_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
     recheck = answer.recheck
     if recheck is None:
         return []
-    flagged = _flagged_parts(recheck.names, recheck.numbers, recheck.regions, recheck.nones)
+    flagged = _flagged_parts(recheck)
     found = (f"It checked its first draft against what the tools returned and found {flagged} they didn't back up: "
              "it was asked to correct the draft before you saw it.")
     if recheck.failed:

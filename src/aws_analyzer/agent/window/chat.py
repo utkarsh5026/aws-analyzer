@@ -37,6 +37,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -52,6 +53,7 @@ from ..._kit.render import _blocks_html, _copyable, _prose
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
 from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, answer_next, services_of
+from ..grounding import calls_by_ref
 from ..llm import provider_info
 from ..prompt import focus_of
 from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
@@ -301,6 +303,8 @@ _CONVERSATION_CSS = """\
 .agt .ag-step>details>summary::-webkit-details-marker{display:none}
 .agt .ag-step>details>summary:hover{background:var(--ag-hover)}
 .agt .ag-tl{display:flex;align-items:center;gap:10px;min-width:0}
+.agt .ag-ref{color:var(--ag-dim);font-size:11px;flex:0 0 auto}
+.agt .ans sup.ag-cite{color:var(--ag-accent);cursor:help;font-size:10px;margin-left:1px}
 .agt .ag-call{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
 .agt .ag-cm{color:var(--ag-comment);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
 .agt .ag-run .ag-cm{background:linear-gradient(90deg,var(--ag-comment) 0%,var(--ag-accent) 50%,var(--ag-comment) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:ag-shine 1.6s linear infinite}
@@ -406,11 +410,31 @@ def _named_badges(codes: Iterable[str]) -> str:
     return "".join(f'<span class="ag-named">{_badge(code)}{_esc(name)}</span>' for name, code in first.items())
 
 
-def _answer_text_html(text: str) -> str:
+_CITED = re.compile(r"<sup>\[([\d,\s\-–]+)\]</sup>")
+_REF_NUMBER = re.compile(r"\d+")
+
+
+def _cited_html(html: str, refs: dict[int, ToolCall]) -> str:
     """
-    The model's markdown as HTML, the way reports draw an answer (every piece of it escaped).
+    Each citation in an answer's HTML ('<sup>[3]</sup>') as one that names the calls it cites when pointed at.
     """
-    return f'<div class="ans">{_markdown_html(text)}</div>'
+    def named(found: re.Match[str]) -> str:
+        cited = [int(number) for number in _REF_NUMBER.findall(found.group(1))]
+        names = [f"[{ref}] {refs[ref].brief}" for ref in cited if ref in refs]
+        title = "; ".join(names) or "no tool call has this ref"
+        return f'<sup class="ag-cite" title="{_esc(title)}">[{found.group(1)}]</sup>'
+
+    return _CITED.sub(named, html)
+
+
+def _answer_text_html(text: str, refs: dict[int, ToolCall] | None = None) -> str:
+    """
+    The model's markdown as HTML, the way reports draw an answer (every piece of it escaped), its citations ('[3]')
+    as superscripts, which name the tool call they cite when pointed at when `refs` (the conversation's calls by
+    ref) is given.
+    """
+    html = _markdown_html(text, inline=True)
+    return f'<div class="ans">{html if refs is None else _cited_html(html, refs)}</div>'
 
 
 def _question_html(question: str, about: str = "") -> str:
@@ -528,7 +552,8 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
         timing = '<span class="ag-spin">◐</span>'
     else:
         timing = f"<b>{_STATE_MARKS[state]}</b> {call.seconds:.1f}s"
-    line = (f'<div class="ag-tl">{_badges(call.services)}<span class="ag-call">{_python_html(call.brief)}</span>'
+    ref = f'<span class="ag-ref" title="what the answer cites it by">[{call.ref}]</span>' if call.ref else ""
+    line = (f'<div class="ag-tl">{ref}{_badges(call.services)}<span class="ag-call">{_python_html(call.brief)}</span>'
             f'<span class="ag-cm"># {_esc(_tool_words(call, running=running or state == "ask"))}</span>'
             f'<span class="ag-tm">{timing}</span></div>')
     if call.code:
@@ -1300,7 +1325,8 @@ class _AgentChat(_Window):
             parts.append(_trail_html(trail, answer.seconds, is_open=went_wrong))
         if answer.text:
             mark = f'<span class="ag-mark">{_MACHINE}</span>'
-            parts.append(f'<div class="ag-ans">{mark}{_answer_text_html(answer.text)}</div>')
+            refs = calls_by_ref(answer, view.core.earlier(answer))
+            parts.append(f'<div class="ag-ans">{mark}{_answer_text_html(answer.text, refs)}</div>')
         if answer.charts:
             parts.append(f'<div class="ag-charts">{_blocks_html([_Charts(answer.charts)], root=_ROOT)}</div>')
         if not answer.text and not answer.error:

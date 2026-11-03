@@ -73,7 +73,9 @@ class CaseResult:
         said_wrong           what it said that a wrong answer says (the text that matched)
         tools_missing        the tools it should have called and didn't (their regexes)
         ungrounded           what check_grounding() flagged in the answer it gave: names, numbers, 'region ...',
-                             'none: <sentence>'
+                             'none: <sentence>', 'citation [9]'
+        cited                the share of its sentences stating a fact that cite a tool call ('[2]'), None when
+                             none states one
         rechecked            whether its first draft was sent back to be corrected (verify=True)
     """
 
@@ -89,6 +91,7 @@ class CaseResult:
     max_calls: int = 0
     ungrounded: list[str] = field(default_factory=list)
     rechecked: bool = False
+    cited: float | None = None
     error: str = ""
     stopped: str = ""
     seconds: float = 0.0
@@ -122,13 +125,11 @@ def _said(answer: Any) -> str:
     return "\n".join([answer.text, *(finding.message for finding in answer.findings)])
 
 
-def _ungrounded(answer: Any) -> list[str]:
-    from aws_analyzer.agent import check_grounding
-
-    grounding = check_grounding(answer)
+def _ungrounded(grounding: Any) -> list[str]:
     return [*grounding.unknown_names, *grounding.unknown_numbers,
             *(f"region {region}" for region in grounding.unchecked_regions),
-            *(f"none: {none.sentence}" for none in grounding.unbacked_nones)]
+            *(f"none: {none.sentence}" for none in grounding.unbacked_nones),
+            *(f"citation {ref}" for ref in grounding.unknown_refs)]
 
 
 def _wrong_things_said(case: EvalCase, said: str) -> list[str]:
@@ -145,14 +146,18 @@ def score(case: EvalCase, answer: Any, *, run: int = 1) -> CaseResult:
     How an AgentAnswer did on a case: the facts it states, what it said wrong, the tools it missed, its calls and what
     no tool returned. Pure: it reads the answer only.
     """
+    from aws_analyzer.agent import check_grounding
+
     said = _said(answer)
+    grounding = check_grounding(answer)
     missed = [pattern for pattern in case.must if not re.search(pattern, said, re.I)]
     called = [call.name for call in answer.calls if call.refused is None]
     tools_missing = [pattern for pattern in case.tools if not any(re.fullmatch(pattern, name) for name in called)]
     return CaseResult(
         case.name, case.kind, run, facts=len(case.must) - len(missed), facts_total=len(case.must), missed=missed,
         said_wrong=_wrong_things_said(case, said), tools_missing=tools_missing, tool_calls=len(called),
-        max_calls=case.max_calls, ungrounded=_ungrounded(answer), rechecked=answer.recheck is not None,
+        max_calls=case.max_calls, ungrounded=_ungrounded(grounding), rechecked=answer.recheck is not None,
+        cited=grounding.cited,
         error=answer.error or "", stopped=answer.stopped or "", seconds=round(answer.seconds, 1), cost=answer.cost,
         tokens=answer.input_tokens + answer.output_tokens, answer=answer.text, calls=[call.call for call in answer.calls])
 
@@ -233,7 +238,8 @@ def run_case(case: EvalCase, model: ModelChoice, demo: Any, *, run: int = 1) -> 
 class CaseSummary:
     """
     A case over its runs: how many passed, the share of its facts stated, the runs that said something wrong, and
-    the averages of what no tool returned, tool calls, seconds and cost.
+    the averages of what no tool returned, the share of facts cited (over the runs that stated one), tool calls,
+    seconds and cost.
     """
 
     case: str
@@ -246,6 +252,7 @@ class CaseSummary:
     calls: float
     seconds: float
     cost: float | None
+    cited: float | None = None
 
 
 def _mean(values: list[float]) -> float:
@@ -266,12 +273,13 @@ def summarize(results: list[CaseResult]) -> list[CaseSummary]:
     summaries = []
     for name, runs in by_case.items():
         costs = [r.cost for r in runs if r.cost is not None]
+        cited = [r.cited for r in runs if r.cited is not None]
         summaries.append(CaseSummary(
             name, runs[0].kind, len(runs), sum(r.passed for r in runs),
             _mean([_fact_share(r) for r in runs]),
             sum(bool(r.said_wrong) for r in runs), _mean([len(r.ungrounded) for r in runs]),
             _mean([r.tool_calls for r in runs]), _mean([r.seconds for r in runs]),
-            sum(costs) if costs else None))
+            sum(costs) if costs else None, _mean(cited) if cited else None))
     return summaries
 
 
@@ -279,24 +287,31 @@ def _money(value: float | None) -> str:
     return f"${value:.3f}" if value is not None else "-"
 
 
+def _share(value: float | None) -> str:
+    return f"{value:.0%}" if value is not None else "-"
+
+
 def render(summaries: list[CaseSummary]) -> str:
     """
     The summaries as a table, then the overall line: cases that passed every run, runs passed, facts stated, runs
     that said something wrong, claims no tool returned per answer, and the cost.
     """
-    header = f"{'case':<{_WIDTH}} {'kind':<5} {'passed':>7} {'facts':>6} {'wrong':>5} {'ungrnd':>6} {'calls':>5} " \
-             f"{'secs':>6} {'cost':>8}"
+    header = f"{'case':<{_WIDTH}} {'kind':<5} {'passed':>7} {'facts':>6} {'wrong':>5} {'ungrnd':>6} {'cited':>5} " \
+             f"{'calls':>5} {'secs':>6} {'cost':>8}"
     lines = [header, "-" * len(header)]
     for s in summaries:
         lines.append(f"{s.case:<{_WIDTH}} {s.kind:<5} {f'{s.passed}/{s.runs}':>7} {s.facts:>6.0%} {s.wrong:>5} "
-                     f"{s.ungrounded:>6.1f} {s.calls:>5.1f} {s.seconds:>6.1f} {_money(s.cost):>8}")
+                     f"{s.ungrounded:>6.1f} {_share(s.cited):>5} {s.calls:>5.1f} {s.seconds:>6.1f} "
+                     f"{_money(s.cost):>8}")
     runs = sum(s.runs for s in summaries)
     every = sum(s.passed == s.runs for s in summaries)
     costs = [s.cost for s in summaries if s.cost is not None]
+    cited = [s.cited for s in summaries if s.cited is not None]
     lines += ["", f"{every}/{len(summaries)} cases passed every run; {sum(s.passed for s in summaries)}/{runs} runs "
                   f"passed; facts {_mean([s.facts for s in summaries]):.0%}; {sum(s.wrong for s in summaries)} runs "
                   f"said something wrong; {_mean([s.ungrounded for s in summaries]):.1f} claims per answer no tool "
-                  f"returned; cost {_money(sum(costs) if costs else None)}"]
+                  f"returned; facts cited {_share(_mean(cited) if cited else None)}; cost "
+                  f"{_money(sum(costs) if costs else None)}"]
     return "\n".join(lines)
 
 

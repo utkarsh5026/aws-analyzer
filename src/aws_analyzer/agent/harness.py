@@ -413,8 +413,8 @@ def _begin_file_call(run: _Run, tool_call: dict[str, Any]) -> tuple[ToolCall, st
     """
     name = tool_call.get("name") or ""
     call = ToolCall(name, dict(tool_call.get("args") or {}), first=FILE_TOOLS.get(name))
+    run.record(call)
     with run.lock:
-        run.calls.append(call)
         used = sum(1 for c in run.calls if c.refused is None) - 1
     run.tell(AgentStep("tool", call=call))
     try:

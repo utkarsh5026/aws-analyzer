@@ -152,6 +152,7 @@ class ToolCall:
         asks      the big reads it asked the user about (BigRead), in order, each with the choice they made
         paused    it's paused, waiting for the user's choice on its last ask (or was, and runs again when resumed)
         key       what ties a pause to this call
+        ref       what the answer cites it by ('[3]'): its number in the conversation, from 1; the report's # column
     """
 
     name: str
@@ -168,6 +169,7 @@ class ToolCall:
     asks: list[BigRead] = field(default_factory=list)
     paused: bool = False
     key: str = field(default_factory=_call_key, repr=False)
+    ref: int = 0
 
     @property
     def waiting(self) -> BigRead | None:
@@ -270,12 +272,14 @@ class AgentFinding:
         message  "orders-etl fails on KeyError 'customer_id' since the 03:00 deploy: 14 runs lost. Read the code ..."
         call     "LambdaView().errors('orders-etl', since='24h')", checked by checked_call()
         shows    what that call shows, in a few words: "its errors, grouped by cause"
+        evidence the refs of the tool calls it comes from ([3, 5]), as the model cited them
     """
 
     level: str
     message: str
     call: str = ""
     shows: str = ""
+    evidence: list[int] = field(default_factory=list)
 
 
 REPLY_TOOL = "final_answer"
@@ -309,6 +313,8 @@ REPLY_SCHEMA: dict[str, Any] = {
                                             "LambdaView().errors('orders-etl', since='24h'). Empty when none fits."},
                     "shows": {"type": "string",
                               "description": "What that call shows, in a few words: 'its errors, by cause'."},
+                    "evidence": {"type": "array", "items": {"type": "integer"},
+                                 "description": "The refs of the tool results it comes from: [3, 5]."},
                 },
                 "required": ["level", "message"],
             },
@@ -326,6 +332,24 @@ def _level_of(value: Any) -> str:
     return "warn" if word in ("warn", "warning", "bad", "error") else "info"
 
 
+_REF_NUMBER = re.compile(r"\d+")
+_MAX_EVIDENCE = 8
+
+
+def refs_in(value: Any) -> list[int]:
+    """
+    The refs a finding's evidence names, each once, in order, forgiving about how a model writes them: [3, 5],
+    ['3', '[5]'], 'c3, c5' -> [3, 5]. Empty for anything without a number.
+    """
+    items = value if isinstance(value, (list, tuple)) else [value]
+    refs: list[int] = []
+    for item in items:
+        if isinstance(item, bool) or item is None:
+            continue
+        refs.extend(int(number) for number in _REF_NUMBER.findall(str(item)))
+    return list(dict.fromkeys(refs))[:_MAX_EVIDENCE]
+
+
 def _finding_of(item: Any) -> AgentFinding | None:
     """
     One item of a reply's findings as an AgentFinding, or None when it says nothing.
@@ -338,7 +362,8 @@ def _finding_of(item: Any) -> AgentFinding | None:
     if not message:
         return None
     shows = _clip(" ".join(str(item.get("shows") or "").split()), _SHOWS_CHARACTERS)
-    return AgentFinding(_level_of(item.get("level")), message, str(item.get("call") or "").strip(), shows)
+    return AgentFinding(_level_of(item.get("level")), message, str(item.get("call") or "").strip(), shows,
+                        refs_in(item.get("evidence")))
 
 
 def parse_reply(reply: Any) -> tuple[str, list[AgentFinding]]:
@@ -606,11 +631,13 @@ def _memory_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
                      "starts from them. See them all with memory(), or clear one with forget('...').")]
 
 
-def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
+def answer_findings(answer: AgentAnswer, budget: Budget | None = None, *,
+                    earlier: Iterable[AgentAnswer] = ()) -> list[tuple[str, str]]:
     """
     What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
     was refused, a call the guard blocked, what it states that its tools didn't return (grounding_findings()), steps
-    of its plan it didn't finish, and an answer that used no tool.
+    of its plan it didn't finish, and an answer that used no tool. `earlier` are the answers before it in the same
+    conversation (AgentAnalyzer.earlier()), whose tool calls it may repeat and cite.
     (level, message) pairs, each with what to do about it.
     """
     budget = budget or Budget()
@@ -634,7 +661,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
     for op in dict.fromkeys(answer.blocked):
         found.append(("warn", f"Blocked {op}: it would change your account, and the agent only reads. Nothing was "
                               "sent to AWS."))
-    found += grounding_findings(answer)
+    found += grounding_findings(answer, earlier)
     for call in answer.calls:
         if call.error:
             found.append(("warn", f"{call.name} couldn't read everything ({call.error}): the answer leaves that "
@@ -651,12 +678,16 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
 def reply_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
     """
     What the agent found in the account, as (level, message) pairs: each finding of its reply, with the call that
-    shows more after the message when the message doesn't already name it.
+    shows more after the message when the message doesn't already name it, and the refs of the tool calls it comes
+    from ('[3, 5]', the report's # column).
     """
     pairs = []
     for finding in answer.findings:
         named = not finding.call or finding.call in finding.message
-        pairs.append((finding.level, finding.message if named else f"{finding.message} ({finding.call})"))
+        message = finding.message if named else f"{finding.message} ({finding.call})"
+        if finding.evidence:
+            message += f" [{', '.join(map(str, finding.evidence))}]"
+        pairs.append((finding.level, message))
     return pairs
 
 
