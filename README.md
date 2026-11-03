@@ -2654,7 +2654,7 @@ core.chat_title                # the title of the chat going on
 `trigger_findings`, the Bedrock knowledge base toolkit's `summarize_knowledge_bases`, `summarize_kb_health`,
 `summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Python
 toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
-`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `check_grounding`, `grounding_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what

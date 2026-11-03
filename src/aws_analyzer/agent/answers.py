@@ -27,6 +27,7 @@ from .._kit.focus import Focus
 from .._kit.render import _call
 from .._kit.text import _clip
 from .budget import Budget, raised_limit
+from .grounding import grounding_findings
 from .workspace.charts import Chart
 from .llm import Rates
 from .memory import MEMORY_FOLDER, parse_notes
@@ -604,7 +605,8 @@ def _memory_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
     """
     What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
-    was refused, a call the guard blocked, steps of its plan it didn't finish, and an answer that used no tool.
+    was refused, a call the guard blocked, what it states that its tools didn't return (grounding_findings()), steps
+    of its plan it didn't finish, and an answer that used no tool.
     (level, message) pairs, each with what to do about it.
     """
     budget = budget or Budget()
@@ -628,6 +630,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
     for op in dict.fromkeys(answer.blocked):
         found.append(("warn", f"Blocked {op}: it would change your account, and the agent only reads. Nothing was "
                               "sent to AWS."))
+    found += grounding_findings(answer)
     for call in answer.calls:
         if call.error:
             found.append(("warn", f"{call.name} couldn't read everything ({call.error}): the answer leaves that "

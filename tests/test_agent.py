@@ -76,6 +76,8 @@ from aws_analyzer.agent import (
     answer_cost,
     answer_findings,
     chart_of,
+    check_grounding,
+    grounding_findings,
     image_kind,
     answer_next,
     asked_at,
@@ -375,6 +377,113 @@ def test_answer_findings_say_where_it_stopped_and_what_it_missed():
     assert answer_findings(AgentAnswer("q", text="hi")) == [
         ("info", "It answered without calling a tool, so nothing in the answer comes from your account. Ask about "
                  "your functions or buckets, or a time window.")]
+
+
+def _overnight_calls(errors_failed: bool = False) -> list[ToolCall]:
+    """
+    A night's function_health and function_errors, as the tools hand them to the model.
+    """
+    window = {"from": "2026-11-02T18:00Z", "to": "2026-11-03T08:00Z", "hours": 14.0}
+    health = ToolCall("function_health", {"since": "2026-11-02T18:00Z"}, first=None,
+                      coverage={"window": window, "regions": ["us-east-1"]},
+                      result={"window": window, "regions": ["us-east-1"], "functions_checked": 3, "functions": [
+                          {"name": "orders-etl", "invocations": 1200, "errors": 35, "max_duration_ms": 14210,
+                           "cost_month": 12.4},
+                          {"name": "report-api", "invocations": 860, "errors": 2, "max_duration_ms": 2310,
+                           "cost_month": 3.1},
+                          {"name": "thumbnailer", "invocations": 40, "errors": 0, "max_duration_ms": 900,
+                           "cost_month": 0.2}]})
+    errors = ToolCall("function_errors", {"function": "orders-etl", "since": "2026-11-02T18:00Z"},
+                      coverage={"window": window, "cut_short": False},
+                      result={"function": "orders-etl", "region": "us-east-1", "cloudwatch": {"errors": 35},
+                              "causes": [{"cause": "KeyError: 'customer_id'", "count": 31,
+                                          "request_ids": ["8f5ce35b-1d2e-4a5b-9c1d-2e3f4a5b6c7d"],
+                                          "in_code": [{"file": "etl/load.py", "line": 42}]},
+                                         {"cause": "Task timed out after 15.00 seconds", "count": 4}]})
+    if errors_failed:
+        errors.error = "AccessDeniedException; needs logs:FilterLogEvents"
+    return [health, errors]
+
+
+def test_an_answer_that_says_what_the_tools_returned_checks_out():
+    text = """**orders-etl** failed 35 times overnight (2.9% of its 1,200 calls); `report-api` had 2 errors.
+
+- 31 (89% of its failures) were `KeyError: 'customer_id'` in `etl/load.py` line 42, from 03:02 to 07:55 (run 8f5ce35b).
+- 4 runs timed out after 15 s; the slowest took 14.2 s, about 14 seconds, and it costs about $12.40/month.
+- In all, 37 errors across 3 functions, roughly 2% of calls.
+
+1. Read the code
+2. Check the field
+
+```bash
+aws logs put-retention-policy --log-group-name /aws/lambda/orders-etl --retention-in-days 30
+```
+
+Checked 18:00 yesterday to 08:00 today (UTC) in us-east-1, the last 14 hours; runs over 10 s count as slow. The
+last failure was 2h ago, on Nov 3 2026."""
+    answer = AgentAnswer("Which Lambda failed last night?", text=text, calls=_overnight_calls(), findings=[
+        AgentFinding("warn", "orders-etl fails on KeyError 'customer_id': 31 runs lost.",
+                     "LambdaView().errors('orders-etl', since='24h')")])
+    assert check_grounding(answer).ok
+    assert grounding_findings(answer) == []
+
+
+def test_names_numbers_and_regions_no_tool_returned_are_flagged():
+    text = ("`billing-sync` failed 42 times, 7.5% of calls, under s3://acme-raw/missing/ (run 1234abcd). "
+            "It costs $99.10/month.\n\nChecked us-east-1 and eu-west-1; I didn't check ap-south-1.")
+    answer = AgentAnswer("q", text=text, calls=_overnight_calls(), findings=[
+        AgentFinding("warn", "billing-sync is failing.", "LambdaView().errors('billing-sync')")])
+    grounding = check_grounding(answer)
+    assert grounding.unknown_names == ["s3://acme-raw/missing/", "1234abcd", "billing-sync"]
+    assert grounding.unknown_numbers == ["7.5%", "$99.10"]
+    assert grounding.unchecked_regions == ["eu-west-1"]
+    found = grounding_findings(answer)
+    assert found[0] == ("warn", "3 names in the answer aren't in anything the tools returned: "
+                                "'s3://acme-raw/missing/', '1234abcd' and 'billing-sync'. They may be made up or "
+                                "misspelt, so check them in What it checked below before you act on them, or ask "
+                                "again naming them so the agent looks them up.")
+    assert found[1][1].startswith("2 numbers in the answer aren't in anything the tools returned: '7.5%' and '$99.10'.")
+    assert found[2] == ("warn", "The answer says it checked a region no tool read: 'eu-west-1'. Ask again naming the "
+                                "region, or all regions, to have it checked.")
+    assert found[0] in answer_findings(answer), "shown with the others"
+    listed = check_grounding(AgentAnswer("s3://acme-raw/incoming/orders.csv", text="It's at "
+                                         "`s3://acme-raw/incoming/orders.csv`.", calls=[
+        ToolCall("find_files", {"location": "s3://acme-raw/"}, result={"bucket": "acme-raw", "files": [
+            {"key": "incoming/orders.csv", "size": "1.5 GB"}]})]))
+    assert listed.ok, "a listing gives the bucket and the key apart"
+
+
+def test_a_claim_of_none_over_an_incomplete_read_is_flagged():
+    calls = _overnight_calls(errors_failed=True)
+    answer = AgentAnswer("q", text="orders-etl had no errors overnight. Everything else ran fine.", calls=calls)
+    assert [none.sentence for none in check_grounding(answer).unbacked_nones] == [
+        "orders-etl had no errors overnight."]
+    assert grounding_findings(answer) == [
+        ("warn", "The answer says there was none, but the read behind it was incomplete: “orders-etl had no errors "
+                 "overnight.” rests on function_errors('orders-etl', since='2026-11-02T18:00Z') couldn't read "
+                 "everything (AccessDeniedException; needs logs:FilterLogEvents). That read can't show there was "
+                 "none, so treat it as unchecked until the call reads everything.")]
+    for fine in ("Of what I could read, orders-etl had no errors.",
+                 "orders-etl had no errors. Its logs couldn't be read, though.",
+                 "thumbnailer had no errors overnight."):
+        assert check_grounding(AgentAnswer("q", text=fine, calls=calls)).ok, fine
+    cut = [ToolCall("find_files", {"location": "s3://acme-raw/incoming/"}, coverage={"cut_short": True}),
+           ToolCall("function_health", {}, refused="raised")]
+    assert check_grounding(AgentAnswer("q", text="No files arrived.", calls=cut)).unbacked_nones[0].calls == cut[:1]
+    assert check_grounding(AgentAnswer("q", text="No files arrived.", calls=cut[1:])).ok
+
+
+def test_grounding_checks_nothing_without_tools_or_with_an_error():
+    assert check_grounding(AgentAnswer("q", text="billing-sync failed 42 times.")).ok
+    failed = AgentAnswer("q", text="`billing-sync` failed.", calls=_overnight_calls(), error="ThrottlingException")
+    assert check_grounding(failed).ok
+
+
+def test_the_report_shows_what_didnt_check_out(capsys):
+    view = AgentView(AgentAnalyzer(region=REGION), mode="text", progress="off")
+    answer = AgentAnswer("q", text="`billing-sync` failed 35 times.", calls=_overnight_calls())
+    out = run(capsys, view._show, view._answer_blocks(answer))
+    assert "A name in the answer isn't in anything the tools returned: 'billing-sync'" in out
 
 
 def test_answer_next_prefers_the_latest_calls_without_repeats():

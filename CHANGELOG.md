@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: checks its answer against the tools**
+  - A name, request ID, ARN, s3:// path or number in the answer that no tool returned is a warning.
+  - So is "no errors" said over a read that failed, was cut short or wasn't run.
+  - `check_grounding(answer)` gives the same as data.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added

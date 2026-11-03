@@ -250,10 +250,22 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
 5. Fills in its findings: each problem it found, why it matters and what to do, with the call that shows more. The report shows them in its findings panel, warnings first, and their calls lead the commands to run next.
+6. Is checked against what the tools returned. A name, request ID, ARN, s3:// path or number in the answer that no tool gave becomes a warning, and so does "no errors" said over a read that failed or was cut short.
 
 ??? more "How the findings are made"
 
     The model ends a question by calling a `final_answer` tool with a set shape (LangChain's `response_format`): the answer in markdown, and a list of findings, each `warn` or `info`, a message and a View call. A call is kept only when it names a real command of `LambdaView`, `S3View` or `BedrockKBView` with arguments that command takes, so one the model made up never shows as a call to run; commands that write files or open a window are never suggested. A model that can't be made to call a tool (a few on Amazon Bedrock) answers in plain text instead, without findings; so does `AgentView(findings=False)`, which also leaves the list of calls out of its instructions.
+
+??? more "How it checks the answer against the tools"
+
+    Once it has answered, aws-analyzer reads the answer and its findings back and compares them with what each tool call handed the model, the question and what you had open. No second model call is made. Four things become warnings:
+
+    - **Names and IDs no tool returned**: ARNs, s3:// paths, request IDs, and names the answer marks as code or bold (`` `billing-sync` ``). A listing that gives the bucket and the key apart still counts.
+    - **Numbers no tool returned**: a number that isn't one the tools gave, or a count of what one listed, a column's total, a share of numbers that belong together (35 of 1,200 calls is 2.9%), a rounding ("about 1,200") or a unit change (2,300 ms is 2.3 s). Dates, times of day, time windows ("the last 24 hours"), thresholds ("over 5 s") and list numbers are left alone.
+    - **Regions it says it checked that no tool read.**
+    - **"None" over an incomplete read**: a sentence like "orders-etl had no errors overnight" when the call it rests on failed (a missing permission), was cut short or wasn't run. A sentence that says so itself ("of what I could read") is fine.
+
+    It leaves alone what it can't read, so a warning is worth checking. It can still miss a made-up number that happens to equal an unrelated one in the results. `check_grounding(answer)` gives the same as data.
 
 ??? more "How it checks that uploads were processed"
 
@@ -702,7 +714,7 @@ core = AgentAnalyzer(
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding` and `grounding_findings` (what in an answer its tools didn't return), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
