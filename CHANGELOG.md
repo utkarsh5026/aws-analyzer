@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- ⚡ **Lambda: search the logs with AND, OR and NOT**
+- ⚡ **Lambda: search the logs with AND, OR and NOT** ([#197](https://github.com/utkarsh5026/aws-analyzer/pull/197))
   - The explorer's Logs box takes `KeyError OR Timeout` or `PutItem AND NOT retrying`, checked over each run's lines.
   - The words show as chips under the box: click OR to make it AND, click a word to leave it out.
   - `logs(search=...)` and `log_runs(search=...)` take the same words.
