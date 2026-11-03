@@ -77,6 +77,7 @@ from aws_analyzer.agent import (
     answer_findings,
     chart_of,
     check_grounding,
+    recheck_request,
     grounding_findings,
     image_kind,
     answer_next,
@@ -1684,6 +1685,90 @@ def test_the_answer_comes_with_the_findings_the_model_filled_in(seeded, capsys):
     looks = out[out.index("Look closer (aws_analyzer.LambdaView)"):]
     assert looks.splitlines()[1].strip().startswith("LambdaView().errors('etl-nightly', since='2h')")
     assert looks.count("LambdaView().errors('etl-nightly'") == 1
+
+
+def test_a_draft_that_doesnt_check_out_is_corrected_before_its_shown(seeded):
+    model = scripted(
+        calls(("function_health", {"since": "2h"})),
+        says("`billing-sync` failed 40 times."),
+        says("**etl-nightly** failed 40 times."),
+    )
+    steps = []
+    answer = make(model).ask("Which Lambda failed?", on_step=steps.append)
+    assert answer.text == "**etl-nightly** failed 40 times." and answer.error is None and answer.model_calls == 3
+    recheck = answer.recheck
+    assert recheck.names == ["billing-sync"] and recheck.first_text == "`billing-sync` failed 40 times."
+    assert (recheck.fixed, recheck.tool_calls, recheck.failed) == (True, 0, "")
+    sent = model.prompts[2][-1]
+    assert type(sent).__name__ == "HumanMessage" and sent.content.startswith("[Before the user sees your answer")
+    assert "- Names and IDs no tool returned: 'billing-sync'." in sent.content
+    assert any(step.kind == "thinking" and "a name didn't match" in step.text for step in steps)
+    found = answer_findings(answer)
+    assert found[0] == ("info", "It checked its first draft against what the tools returned and found a name they "
+                                "didn't back up: it was asked to correct the draft before you saw it. It rewrote "
+                                "it, and the answer shown checks out.")
+    assert not any("isn't in anything the tools returned" in m for _, m in found)
+    assert answer_from_record(answer_record(answer)).recheck == recheck
+
+
+def test_a_correction_can_read_more_with_the_tools(seeded):
+    model = scripted(
+        calls(("function_health", {"since": "2h"})),
+        says("etl-nightly failed 40 times, called by `orders-loader`."),
+        calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+        says("etl-nightly failed 40 times on KeyError 'customer_id'."),
+    )
+    answer = make(model).ask("Why did etl-nightly fail?")
+    assert answer.recheck.names == ["orders-loader"] and answer.recheck.tool_calls == 1
+    assert answer.recheck.fixed and [c.name for c in answer.calls] == ["function_health", "function_errors"]
+    assert "read more with 1 tool call and rewrote it" in answer_findings(answer)[0][1]
+
+
+def test_a_correction_that_still_doesnt_check_out_keeps_its_warnings(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."),
+                     says("`billing-cron` failed."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.text == "`billing-cron` failed." and answer.recheck.fixed is False
+    found = [m for _, m in answer_findings(answer)]
+    assert "some of it still doesn't check out" in found[0]
+    assert "A name in the answer isn't in anything the tools returned: 'billing-cron'." in " ".join(found)
+
+
+def test_a_correction_that_fails_leaves_the_draft(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."),
+                     RuntimeError("the model is overloaded"))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.text == "`billing-sync` failed." and answer.error is None and answer.stopped is None
+    assert answer.recheck.failed.startswith("RuntimeError: the model is overloaded")
+    assert answer.recheck.fixed is None
+    found = " ".join(m for _, m in answer_findings(answer))
+    assert "That failed (RuntimeError: the model is overloaded" in found and "'billing-sync'" in found
+
+
+def test_a_draft_that_checks_out_or_verify_false_costs_no_second_turn(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."))
+    answer = make(model, verify=False).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2 and answer.text == "`billing-sync` failed."
+    assert any("'billing-sync'" in m for _, m in answer_findings(answer))
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."))
+    answer = make(model, budget={"tool_calls": 1}, interrupt_on=False).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2, "no tool call left to correct it with"
+
+
+def test_the_recheck_request_lists_each_problem():
+    grounding = check_grounding(AgentAnswer("q", text="`billing-sync` failed 42 times. Checked eu-west-1.",
+                                            calls=_overnight_calls()))
+    text = recheck_request(grounding)
+    assert "- Names and IDs no tool returned: 'billing-sync'." in text
+    assert "- You say you checked 'eu-west-1', but no tool read it." in text
+    assert "give the whole answer again with final_answer, with its findings" in text
+    assert "final_answer" not in recheck_request(grounding, reply=False)
+    nones = check_grounding(AgentAnswer("q", text="orders-etl had no errors.", calls=_overnight_calls(True)))
+    assert ("- “orders-etl had no errors.” says there was none, but function_errors('orders-etl', "
+            "since='2026-11-02T18:00Z') couldn't read everything") in recheck_request(nones)
 
 
 def test_findings_false_answers_in_plain_text(seeded):

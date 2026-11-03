@@ -27,7 +27,7 @@ from .._kit.focus import Focus
 from .._kit.render import _call
 from .._kit.text import _clip
 from .budget import Budget, raised_limit
-from .grounding import grounding_findings
+from .grounding import Recheck, grounding_findings
 from .workspace.charts import Chart
 from .llm import Rates
 from .memory import MEMORY_FOLDER, parse_notes
@@ -462,6 +462,9 @@ class AgentAnswer:
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
         focus         what the user had open in an explorer when they asked (ask(focus=)), or None
+        recheck       how its first draft was checked against what the tools returned and corrected before it was
+                      shown (Recheck: what didn't check out, the draft, whether the answer now does), or None when
+                      the draft checked out or wasn't checked (verify=False)
         exception     the error itself, to raise when debugging
     """
 
@@ -488,6 +491,7 @@ class AgentAnswer:
     thread: str = ""
     asked: datetime | None = None
     focus: Focus | None = None
+    recheck: Recheck | None = None
     exception: BaseException | None = field(default=None, repr=False)
 
     @property

@@ -30,6 +30,7 @@ from .._kit.errors import _Hint
 from .._kit.focus import Focus, FocusPart
 from .._kit.text import _clip
 from .answers import AgentAnswer, AgentFinding, BigRead, PlanStep, ToolCall
+from .grounding import Recheck
 from .llm import Rates
 from .workspace.charts import Chart
 
@@ -172,6 +173,16 @@ def _focus(record: Any) -> Focus | None:
                  since=_time(record.get("since")), until=_time(record.get("until")), parts=tuple(parts))
 
 
+def _recheck(record: Any) -> Recheck | None:
+    """
+    A saved answer's Recheck (the dict answer_record wrote for it), or None when it had none; fields a newer record
+    has and this version doesn't know are left out.
+    """
+    if not isinstance(record, dict):
+        return None
+    return Recheck(**{name: value for name, value in record.items() if name in Recheck.__dataclass_fields__})
+
+
 def answer_from_record(text: str) -> AgentAnswer:
     """
     The answer a saved chat's JSON holds, as AgentAnswer (answer_record's other half). ValueError when it isn't one.
@@ -204,6 +215,7 @@ def answer_from_record(text: str) -> AgentAnswer:
         thread=str(record.get("thread") or ""),
         asked=_time(record.get("asked")),
         focus=_focus(record.get("focus")),
+        recheck=_recheck(record.get("recheck")),
     )
 
 

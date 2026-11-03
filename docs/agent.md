@@ -250,7 +250,7 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
 5. Fills in its findings: each problem it found, why it matters and what to do, with the call that shows more. The report shows them in its findings panel, warnings first, and their calls lead the commands to run next.
-6. Is checked against what the tools returned. A name, request ID, ARN, s3:// path or number in the answer that no tool gave becomes a warning, and so does "no errors" said over a read that failed or was cut short.
+6. Is checked against what the tools returned before you see it. If a name, request ID, ARN, s3:// path or number in the draft came from no tool, or it says "no errors" over a read that failed or was cut short, the model gets one more turn to read what it needs or take the claim out. What still doesn't check out becomes a warning.
 
 ??? more "How the findings are made"
 
@@ -266,6 +266,8 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
     - **"None" over an incomplete read**: a sentence like "orders-etl had no errors overnight" when the call it rests on failed (a missing permission), was cut short or wasn't run. A sentence that says so itself ("of what I could read") is fine.
 
     It leaves alone what it can't read, so a warning is worth checking. It can still miss a made-up number that happens to equal an unrelated one in the results. `check_grounding(answer)` gives the same as data.
+
+    When the draft doesn't check out, the model is sent the list of problems once, in the same conversation and with its tools, and the answer it gives then is the one you see. The chat window shows it as a step ("Before I answer, I checked my draft…"), and the findings say what was flagged and whether the answer now checks out. `answer.recheck` keeps the draft, what was flagged, the tool calls it made to correct it, and whether it worked. It costs one more model call, only when the draft didn't check out, and only while the budget has time, cost and a tool call left. If that turn fails, you see the draft with its warnings. `AgentView(verify=False)` turns it off and shows the draft as it is, with the warnings.
 
 ??? more "How it checks that uploads were processed"
 
@@ -659,6 +661,7 @@ In the [chat window](#chat), the call's line says *✋ waiting for you* and thre
 answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
 answer.findings                # AgentFinding: level ('warn', 'info'), message, call (a View call, checked), shows
+answer.recheck                 # Recheck when its draft didn't check out: names, numbers, first_text, fixed
 answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
@@ -709,12 +712,14 @@ core = AgentAnalyzer(
     plan=False,                                      # no plan for questions of several steps; on by default
     runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
     findings=False,                                  # answer in plain text, without findings; on by default
+    verify=False,                                    # show the draft as it is; on by default: one more turn to
+                                                     # correct what no tool returned
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding` and `grounding_findings` (what in an answer its tools didn't return), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings` and `recheck_request` (what in an answer its tools didn't return, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 

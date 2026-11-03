@@ -25,6 +25,7 @@ from .._kit.focus import Focus
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
+from .grounding import Recheck, check_grounding, recheck_request, recheck_said
 from .chats import (
     ChatStore,
     ChatSummary,
@@ -214,6 +215,14 @@ filling in a set shape (findings=True, the default): the answer, and what it fou
 a real command with arguments it takes), which the report shows as its findings and next calls. findings=False
 has it answer in plain text, as does a model that can't be made to call a tool.
 
+    Checked before it's shown (verify=True, the default): once the model has answered, its draft is compared with
+    what the tools returned (check_grounding: names, IDs and numbers no tool gave, regions it didn't read, "no
+    errors" over a read that failed or was cut short). When part of it doesn't check out, the model gets one more
+    turn, with its tools, to read what it needs, take the claim out or say it couldn't check it, and that answer is
+    shown instead (answer.recheck says what was flagged, keeps the draft, and whether the answer now checks out).
+    It costs a model call only when the draft didn't check out. verify=False shows the draft as it is, with the same
+    warnings.
+
     Runbooks: step-by-step guides for common problems ("a Lambda is failing", "an S3 upload didn't start my
     function"), each a folder with a SKILL.md. The model sees only each one's name and one-line description, and reads
     the whole guide (read_runbook) when a question needs it. runbooks=True (the default) gives it the built-in ones; a
@@ -273,6 +282,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         plan: bool = True,
         runbooks: bool | str | Path | Iterable[str | Path] = True,
         findings: bool = True,
+        verify: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
     ):
@@ -295,6 +305,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         self.budget = Budget.of(budget)
         self.plan = plan
         self.findings = findings
+        self.verify = verify
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
@@ -814,6 +825,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             answer.text = harness.stream_turn(graph, self._message(question, moment, shown),
                                               thread=self.thread, run=run, answer=answer, model_prices=self.prices,
                                               progress=progress, provider=self.provider)
+            self._recheck(graph, run, answer, progress)
         finally:
             self._run = None
         self.history.append(answer)
@@ -862,6 +874,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         try:
             answer.text = harness.resume_turn(graph, choices, thread=answer.thread, run=run, answer=answer,
                                               model_prices=self.prices, progress=progress, provider=self.provider)
+            self._recheck(graph, run, answer, progress)
         finally:
             self._run = None
         return self._finish(graph, run, answer)
@@ -873,6 +886,52 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         """
         call = next((c for c in answer.calls if c.key == key and c.asks), None)
         return (call.asks[-1].choice or "skip") if call is not None else "skip"
+
+    def _can_recheck(self, run: _Run, answer: AgentAnswer) -> bool:
+        """
+        Whether a draft can be checked and corrected: verify is on, it's the question's first check, the model
+        answered (no error, no stop, nothing waiting for the user), and the budget has time, cost and a tool call
+        left for the correction.
+        """
+        budget = run.budget
+        is_answered = answer.error is None and answer.stopped is None and bool(answer.text.strip())
+        is_waiting = any(call.waiting is not None for call in run.calls)
+        used = sum(1 for call in run.calls if call.refused is None)
+        has_cost_left = budget.usd is None or run.cost < budget.usd
+        has_room = run.elapsed < budget.seconds and used < budget.tool_calls and has_cost_left
+        return self.verify and answer.recheck is None and is_answered and not is_waiting and has_room
+
+    def _recheck(self, graph: Any, run: _Run, answer: AgentAnswer, progress: Callable[..., None] | None) -> None:
+        """
+        With verify=True, checks the model's draft against what its tools returned (check_grounding) and, when part
+        of it doesn't check out, gives the model one more turn in the same conversation, with its tools, to correct
+        it: that answer replaces the draft, and answer.recheck keeps what was flagged and the draft. A turn that
+        fails or ends without an answer leaves the draft as it was, with why in recheck.failed; one that pauses to
+        ask about a big read leaves no text, as any pause does.
+        """
+        if not self._can_recheck(run, answer):
+            return
+        answer.calls = list(run.calls)
+        flagged = check_grounding(answer)
+        if flagged.ok:
+            return
+        draft_text, draft_findings, calls_before = answer.text, list(answer.findings), len(run.calls)
+        answer.recheck = recheck = Recheck.of(flagged, draft_text)
+        run.tell(AgentStep("thinking", text=recheck_said(flagged)))
+        text = harness.stream_turn(graph, recheck_request(flagged, reply=self.findings), thread=answer.thread,
+                                   run=run, answer=answer, model_prices=self.prices, progress=progress,
+                                   provider=self.provider)
+        recheck.tool_calls = len(run.calls) - calls_before
+        if text.strip():
+            answer.text = text
+            return
+        if any(call.waiting is not None for call in run.calls):
+            answer.text = ""
+            return
+        recheck.failed = answer.error or "the model ended its turn without an answer"
+        answer.text, answer.findings = draft_text, draft_findings
+        if answer.stopped in ("error", "steps"):
+            answer.stopped, answer.error, answer.exception = None, None, None
 
     def _finish(self, graph: Any, run: _Run, answer: AgentAnswer) -> AgentAnswer:
         """
@@ -891,6 +950,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
                                   provider=self.provider)
         answer.seconds = run.elapsed
+        if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
+            answer.recheck.fixed = check_grounding(answer).ok
         pauses = harness.pauses(graph, answer.thread) if answer.waiting and answer.error is None else {}
         if pauses:
             run.pause()

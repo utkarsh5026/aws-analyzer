@@ -18,6 +18,10 @@ What it checks (Grounding):
                        sentence that says so itself ("of what I could read") is fine.
 
 It errs towards saying nothing: a claim it can't read is let through, so what it flags is worth checking.
+
+With AgentAnalyzer(verify=True), a draft that doesn't check out is sent back to the model once before the user sees
+it: recheck_request() is the message (each problem, and how to correct it), recheck_said() the line the agent says
+meanwhile, and Recheck what the answer keeps of it (answer.recheck), which grounding_findings() reports first.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
 
+from .._kit.fmt import _plural
 from .._kit.text import _clip
 from .budget import _REFUSED
 
@@ -698,11 +703,13 @@ def _regions_finding(regions: list[str]) -> tuple[str, str]:
 
 def grounding_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
     """
-    What check_grounding() found, as (level, message) pairs saying what to check: claims of none over an incomplete
-    read first, then names and IDs no tool returned, numbers no tool returned, and regions no tool read.
+    What check_grounding() found, as (level, message) pairs saying what to check: how its first draft was corrected
+    (answer.recheck) first, then claims of none over an incomplete read, names and IDs no tool returned, numbers no
+    tool returned, and regions no tool read.
     """
     grounding = check_grounding(answer)
-    found = [_none_finding(none) for none in grounding.unbacked_nones[:_NONES_SHOWN]]
+    found = _recheck_findings(answer)
+    found += [_none_finding(none) for none in grounding.unbacked_nones[:_NONES_SHOWN]]
     if grounding.unknown_names:
         found.append(_names_finding(grounding.unknown_names))
     if grounding.unknown_numbers:
@@ -710,3 +717,107 @@ def grounding_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
     if grounding.unchecked_regions:
         found.append(_regions_finding(grounding.unchecked_regions))
     return found
+
+
+@dataclass
+class Recheck:
+    """
+    How an answer's first draft was checked before the user saw it (AgentAnalyzer(verify=True)): what in it no tool
+    returned, and how the model's one turn to correct it went. Plain data, so a saved chat keeps it.
+
+        names, numbers, regions  what check_grounding() flagged in the draft (Grounding's lists)
+        nones       the draft's sentences that claimed none over an incomplete read
+        first_text  the draft as the model first wrote it
+        tool_calls  the tool calls the model made to correct it
+        fixed       whether the answer it gave then checks out; None while unfinished, or when correcting failed
+        failed      why correcting it failed, when it did: the answer is then the first draft
+    """
+
+    names: list[str] = field(default_factory=list)
+    numbers: list[str] = field(default_factory=list)
+    regions: list[str] = field(default_factory=list)
+    nones: list[str] = field(default_factory=list)
+    first_text: str = ""
+    tool_calls: int = 0
+    fixed: bool | None = None
+    failed: str = ""
+
+    @classmethod
+    def of(cls, grounding: Grounding, first_text: str) -> Recheck:
+        return cls(list(grounding.unknown_names), list(grounding.unknown_numbers), list(grounding.unchecked_regions),
+                   [none.sentence for none in grounding.unbacked_nones], first_text)
+
+
+_RECHECK = """[Before the user sees your answer, check it: part of it isn't in what your tools returned.
+{problems}
+Fix each one: call a tool to read what it needs, take the claim out, or say you couldn't check it. A number you
+worked out from the tools' numbers is fine if the answer says how. Don't call the tools you already called again with
+the same arguments. Then give the whole answer again{how}, as if for the first time: the user never saw this draft.]"""
+_RECHECK_REPLY = " with final_answer, with its findings"
+
+
+def _none_problem(none: UnbackedNone) -> str:
+    reasons = "; ".join(f"{call.call} {_why_incomplete(call)}" for call in none.calls)
+    return f"- “{_clip(none.sentence, _SENTENCE_CHARACTERS)}” says there was none, but {reasons}: it can't show that."
+
+
+def recheck_request(grounding: Grounding, *, reply: bool = True) -> str:
+    """
+    What the model is sent when its draft doesn't check out: each problem check_grounding() found, a line each,
+    and how to correct it (read it, take it out, or say it couldn't be checked), then to answer again, with
+    final_answer when `reply`.
+    """
+    problems = [_none_problem(none) for none in grounding.unbacked_nones]
+    if grounding.unknown_names:
+        problems.append(f"- Names and IDs no tool returned: {_listed(grounding.unknown_names)}.")
+    if grounding.unknown_numbers:
+        problems.append(f"- Numbers no tool returned, nor a count, total, share or unit change of theirs: "
+                        f"{_listed(grounding.unknown_numbers)}.")
+    if grounding.unchecked_regions:
+        problems.append(f"- You say you checked {_listed(grounding.unchecked_regions)}, but no tool read "
+                        f"{_Words.of(grounding.unchecked_regions, 'region').them}.")
+    return _RECHECK.format(problems="\n".join(problems), how=_RECHECK_REPLY if reply else "")
+
+
+def _flagged_parts(names: list[str], numbers: list[str], regions: list[str], nones: list[str]) -> str:
+    """
+    What a check flagged, in a few words: "2 names, a number and a claim of none over an incomplete read".
+    """
+    parts = [_Words.of(items, noun).some.lower() for items, noun in ((names, "name"), (numbers, "number"))
+             if items]
+    if regions:
+        parts.append(f"{_Words.of(regions, 'region').some.lower()} said to be checked")
+    if nones:
+        parts.append(f"{_Words.of(nones, 'claim').some.lower()} of none over an incomplete read")
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
+def recheck_said(grounding: Grounding) -> str:
+    """
+    The line the agent says while it corrects its draft (the chat window shows it as one of its steps).
+    """
+    flagged = _flagged_parts(grounding.unknown_names, grounding.unknown_numbers, grounding.unchecked_regions,
+                             [none.sentence for none in grounding.unbacked_nones])
+    return (f"Before I answer, I checked my draft against what the tools returned: {flagged} didn't match, so "
+            "I'll correct it.")
+
+
+def _recheck_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
+    """
+    What the reader should know when the answer's first draft was corrected: what didn't check out, and whether the
+    answer they see is the correction or, when correcting failed, the draft.
+    """
+    recheck = answer.recheck
+    if recheck is None:
+        return []
+    flagged = _flagged_parts(recheck.names, recheck.numbers, recheck.regions, recheck.nones)
+    found = (f"It checked its first draft against what the tools returned and found {flagged} they didn't back up: "
+             "it was asked to correct the draft before you saw it.")
+    if recheck.failed:
+        return [("info", f"{found} That failed ({recheck.failed}), so the answer shown is the draft; check what "
+                         "the warnings here name.")]
+    read = f"read more with {_plural(recheck.tool_calls, 'tool call')} and " if recheck.tool_calls else ""
+    if recheck.fixed is False:
+        return [("info", f"{found} It {read}rewrote it, but some of it still doesn't check out: see the warnings "
+                         "here.")]
+    return [("info", f"{found} It {read}rewrote it, and the answer shown checks out.")]

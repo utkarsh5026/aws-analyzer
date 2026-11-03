@@ -90,7 +90,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      and next steps a report shows about them.
     grounding.py     Whether an answer says only what its tools returned: names, IDs and numbers no tool gave,
                      regions it didn't read, and claims of none over an incomplete read (check_grounding), as
-                     findings the report shows (grounding_findings).
+                     findings the report shows (grounding_findings), and the message that sends a draft that
+                     doesn't check out back to the model once (recheck_request, verify=True; answer.recheck).
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
     workspace/       The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
@@ -129,7 +130,7 @@ from .answers import (
     reply_findings,
 )
 from .budget import Budget
-from .grounding import Grounding, UnbackedNone, check_grounding, grounding_findings
+from .grounding import Grounding, Recheck, UnbackedNone, check_grounding, grounding_findings, recheck_request
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
     AZURE_API_VERSION,
@@ -292,6 +293,8 @@ __all__ = [
     "grounding_findings",
     "Grounding",
     "UnbackedNone",
+    "Recheck",
+    "recheck_request",
     "answer_next",
     "reply_findings",
     "parse_reply",

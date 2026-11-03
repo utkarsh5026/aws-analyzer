@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - So is "no errors" said over a read that failed, was cut short or wasn't run.
   - `check_grounding(answer)` gives the same as data.
 
+- 🤖 **Agent: corrects a draft that doesn't check out**
+  - Before you see it, the model gets one more turn, with its tools, to fix what no tool returned.
+  - `answer.recheck` keeps the draft and what was flagged; the findings say whether the answer now checks out.
+  - `AgentView(verify=False)` turns it off.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added
