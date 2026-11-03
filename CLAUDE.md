@@ -505,7 +505,13 @@ How the View layer works:
   `80%`, `14:00`), never `eval`; a short name stands for the one field ending in it (`size`). `blocks/runs.py` draws the
   report. The explorer's Logs search box takes the same queries (`_query_of`: a query when it compares or names only
   yes-or-no fields, else words for CloudWatch), with a sort menu (`_RUN_SORTS`) and a run's logged event at the top of
-  its lines (`_event_html`).
+  its lines (`_event_html`). Words can be joined with AND, OR and NOT in capitals (`-word` too): `analysis/word_search.py`
+  (pure: `word_search` into a `WordSearch` of `Phrase` / `Not` / `AllOf` / `AnyOf`, lowercase and/or staying words so a
+  pasted message stays a phrase) gives CloudWatch the OR of the wanted phrases (`pattern()`), and `runs_matching` keeps
+  the runs whose lines hold the whole search, since CloudWatch matches one line at a time; `_log_runs` and `logs()` (per
+  line) use it. In the explorer, `explorer/terms.py`'s `_SearchTerms` draws `WordSearch.terms()` (a `SearchTerms`) as
+  chips under the box, pooled by place (`_TermSlot`): the joiner flips AND / OR, a chip leaves its word out, ✕ drops it,
+  and each click writes `SearchTerms.text()` back into the box, the one record of the search.
 - `LambdaView.how_it_works()` (its pure side in `lambda_functions/analysis/codemap/`: `terms`, `aws_model`, `syntax`,
   `model`, `reader`, `mapping`, `findings`, `graph`) is `LambdaAnalyzer.code_map()` -> `map_package()` (the
   package's own `.py` files;
@@ -1416,7 +1422,8 @@ it can run off the main thread: `_request()` makes one request and changes nothi
 - The home page's hero is a video (`docs/images/hero-demo.mp4`, its last frame `hero-poster.webp`), made with Remotion in
   `hero-video/` (scenes in `src/scenes/`; `npm run render` writes both, `npm run figures` copies the guide's pictures
   into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on
-  a click; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
+  a click, only once the page has loaded and while it's on screen in a tab in front (the dots behind it stop drifting
+  meanwhile); `remotion.config.ts` keeps it H.264 level 4.0 with 4 reference frames, which every decoder plays; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
   shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`).
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the

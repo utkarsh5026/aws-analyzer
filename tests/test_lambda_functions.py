@@ -33,6 +33,7 @@ from aws_analyzer.lambda_functions.explorer import plain as plain_search
 from aws_analyzer._kit.focus import QueryDraft
 from aws_analyzer import set_assistant
 from aws_analyzer.lambda_functions.analysis import live as live_mod
+from aws_analyzer.lambda_functions.analysis.word_search import runs_matching
 from aws_analyzer.lambda_functions.models import Activity
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
@@ -48,7 +49,10 @@ from aws_analyzer.lambda_functions import (
     RUNTIMES,
     AccountLimits,
     QueryError,
+    SearchError,
+    SearchTerms,
     logged_event,
+    word_search,
     looks_like_query,
     parse_query,
     run_fields,
@@ -1518,6 +1522,80 @@ def orders_page():
     )
 
 
+@pytest.mark.parametrize("text, written, pattern", [
+    ("KeyError OR Timeout", "KeyError OR Timeout", '?"KeyError" ?"Timeout"'),
+    ("PutItem -retrying", "PutItem AND NOT retrying", '"PutItem"'),
+    ("(AccessDenied OR Throttling) AND NOT retrying", "(AccessDenied OR Throttling) AND NOT retrying",
+     '?"AccessDenied" ?"Throttling"'),
+    ("Task timed out OR KeyError", '"Task timed out" OR KeyError', '?"Task timed out" ?"KeyError"'),
+    ('-"not authorized" PutItem', 'NOT "not authorized" AND PutItem', '"PutItem"'),
+    ('say "hi there" OR x', '(say AND "hi there") OR x', '?"say" ?"hi there" ?"x"'),
+    ("handler(event) OR x", '"handler(event)" OR x', '?"handler(event)" ?"x"'),
+    ("NOT retrying", "NOT retrying", None),
+])
+def test_words_joined_with_and_or_not(text, written, pattern):
+    search = word_search(text)
+    assert search.written() == written and search.pattern() == pattern
+
+
+@pytest.mark.parametrize("text", ["KeyError", "No such file or directory", "?ERROR ?WARN", '{ $.level = "ERROR" }',
+                                  "", None, "a and b", "status code -", "--verbose"])
+def test_text_without_operators_is_searched_as_it_is(text):
+    assert word_search(text) is None
+
+
+@pytest.mark.parametrize("text, said", [
+    ("a OR", "OR at the end needs a word after it"),
+    ("(a OR b", "isn't closed: add the ')'"),
+    ("a) OR b", "has no '(' before it"),
+    ('"oops OR x', "A quote in"),
+    ('a AND ""', "Empty quotes"),
+    ("OR a", "'OR' needs a word before it"),
+])
+def test_words_that_cant_be_read_say_why(text, said):
+    with pytest.raises(SearchError, match=re.escape(said)):
+        word_search(text)
+
+
+def test_a_search_holds_over_a_runs_lines():
+    search = word_search("KeyError AND order-42 AND NOT retrying")
+    assert search.matches(["KeyError: 'x'", "order-42 accepted"])
+    assert not search.matches(["KeyError order-42", "retrying PutItem"])
+    assert not search.matches(["keyerror order-42"]) and search.matches(["keyerror order-42"], ignore_case=True)
+    assert search.wanted == ["KeyError", "order-42"] and search.left_out == ["retrying"]
+    assert search.mentions("a KeyError") and not search.mentions("retrying")
+
+
+def test_search_terms_are_the_chips_and_write_the_search_back():
+    terms = word_search("(a OR b) -c").terms()
+    assert terms == SearchTerms("OR", ["a", "b"], ["c"]) and terms.text() == "(a OR b) AND NOT c"
+    assert terms.flipped().text() == "a AND b AND NOT c"
+    assert terms.toggled("a").text() == "b AND NOT c AND NOT a" and terms.toggled("c").text() == "a OR b OR c"
+    assert terms.without("c").text() == "a OR b" and terms.without("a").without("b").text() == "NOT c"
+    assert word_search(terms.toggled("a").text()).terms().text() == terms.toggled("a").text()
+    assert SearchTerms("AND", ["Task timed out"], ["not this"]).text() == '"Task timed out" AND NOT "not this"'
+    assert word_search("(a OR b) AND (c OR d)").terms() is None
+    assert word_search("a OR b -c").terms() is None
+
+
+def test_runs_matching_keeps_whole_runs_that_hold_the_search():
+    now = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
+
+    def run_lines(rid, at, *lines):
+        stamps = [now + timedelta(seconds=at, milliseconds=i) for i in range(len(lines) + 2)]
+        return [LogEvent(stamps[0], f"START RequestId: {rid} Version: $LATEST", "s", rid),
+                *(LogEvent(stamps[i + 1], line, "s", rid) for i, line in enumerate(lines)),
+                LogEvent(stamps[-1], f"REPORT RequestId: {rid}\tDuration: 5.00 ms", "s", rid)]
+
+    events = [*run_lines("r1", 0, "KeyError: 'x'", "order-42"), *run_lines("r2", 1, "KeyError: 'y'"),
+              *run_lines("r3", 2, "fine")]
+    both = runs_matching(events, word_search("KeyError AND order-42"))
+    assert {e.request_id for e in both} == {"r1"} and [e.message for e in both if e.matched] == ["KeyError: 'x'",
+                                                                                                 "order-42"]
+    odd = runs_matching(events, word_search("order-42 OR NOT KeyError"))
+    assert {e.request_id for e in odd} == {"r1", "r3"} and not any(e.matched for e in odd)
+
+
 @pytest.mark.parametrize("text, matched", [
     ("duration > 15s", ["r3", "r2", "r0"]),
     ("duration > 15000", ["r3", "r2", "r0"]),
@@ -2837,6 +2915,78 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     assert x.found is None and len(x._visible_runs()) == 5
     x.log_find.value = "?ERROR ?WARN"
     assert "That's a CloudWatch Logs filter pattern: press Enter" in plain(x.status.value)
+
+
+def test_log_runs_searches_words_joined_with_and_or_not(core, ui, capsys):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    either = core.log_runs("etl-nightly", since="1h", search="ORD-77 OR KeyError")
+    assert [run.request_id for run in either.runs] == [ids[1], RID] and either.pattern == '?"ORD-77" ?"KeyError"'
+    assert [e.message for e in either.runs[0].events if e.matched] == ["handling order ORD-77"]
+    over_lines = core.log_runs("etl-nightly", since="1h", search="handling order AND ORD-77")
+    assert [run.request_id for run in over_lines.runs] == [ids[1]]
+    without = core.log_runs("etl-nightly", since="1h", search="handling order -ORD-77")
+    assert [run.request_id for run in without.runs] == [ids[3], ids[2], ids[0]]
+    only_out = core.log_runs("etl-nightly", since="1h", search="NOT handling")
+    assert [run.request_id for run in only_out.runs] == [RID] and only_out.pattern is None
+    with pytest.raises(SearchError, match="isn't closed"):
+        core.log_runs("etl-nightly", since="1h", search="(ORD-77 OR KeyError")
+    out = run(capsys, ui.logs, "etl-nightly", search="ORD-77 OR KeyError")
+    assert "lines matching 'ORD-77 OR KeyError'" in out and "handling order ORD-77" in out
+    assert "KeyError: 'customer_id'" in out and "handling order ORD-1" not in out
+    broken = run(capsys, ui.logs, "etl-nightly", search="ORD-77 OR")
+    assert "SearchError: OR at the end needs a word after it" in broken and "Traceback" not in broken
+
+
+def test_explorer_searches_words_joined_with_and_or_not_as_chips(core, explorer):
+    now = datetime.now(timezone.utc)
+    ids = seed_runs(now)
+    x = explorer("etl-nightly", tab="logs")
+    assert x.terms_row.layout.display == "none"
+    x.log_find.value = "ORD-77"
+    assert x.terms_row.layout.display == "none"
+    x.log_find.value = "ord-77 OR keyerror"
+    assert [run.request_id for run in x._visible_runs()] == [ids[1], RID]
+    assert x.terms_row.layout.display == ""
+    shown = [w.description for w in x.terms_row.children if w is not x.terms_lead and w is not x.terms_note]
+    assert shown == ["ord-77", "✕", "OR", "keyerror", "✕"]
+    assert "2 of 5 runs read match 'ord-77 OR keyerror'" in plain(x.status.value)
+    assert "Enter asks CloudWatch for lines with 'ord-77' or 'keyerror', then checks each run" in plain(x.status.value)
+    joiner = x._term_slots[1].joiner
+    assert joiner.tooltip.startswith("Any word") and not joiner.disabled
+    joiner.click()
+    assert x.log_find.value == "ord-77 AND keyerror" and x._visible_runs() == []
+    x._term_slots[1].chip.click()
+    assert x.log_find.value == "ord-77 AND NOT keyerror"
+    assert [run.request_id for run in x._visible_runs()] == [ids[1]]
+    assert "lmx-term-out" in x._term_slots[1].chip._dom_classes and x._term_slots[1].joiner.disabled
+    x._term_slots[1].chip.click()
+    assert x.log_find.value == "ord-77 AND keyerror"
+    x._term_slots[1].joiner.click()
+    x._term_slots[1].chip.click()
+    x._term_slots[1].chip.click()
+    assert x.log_find.value == "ord-77 OR keyerror"
+    x._term_slots[1].chip.click()
+    x._term_slots[0].drop.click()
+    assert x.log_find.value == "NOT keyerror" and len(x._visible_runs()) == 4
+    x._term_slots[0].drop.click()
+    assert x.log_find.value == "" and x.terms_row.layout.display == "none" and len(x._visible_runs()) == 5
+    x.log_find.value = "ORD-77 OR KeyError"
+    enter(x.log_find)
+    assert [run.request_id for run in x._found_runs] == [ids[1], RID]
+    assert plain(x.status.value) == ("2 runs matching 'ORD-77 OR KeyError' in the last hour, 1 failed · ✕ shows "
+                                     "every run again")
+    assert "<mark>ORD-77</mark>" in x._run_rows[0].face.value
+    x.log_find.value = "(ORD-77 OR KeyError) AND (handling OR loading)"
+    assert "grouped in brackets" in plain(x.terms_note.value) and x.terms_row.children[-1] is x.terms_note
+    x.log_find.value = "(ORD-77 OR KeyError"
+    assert "isn't closed" in plain(x.status.value) and "isn't closed" in plain(x.terms_note.value)
+    assert len(x._visible_runs()) == 5
+    found = x.found
+    enter(x.log_find)
+    assert x.found is found and "isn't closed" in plain(x.status.value)
+    x.log_find.value = "cold or failed"
+    assert x.terms_row.layout.display == "none" and [run.request_id for run in x._visible_runs()] == [RID]
 
 
 def test_explorer_shows_times_in_the_zone_picked(core, explorer):

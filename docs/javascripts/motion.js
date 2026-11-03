@@ -174,18 +174,51 @@
     highlight(root);
   }
 
+  /* The hero's video plays only while it's on screen and the tab is in front, so it never decodes for nobody, and
+     not before the page has loaded, so its download doesn't hold up the rest. While it plays, the dots behind it
+     stop drifting: the browser then repaints only the video. */
   function heroVideo(root) {
     var video = root.querySelector(".hero-video");
     if (!video || video.offsetParent === null) return;
-    video.addEventListener("click", function () {
-      video.currentTime = 0;
+    var hero = video.closest(".hero");
+    var visible = false;
+    var wanted = !localStorage.getItem(HERO_SEEN);
+
+    function play() {
+      if (!wanted || !visible || document.hidden) return;
       video.play().catch(function () {});
+    }
+    function update() {
+      if (visible && !document.hidden) play();
+      else if (!video.paused) video.pause();
+    }
+
+    video.addEventListener("click", function () {
+      wanted = true;
+      video.currentTime = 0;
+      play();
     });
-    if (localStorage.getItem(HERO_SEEN)) return;
+    video.addEventListener("play", function () { if (hero) hero.classList.add("aa-playing"); });
+    video.addEventListener("pause", function () { if (hero) hero.classList.remove("aa-playing"); });
     video.addEventListener("ended", function () {
+      wanted = false;
       localStorage.setItem(HERO_SEEN, "1");
     });
-    video.play().catch(function () {});
+    document.addEventListener("visibilitychange", update);
+
+    function watch() {
+      if (!canObserve) {
+        visible = true;
+        update();
+        return;
+      }
+      new IntersectionObserver(function (entries) {
+        visible = entries[entries.length - 1].isIntersecting;
+        update();
+      }, { threshold: 0.25 }).observe(video);
+    }
+    if (document.readyState === "complete") watch();
+    else window.addEventListener("load", watch, { once: true });
   }
 
   /* Material's instant loading, if it's ever turned on, swaps pages without reloading: document$ says when */

@@ -844,6 +844,7 @@ html.aa-zoomed { overflow: hidden; }
 
   /* ---- The home page: the promise arrives, the dots drift, then the notebook cell runs its call */
   .md-typeset .hero::before { animation: aa-drift 18s ease-in-out infinite; }
+  .md-typeset .hero.aa-playing::before { animation-play-state: paused; }
   .md-typeset .hero > div:first-child > * { animation: aa-rise .6s var(--aa-ease) both; }
   .md-typeset .hero > div:first-child > :nth-child(2) { animation-delay: .07s; }
   .md-typeset .hero > div:first-child > :nth-child(3) { animation-delay: .14s; }
