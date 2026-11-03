@@ -1398,7 +1398,8 @@ it can run off the main thread: `_request()` makes one request and changes nothi
 - The home page's hero is a video (`docs/images/hero-demo.mp4`, its last frame `hero-poster.webp`), made with Remotion in
   `hero-video/` (scenes in `src/scenes/`; `npm run render` writes both, `npm run figures` copies the guide's pictures
   into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on
-  a click; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
+  a click, only once the page has loaded and while it's on screen in a tab in front (the dots behind it stop drifting
+  meanwhile); `remotion.config.ts` keeps it H.264 level 4.0 with 4 reference frames, which every decoder plays; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
   shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`).
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
