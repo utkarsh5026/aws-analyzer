@@ -82,6 +82,8 @@ mkdocs serve                                   # preview docs/ at http://127.0.0
 mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
 python .claude/skills/check/snapshot.py run OUT [--root CHECKOUT]  # every report as text and HTML (pip install time-machine)
 python .claude/skills/check/snapshot.py compare BASE NEW           # what a refactor changed in them (see /check)
+python .claude/skills/agent-eval/evals.py run --model M --repeat 3 --out A.json   # the agent graded on demo data
+python .claude/skills/agent-eval/evals.py compare A.json B.json   # what an agent change did to it (see /agent-eval)
 make <task>                                    # or python makefile.py <task>: setup, test, lint, check, build, docs, demo, ...
 make local                                     # the wheel in a fresh venv (.local-check/), imported with only boto3,
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
@@ -1293,7 +1295,10 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   sent; `Folder` is a workspace for the tests (a folder, each run a subprocess: no sandbox), and the `pyodide` fixture
   downloads Pyodide's files once for the tests that run `LocalSandbox` for real (into `AWS_ANALYZER_TEST_PYODIDE` when
   it's set, so a second run reuses them; skipped without Deno or the internet); `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as
-  Azure does. Tests that need deepagents or langchain-openai skip without them (Python 3.10).
+  Azure does. Tests that need deepagents or langchain-openai skip without them (Python 3.10). `tests/test_agent_evals.py` checks the eval set
+  (`.claude/skills/agent-eval`: `cases.py`'s questions about demo.py's Lambda data, `evals.py`'s grading) and runs a
+  case end to end with demo.py's scripted model; the evals themselves need a real model, so run `/agent-eval` before
+  and after changing the agent's prompt, toolkits or grounding.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper. Each service's help test checks that `set(_commands(<Service>View))` is what its `_GROUPS` list.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
