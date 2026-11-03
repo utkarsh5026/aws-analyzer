@@ -290,7 +290,7 @@ def _without_code(text: str) -> str:
     return _FENCE.sub(" ", text)
 
 
-def _prose(text: str) -> str:
+def _number_text(text: str) -> str:
     """
     The answer's sentences as numbers are read from them: no code blocks, and each code span a blank.
     """
@@ -497,7 +497,7 @@ def _number_claim(prose: str, match: re.Match[str]) -> _Number | None:
     return _Number(value, tolerance, _kind(match, next_word), shown)
 
 
-def _within(values: list[float], low: float, high: float) -> bool:
+def _holds_between(values: list[float], low: float, high: float) -> bool:
     """
     Whether a sorted list holds a value from low to high.
     """
@@ -510,12 +510,12 @@ def _supported(number: _Number, evidence: _Evidence) -> bool:
     Whether a number is one the tools returned, or follows from them: rounded, in another unit, or as a share.
     """
     low, high = number.value - number.tolerance, number.value + number.tolerance
-    if _within(evidence.numbers, low, high):
+    if _holds_between(evidence.numbers, low, high):
         return True
     if number.kind == "percent":
-        return _within(evidence.numbers, low / 100, high / 100) or _within(evidence.shares, low, high)
+        return _holds_between(evidence.numbers, low / 100, high / 100) or _holds_between(evidence.shares, low, high)
     if number.kind == "unit":
-        return any(_within(evidence.numbers, low / scale, high / scale) for scale in _SCALES)
+        return any(_holds_between(evidence.numbers, low / scale, high / scale) for scale in _SCALES)
     return False
 
 
@@ -524,7 +524,7 @@ def unknown_numbers(answer: AgentAnswer, evidence: _Evidence | None = None) -> l
     The numbers the answer reports that no tool returned or implies, as it writes them ('42 failures'), each once.
     """
     evidence = evidence or _evidence(answer)
-    prose = _prose(_claimed_text(answer))
+    prose = _number_text(_claimed_text(answer))
     claims = (_number_claim(prose, match) for match in _NUMBER.finditer(prose))
     unknown = [claim.shown for claim in claims if claim is not None and not _supported(claim, evidence)]
     return list(dict.fromkeys(unknown))
