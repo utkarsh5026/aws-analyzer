@@ -40,9 +40,10 @@ from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
 )
 from .analysis.overview import Overview
-from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
+from .analysis.errors import _filter_pattern, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
 from .analysis.runs import RunTable, run_table
+from .analysis.word_search import runs_matching, search_hits, word_search
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.source import find_symbol_in, read_sources, search_package
 from .analysis.versions import diff_packages, nothing_before, version_before
@@ -1020,7 +1021,8 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
         What a function logged from `since` to `until`, as runs: .runs is a LogRun per call, newest first, each with
         every line it logged, its status (ok, failed, timeout...), run time, memory and cold start. Reads the newest
         `limit` lines. search= ('KeyError', an order ID, a request ID, or a CloudWatch Logs filter pattern) keeps the
-        runs with a matching line, each with all of its lines (the matching ones are marked).
+        runs with a matching line, each with all of its lines (the matching ones are marked); words joined with AND,
+        OR and NOT ('KeyError OR Timeout', 'PutItem AND NOT retrying') keep the runs whose lines hold them all.
         """
         fn = self.function(ref, region=region)
         start, end = self.time_range(since, until)
@@ -1064,23 +1066,26 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
         log_runs() for a function already read (no GetFunction); reached= hears how far back the read (or the
         search, before the runs it found are read) has come.
         """
-        pattern = _filter_pattern(search)
+        words = word_search(search)
+        pattern = words.pattern() if words is not None else _filter_pattern(search)
         if not pattern:
-            return self._log_page(fn, start, end, limit=limit, progress=progress, reached=reached)
+            page = self._log_page(fn, start, end, limit=limit, progress=progress, reached=reached)
+            if words is not None:
+                page.events = runs_matching(page.events, words)
+            return page
         page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
         try:
             hits, page.truncated, page.covered_from = self._filter(
                 fn.log_group, fn.region, start, end, pattern, _SEARCH_HITS, progress=progress, reached=reached)
-            phrase = _phrase(search)
-            if phrase:  # the same check here, for log stores that only roughly apply patterns
-                hits = [e for e in hits if phrase in e.message]
-            page.events = self._around(fn, hits, limit)
+            page.events = self._around(fn, search_hits(hits, search, words), limit)
         except ClientError as exc:
             page.errors["logs"] = _error_code(exc)
             return page
         except BotoCoreError as exc:
             page.errors["logs"] = type(exc).__name__
             return page
+        if words is not None:
+            page.events = runs_matching(page.events, words)
         if not page.events:
             page.latest = self._latest(fn.log_group, fn.region)
         return page
