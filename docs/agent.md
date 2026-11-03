@@ -719,6 +719,8 @@ core = AgentAnalyzer(
     findings=False,                                  # answer in plain text, without findings; on by default
     verify=False,                                    # show the draft as it is; on by default: one more turn to
                                                      # correct what no tool returned
+    temperature=None,                                # the provider's default; 0 by default, so the same question
+                                                     # gets the same answer (reasoning models get none)
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)

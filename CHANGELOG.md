@@ -31,6 +31,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `function_health` says whether a function's failures rose from the first half of the window to the second.
   - Every result says whether it read everything (`complete`), so "none" isn't read off a partial result.
 
+- 🤖 **Agent: the same question gets the same answer**
+  - The model is sent temperature 0 (OpenAI's o-series and GPT-5 keep their own).
+  - `AgentView(temperature=None)` leaves the provider's default; a model that refuses it says so.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added

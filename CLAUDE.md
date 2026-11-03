@@ -1070,7 +1070,10 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   (`function_health`'s `totals`, `share_of_errors_pct`, `longest_vs_timeout_pct` and `errors_by_half`, a cause's
   `share_pct`, `statuses_pct`, a folder's `share_of_size_pct`, a knowledge base's `counts_pct`), and `_reported`
   leads every result with `ref` and `complete` (false when it failed, was refused or cut short); the prompt says to
-  copy them and when `complete` is false not to say there was none.
+  copy them and when `complete` is false not to say there was none. `AgentAnalyzer(temperature=0.0)` (`llm.py`'s
+  `DEFAULT_TEMPERATURE`) goes to every maker through `temperature_for`, which sends none to a model that takes only
+  its own (`_SETS_NO_TEMPERATURE`: OpenAI's o-series and GPT-5 by name or Azure deployment); `explain_model_error`
+  says `temperature=None` when a provider refuses it, and a `chat_model=` passed in keeps its own.
 - **`AgentAnalyzer`** (`analyzer.py`) holds the settings and puts the parts together: `ask()` makes the `_Run` and
   the `AgentAnswer`, calls `stream_turn()`, and fills in what the guard and the run counted. `AgentView` (`view.py`)
   draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its `_EXTRA_CSS`), cards, `answers.py`'s

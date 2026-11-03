@@ -53,6 +53,7 @@ from .memory import (
 )
 from .llm import (
     AZURE_API_VERSION,
+    DEFAULT_TEMPERATURE,
     answer_cost,
     azure_chat_model,
     azure_settings,
@@ -67,6 +68,7 @@ from .llm import (
     openai_chat_model,
     pick_provider,
     provider_info,
+    temperature_for,
 )
 from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
@@ -185,6 +187,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
     10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
     either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
+    temperature (0 by default) makes the model pick its likeliest words, so the same question over the same data
+    gets the same answer; None leaves the provider's default, and a model that takes only its own (OpenAI's o-series
+    and GPT-5, told by name) is sent none. A chat_model= passed in keeps its own settings.
     use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
@@ -271,6 +276,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         chats: bool | str | os.PathLike = False,
         budget: Budget | dict[str, Any] | None = None,
         max_tokens: int | None = 4096,
+        temperature: float | None = DEFAULT_TEMPERATURE,
         toolkits: Iterable[str | Toolkit | type[Toolkit]] | None = None,
         lambda_core: LambdaAnalyzer | None = None,
         lambda_clients: dict[str, Any] | None = None,
@@ -291,6 +297,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         self._set_model(provider, model, deployment=deployment, endpoint=endpoint, api_key=api_key,
                         api_version=api_version, token_provider=azure_ad_token_provider, chat_model=chat_model)
         self.max_tokens = max_tokens
+        self.temperature = temperature
         self.timezone = _checked_zone(timezone)
         self.regions = regions
         self.notes = notes
@@ -474,15 +481,22 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             return azure_chat_model(endpoint=self.endpoint, deployment=self.deployment,
                                     api_version=self.api_version or AZURE_API_VERSION,
                                     api_key=self._api_key, token_provider=self._token_provider,
-                                    max_tokens=self.max_tokens)
+                                    max_tokens=self.max_tokens, temperature=self._temperature(self.deployment))
         if self.provider == "bedrock":
-            return bedrock_chat_model(self._bedrock_model(), runtime=self._bedrock_runtime(),
-                                      control=self._bedrock_control(), max_tokens=self.max_tokens)
+            model_id = self._bedrock_model()
+            return bedrock_chat_model(model_id, runtime=self._bedrock_runtime(), control=self._bedrock_control(),
+                                      max_tokens=self.max_tokens, temperature=self._temperature(model_id))
         if self.provider == "openai":
             return openai_chat_model(self.model_id, api_key=self._api_key, endpoint=self.endpoint,
-                                     max_tokens=self.max_tokens)
+                                     max_tokens=self.max_tokens, temperature=self._temperature(self.model_id))
         return langchain_chat_model(self.provider, self.model_id, api_key=self._api_key, endpoint=self.endpoint,
-                                    max_tokens=self.max_tokens)
+                                    max_tokens=self.max_tokens, temperature=self._temperature(self.model_id))
+
+    def _temperature(self, model: str | None) -> float | None:
+        """
+        The temperature this model is sent: the agent's, or None for one that takes only its own (temperature_for).
+        """
+        return temperature_for(model or self.model_id, self.temperature)
 
     def _bedrock_runtime(self) -> Any:
         """

@@ -147,6 +147,7 @@ from .grounding import (
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
     AZURE_API_VERSION,
+    DEFAULT_TEMPERATURE,
     MODEL_ENV,
     OPENAI_MODEL,
     PROVIDERS,
@@ -156,6 +157,7 @@ from .llm import (
     explain_model_error,
     model_rates,
     pick_provider,
+    temperature_for,
 )
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
@@ -319,6 +321,8 @@ __all__ = [
     "parse_plan",
     "answer_cost",
     "explain_model_error",
+    "temperature_for",
+    "DEFAULT_TEMPERATURE",
     "function_row",
     "summarize_functions",
     "summarize_health",

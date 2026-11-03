@@ -93,6 +93,7 @@ from aws_analyzer.agent import (
     code_locations,
     count_arrivals,
     explain_model_error,
+    temperature_for,
     hide_secrets,
     model_rates,
     pick_provider,
@@ -232,6 +233,39 @@ def test_explain_model_error(name, status, says):
     error = type(name, (Exception,), {"status_code": status})("something went wrong")
     text = explain_model_error(error)
     assert text.startswith(f"{name}: something went wrong") and says in text
+
+
+def test_the_model_is_sent_temperature_0_unless_it_takes_only_its_own():
+    for model in ("gpt-4.1", "gpt-4o-mini", "gpt-5-chat-latest", f"us.{HAIKU}", "openai.gpt-oss-20b-1:0", "prod-gpt-4o"):
+        assert temperature_for(model, 0.0) == 0.0, model
+    for model in ("o1", "o3-mini", "openai:o4-mini", "gpt-5", "gpt-5-mini", "my-o4-mini", "prod_o3"):
+        assert temperature_for(model, 0.0) is None, model
+    assert temperature_for("gpt-4.1", None) is None and temperature_for("gpt-4.1", 0.3) == 0.3
+
+
+def test_each_provider_s_model_gets_the_temperature():
+    pytest.importorskip("langchain_openai")
+    made = AgentAnalyzer(region=REGION, provider="openai", model="gpt-4.1", api_key="not-a-key")._new_chat_model()
+    assert made.temperature == 0.0
+    assert AgentAnalyzer(region=REGION, model="openai:o3-mini", api_key="k")._new_chat_model().temperature is None
+    assert AgentAnalyzer(region=REGION, model="openai:gpt-4.1", api_key="k",
+                         temperature=None)._new_chat_model().temperature is None
+    assert AgentAnalyzer(region=REGION, model="openai:gpt-4.1", api_key="k",
+                         temperature=0.4)._new_chat_model().temperature == 0.4
+    azure = dict(provider="azure", endpoint="https://acme.openai.azure.com", api_key="k")
+    assert AgentAnalyzer(region=REGION, deployment="prod-gpt-4o", **azure)._new_chat_model().temperature == 0.0
+    assert AgentAnalyzer(region=REGION, deployment="prod-o4-mini", **azure)._new_chat_model().temperature is None
+    from aws_analyzer.agent.llm import langchain_chat_model
+
+    assert langchain_chat_model("openai", "gpt-4.1", api_key="k", temperature=0.0).temperature == 0.0
+
+
+def test_a_model_that_refuses_a_temperature_says_how_to_leave_it_out():
+    refused = type("BadRequestError", (Exception,), {"status_code": 400})(
+        "Unsupported value: 'temperature' does not support 0.0 with this model. Only the default (1) value is "
+        "supported.")
+    assert "AgentView(temperature=None) leaves it out" in explain_model_error(refused, "openai")
+    assert "temperature" not in explain_model_error(ValueError("bad input"), "openai")
 
 
 def test_explain_model_error_names_the_content_filter():
@@ -2071,7 +2105,7 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     assert [c.name for c in answer.calls] == ["function_health"] and answer.calls[0].ok
     names = {t["toolSpec"]["name"] for t in sent[0]["toolConfig"]["tools"] if "toolSpec" in t}
     assert {"function_health", "s3_triggers"} <= names and not names & {"task", "execute"}
-    assert sent[0]["inferenceConfig"]["maxTokens"] == 4096
+    assert sent[0]["inferenceConfig"]["maxTokens"] == 4096 and sent[0]["inferenceConfig"]["temperature"] == 0.0
     assert answer.rates == Rates(1.10, 5.50, "list") and answer.cost == pytest.approx((2700 * 1.10 + 50 * 5.50) / 1e6)
     view = AgentView(core, mode="text", progress="off")
     view._show(view._answer_blocks(answer))
