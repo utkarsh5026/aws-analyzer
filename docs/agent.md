@@ -265,6 +265,8 @@ The model picks which read-only tools to call. For "Which Lambda failed last nig
     - **Regions it says it checked that no tool read.**
     - **"None" over an incomplete read**: a sentence like "orders-etl had no errors overnight" when the call it rests on failed (a missing permission), was cut short or wasn't run. A sentence that says so itself ("of what I could read") is fine.
 
+    The tools work out the numbers an answer needs, so the model copies them rather than adds or divides: totals over every function, each one's share of the failures, an error rate across all of them, a cause's share of the errors, a file type's share of a folder's size, and whether failures rose from the first half of the window to the second. Every result also says whether it read everything (`complete`), so "none" is never read off a partial result.
+
     It leaves alone what it can't read, so a warning is worth checking. It can still miss a made-up number that happens to equal an unrelated one in the results. `check_grounding(answer)` gives the same as data.
 
     Citations are checked too: one that names no tool call is a warning (and sends the draft back), and a fact that cites a call that doesn't hold it, though another does, is noted. References go on across a conversation, so a follow-up can cite what an earlier question read, and its facts are checked against those calls as well.

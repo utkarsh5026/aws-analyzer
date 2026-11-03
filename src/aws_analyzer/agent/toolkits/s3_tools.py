@@ -42,7 +42,7 @@ from ..._kit.errors import _error_code
 from ..._kit.fmt import _plural, _utcnow, human_money, human_size, parse_time
 from ..._kit.text import _clip
 from ..budget import Budget
-from ..results import _iso, _plain, _window, _with_permissions, hide_secrets
+from ..results import _iso, _plain, _window, _with_permissions, hide_secrets, share_pct
 from .base import Toolkit
 from .s3_listing import _AsksFirst, listing_read
 from .s3_saving import DEFAULT_FILES, SAVE_READS, read_files, summarize_saved
@@ -288,14 +288,15 @@ def summarize_found(location: str, found: list[ObjectInfo], *, scanned: int, cut
 def summarize_prefix(summary: PrefixSummary, prices: dict[str, float] | None = None, *, top: int = 8) -> dict[str, Any]:
     """
     folder_summary()'s answer: what a location holds (files, total size, by file type, storage class and
-    folder), the oldest and newest file, the largest ones, the estimated monthly storage cost and the findings.
+    folder, each with its share of the size), the oldest and newest file, the largest ones, the estimated monthly
+    storage cost and the findings.
     """
     s3 = _s3_module()
 
     def stats(by: dict[str, Any], n: int = top) -> list[dict[str, Any]]:
         ordered = sorted(by.items(), key=lambda kv: -kv[1].size)
-        return [{"name": name or "(directly here)", "files": st.count, "size": human_size(st.size)}
-                for name, st in ordered[:n]]
+        return [{"name": name or "(directly here)", "files": st.count, "size": human_size(st.size),
+                 "share_of_size_pct": share_pct(st.size, summary.total_size)} for name, st in ordered[:n]]
 
     out: dict[str, Any] = {
         "location": summary.uri, "files": summary.object_count, "total_size": human_size(summary.total_size),

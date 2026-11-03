@@ -26,6 +26,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - In the chat window, point at a citation to see the call; findings list theirs too.
   - A citation that names no call is a warning, and the draft goes back to be corrected.
 
+- 🤖 **Agent: the tools work out the numbers**
+  - Results carry totals, rates and shares (each function's share of failures, a cause's share of errors).
+  - `function_health` says whether a function's failures rose from the first half of the window to the second.
+  - Every result says whether it read everything (`complete`), so "none" isn't read off a partial result.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added

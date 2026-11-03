@@ -1065,7 +1065,12 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   With `verify=True` (the default) `AgentAnalyzer._recheck` sends a draft that doesn't check out back to the model once,
   with its tools (`recheck_request`), keeping `answer.recheck` (`Recheck`, plain data). The report's `#` column and
   the window's step lines show each call's ref, and `_Answer(inline=True)` / the window's `_cited_html` draw citations.
-  `/agent-eval` measures it all with a real model.
+  `/agent-eval` measures it all with a real model. The tools work out the numbers answers use, so the model copies
+  rather than computes: `results.py`'s `share_pct` / `shares_pct` give each summary its totals and shares
+  (`function_health`'s `totals`, `share_of_errors_pct`, `longest_vs_timeout_pct` and `errors_by_half`, a cause's
+  `share_pct`, `statuses_pct`, a folder's `share_of_size_pct`, a knowledge base's `counts_pct`), and `_reported`
+  leads every result with `ref` and `complete` (false when it failed, was refused or cut short); the prompt says to
+  copy them and when `complete` is false not to say there was none.
 - **`AgentAnalyzer`** (`analyzer.py`) holds the settings and puts the parts together: `ask()` makes the `_Run` and
   the `AgentAnswer`, calls `stream_turn()`, and fills in what the guard and the run counted. `AgentView` (`view.py`)
   draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its `_EXTRA_CSS`), cards, `answers.py`'s

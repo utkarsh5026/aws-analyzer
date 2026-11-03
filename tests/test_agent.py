@@ -120,7 +120,7 @@ from aws_analyzer.agent import (
     summarize_kb_files,
 )
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
-from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
+from aws_analyzer.lambda_functions import CodePackage, DailyUsage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
 from test_bedrock_kb import HAIKU as HAIKU_PROFILE_ID
 from test_bedrock_kb import (
@@ -349,6 +349,20 @@ def test_summarize_health_sorts_functions_by_what_went_wrong():
     assert [r["name"] for r in out["near_timeout"]] == ["etl"]  # 59 s of a 60 s timeout
     assert out["not_called"] == ["old"] and out["functions_checked"] == 3
     assert out["window"] == {"from": "2026-10-15T17:42Z", "to": "2026-10-16T03:42Z", "hours": 10.0}
+    assert out["totals"] == {"calls": 1000, "errors": 13, "throttles": 40, "error_rate_pct": 1.3, "functions_failed": 2,
+                             "functions_throttled": 1, "functions_near_timeout": 1, "functions_not_called": 1}
+    assert [r["share_of_errors_pct"] for r in out["failed"]] == [92.3, 7.7]
+    assert out["failed"][0]["longest_vs_timeout_pct"] == 98.3 and "errors_by_half" not in out["failed"][0]
+
+
+def test_health_says_whether_failures_rose_over_the_window():
+    start, end = NOW - timedelta(hours=4), NOW
+    hours = [DailyUsage(start + timedelta(hours=h), invocations=100, errors=e) for h, e in enumerate((1, 2, 9, 20))]
+    metrics = {fn().arn: FunctionMetrics("etl", 4 / 24, 3600, invocations=400, errors=32, daily=hours)}
+    out = summarize_health([fn()], metrics, start, end, [REGION])
+    assert out["failed"][0]["errors_by_half"] == {"first": 3, "second": 29}
+    one = {fn().arn: FunctionMetrics("etl", 1, 86400, invocations=10, errors=1, daily=hours[:1])}
+    assert "errors_by_half" not in summarize_health([fn()], one, start, end, [REGION])["failed"][0]
 
 
 def test_summarize_errors_hides_secrets_and_keeps_findings():
@@ -358,6 +372,8 @@ def test_summarize_errors_hides_secrets_and_keeps_findings():
     out = summarize_errors(report)
     cause = out["causes"][0]
     assert cause["kind"] == "KeyError" and cause["count"] == 3 and cause["request_ids"] == ["r1", "r2", "r3"]
+    assert cause["share_pct"] == 100.0 and out["causes_found"] == 1 and out["errors_in_causes"] == 3
+    assert "a failed call can log several error lines, or none" in out["counts_note"]
     assert "hunter2" not in cause["example"] and "[hidden]" in cause["example"]
     assert out["findings"] and all(f["level"] in ("warn", "info") for f in out["findings"])
     report.errors = {"logs": "AccessDeniedException"}
@@ -615,10 +631,10 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
 
     # The agent's runtime runs its tools: results made JSON-ready, errors turned into results.
-    assert tool(core, "read_note")("plan") == {"ref": 1, "name": "plan", "text": "ship it"}
-    assert tool(core, "read_note")(name="plam") == {"ref": 1, "error": "No note 'plam'.",
+    assert tool(core, "read_note")("plan") == {"ref": 1, "complete": True, "name": "plan", "text": "ship it"}
+    assert tool(core, "read_note")(name="plam") == {"ref": 1, "complete": False, "error": "No note 'plam'.",
                                                     "close_names": ["plan", "plans"]}
-    assert tool(core, "list_notes")() == {"ref": 1, "error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
+    assert tool(core, "list_notes")() == {"ref": 1, "complete": False, "error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
 
     # Its section of the prompt, after the shared rules; its reads and privacy note in tools().
     text = core.instructions()
@@ -740,6 +756,8 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
     assert [r["name"] for r in health["near_timeout"]] == ["etl-nightly"]  # 58 s of 60 s
     assert health["regions"] == [REGION] and health["window"]["hours"] == 2.0
     json.dumps(health)  # what the model gets is JSON
+    assert health["totals"]["errors"] == 40 and health["failed"][0]["share_of_errors_pct"] == 100.0
+    assert health["complete"] is True and health["ref"] == 1
 
     errors = tool(core, "function_errors")("etl-nightly", since="1h")
     assert [c["kind"] for c in errors["causes"]] == ["KeyError"] and errors["causes"][0]["request_ids"] == [RID]
@@ -747,10 +765,13 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
 
     logs = tool(core, "function_logs")("etl-nightly", since="1h", search=RID)
     assert logs["runs_found"] == 1 and logs["runs"][0]["status"] == "failed"
+    assert logs["statuses_pct"] == {"failed": 100.0}
     assert "hunter2" not in json.dumps(logs) and "DB_PASSWORD=[hidden]" in " ".join(logs["runs"][0]["lines"])
 
     perf = tool(core, "function_performance")("etl-nightly", since="1h")
     assert perf["runs"] == 1 and perf["median_ms"] == pytest.approx(102.12) and perf["cold_starts"] == 1
+    assert perf["cold_start_pct"] == 100.0 and perf["longest_vs_timeout_pct"] == 0.2
+    assert perf["memory_used_pct"] == round(100 * perf["most_memory_used_mb"] / perf["memory_mb"], 1)
 
     details = tool(core, "function_details")("etl-nightly")
     assert details["function"]["runtime_support"] in ("deprecated", "blocked")  # python3.9 lost support
@@ -1069,7 +1090,8 @@ def test_s3_tools_read_buckets_folders_and_files_but_never_their_contents(bucket
     assert files["window"]["hours"] == 1.0
 
     summary = tool(core, "folder_summary")("acme-raw")
-    assert summary["files"] == 4 and summary["cut_short"] is False
+    assert summary["files"] == 4 and summary["cut_short"] is False and summary["complete"] is True
+    assert sum(row["share_of_size_pct"] for row in summary["by_storage_class"]) == pytest.approx(100, abs=0.1)
 
     info = tool(core, "file_info")("s3://acme-raw/README.md")
     assert info["metadata"] == {"owner": "data-team", "api-key": "[hidden]"} and info["size"] == "5 B"
@@ -1158,7 +1180,8 @@ def test_s3_listings_stop_at_the_budget(buckets):
     core = with_s3(budget={"s3_keys": 2})
     out = tool(core, "find_files")("acme-raw")
     assert out["scanned"] == 2 and out["cut_short"] is True and "Stopped after 2 keys" in out["note"]
-    assert tool(core, "folder_summary")("acme-raw")["cut_short"] is True
+    cut = tool(core, "folder_summary")("acme-raw")
+    assert cut["cut_short"] is True and cut["complete"] is False
 
 
 def test_the_guard_covers_every_client_the_s3_analyzer_makes(buckets):
@@ -1240,6 +1263,7 @@ def test_kb_files_put_the_bucket_next_to_bedrocks_record(world):
     files = tool(core, "kb_files")("support-docs")
     assert files["counts"] == {"Failed": 1, "Not synced yet": 1, "Skipped by the sync": 1, "Deleted from S3": 1,
                                "Indexed": 2}
+    assert files["files_total"] == 6 and files["counts_pct"]["Indexed"] == 33.3
     assert [(f["file"].rsplit("/", 1)[1], f["state"]) for f in files["files"]] == [
         ("scanned.pdf", "failed"), ("added.pdf", "new"), ("video.mp4", "skipped"), ("gone.pdf", "deleted"),
         ("faq.md", "indexed"), ("refund-policy.pdf", "indexed")]
@@ -1341,7 +1365,7 @@ def test_kb_passages_hide_what_looks_like_a_secret(world):
 def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     core = with_kb(world)
     assert tool(core, "kb_health")() == {
-        "ref": 1, "error": "ValueError",
+        "ref": 1, "complete": False, "error": "ValueError",
         "message": "2 knowledge bases in us-east-1: name one with knowledge_base= (sales, support-docs)."}
     assert "Did you mean 'support-docs'?" in tool(core, "kb_syncs")("support-dcos")["message"]
     world.kbs = world.kbs[:1]
@@ -1352,10 +1376,11 @@ def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     world.errors["get_knowledge_base"] = ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "none"}},
                                                      "GetKnowledgeBase")
     gone = tool(with_kb(world), "kb_health")("KBID999999")
-    assert gone == {"ref": 1, "error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
+    assert gone == {"ref": 1, "complete": False, "error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
                     "close_names": [], "hint": "Use one of close_names, or find_knowledge_bases to list them."}
     denied = tool(with_kb(world), "find_knowledge_bases")()
-    assert denied == {"ref": 1, "error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
+    assert denied == {"ref": 1, "complete": False,
+                      "error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
 
 
 def test_kb_searches_keep_to_the_budget(world):
