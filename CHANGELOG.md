@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-04
+
 ### Added
 
 - ⚡ **Lambda: search the logs with AND, OR and NOT** ([#197](https://github.com/utkarsh5026/aws-analyzer/pull/197))
@@ -1189,7 +1191,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.42.0...v0.43.0
