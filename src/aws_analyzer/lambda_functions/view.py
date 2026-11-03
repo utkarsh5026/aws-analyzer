@@ -32,7 +32,7 @@ from .helpers import (
     runtime_family,
 )
 from .models import (
-    CodePackage, ErrorReport, Function, FunctionDetail, LogGroup, PackageDownload, Performance, RuntimeStatus,
+    CodePackage, ErrorReport, Function, FunctionDetail, LogEvent, LogGroup, PackageDownload, Performance, RuntimeStatus,
     SavedPage, Trigger,
 )
 from .analysis.text import _reason, _window
@@ -41,6 +41,7 @@ from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
 from .analysis.logs import parse_report, readable_line
+from .analysis.word_search import WordSearch, word_search
 from .analysis.performance import percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
@@ -212,6 +213,25 @@ def _lifecycle(message: str) -> bool:
         return True
     return text.startswith('{"time"') and any(
         f'"type":"platform.{kind}"' in text.replace(" ", "") for kind in ("start", "runtimeDone", "initStart"))
+
+
+def _lines_found(events: list[LogEvent], phrase: str | None, words: WordSearch | None) -> list[LogEvent]:
+    """
+    The lines logs(search=...) keeps: each line that holds the words joined with AND, OR and NOT, else the plain
+    search's phrase, checked again here for log stores that only roughly apply filter patterns.
+    """
+    if words is not None:
+        return [event for event in events if words.matches([event.message])]
+    return [event for event in events if phrase in event.message] if phrase else events
+
+
+def _search_said(search: str, phrase: str | None, words: WordSearch | None) -> str:
+    """
+    What logs(search=...) looked for, for the report's subtitle.
+    """
+    if words is not None:
+        return f"lines matching {words.written()!r}"
+    return f"lines containing {phrase!r}" if phrase else f"filter pattern {_filter_pattern(search)}"
 
 
 def _since_arg(since: Any, default: str) -> dict[str, Any]:
@@ -828,16 +848,17 @@ class LambdaView(_BaseView):
     ) -> None:
         """
         The newest lines a function logged (50, from the last hour), with each run's REPORT line summed up: run
-        time, memory used and cold start. search='KeyError' keeps lines with that text (case-sensitive; a
-        CloudWatch Logs filter pattern works too), request_id= shows one run from start to end (from the last 24
-        hours), and since='24h' or '2026-10-01' looks further back.
+        time, memory used and cold start. search='KeyError' keeps lines with that text (case-sensitive; join words
+        with AND, OR and NOT, 'KeyError OR Timeout', or pass a CloudWatch Logs filter pattern), request_id= shows one
+        run from start to end (from the last 24 hours), and since='24h' or '2026-10-01' looks further back.
         """
         n = _as_int(n, "n")
         if n < 1:
             raise ValueError("n= is how many lines to show: 1 or more")
         chosen = since  # next steps carry over a since= the user picked, not this command's default
         since = since if since is not None else ("24h" if request_id else "1h")
-        pattern = _filter_pattern(search)
+        words = word_search(search)
+        pattern = words.pattern() if words is not None else _filter_pattern(search)
         limit = 10_000 if request_id else max(3 * n, 300)
         with self._progress("Reading log lines", unit="lines") as tick, self._named(name, region):
             page = self.core.log_events(name, since=since, pattern=pattern, request_id=request_id, limit=limit,
@@ -846,8 +867,8 @@ class LambdaView(_BaseView):
         window = _window((page.until - page.since).total_seconds())
         events = page.events
         phrase = _phrase(search)
-        if phrase and not request_id:  # the same check here, for log stores that only roughly apply patterns
-            events = [e for e in events if phrase in e.message]
+        if not request_id:
+            events = _lines_found(events, phrase, words)
         if not request_id:
             events = [e for e in events if not _lifecycle(e.message)]
         shown = events[-n:]
@@ -864,8 +885,7 @@ class LambdaView(_BaseView):
                 else f"the last {window}")
         sub = " · ".join(filter(None, [
             f"log group {page.log_group}",
-            (f"lines containing {phrase!r}" if phrase else f"filter pattern {pattern}") if search and not request_id
-            else "",
+            _search_said(search, phrase, words) if search and not request_id else "",
             what,
             "START and END lines left out" if not request_id else "",
         ]))

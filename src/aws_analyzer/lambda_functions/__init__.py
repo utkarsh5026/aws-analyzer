@@ -88,6 +88,7 @@ from .analysis.live import (
 )
 from .analysis.performance import percentile, performance_findings, suggest_memory
 from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
+from .analysis.word_search import SearchError, SearchTerms, WordSearch, word_search
 from .analysis.runs import (
     BUILTIN_FIELDS, FieldInfo, LoggedEvent, RunGroup, RunRow, RunTable, logged_event, run_fields, run_table,
     runs_findings,
@@ -124,12 +125,16 @@ __all__ = [
     "run_fields",
     "parse_query",
     "looks_like_query",
+    "word_search",
     "logged_event",
     "RunTable",
     "RunRow",
     "RunQuery",
     "RunGroup",
     "QueryError",
+    "WordSearch",
+    "SearchTerms",
+    "SearchError",
     "LoggedEvent",
     "FieldInfo",
     "BUILTIN_FIELDS",
