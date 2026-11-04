@@ -2072,26 +2072,29 @@ def _demo_model():
             return (f"No function had failed calls in the last 24 hours ({health.get('functions_checked', 0)} "
                     f"checked in {', '.join(health.get('regions') or [])}).")
         causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        refs = {r.get("function"): r.get("ref") for r in reports}
         rows = ["| Function | Failed calls | Error rate | Most common cause |", "|---|---|---|---|"]
         for row in failed:
             cause = causes.get(row["name"]) or {}
-            what = f"{cause['kind']} ×{cause['count']}" if cause.get("kind") else "not read"
-            rows.append(f"| {row['name']} | {row['errors']:,} | {row['error_rate_pct']}% | {what} |")
+            what = f"{cause['kind']} ×{cause['count']} [{refs[row['name']]}]" if cause.get("kind") else "not read"
+            rows.append(f"| {row['name']} | {row['errors']:,} [{health.get('ref')}] | {row['error_rate_pct']}% | {what} |")
         names = " and ".join(f"**{r['name']}**" for r in failed[:2])
         window = health.get("window") or {}
-        return (f"{names} had failed calls in the last 24 hours.\n\n" + "\n".join(rows)
+        return (f"{names} had failed calls in the last 24 hours [{health.get('ref')}].\n\n" + "\n".join(rows)
                 + f"\n\nChecked {window.get('from', '?')} to {window.get('to', '?')} UTC in "
                 + ", ".join(health.get("regions") or []) + ".")
 
     def findings(health: dict, reports: list[dict]) -> list[dict]:
         causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        refs = {r.get("function"): r.get("ref") for r in reports}
         found = []
         for row in (health.get("failed") or [])[:3]:
             cause = causes.get(row["name"]) or {}
             why = f"; the most common cause is {cause['kind']} ({cause['count']} times)" if cause.get("kind") else ""
             region = f", region={row['region']!r}" if row["region"] != REGION else ""
             call = f"LambdaView().errors({row['name']!r}, since='24h'{region})"
-            found.append({"level": "warn",
+            evidence = [ref for ref in (health.get("ref"), refs.get(row["name"])) if ref]
+            found.append({"level": "warn", "evidence": evidence,
                           "message": f"{row['name']} failed {row['errors']:,} calls in the last 24 hours "
                                      f"({row['error_rate_pct']}% of them){why}: those runs did no work. Read each "
                                      "cause with the lines around it, and fix the most common first.",

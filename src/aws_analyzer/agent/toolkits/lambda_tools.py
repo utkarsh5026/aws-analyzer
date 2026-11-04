@@ -22,7 +22,7 @@ import json
 import re
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -31,7 +31,7 @@ from ..._kit.fmt import _plural, human_money, human_size
 from ..._kit.text import _clip
 from ..answers import BigRead
 from ..budget import Budget, _Refused
-from ..results import _iso, _window, _with_permissions, hide_secrets
+from ..results import _iso, _window, _with_permissions, hide_secrets, share_pct, shares_pct
 from .base import Toolkit
 
 if TYPE_CHECKING:
@@ -76,6 +76,9 @@ def _lambda_module() -> Any:
 
 
 _NEAR_TIMEOUT = 0.9
+_COUNTS_NOTE = ("cloudwatch.errors counts calls that failed; error_lines_found and the causes' counts count log lines "
+                "that look like errors. They differ: a failed call can log several error lines, or none, and a call "
+                "that handled an error logs one without failing. Each cause's share_pct is of errors_in_causes.")
 
 _PYTHON_FRAME_RE = re.compile(r'File \\?"/var/task/(?P<file>[^"\\]+)\\?", line (?P<line>\d+)(?:, in (?P<name>[\w<>.]+))?')
 
@@ -155,8 +158,35 @@ def summarize_functions(functions: list[Function], regions: list[str], errors: d
     return out
 
 
-def _health_groups(functions: list[Function],
-                   metrics: dict[str, FunctionMetrics]) -> tuple[list[dict], list[dict], list[dict], list[str]]:
+def _errors_by_half(m: FunctionMetrics, middle: datetime) -> dict[str, int] | None:
+    """
+    A function's failed calls in the window's first half and its second, from CloudWatch's periods, so "rising"
+    or "falling" is a comparison the tool made; None when the window holds fewer than two periods.
+    """
+    if len(m.daily) < 2:
+        return None
+    first = sum(row.errors for row in m.daily if row.start < middle)
+    return {"first": int(first), "second": int(m.errors - first)}
+
+
+def _health_row(fn: Function, m: FunctionMetrics, middle: datetime) -> dict[str, Any]:
+    """
+    One function's CloudWatch numbers as function_health lists them, with its longest run as a share of its
+    timeout and, when it failed, its failed calls in each half of the window.
+    """
+    row = {"name": fn.name, "region": fn.region, **(_metrics_dict(m) or {}), "timeout_ms": fn.timeout * 1000}
+    if m.duration_max is not None:
+        row["longest_vs_timeout_pct"] = share_pct(m.duration_max, fn.timeout * 1000)
+    halves = _errors_by_half(m, middle) if m.errors else None
+    if halves:
+        row["errors_by_half"] = halves
+    if m.last_error is not None:
+        row["last_error_period"] = m.last_error
+    return row
+
+
+def _health_groups(functions: list[Function], metrics: dict[str, FunctionMetrics],
+                   middle: datetime) -> tuple[list[dict], list[dict], list[dict], list[str]]:
     """
     (failed, throttled, near_timeout, not_called): each function with CloudWatch numbers, as a row of them, in
     every group it belongs to. Near its timeout is a longest run of _NEAR_TIMEOUT of the timeout or more.
@@ -166,9 +196,7 @@ def _health_groups(functions: list[Function],
         m = metrics.get(fn.arn)
         if m is None:
             continue
-        row = {"name": fn.name, "region": fn.region, **(_metrics_dict(m) or {}), "timeout_ms": fn.timeout * 1000}
-        if m.last_error is not None:
-            row["last_error_period"] = m.last_error
+        row = _health_row(fn, m, middle)
         if m.errors:
             failed.append(row)
         if m.throttles:
@@ -180,20 +208,40 @@ def _health_groups(functions: list[Function],
     return failed, throttled, near, idle
 
 
+def _health_totals(metrics: Iterable[FunctionMetrics], groups: dict[str, list[Any]]) -> dict[str, Any]:
+    """
+    function_health's totals over every function with numbers, so the model copies them rather than adds rows up:
+    calls, failed calls and throttles, the error rate over all of them, and how many functions are in each group
+    (functions_failed, ...), however many the lists show.
+    """
+    numbers = list(metrics)
+    calls = int(sum(m.invocations for m in numbers))
+    errors = int(sum(m.errors for m in numbers))
+    totals: dict[str, Any] = {"calls": calls, "errors": errors, "throttles": int(sum(m.throttles for m in numbers)),
+                              "error_rate_pct": share_pct(errors, calls)}
+    totals.update({f"functions_{name}": len(rows) for name, rows in groups.items()})
+    return totals
+
+
 def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetrics],  # noqa: PLR0913
                      start: datetime, end: datetime, regions: list[str], errors: dict[str, str] | None = None,
                      *, limit: int = 25) -> dict[str, Any]:
     """
     function_health()'s answer: CloudWatch's counts for every function in a window, grouped into the ones that
-    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called.
+    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called, with
+    the totals over all of them and each failed one's share of the failures.
     """
-    failed, throttled, near, idle = _health_groups(functions, metrics)
+    failed, throttled, near, idle = _health_groups(functions, metrics, start + (end - start) / 2)
+    totals = _health_totals(metrics.values(), {"failed": failed, "throttled": throttled, "near_timeout": near,
+                                               "not_called": idle})
+    for row in failed:
+        row["share_of_errors_pct"] = share_pct(row["errors"], totals["errors"])
     failed.sort(key=lambda r: (-r["errors"], r["name"]))
     throttled.sort(key=lambda r: (-r["throttles"], r["name"]))
     near.sort(key=lambda r: -(r["longest_ms"] or 0) / max(r["timeout_ms"], 1))
     out: dict[str, Any] = {
         "window": _window(start, end), "regions": regions, "functions_checked": len(functions),
-        "with_numbers": sum(1 for fn in functions if fn.arn in metrics),
+        "with_numbers": sum(1 for fn in functions if fn.arn in metrics), "totals": totals,
         "failed": failed[:limit], "throttled": throttled[:limit], "near_timeout": near[:limit],
         "not_called": sorted(idle)[:limit],
         "note": "From CloudWatch's Errors metric: calls that ended in an error. Errors a function logged but "
@@ -207,11 +255,13 @@ def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetri
     return out
 
 
-def _cause(group: ErrorGroup) -> dict[str, Any]:
+def _cause(group: ErrorGroup, grouped: int) -> dict[str, Any]:
     """
-    One cause of errors as the model reads it, with where in the code it happened when its example has a trace.
+    One cause of errors as the model reads it, with its share of the `grouped` errors and where in the code it
+    happened when its example has a trace.
     """
     cause = {"kind": group.kind, "message": hide_secrets(_clip(group.message, 200)), "count": group.count,
+             "share_pct": share_pct(group.count, grouped),
              "first": group.first, "last": group.last, "example": hide_secrets(_clip(group.example, 300)),
              "request_ids": group.request_ids[:3]}
     in_code = code_locations(group.example)
@@ -229,11 +279,14 @@ def summarize_errors(report: ErrorReport, *, causes: int = 8) -> dict[str, Any]:
     the code each happened at (in_code), CloudWatch's counts and the analyzer's findings.
     """
     lf = _lambda_module()
+    grouped = sum(group.count for group in report.groups)
     out: dict[str, Any] = {
         "function": report.function.name, "region": report.function.region,
         "window": _window(report.since, report.until),
         "cloudwatch": _metrics_dict(report.metrics), "error_lines_found": report.errors_found,
-        "causes": [_cause(group) for group in report.groups[:causes]],
+        "causes_found": len(report.groups), "errors_in_causes": grouped,
+        "causes": [_cause(group, grouped) for group in report.groups[:causes]],
+        "counts_note": _COUNTS_NOTE,
         "cut_short": report.truncated,
         "findings": [{"level": level, "message": hide_secrets(text)} for level, text in lf.error_findings(report)],
     }
@@ -312,10 +365,10 @@ def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str
     and line in the code it failed at (in_code).
     """
     found = page.runs
+    statuses = dict(Counter(run.status for run in found))
     out: dict[str, Any] = {
         "function": page.function.name, "region": page.function.region, "window": _window(page.since, page.until),
-        "search": page.pattern, "runs_found": len(found),
-        "statuses": dict(Counter(run.status for run in found)),
+        "search": page.pattern, "runs_found": len(found), "statuses": statuses, "statuses_pct": shares_pct(statuses),
         "runs": [],
         "cut_short": page.truncated,
     }
@@ -335,7 +388,8 @@ def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str
 def summarize_performance(perf: Performance, prices: dict[str, float] | None = None) -> dict[str, Any]:
     """
     function_performance()'s answer: run times (median, p95, p99, longest) against the timeout, timeouts, cold
-    starts, memory used against what it has (and the size it needs), and the analyzer's findings.
+    starts, memory used against what it has (and the size it needs), each as a share where the answer would give
+    one, and the analyzer's findings.
     """
     lf = _lambda_module()
     fn, runs = perf.function, perf.invocations
@@ -349,7 +403,10 @@ def summarize_performance(perf: Performance, prices: dict[str, float] | None = N
         "timeouts": sum(1 for r in runs if r.status == "timeout" or r.duration >= fn.timeout * 1000 * 0.99),
         "cold_starts": len(colds),
         "avg_cold_start_ms": round(sum(r.init or 0 for r in colds) / len(colds)) if colds else None,
+        "longest_vs_timeout_pct": share_pct(max(times, default=0), fn.timeout * 1000) if times else None,
+        "cold_start_pct": share_pct(len(colds), len(runs)),
         "memory_mb": fn.memory, "most_memory_used_mb": used,
+        "memory_used_pct": share_pct(used, fn.memory) if used else None,
         "suggested_memory_mb": lf.suggest_memory(used, fn.memory) if used else None,
         "cut_short": perf.truncated,
         "findings": [{"level": level, "message": text} for level, text in lf.performance_findings(perf, prices)],

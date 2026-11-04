@@ -3,6 +3,7 @@ import html
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -76,6 +77,11 @@ from aws_analyzer.agent import (
     answer_cost,
     answer_findings,
     chart_of,
+    check_grounding,
+    cited_refs,
+    refs_in,
+    recheck_request,
+    grounding_findings,
     image_kind,
     answer_next,
     asked_at,
@@ -87,6 +93,7 @@ from aws_analyzer.agent import (
     code_locations,
     count_arrivals,
     explain_model_error,
+    temperature_for,
     hide_secrets,
     model_rates,
     pick_provider,
@@ -114,7 +121,7 @@ from aws_analyzer.agent import (
     summarize_kb_files,
 )
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
-from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
+from aws_analyzer.lambda_functions import CodePackage, DailyUsage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
 from test_bedrock_kb import HAIKU as HAIKU_PROFILE_ID
 from test_bedrock_kb import (
@@ -226,6 +233,39 @@ def test_explain_model_error(name, status, says):
     error = type(name, (Exception,), {"status_code": status})("something went wrong")
     text = explain_model_error(error)
     assert text.startswith(f"{name}: something went wrong") and says in text
+
+
+def test_the_model_is_sent_temperature_0_unless_it_takes_only_its_own():
+    for model in ("gpt-4.1", "gpt-4o-mini", "gpt-5-chat-latest", f"us.{HAIKU}", "openai.gpt-oss-20b-1:0", "prod-gpt-4o"):
+        assert temperature_for(model, 0.0) == 0.0, model
+    for model in ("o1", "o3-mini", "openai:o4-mini", "gpt-5", "gpt-5-mini", "my-o4-mini", "prod_o3"):
+        assert temperature_for(model, 0.0) is None, model
+    assert temperature_for("gpt-4.1", None) is None and temperature_for("gpt-4.1", 0.3) == 0.3
+
+
+def test_each_provider_s_model_gets_the_temperature():
+    pytest.importorskip("langchain_openai")
+    made = AgentAnalyzer(region=REGION, provider="openai", model="gpt-4.1", api_key="not-a-key")._new_chat_model()
+    assert made.temperature == 0.0
+    assert AgentAnalyzer(region=REGION, model="openai:o3-mini", api_key="k")._new_chat_model().temperature is None
+    assert AgentAnalyzer(region=REGION, model="openai:gpt-4.1", api_key="k",
+                         temperature=None)._new_chat_model().temperature is None
+    assert AgentAnalyzer(region=REGION, model="openai:gpt-4.1", api_key="k",
+                         temperature=0.4)._new_chat_model().temperature == 0.4
+    azure = dict(provider="azure", endpoint="https://acme.openai.azure.com", api_key="k")
+    assert AgentAnalyzer(region=REGION, deployment="prod-gpt-4o", **azure)._new_chat_model().temperature == 0.0
+    assert AgentAnalyzer(region=REGION, deployment="prod-o4-mini", **azure)._new_chat_model().temperature is None
+    from aws_analyzer.agent.llm import langchain_chat_model
+
+    assert langchain_chat_model("openai", "gpt-4.1", api_key="k", temperature=0.0).temperature == 0.0
+
+
+def test_a_model_that_refuses_a_temperature_says_how_to_leave_it_out():
+    refused = type("BadRequestError", (Exception,), {"status_code": 400})(
+        "Unsupported value: 'temperature' does not support 0.0 with this model. Only the default (1) value is "
+        "supported.")
+    assert "AgentView(temperature=None) leaves it out" in explain_model_error(refused, "openai")
+    assert "temperature" not in explain_model_error(ValueError("bad input"), "openai")
 
 
 def test_explain_model_error_names_the_content_filter():
@@ -343,6 +383,20 @@ def test_summarize_health_sorts_functions_by_what_went_wrong():
     assert [r["name"] for r in out["near_timeout"]] == ["etl"]  # 59 s of a 60 s timeout
     assert out["not_called"] == ["old"] and out["functions_checked"] == 3
     assert out["window"] == {"from": "2026-10-15T17:42Z", "to": "2026-10-16T03:42Z", "hours": 10.0}
+    assert out["totals"] == {"calls": 1000, "errors": 13, "throttles": 40, "error_rate_pct": 1.3, "functions_failed": 2,
+                             "functions_throttled": 1, "functions_near_timeout": 1, "functions_not_called": 1}
+    assert [r["share_of_errors_pct"] for r in out["failed"]] == [92.3, 7.7]
+    assert out["failed"][0]["longest_vs_timeout_pct"] == 98.3 and "errors_by_half" not in out["failed"][0]
+
+
+def test_health_says_whether_failures_rose_over_the_window():
+    start, end = NOW - timedelta(hours=4), NOW
+    hours = [DailyUsage(start + timedelta(hours=h), invocations=100, errors=e) for h, e in enumerate((1, 2, 9, 20))]
+    metrics = {fn().arn: FunctionMetrics("etl", 4 / 24, 3600, invocations=400, errors=32, daily=hours)}
+    out = summarize_health([fn()], metrics, start, end, [REGION])
+    assert out["failed"][0]["errors_by_half"] == {"first": 3, "second": 29}
+    one = {fn().arn: FunctionMetrics("etl", 1, 86400, invocations=10, errors=1, daily=hours[:1])}
+    assert "errors_by_half" not in summarize_health([fn()], one, start, end, [REGION])["failed"][0]
 
 
 def test_summarize_errors_hides_secrets_and_keeps_findings():
@@ -352,6 +406,8 @@ def test_summarize_errors_hides_secrets_and_keeps_findings():
     out = summarize_errors(report)
     cause = out["causes"][0]
     assert cause["kind"] == "KeyError" and cause["count"] == 3 and cause["request_ids"] == ["r1", "r2", "r3"]
+    assert cause["share_pct"] == 100.0 and out["causes_found"] == 1 and out["errors_in_causes"] == 3
+    assert "a failed call can log several error lines, or none" in out["counts_note"]
     assert "hunter2" not in cause["example"] and "[hidden]" in cause["example"]
     assert out["findings"] and all(f["level"] in ("warn", "info") for f in out["findings"])
     report.errors = {"logs": "AccessDeniedException"}
@@ -375,6 +431,113 @@ def test_answer_findings_say_where_it_stopped_and_what_it_missed():
     assert answer_findings(AgentAnswer("q", text="hi")) == [
         ("info", "It answered without calling a tool, so nothing in the answer comes from your account. Ask about "
                  "your functions or buckets, or a time window.")]
+
+
+def _overnight_calls(errors_failed: bool = False) -> list[ToolCall]:
+    """
+    A night's function_health and function_errors, as the tools hand them to the model.
+    """
+    window = {"from": "2026-11-02T18:00Z", "to": "2026-11-03T08:00Z", "hours": 14.0}
+    health = ToolCall("function_health", {"since": "2026-11-02T18:00Z"}, first=None,
+                      coverage={"window": window, "regions": ["us-east-1"]},
+                      result={"window": window, "regions": ["us-east-1"], "functions_checked": 3, "functions": [
+                          {"name": "orders-etl", "invocations": 1200, "errors": 35, "max_duration_ms": 14210,
+                           "cost_month": 12.4},
+                          {"name": "report-api", "invocations": 860, "errors": 2, "max_duration_ms": 2310,
+                           "cost_month": 3.1},
+                          {"name": "thumbnailer", "invocations": 40, "errors": 0, "max_duration_ms": 900,
+                           "cost_month": 0.2}]})
+    errors = ToolCall("function_errors", {"function": "orders-etl", "since": "2026-11-02T18:00Z"},
+                      coverage={"window": window, "cut_short": False},
+                      result={"function": "orders-etl", "region": "us-east-1", "cloudwatch": {"errors": 35},
+                              "causes": [{"cause": "KeyError: 'customer_id'", "count": 31,
+                                          "request_ids": ["8f5ce35b-1d2e-4a5b-9c1d-2e3f4a5b6c7d"],
+                                          "in_code": [{"file": "etl/load.py", "line": 42}]},
+                                         {"cause": "Task timed out after 15.00 seconds", "count": 4}]})
+    if errors_failed:
+        errors.error = "AccessDeniedException; needs logs:FilterLogEvents"
+    return [health, errors]
+
+
+def test_an_answer_that_says_what_the_tools_returned_checks_out():
+    text = """**orders-etl** failed 35 times overnight (2.9% of its 1,200 calls); `report-api` had 2 errors.
+
+- 31 (89% of its failures) were `KeyError: 'customer_id'` in `etl/load.py` line 42, from 03:02 to 07:55 (run 8f5ce35b).
+- 4 runs timed out after 15 s; the slowest took 14.2 s, about 14 seconds, and it costs about $12.40/month.
+- In all, 37 errors across 3 functions, roughly 2% of calls.
+
+1. Read the code
+2. Check the field
+
+```bash
+aws logs put-retention-policy --log-group-name /aws/lambda/orders-etl --retention-in-days 30
+```
+
+Checked 18:00 yesterday to 08:00 today (UTC) in us-east-1, the last 14 hours; runs over 10 s count as slow. The
+last failure was 2h ago, on Nov 3 2026."""
+    answer = AgentAnswer("Which Lambda failed last night?", text=text, calls=_overnight_calls(), findings=[
+        AgentFinding("warn", "orders-etl fails on KeyError 'customer_id': 31 runs lost.",
+                     "LambdaView().errors('orders-etl', since='24h')")])
+    assert check_grounding(answer).ok
+    assert grounding_findings(answer) == []
+
+
+def test_names_numbers_and_regions_no_tool_returned_are_flagged():
+    text = ("`billing-sync` failed 42 times, 7.5% of calls, under s3://acme-raw/missing/ (run 1234abcd). "
+            "It costs $99.10/month.\n\nChecked us-east-1 and eu-west-1; I didn't check ap-south-1.")
+    answer = AgentAnswer("q", text=text, calls=_overnight_calls(), findings=[
+        AgentFinding("warn", "billing-sync is failing.", "LambdaView().errors('billing-sync')")])
+    grounding = check_grounding(answer)
+    assert grounding.unknown_names == ["s3://acme-raw/missing/", "1234abcd", "billing-sync"]
+    assert grounding.unknown_numbers == ["7.5%", "$99.10"]
+    assert grounding.unchecked_regions == ["eu-west-1"]
+    found = grounding_findings(answer)
+    assert found[0] == ("warn", "3 names in the answer aren't in anything the tools returned: "
+                                "'s3://acme-raw/missing/', '1234abcd' and 'billing-sync'. They may be made up or "
+                                "misspelt, so check them in What it checked below before you act on them, or ask "
+                                "again naming them so the agent looks them up.")
+    assert found[1][1].startswith("2 numbers in the answer aren't in anything the tools returned: '7.5%' and '$99.10'.")
+    assert found[2] == ("warn", "The answer says it checked a region no tool read: 'eu-west-1'. Ask again naming the "
+                                "region, or all regions, to have it checked.")
+    assert found[0] in answer_findings(answer), "shown with the others"
+    listed = check_grounding(AgentAnswer("s3://acme-raw/incoming/orders.csv", text="It's at "
+                                         "`s3://acme-raw/incoming/orders.csv`.", calls=[
+        ToolCall("find_files", {"location": "s3://acme-raw/"}, result={"bucket": "acme-raw", "files": [
+            {"key": "incoming/orders.csv", "size": "1.5 GB"}]})]))
+    assert listed.ok, "a listing gives the bucket and the key apart"
+
+
+def test_a_claim_of_none_over_an_incomplete_read_is_flagged():
+    calls = _overnight_calls(errors_failed=True)
+    answer = AgentAnswer("q", text="orders-etl had no errors overnight. Everything else ran fine.", calls=calls)
+    assert [none.sentence for none in check_grounding(answer).unbacked_nones] == [
+        "orders-etl had no errors overnight."]
+    assert grounding_findings(answer) == [
+        ("warn", "The answer says there was none, but the read behind it was incomplete: “orders-etl had no errors "
+                 "overnight.” rests on function_errors('orders-etl', since='2026-11-02T18:00Z') couldn't read "
+                 "everything (AccessDeniedException; needs logs:FilterLogEvents). That read can't show there was "
+                 "none, so treat it as unchecked until the call reads everything.")]
+    for fine in ("Of what I could read, orders-etl had no errors.",
+                 "orders-etl had no errors. Its logs couldn't be read, though.",
+                 "thumbnailer had no errors overnight."):
+        assert check_grounding(AgentAnswer("q", text=fine, calls=calls)).ok, fine
+    cut = [ToolCall("find_files", {"location": "s3://acme-raw/incoming/"}, coverage={"cut_short": True}),
+           ToolCall("function_health", {}, refused="raised")]
+    assert check_grounding(AgentAnswer("q", text="No files arrived.", calls=cut)).unbacked_nones[0].calls == cut[:1]
+    assert check_grounding(AgentAnswer("q", text="No files arrived.", calls=cut[1:])).ok
+
+
+def test_grounding_checks_nothing_without_tools_or_with_an_error():
+    assert check_grounding(AgentAnswer("q", text="billing-sync failed 42 times.")).ok
+    failed = AgentAnswer("q", text="`billing-sync` failed.", calls=_overnight_calls(), error="ThrottlingException")
+    assert check_grounding(failed).ok
+
+
+def test_the_report_shows_what_didnt_check_out(capsys):
+    view = AgentView(AgentAnalyzer(region=REGION), mode="text", progress="off")
+    answer = AgentAnswer("q", text="`billing-sync` failed 35 times.", calls=_overnight_calls())
+    out = run(capsys, view._show, view._answer_blocks(answer))
+    assert "A name in the answer isn't in anything the tools returned: 'billing-sync'" in out
 
 
 def test_answer_next_prefers_the_latest_calls_without_repeats():
@@ -502,9 +665,10 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
 
     # The agent's runtime runs its tools: results made JSON-ready, errors turned into results.
-    assert tool(core, "read_note")("plan") == {"name": "plan", "text": "ship it"}
-    assert tool(core, "read_note")(name="plam") == {"error": "No note 'plam'.", "close_names": ["plan", "plans"]}
-    assert tool(core, "list_notes")() == {"error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
+    assert tool(core, "read_note")("plan") == {"ref": 1, "complete": True, "name": "plan", "text": "ship it"}
+    assert tool(core, "read_note")(name="plam") == {"ref": 1, "complete": False, "error": "No note 'plam'.",
+                                                    "close_names": ["plan", "plans"]}
+    assert tool(core, "list_notes")() == {"ref": 1, "complete": False, "error": "AccessDeniedException; needs notes:ListNotes", "message": "no"}
 
     # Its section of the prompt, after the shared rules; its reads and privacy note in tools().
     text = core.instructions()
@@ -626,6 +790,8 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
     assert [r["name"] for r in health["near_timeout"]] == ["etl-nightly"]  # 58 s of 60 s
     assert health["regions"] == [REGION] and health["window"]["hours"] == 2.0
     json.dumps(health)  # what the model gets is JSON
+    assert health["totals"]["errors"] == 40 and health["failed"][0]["share_of_errors_pct"] == 100.0
+    assert health["complete"] is True and health["ref"] == 1
 
     errors = tool(core, "function_errors")("etl-nightly", since="1h")
     assert [c["kind"] for c in errors["causes"]] == ["KeyError"] and errors["causes"][0]["request_ids"] == [RID]
@@ -633,10 +799,13 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
 
     logs = tool(core, "function_logs")("etl-nightly", since="1h", search=RID)
     assert logs["runs_found"] == 1 and logs["runs"][0]["status"] == "failed"
+    assert logs["statuses_pct"] == {"failed": 100.0}
     assert "hunter2" not in json.dumps(logs) and "DB_PASSWORD=[hidden]" in " ".join(logs["runs"][0]["lines"])
 
     perf = tool(core, "function_performance")("etl-nightly", since="1h")
     assert perf["runs"] == 1 and perf["median_ms"] == pytest.approx(102.12) and perf["cold_starts"] == 1
+    assert perf["cold_start_pct"] == 100.0 and perf["longest_vs_timeout_pct"] == 0.2
+    assert perf["memory_used_pct"] == round(100 * perf["most_memory_used_mb"] / perf["memory_mb"], 1)
 
     details = tool(core, "function_details")("etl-nightly")
     assert details["function"]["runtime_support"] in ("deprecated", "blocked")  # python3.9 lost support
@@ -955,7 +1124,8 @@ def test_s3_tools_read_buckets_folders_and_files_but_never_their_contents(bucket
     assert files["window"]["hours"] == 1.0
 
     summary = tool(core, "folder_summary")("acme-raw")
-    assert summary["files"] == 4 and summary["cut_short"] is False
+    assert summary["files"] == 4 and summary["cut_short"] is False and summary["complete"] is True
+    assert sum(row["share_of_size_pct"] for row in summary["by_storage_class"]) == pytest.approx(100, abs=0.1)
 
     info = tool(core, "file_info")("s3://acme-raw/README.md")
     assert info["metadata"] == {"owner": "data-team", "api-key": "[hidden]"} and info["size"] == "5 B"
@@ -1044,7 +1214,8 @@ def test_s3_listings_stop_at_the_budget(buckets):
     core = with_s3(budget={"s3_keys": 2})
     out = tool(core, "find_files")("acme-raw")
     assert out["scanned"] == 2 and out["cut_short"] is True and "Stopped after 2 keys" in out["note"]
-    assert tool(core, "folder_summary")("acme-raw")["cut_short"] is True
+    cut = tool(core, "folder_summary")("acme-raw")
+    assert cut["cut_short"] is True and cut["complete"] is False
 
 
 def test_the_guard_covers_every_client_the_s3_analyzer_makes(buckets):
@@ -1126,6 +1297,7 @@ def test_kb_files_put_the_bucket_next_to_bedrocks_record(world):
     files = tool(core, "kb_files")("support-docs")
     assert files["counts"] == {"Failed": 1, "Not synced yet": 1, "Skipped by the sync": 1, "Deleted from S3": 1,
                                "Indexed": 2}
+    assert files["files_total"] == 6 and files["counts_pct"]["Indexed"] == 33.3
     assert [(f["file"].rsplit("/", 1)[1], f["state"]) for f in files["files"]] == [
         ("scanned.pdf", "failed"), ("added.pdf", "new"), ("video.mp4", "skipped"), ("gone.pdf", "deleted"),
         ("faq.md", "indexed"), ("refund-policy.pdf", "indexed")]
@@ -1227,7 +1399,7 @@ def test_kb_passages_hide_what_looks_like_a_secret(world):
 def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     core = with_kb(world)
     assert tool(core, "kb_health")() == {
-        "error": "ValueError",
+        "ref": 1, "complete": False, "error": "ValueError",
         "message": "2 knowledge bases in us-east-1: name one with knowledge_base= (sales, support-docs)."}
     assert "Did you mean 'support-docs'?" in tool(core, "kb_syncs")("support-dcos")["message"]
     world.kbs = world.kbs[:1]
@@ -1238,10 +1410,11 @@ def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
     world.errors["get_knowledge_base"] = ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "none"}},
                                                      "GetKnowledgeBase")
     gone = tool(with_kb(world), "kb_health")("KBID999999")
-    assert gone == {"error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
+    assert gone == {"ref": 1, "complete": False, "error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
                     "close_names": [], "hint": "Use one of close_names, or find_knowledge_bases to list them."}
     denied = tool(with_kb(world), "find_knowledge_bases")()
-    assert denied == {"error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
+    assert denied == {"ref": 1, "complete": False,
+                      "error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
 
 
 def test_kb_searches_keep_to_the_budget(world):
@@ -1577,6 +1750,179 @@ def test_the_answer_comes_with_the_findings_the_model_filled_in(seeded, capsys):
     assert looks.count("LambdaView().errors('etl-nightly'") == 1
 
 
+def test_a_draft_that_doesnt_check_out_is_corrected_before_its_shown(seeded):
+    model = scripted(
+        calls(("function_health", {"since": "2h"})),
+        says("`billing-sync` failed 40 times."),
+        says("**etl-nightly** failed 40 times."),
+    )
+    steps = []
+    answer = make(model).ask("Which Lambda failed?", on_step=steps.append)
+    assert answer.text == "**etl-nightly** failed 40 times." and answer.error is None and answer.model_calls == 3
+    recheck = answer.recheck
+    assert recheck.names == ["billing-sync"] and recheck.first_text == "`billing-sync` failed 40 times."
+    assert (recheck.fixed, recheck.tool_calls, recheck.failed) == (True, 0, "")
+    sent = model.prompts[2][-1]
+    assert type(sent).__name__ == "HumanMessage" and sent.content.startswith("[Before the user sees your answer")
+    assert "- Names and IDs no tool returned: 'billing-sync'." in sent.content
+    assert any(step.kind == "thinking" and "a name didn't match" in step.text for step in steps)
+    found = answer_findings(answer)
+    assert found[0] == ("info", "It checked its first draft against what the tools returned and found a name they "
+                                "didn't back up: it was asked to correct the draft before you saw it. It rewrote "
+                                "it, and the answer shown checks out.")
+    assert not any("isn't in anything the tools returned" in m for _, m in found)
+    assert answer_from_record(answer_record(answer)).recheck == recheck
+
+
+def test_a_correction_can_read_more_with_the_tools(seeded):
+    model = scripted(
+        calls(("function_health", {"since": "2h"})),
+        says("etl-nightly failed 40 times, called by `orders-loader`."),
+        calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+        says("etl-nightly failed 40 times on KeyError 'customer_id'."),
+    )
+    answer = make(model).ask("Why did etl-nightly fail?")
+    assert answer.recheck.names == ["orders-loader"] and answer.recheck.tool_calls == 1
+    assert answer.recheck.fixed and [c.name for c in answer.calls] == ["function_health", "function_errors"]
+    assert "read more with 1 tool call and rewrote it" in answer_findings(answer)[0][1]
+
+
+def test_a_correction_that_still_doesnt_check_out_keeps_its_warnings(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."),
+                     says("`billing-cron` failed."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.text == "`billing-cron` failed." and answer.recheck.fixed is False
+    found = [m for _, m in answer_findings(answer)]
+    assert "some of it still doesn't check out" in found[0]
+    assert "A name in the answer isn't in anything the tools returned: 'billing-cron'." in " ".join(found)
+
+
+def test_a_correction_that_fails_leaves_the_draft(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."),
+                     RuntimeError("the model is overloaded"))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.text == "`billing-sync` failed." and answer.error is None and answer.stopped is None
+    assert answer.recheck.failed.startswith("RuntimeError: the model is overloaded")
+    assert answer.recheck.fixed is None
+    found = " ".join(m for _, m in answer_findings(answer))
+    assert "That failed (RuntimeError: the model is overloaded" in found and "'billing-sync'" in found
+
+
+def test_a_draft_that_checks_out_or_verify_false_costs_no_second_turn(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."))
+    answer = make(model, verify=False).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2 and answer.text == "`billing-sync` failed."
+    assert any("'billing-sync'" in m for _, m in answer_findings(answer))
+    model = scripted(calls(("function_health", {"since": "2h"})), says("`billing-sync` failed."))
+    answer = make(model, budget={"tool_calls": 1}, interrupt_on=False).ask("Which Lambda failed?")
+    assert answer.recheck is None and answer.model_calls == 2, "no tool call left to correct it with"
+
+
+def test_the_recheck_request_lists_each_problem():
+    grounding = check_grounding(AgentAnswer("q", text="`billing-sync` failed 42 times. Checked eu-west-1.",
+                                            calls=_overnight_calls()))
+    text = recheck_request(grounding)
+    assert "- Names and IDs no tool returned: 'billing-sync'." in text
+    assert "- You say you checked 'eu-west-1', but no tool read it." in text
+    assert "give the whole answer again with final_answer, with its findings" in text
+    assert "final_answer" not in recheck_request(grounding, reply=False)
+    nones = check_grounding(AgentAnswer("q", text="orders-etl had no errors.", calls=_overnight_calls(True)))
+    assert ("- “orders-etl had no errors.” says there was none, but function_errors('orders-etl', "
+            "since='2026-11-02T18:00Z') couldn't read everything") in recheck_request(nones)
+
+
+def _cited_calls():
+    """
+    A night's function_health and function_errors as the model was handed them, refs 1 and 2.
+    """
+    health, errors = _overnight_calls()
+    health.ref, errors.ref = 1, 2
+    return [health, errors]
+
+
+def test_citations_are_read_forgivingly():
+    assert cited_refs("orders-etl failed 35 times [2]. Its logs [1, 3] and runs [4-6] say why.") == [2, 1, 3, 4, 5, 6]
+    assert cited_refs("See [the docs](https://x.y) and `a[1]`.\n```\nx = y[2]\n```") == [1]
+    assert refs_in([3, "5", "[7]", "c8", None, True]) == [3, 5, 7, 8] and refs_in("c2, c4") == [2, 4]
+    assert refs_in(None) == [] and len(refs_in(list(range(20)))) == 8
+    _, findings = parse_reply({"answer": "a", "findings": [{"message": "m", "evidence": [2, "3"]}]})
+    assert findings[0].evidence == [2, 3]
+
+
+def test_citations_are_checked_against_the_calls_they_name():
+    text = ("**orders-etl** failed 35 times [1]; 31 were `KeyError: 'customer_id'` [2]. `report-api` had 2 errors "
+            "[1].\n\nIt costs $12.40/month. [1]")
+    grounding = check_grounding(AgentAnswer("q", text=text, calls=_cited_calls()))
+    assert grounding.ok and grounding.miscited == [] and grounding.cited == 1.0
+    wrong = check_grounding(AgentAnswer("q", text="orders-etl failed 35 times [9]. 31 were KeyErrors [1].",
+                                        calls=_cited_calls(), findings=[AgentFinding("warn", "x", evidence=[7])]))
+    assert wrong.unknown_refs == ["[9]", "[7]"] and not wrong.ok
+    assert wrong.miscited == ["'31 were' [1]"]
+    found = dict(grounding_findings(AgentAnswer("q", text="orders-etl failed 35 times [9].", calls=_cited_calls())))
+    assert found["warn"] == ("A citation in the answer points at no tool call: [9]. What it backs has no source, so "
+                             "check it in What it checked below, where # is each call's ref.")
+    some = check_grounding(AgentAnswer("q", text="orders-etl failed 35 times [1]. `report-api` had 2 errors.",
+                                       calls=_cited_calls()))
+    assert some.cited == 0.5 and some.ok, "an uncited fact is counted, not flagged"
+    assert check_grounding(AgentAnswer("q", text="It failed 37 times [37].",
+                                       calls=[ToolCall("x", result={"errors": 37}, ref=37)])).ok
+
+
+def test_a_follow_up_may_repeat_and_cite_what_an_earlier_question_read():
+    first = AgentAnswer("Which failed?", text="orders-etl [1]", calls=_cited_calls()[:1], thread="t")
+    later = ToolCall("function_logs", {"function": "orders-etl"}, ref=3, result={"runs": [{"status": "failed"}]})
+    follow_up = AgentAnswer("Why?", text="`orders-etl` failed 35 times [1]; its last run failed [3].",
+                            calls=[later], thread="t")
+    assert not check_grounding(follow_up).ok, "on its own, [1] and orders-etl's 35 come from nowhere"
+    assert check_grounding(follow_up, [first]).ok
+    assert check_grounding(AgentAnswer("q", text="It failed [1].", thread="t"), [first]).ok, "no calls of its own"
+
+
+def test_refs_go_on_across_a_conversation_and_the_model_reads_them(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("**etl-nightly** failed 40 times [1] on KeyError 'customer_id' [2]."),
+                     calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."))
+    core = make(model)
+    first, second = core.ask("Which Lambda failed?"), core.ask("Why?")
+    assert [c.ref for c in first.calls] == [1] and [c.ref for c in second.calls] == [2]
+    assert json.loads(model.prompts[1][-1].content)["ref"] == 1 and first.recheck is None and second.recheck is None
+    assert "put their refs in square brackets" in system_text(model)
+    assert core.earlier(second) == [first] and core.earlier(first) == []
+    assert [c.ref for c in core.ask("Again", new=True).calls] == [1]
+
+
+def test_the_report_and_the_window_show_what_each_citation_names(seeded, capsys):
+    from aws_analyzer.agent.window.chat import _answer_text_html, _tool_html
+
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [1]."))
+    view = AgentView(make(model), mode="text", progress="off")
+    answer = view.core.ask("Which Lambda failed?")
+    out = run(capsys, view._show, view._answer_blocks(answer))
+    assert "failed 40 times [1]." in out and re.search(r"\n\s*1\s+function_health\(since='2h'\)", out)
+    html = viewmod._render_html(view._answer_blocks(answer), 50)
+    assert "failed 40 times <sup>[1]</sup>" in html
+    drawn = _answer_text_html(answer.text, {1: answer.calls[0]})
+    assert "<sup class=\"ag-cite\" title=\"[1] function_health(since=&#x27;2h&#x27;)\">[1]</sup>" in drawn
+    assert 'title="no tool call has this ref">[9]</sup>' in _answer_text_html("x [9]", {})
+    assert '<span class="ag-ref" title="what the answer cites it by">[1]</span>' in _tool_html(answer.calls[0],
+                                                                                              running=False)
+    found = [m for _, m in reply_findings(AgentAnswer("q", findings=[AgentFinding("warn", "It fails.", evidence=[1])]))]
+    assert found == ["It fails. [1]"]
+
+
+def test_a_draft_citing_a_call_that_isnt_there_is_corrected(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})), says("**etl-nightly** failed 40 times [4]."),
+                     says("**etl-nightly** failed 40 times [1]."))
+    answer = make(model).ask("Which Lambda failed?")
+    assert answer.recheck.refs == ["[4]"] and answer.recheck.fixed and answer.text.endswith("[1].")
+    assert "- Citations no tool result carries: [4]." in model.prompts[2][-1].content
+    assert "found a citation they didn't back up" in answer_findings(answer)[0][1]
+
+
 def test_findings_false_answers_in_plain_text(seeded):
     model = scripted(says("**etl-nightly** failed."))
     answer = make(model, findings=False).ask("Which Lambda failed?")
@@ -1759,7 +2105,7 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     assert [c.name for c in answer.calls] == ["function_health"] and answer.calls[0].ok
     names = {t["toolSpec"]["name"] for t in sent[0]["toolConfig"]["tools"] if "toolSpec" in t}
     assert {"function_health", "s3_triggers"} <= names and not names & {"task", "execute"}
-    assert sent[0]["inferenceConfig"]["maxTokens"] == 4096
+    assert sent[0]["inferenceConfig"]["maxTokens"] == 4096 and sent[0]["inferenceConfig"]["temperature"] == 0.0
     assert answer.rates == Rates(1.10, 5.50, "list") and answer.cost == pytest.approx((2700 * 1.10 + 50 * 5.50) / 1e6)
     view = AgentView(core, mode="text", progress="off")
     view._show(view._answer_blocks(answer))

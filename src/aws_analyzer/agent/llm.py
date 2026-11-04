@@ -36,6 +36,11 @@ OPENAI_MODEL = "gpt-4.1"
 MODEL_ENV = "AWS_ANALYZER_AGENT_MODEL"
 _RETRIES = 3
 _ERROR_CHARACTERS = 300
+DEFAULT_TEMPERATURE = 0.0
+_SETS_NO_TEMPERATURE = re.compile(r"(?:^|[/:._-])(?:o\d|gpt-5(?!-chat))(?:$|[-.:_])", re.I)
+_REFUSES_TEMPERATURE = re.compile(r"temperature.{0,80}(?:unsupported|not supported|does not support|only the "
+                                  r"default|isn't supported|is not supported|must be 1)|(?:unsupported|not supported|does "
+                                  r"not support).{0,40}temperature", re.I)
 _NO_KEY = "not-needed"
 _CLOSE_MODELS = 3
 
@@ -297,12 +302,31 @@ def azure_settings(deployment: str | None = None, endpoint: str | None = None,
             or AZURE_API_VERSION)
 
 
+def temperature_for(model: str, temperature: float | None) -> float | None:
+    """
+    The temperature to send a model: `temperature` (AgentAnalyzer's, DEFAULT_TEMPERATURE unless changed), or None
+    (the provider's own) for a reasoning model that takes only its default, OpenAI's o-series and GPT-5 ('o3-mini',
+    'openai:o4-mini', 'gpt-5', but not 'gpt-5-chat'), told by its name or Azure deployment's.
+    """
+    if temperature is None or _SETS_NO_TEMPERATURE.search(str(model or "")):
+        return None
+    return temperature
+
+
+def _with_temperature(settings: dict[str, Any], temperature: float | None) -> dict[str, Any]:
+    """
+    A chat model's settings with `temperature` added when there is one, so None leaves the provider's default.
+    """
+    return {**settings, "temperature": temperature} if temperature is not None else settings
+
+
 def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_version: str,  # noqa: PLR0913
                      api_key: str | None = None, token_provider: Callable[[], str] | None = None,
-                     max_tokens: int | None = None) -> Any:
+                     max_tokens: int | None = None, temperature: float | None = None) -> Any:
     """
     LangChain's AzureChatOpenAI for a deployment. The key is api_key, else AZURE_OPENAI_API_KEY, or a Microsoft
-    Entra ID token_provider instead. _Hint (a note, not a traceback) says which settings are missing.
+    Entra ID token_provider instead. temperature is sent when given (None: the deployment's default). _Hint (a note,
+    not a traceback) says which settings are missing.
     """
     missing = [env for env, value in (("AZURE_OPENAI_ENDPOINT", endpoint),
                                       ("AZURE_OPENAI_DEPLOYMENT", deployment)) if not value]
@@ -324,15 +348,15 @@ def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_versio
         settings["api_key"] = api_key
     if token_provider:
         settings["azure_ad_token_provider"] = token_provider
-    return openai.AzureChatOpenAI(**settings)
+    return openai.AzureChatOpenAI(**_with_temperature(settings, temperature))
 
 
 def openai_chat_model(model: str, *, api_key: str | None = None, endpoint: str | None = None,
-                      max_tokens: int | None = None) -> Any:
+                      max_tokens: int | None = None, temperature: float | None = None) -> Any:
     """
     LangChain's ChatOpenAI for an OpenAI model, or for any server that speaks OpenAI's API at `endpoint` (or
     OPENAI_BASE_URL): a LiteLLM or vLLM gateway, OpenRouter, Ollama's /v1. The key is api_key, else OPENAI_API_KEY;
-    a server of your own may need none. _Hint says what's missing.
+    a server of your own may need none. temperature is sent when given. _Hint says what's missing.
     """
     base_url = endpoint or os.environ.get("OPENAI_BASE_URL")
     key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -346,29 +370,32 @@ def openai_chat_model(model: str, *, api_key: str | None = None, endpoint: str |
         settings["max_tokens"] = max_tokens
     if base_url:
         settings["base_url"] = base_url
-    return openai.ChatOpenAI(**settings)
+    return openai.ChatOpenAI(**_with_temperature(settings, temperature))
 
 
-def bedrock_chat_model(model_id: str, *, runtime: Any, control: Any, max_tokens: int | None = None) -> Any:
+def bedrock_chat_model(model_id: str, *, runtime: Any, control: Any, max_tokens: int | None = None,
+                       temperature: float | None = None) -> Any:
     """
     LangChain's ChatBedrockConverse for a Bedrock model ID or inference profile. It calls Bedrock's Converse API
     through `runtime`, a bedrock-runtime client the agent makes from its own session, so it uses the notebook's
     credentials, region and retries; `control` (a bedrock client) is what it reads an application inference
-    profile's model with.
+    profile's model with. temperature goes in Converse's inferenceConfig when given.
     """
     aws = _require("langchain_aws", "The agent's Amazon Bedrock model", package="langchain-aws")
     settings: dict[str, Any] = {"model": model_id, "client": runtime, "bedrock_client": control}
     if max_tokens:
         settings["max_tokens"] = max_tokens
-    return aws.ChatBedrockConverse(**settings)
+    return aws.ChatBedrockConverse(**_with_temperature(settings, temperature))
 
 
-def langchain_chat_model(provider: str, model: str, *, api_key: str | None = None, endpoint: str | None = None,
-                         max_tokens: int | None = None) -> Any:
+def langchain_chat_model(provider: str, model: str, *, api_key: str | None = None,  # noqa: PLR0913
+                         endpoint: str | None = None, max_tokens: int | None = None,
+                         temperature: float | None = None) -> Any:
     """
     Any other provider's chat model, through LangChain's init_chat_model ('anthropic', 'google_genai', 'ollama',
     'mistralai', 'groq', ...), with its key (else the provider's own environment variable) and `endpoint` as its
-    base URL. max_tokens caps each answer when the model has that setting. Its ImportError says what to pip install.
+    base URL. max_tokens caps each answer and temperature is set when the model has those settings. Its ImportError
+    says what to pip install.
     """
     info = provider_info(provider)
     if not model:
@@ -381,8 +408,11 @@ def langchain_chat_model(provider: str, model: str, *, api_key: str | None = Non
     if endpoint:
         settings["base_url"] = endpoint
     chat_model = chat_models.init_chat_model(model, model_provider=provider, **settings)
-    if max_tokens and "max_tokens" in getattr(type(chat_model), "model_fields", {}):
+    fields = getattr(type(chat_model), "model_fields", {})
+    if max_tokens and "max_tokens" in fields:
         chat_model.max_tokens = max_tokens
+    if temperature is not None and "temperature" in fields:
+        chat_model.temperature = temperature
     return chat_model
 
 
@@ -569,6 +599,9 @@ def explain_model_error(exc: BaseException, provider: str = "azure") -> str:
         text = text[:_ERROR_CHARACTERS - 1] + "…"
     if name == "GraphRecursionError":
         why = "The agent took more steps than its budget allows."
+    elif _REFUSES_TEMPERATURE.search(str(exc)):
+        why = ("This model doesn't take a temperature setting (the agent sends 0, so the same question gets the same "
+               "answer): AgentView(temperature=None) leaves it out.")
     elif provider == "bedrock":
         why = _bedrock_why(exc, text)
     else:

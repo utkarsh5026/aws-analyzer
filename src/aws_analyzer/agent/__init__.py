@@ -88,6 +88,12 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      does, told as it happens), BigRead (what a tool asks before a big read) and AgentFinding (what
                      the model found, from its reply: REPLY_SCHEMA, parse_reply, checked_call), and the pure findings
                      and next steps a report shows about them.
+    grounding.py     Whether an answer says only what its tools returned: names, IDs and numbers no tool gave,
+                     regions it didn't read, and claims of none over an incomplete read (check_grounding), as
+                     findings the report shows (grounding_findings), and the message that sends a draft that
+                     doesn't check out back to the model once (recheck_request, verify=True; answer.recheck).
+                     Citations: each tool result starts with its ref (ToolCall.ref), the answer cites it ("[2]")
+                     and a finding names its evidence; check_citations checks each against the call it names.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
     workspace/       The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
@@ -123,12 +129,25 @@ from .answers import (
     limit_read,
     parse_plan,
     parse_reply,
+    refs_in,
     reply_findings,
 )
 from .budget import Budget
+from .grounding import (
+    Grounding,
+    Recheck,
+    UnbackedNone,
+    calls_by_ref,
+    check_citations,
+    check_grounding,
+    cited_refs,
+    grounding_findings,
+    recheck_request,
+)
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
     AZURE_API_VERSION,
+    DEFAULT_TEMPERATURE,
     MODEL_ENV,
     OPENAI_MODEL,
     PROVIDERS,
@@ -138,6 +157,7 @@ from .llm import (
     explain_model_error,
     model_rates,
     pick_provider,
+    temperature_for,
 )
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
@@ -284,6 +304,16 @@ __all__ = [
     "parse_query_reply",
     "system_prompt",
     "answer_findings",
+    "check_grounding",
+    "grounding_findings",
+    "Grounding",
+    "UnbackedNone",
+    "Recheck",
+    "recheck_request",
+    "cited_refs",
+    "check_citations",
+    "calls_by_ref",
+    "refs_in",
     "answer_next",
     "reply_findings",
     "parse_reply",
@@ -291,6 +321,8 @@ __all__ = [
     "parse_plan",
     "answer_cost",
     "explain_model_error",
+    "temperature_for",
+    "DEFAULT_TEMPERATURE",
     "function_row",
     "summarize_functions",
     "summarize_health",

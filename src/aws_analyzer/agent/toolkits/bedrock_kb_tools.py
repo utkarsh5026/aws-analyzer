@@ -44,7 +44,7 @@ from ..._kit.errors import _error_code, _error_name
 from ..._kit.fmt import _plural, human_money, human_size
 from ..._kit.text import _clip
 from ..budget import Budget, _Refused
-from ..results import _with_permissions, hide_secrets
+from ..results import _with_permissions, hide_secrets, shares_pct
 from .base import Toolkit
 from .s3_tools import _shown
 
@@ -196,7 +196,7 @@ def _documents_part(docs: DocumentSummary, sources: dict[str, str]) -> dict[str,
     kb_health's count of Bedrock's documents by status, with the most common reasons documents failed, and the
     data sources whose type has no document list.
     """
-    part: dict[str, Any] = {"total": docs.total, "by_status": docs.counts,
+    part: dict[str, Any] = {"total": docs.total, "by_status": docs.counts, "by_status_pct": shares_pct(docs.counts),
                             "top_failure_reasons": [{"reason": hide_secrets(_clip(reason, _REASON_CHARS)),
                                                      "documents": count} for reason, count in docs.reasons[:3]],
                             "cut_short": docs.truncated}
@@ -282,9 +282,10 @@ def summarize_kb_files(inv: FileInventory, picked: list[KBFile], *, limit: int =
     that syncs each data source a sync would fix, and what couldn't be read or was cut short.
     """
     kb = _kb_module()
+    counts = {kb.FILE_STATES[state][0]: count for state, count in inv.counts().items()}
     out: dict[str, Any] = {
         "knowledge_base": inv.kb_name or inv.kb_id,
-        "counts": {kb.FILE_STATES[state][0]: count for state, count in inv.counts().items()},
+        "files_total": sum(counts.values()), "counts": counts, "counts_pct": shares_pct(counts),
         "matching": len(picked), "files": [_file_row(f, inv.sources) for f in picked[:limit]],
         "findings": _findings(kb.inventory_findings(inv)),
         "sync_commands": {inv.sources.get(ds_id, ds_id): kb.sync_command(inv.kb_id, ds_id, region)

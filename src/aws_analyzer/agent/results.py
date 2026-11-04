@@ -40,6 +40,27 @@ def hide_secrets(text: Any) -> str:
     return out
 
 
+_SHARE_DIGITS = 1
+
+
+def share_pct(part: float, whole: float) -> float | None:
+    """
+    `part` as a share of `whole`, in % to one decimal, so the model copies it rather than works it out: 35 of 1,200
+    -> 2.9. None when there's no whole.
+    """
+    if not whole:
+        return None
+    return round(100 * part / whole, _SHARE_DIGITS)
+
+
+def shares_pct(counts: dict[str, float]) -> dict[str, float | None]:
+    """
+    Each count as a share of their total, in %: {'failed': 3, 'indexed': 97} -> {'failed': 3.0, 'indexed': 97.0}.
+    """
+    total = sum(counts.values())
+    return {key: share_pct(value, total) for key, value in counts.items()}
+
+
 def _iso(moment: datetime | None) -> str | None:
     """
     A time as the tools hand it to the model: '2026-10-15T18:00Z', always UTC.

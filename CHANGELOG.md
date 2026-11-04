@@ -9,6 +9,32 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: checks its answer against the tools** ([#200](https://github.com/utkarsh5026/aws-analyzer/pull/200))
+  - A name, request ID, ARN, s3:// path or number in the answer that no tool returned is a warning.
+  - So is "no errors" said over a read that failed, was cut short or wasn't run.
+  - `check_grounding(answer)` gives the same as data.
+
+- 🤖 **Agent: corrects a draft that doesn't check out** ([#200](https://github.com/utkarsh5026/aws-analyzer/pull/200))
+  - Before you see it, the model gets one more turn, with its tools, to fix what no tool returned.
+  - `answer.recheck` keeps the draft and what was flagged; the findings say whether the answer now checks out.
+  - `AgentView(verify=False)` turns it off.
+
+- 🤖 **Agent: cites the tool call behind each fact** ([#200](https://github.com/utkarsh5026/aws-analyzer/pull/200))
+  - The answer marks each fact with its source, `[2]`: the `#` of the call in What it checked.
+  - In the chat window, point at a citation to see the call; findings list theirs too.
+  - A citation that names no call is a warning, and the draft goes back to be corrected.
+
+- 🤖 **Agent: the tools work out the numbers** ([#200](https://github.com/utkarsh5026/aws-analyzer/pull/200))
+  - Results carry totals, rates and shares (each function's share of failures, a cause's share of errors).
+  - `function_health` says whether a function's failures rose from the first half of the window to the second.
+  - Every result says whether it read everything (`complete`), so "none" isn't read off a partial result.
+
+- 🤖 **Agent: the same question gets the same answer** ([#200](https://github.com/utkarsh5026/aws-analyzer/pull/200))
+  - The model is sent temperature 0 (OpenAI's o-series and GPT-5 keep their own).
+  - `AgentView(temperature=None)` leaves the provider's default; a model that refuses it says so.
+
 ## [0.46.0] - 2026-11-04
 
 ### Added

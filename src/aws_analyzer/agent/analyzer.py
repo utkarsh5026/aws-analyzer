@@ -25,6 +25,7 @@ from .._kit.focus import Focus
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
+from .grounding import Recheck, check_grounding, recheck_request, recheck_said
 from .chats import (
     ChatStore,
     ChatSummary,
@@ -52,6 +53,7 @@ from .memory import (
 )
 from .llm import (
     AZURE_API_VERSION,
+    DEFAULT_TEMPERATURE,
     answer_cost,
     azure_chat_model,
     azure_settings,
@@ -66,6 +68,7 @@ from .llm import (
     openai_chat_model,
     pick_provider,
     provider_info,
+    temperature_for,
 )
 from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
@@ -184,6 +187,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
     10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
     either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
+    temperature (0 by default) makes the model pick its likeliest words, so the same question over the same data
+    gets the same answer; None leaves the provider's default, and a model that takes only its own (OpenAI's o-series
+    and GPT-5, told by name) is sent none. A chat_model= passed in keeps its own settings.
     use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
@@ -213,6 +219,14 @@ filling in a set shape (findings=True, the default): the answer, and what it fou
 (answer.findings: warn or info, what's wrong and what to do, and the View call that shows more, kept only when it's
 a real command with arguments it takes), which the report shows as its findings and next calls. findings=False
 has it answer in plain text, as does a model that can't be made to call a tool.
+
+    Checked before it's shown (verify=True, the default): once the model has answered, its draft is compared with
+    what the tools returned (check_grounding: names, IDs and numbers no tool gave, regions it didn't read, "no
+    errors" over a read that failed or was cut short). When part of it doesn't check out, the model gets one more
+    turn, with its tools, to read what it needs, take the claim out or say it couldn't check it, and that answer is
+    shown instead (answer.recheck says what was flagged, keeps the draft, and whether the answer now checks out).
+    It costs a model call only when the draft didn't check out. verify=False shows the draft as it is, with the same
+    warnings.
 
     Runbooks: step-by-step guides for common problems ("a Lambda is failing", "an S3 upload didn't start my
     function"), each a folder with a SKILL.md. The model sees only each one's name and one-line description, and reads
@@ -262,6 +276,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         chats: bool | str | os.PathLike = False,
         budget: Budget | dict[str, Any] | None = None,
         max_tokens: int | None = 4096,
+        temperature: float | None = DEFAULT_TEMPERATURE,
         toolkits: Iterable[str | Toolkit | type[Toolkit]] | None = None,
         lambda_core: LambdaAnalyzer | None = None,
         lambda_clients: dict[str, Any] | None = None,
@@ -273,6 +288,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         plan: bool = True,
         runbooks: bool | str | Path | Iterable[str | Path] = True,
         findings: bool = True,
+        verify: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
     ):
@@ -281,6 +297,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         self._set_model(provider, model, deployment=deployment, endpoint=endpoint, api_key=api_key,
                         api_version=api_version, token_provider=azure_ad_token_provider, chat_model=chat_model)
         self.max_tokens = max_tokens
+        self.temperature = temperature
         self.timezone = _checked_zone(timezone)
         self.regions = regions
         self.notes = notes
@@ -295,6 +312,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         self.budget = Budget.of(budget)
         self.plan = plan
         self.findings = findings
+        self.verify = verify
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
@@ -463,15 +481,22 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             return azure_chat_model(endpoint=self.endpoint, deployment=self.deployment,
                                     api_version=self.api_version or AZURE_API_VERSION,
                                     api_key=self._api_key, token_provider=self._token_provider,
-                                    max_tokens=self.max_tokens)
+                                    max_tokens=self.max_tokens, temperature=self._temperature(self.deployment))
         if self.provider == "bedrock":
-            return bedrock_chat_model(self._bedrock_model(), runtime=self._bedrock_runtime(),
-                                      control=self._bedrock_control(), max_tokens=self.max_tokens)
+            model_id = self._bedrock_model()
+            return bedrock_chat_model(model_id, runtime=self._bedrock_runtime(), control=self._bedrock_control(),
+                                      max_tokens=self.max_tokens, temperature=self._temperature(model_id))
         if self.provider == "openai":
             return openai_chat_model(self.model_id, api_key=self._api_key, endpoint=self.endpoint,
-                                     max_tokens=self.max_tokens)
+                                     max_tokens=self.max_tokens, temperature=self._temperature(self.model_id))
         return langchain_chat_model(self.provider, self.model_id, api_key=self._api_key, endpoint=self.endpoint,
-                                    max_tokens=self.max_tokens)
+                                    max_tokens=self.max_tokens, temperature=self._temperature(self.model_id))
+
+    def _temperature(self, model: str | None) -> float | None:
+        """
+        The temperature this model is sent: the agent's, or None for one that takes only its own (temperature_for).
+        """
+        return temperature_for(model or self.model_id, self.temperature)
 
     def _bedrock_runtime(self) -> Any:
         """
@@ -805,7 +830,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         shown = focus_of(focus)
         graph = self._harness()
         moment = now or _utcnow()
-        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more)
+        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step, ask_more=self.ask_more,
+                   first_ref=self._next_ref(self.thread))
         answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
                              asked=moment, focus=shown)
         self._guard.reset()
@@ -814,6 +840,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             answer.text = harness.stream_turn(graph, self._message(question, moment, shown),
                                               thread=self.thread, run=run, answer=answer, model_prices=self.prices,
                                               progress=progress, provider=self.provider)
+            self._recheck(graph, run, answer, progress)
         finally:
             self._run = None
         self.history.append(answer)
@@ -862,6 +889,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         try:
             answer.text = harness.resume_turn(graph, choices, thread=answer.thread, run=run, answer=answer,
                                               model_prices=self.prices, progress=progress, provider=self.provider)
+            self._recheck(graph, run, answer, progress)
         finally:
             self._run = None
         return self._finish(graph, run, answer)
@@ -873,6 +901,71 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         """
         call = next((c for c in answer.calls if c.key == key and c.asks), None)
         return (call.asks[-1].choice or "skip") if call is not None else "skip"
+
+    def earlier(self, answer: AgentAnswer) -> list[AgentAnswer]:
+        """
+        The answers asked before `answer` in its conversation, oldest first: what a follow-up may repeat and cite.
+        """
+        found: list[AgentAnswer] = []
+        for each in self.history:
+            if each is answer:
+                break
+            if each.thread == answer.thread:
+                found.append(each)
+        return found
+
+    def _next_ref(self, thread: str) -> int:
+        """
+        The ref the next question's first tool call gets in a conversation: one past the calls asked before it, so
+        the answer can cite an earlier question's calls by theirs.
+        """
+        return 1 + sum(len(each.calls) for each in self.history if each.thread == thread)
+
+    def _can_recheck(self, run: _Run, answer: AgentAnswer) -> bool:
+        """
+        Whether a draft can be checked and corrected: verify is on, it's the question's first check, the model
+        answered (no error, no stop, nothing waiting for the user), and the budget has time, cost and a tool call
+        left for the correction.
+        """
+        budget = run.budget
+        is_answered = answer.error is None and answer.stopped is None and bool(answer.text.strip())
+        is_waiting = any(call.waiting is not None for call in run.calls)
+        used = sum(1 for call in run.calls if call.refused is None)
+        has_cost_left = budget.usd is None or run.cost < budget.usd
+        has_room = run.elapsed < budget.seconds and used < budget.tool_calls and has_cost_left
+        return self.verify and answer.recheck is None and is_answered and not is_waiting and has_room
+
+    def _recheck(self, graph: Any, run: _Run, answer: AgentAnswer, progress: Callable[..., None] | None) -> None:
+        """
+        With verify=True, checks the model's draft against what its tools returned (check_grounding) and, when part
+        of it doesn't check out, gives the model one more turn in the same conversation, with its tools, to correct
+        it: that answer replaces the draft, and answer.recheck keeps what was flagged and the draft. A turn that
+        fails or ends without an answer leaves the draft as it was, with why in recheck.failed; one that pauses to
+        ask about a big read leaves no text, as any pause does.
+        """
+        if not self._can_recheck(run, answer):
+            return
+        answer.calls = list(run.calls)
+        flagged = check_grounding(answer, self.earlier(answer))
+        if flagged.ok:
+            return
+        draft_text, draft_findings, calls_before = answer.text, list(answer.findings), len(run.calls)
+        answer.recheck = recheck = Recheck.of(flagged, draft_text)
+        run.tell(AgentStep("thinking", text=recheck_said(flagged)))
+        text = harness.stream_turn(graph, recheck_request(flagged, reply=self.findings), thread=answer.thread,
+                                   run=run, answer=answer, model_prices=self.prices, progress=progress,
+                                   provider=self.provider)
+        recheck.tool_calls = len(run.calls) - calls_before
+        if text.strip():
+            answer.text = text
+            return
+        if any(call.waiting is not None for call in run.calls):
+            answer.text = ""
+            return
+        recheck.failed = answer.error or "the model ended its turn without an answer"
+        answer.text, answer.findings = draft_text, draft_findings
+        if answer.stopped in ("error", "steps"):
+            answer.stopped, answer.error, answer.exception = None, None, None
 
     def _finish(self, graph: Any, run: _Run, answer: AgentAnswer) -> AgentAnswer:
         """
@@ -891,6 +984,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
                                   provider=self.provider)
         answer.seconds = run.elapsed
+        if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
+            answer.recheck.fixed = check_grounding(answer, self.earlier(answer)).ok
         pauses = harness.pauses(graph, answer.thread) if answer.waiting and answer.error is None else {}
         if pauses:
             run.pause()
