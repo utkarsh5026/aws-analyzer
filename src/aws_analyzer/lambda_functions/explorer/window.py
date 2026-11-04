@@ -16,7 +16,9 @@ from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _window_errors
 
 from ..helpers import parse_function_ref
-from ..models import CodeFrame, CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance, SavedPage
+from ..models import (
+    CodeFrame, CodePackage, ErrorReport, Function, FunctionDetail, FunctionStats, PackageDownload, Performance, SavedPage,
+)
 from ..analysis.text import _window
 from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
@@ -38,6 +40,7 @@ from .logs import _FIRST_LOGS_RANGE, _LogsTab, _Reading
 from .timeline import _Timeline
 from .errors import _ErrorsTab
 from .performance import _PerformanceTab
+from .range_summary import _RangeSummary
 from .code import _CodeTab
 from .focus import _FocusReads
 from .plain import _PLAIN_CSS, _PlainSearch
@@ -45,7 +48,7 @@ from .terms import _TERMS_CSS, _SearchTerms
 
 
 class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab,
-                     _PlainSearch, _SearchTerms, _FocusReads, _Explorer):
+                     _RangeSummary, _PlainSearch, _SearchTerms, _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -186,6 +189,8 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         self.change_line: Any = None
         self._code_target: CodeFrame | None = None
         self._slow_rows: list[_Row] = []
+        self.range_views: dict[str, Any] = {}
+        self.range_stats: dict[str, FunctionStats] = {}
         self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package
         self._package_data: bytes | None = None
         self._code_query, self._code_offset, self._code_file = "", 0, None

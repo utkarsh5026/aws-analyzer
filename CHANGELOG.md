@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda: numbers from one date to another**
+  - `stats("orders-etl", "2026-10-01", "2026-10-15")`: calls, error rate, throttles, run time, cold starts, memory and cost, day by day.
+  - `errors()`, `logs()`, `runs()` and `performance()` take `until=`, so they read the same range.
+  - The explorer's Logs and Performance tabs open with the picked range's calls, errors and cost.
+
 ## [0.47.0] - 2026-11-04
 
 ### Added

@@ -15,7 +15,7 @@ from ..._kit.text import _clip
 
 from ..helpers import stream_version
 from ..models import CodeFrame, ErrorGroup, ErrorReport, LogEvent
-from .text import _cli, _window
+from .text import _cli, _span_said
 from .findings import _longer, _next_memory, _times
 from .codemap.terms import _LIBRARIES
 
@@ -370,16 +370,16 @@ def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
             f"{human_age(g.last, report.until)}): {_clip(g.message, 160).rstrip('.')}.{see}"
         )))
     m = report.metrics
-    window = _window((report.until - report.since).total_seconds())
+    span = _span_said(report.since, report.until)
     if m is not None and m.errors >= 1 and not report.groups and "logs" not in report.errors:
         found.append(("info", (
-            f"CloudWatch counted {_count(round(m.errors))} failed calls in the last {window}, but no log line looked "
+            f"CloudWatch counted {_count(round(m.errors))} failed calls in {span}, but no log line looked "
             f"like an error: the code may fail without logging it, or its logging is off. logs('{name}') shows what "
             "it did log."
         )))
     if m is not None and m.throttles >= 1:
         found.append(("warn", (
-            f"{_count(round(m.throttles))} calls were throttled in the last {window} (throttled calls never run, so "
+            f"{_count(round(m.throttles))} calls were throttled in {span} (throttled calls never run, so "
             f"they log nothing): more arrived than it may run at once. function_info('{name}') shows its concurrency."
         )))
     return found

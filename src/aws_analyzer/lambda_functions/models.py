@@ -493,6 +493,55 @@ class Performance:
 
 
 @dataclass
+class RunSample:
+    """
+    Cold starts and memory from a set of runs' REPORT lines: how many runs, how many started cold and their average
+    start-up time in ms, and the memory they used in MB (the most, and the median) against what they had.
+    """
+
+    runs: int = 0
+    cold_starts: int = 0
+    init_avg: float | None = None
+    memory: int = 0
+    memory_max: int = 0
+    memory_median: float | None = None
+
+    @property
+    def cold_share(self) -> float | None:
+        return self.cold_starts / self.runs if self.runs else None
+
+
+@dataclass
+class FunctionStats:
+    """
+    A function's numbers from `since` to `until`: what CloudWatch counted (`metrics`, with a row a day, or an hour
+    for two days or less), what that cost in USD by part (`cost`, function_range_cost), and its runs' REPORT lines
+    for cold starts and memory (`perf`, the newest `limit` runs; None with limit=0), at `prices`. `metrics_read`
+    is how many metrics were requested (GetMetricData bills $0.01 per 1,000); what couldn't be read is in `errors`
+    ('metrics', 'logs').
+    """
+
+    function: Function
+    since: datetime
+    until: datetime
+    metrics: FunctionMetrics | None = None
+    perf: Performance | None = None
+    cost: dict[str, float] = field(default_factory=dict)
+    prices: dict[str, float] = field(default_factory=dict)
+    metrics_read: int = 0
+    errors: dict[str, str] = field(default_factory=dict)
+
+    def to_df(self):
+        """
+        One row per day (or hour): calls, failed and throttled calls, total and longest run time in ms, and the most
+        running at once.
+        """
+        pd = _require("pandas", "FunctionStats.to_df()")
+        rows = self.metrics.daily if self.metrics is not None else []
+        return pd.DataFrame([vars(row) for row in rows])
+
+
+@dataclass
 class CodeFile:
     path: str
     size: int  # unzipped

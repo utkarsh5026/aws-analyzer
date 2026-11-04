@@ -36,6 +36,28 @@ def suggest_memory(max_used: float, memory: int, headroom: float = 1.3) -> int |
     return step if step is not None and step < memory else None
 
 
+def near_timeout(perf: Performance) -> bool:
+    """
+    Whether runs time out, or 1 in 100 takes 80% of the timeout or more: what performance_findings() warns about.
+    """
+    runs, fn = perf.invocations, perf.function
+    if any(r.status == "timeout" for r in runs):
+        return True
+    p99 = percentile([r.duration for r in runs], 99) or 0.0
+    return bool(fn.timeout) and p99 >= 0.8 * fn.timeout * 1000
+
+
+def memory_tight(perf: Performance) -> bool:
+    """
+    Whether a run ran out of memory, or one used 90% of it or more: what performance_findings() warns about.
+    """
+    runs = perf.invocations
+    memory = max((r.memory for r in runs if r.memory), default=perf.function.memory)
+    max_used = max((r.max_memory for r in runs), default=0)
+    out_of_memory = any((r.error_type or "").endswith("OutOfMemory") for r in runs)
+    return out_of_memory or bool(memory and max_used >= 0.9 * memory)
+
+
 def performance_findings(perf: Performance, prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
     """
     What the run times and memory say: timeouts, runs close to the timeout or out of memory, memory that's

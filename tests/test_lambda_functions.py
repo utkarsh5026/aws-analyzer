@@ -43,7 +43,13 @@ from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.lambda_functions import (
+    DAYS_PER_MONTH,
     GB,
+    FunctionStats,
+    RunSample,
+    function_range_cost,
+    run_sample,
+    stats_findings,
     LAMBDA_PRICES,
     MB,
     RUNTIMES,
@@ -600,6 +606,41 @@ def test_performance_findings():
     killed.invocations[0].error_type = "Runtime.OutOfMemory"
     assert "1 run ran out of memory at 128 MB: Lambda killed it" in performance_findings(killed)[0][1]
     assert performance_findings(Performance(fn(), "/x", NOW, NOW)) == []
+
+
+def test_range_cost_is_what_the_window_used_not_a_month():
+    usage = metrics(invocations=1_000_000.0, avg=1000.0, days=7, log_bytes=float(GB))
+    cost = function_range_cost(fn(memory=2048), usage)
+    assert cost["requests"] == pytest.approx(0.20) and cost["logs"] == pytest.approx(0.50)
+    assert cost["compute"] == pytest.approx(1_000_000 * 2 * LAMBDA_PRICES["gb_second"]) and "storage" not in cost
+    assert function_monthly_cost(fn(memory=2048), usage)["requests"] == pytest.approx(0.20 * DAYS_PER_MONTH / 7)
+    one_day = function_range_cost(fn(memory=2048), usage.daily[0], prices={"request": 0.40})
+    assert one_day["requests"] == pytest.approx(0.40) and "logs" not in one_day
+
+
+def test_run_sample_counts_cold_starts_and_memory():
+    sample = run_sample(runs((100.0, 80, 400.0, None), (200.0, 120, None, None), (300.0, 100, 600.0, None), memory=512))
+    assert (sample.runs, sample.cold_starts, sample.init_avg) == (3, 2, 500.0)
+    assert (sample.memory, sample.memory_max, sample.memory_median) == (512, 120, 100.0)
+    assert sample.cold_share == pytest.approx(2 / 3)
+    assert run_sample([]) == RunSample() and RunSample().cold_share is None
+
+
+def test_stats_findings():
+    week = (NOW - timedelta(days=7), NOW)
+    busy = metrics(invocations=1000.0, errors=40.0, throttles=3.0, longest=29_000.0, concurrency_max=12.0)
+    found = stats_findings(FunctionStats(fn(timeout=30), *week, metrics=busy),
+                           range_args={"since": "2026-10-01", "until": "2026-10-08"})
+    text = " ".join(message for _, message in found)
+    assert [level for level, _ in found] == ["warn", "warn", "warn"]
+    assert "40 calls of 1,000 failed (4.0%)" in text and "errors('etl', since='2026-10-01', until='2026-10-08')" in text
+    assert "3 calls were throttled (at most 12 ran at once)" in text and "function_info('etl')" in text
+    assert "The longest run took 29.0 s, close to its 30 s timeout" in text and "--timeout" in text
+    assert stats_findings(FunctionStats(fn(), *week, metrics=metrics(errors=2.0)))[0][0] == "info"
+    quick = Performance(fn(timeout=30), "/aws/lambda/etl", *week, runs((100.0, 50, None, None)))
+    with_runs = " ".join(m for _, m in stats_findings(FunctionStats(fn(timeout=30), *week, metrics=busy, perf=quick)))
+    assert "The longest run took" not in with_runs
+    assert stats_findings(FunctionStats(fn(), *week)) == []
 
 
 def test_handler_file_and_package_findings():
@@ -2066,6 +2107,21 @@ def test_errors_and_performance(core):
         core.errors("etl-nightly", since="2h", until="3h")
 
 
+def test_stats_reads_cloudwatch_and_the_report_lines(core):
+    stats = core.stats("etl-nightly", since="24h")
+    m = stats.metrics
+    assert (m.invocations, m.errors, m.throttles, m.period, stats.metrics_read) == (1000, 40, 3, 3600, 7)
+    assert stats.cost["requests"] == pytest.approx(1000 * 0.20 / 1e6)
+    assert stats.cost["compute"] == pytest.approx(250 * LAMBDA_PRICES["gb_second"])
+    assert len(stats.perf.invocations) == 1 and stats.perf.invocations[0].init is not None
+    assert core.stats("etl-nightly", limit=0).perf is None
+    earlier = core.stats("etl-nightly", since="2026-01-01", until="2026-01-02")
+    assert earlier.metrics.invocations == 0 and earlier.perf.invocations == []
+    assert core.stats("api-handler").errors == {"logs": "ResourceNotFoundException"}
+    with pytest.raises(ValueError, match="must be before until="):
+        core.stats("etl-nightly", since="2026-01-02", until="2026-01-01")
+
+
 def test_code_reads_the_package(core):
     package = core.code("etl-nightly")
     assert sorted(f.path for f in package.files) == [".env", "app.py", "utils.py"]
@@ -2497,6 +2553,43 @@ def test_performance_report(ui, capsys):
     assert f"logs('etl-nightly', request_id='{RID}')" in out
     assert "No REPORT lines" not in out
     assert "has no log group yet" in run(capsys, ui.performance, "api-handler")
+
+
+def test_stats_report(ui, capsys, monkeypatch):
+    out = run(capsys, ui.stats, "etl-nightly", "24h")
+    assert "Stats for etl-nightly" in out and "Calls: 1,000" in out and "Error rate: 4.0% · 40 failed (!)" in out
+    assert "Throttled: 3 (!)" in out and "Cold starts: 100.0% · 300 ms" in out and "Memory used: 88 of 1,024 MB" in out
+    assert "-- Hour by hour" in out and "-- What it cost, by part --" in out and "Compute (memory x run time)" in out
+    assert "from the 1 run whose REPORT lines its logs hold for the range, of 1,000 calls" in out
+    assert "errors('etl-nightly')" in out and "runs('etl-nightly', sort='-duration')" in out
+    ranged = run(capsys, ui.stats, "etl-nightly", "2026-10-01", "2026-10-15")
+    assert "from 2026-10-01 00:00 to 2026-10-15 00:00 UTC (14 days)" in ranged
+    assert "CloudWatch counted no calls" in ranged and "What it cost" not in ranged
+    assert "errors('etl-nightly', since='2026-10-01', until='2026-10-15')" in ranged
+
+    def denied(*args, **kwargs):
+        raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "GetMetricData")
+
+    monkeypatch.setattr(ui.core, "metrics", denied)
+    blocked = run(capsys, ui.stats, "etl-nightly", "24h")
+    assert "Couldn't read CloudWatch's numbers" in blocked and "cloudwatch:GetMetricData" in blocked
+    assert "Cold starts: 100.0% · 300 ms" in blocked and "Traceback" not in blocked
+
+
+def test_reports_end_a_range_with_until(ui, capsys):
+    now = datetime.now(timezone.utc)
+    hour_ago, two_hours_ago = f"{now - timedelta(hours=1):%Y-%m-%d %H:%M}", f"{now - timedelta(hours=2):%Y-%m-%d %H:%M}"
+    before_the_run = {"since": two_hours_ago, "until": hour_ago}
+    assert f"No errors in the range {two_hours_ago} – {hour_ago} UTC" in run(capsys, ui.errors, "etl-nightly",
+                                                                          **before_the_run)
+    assert f"No REPORT lines in the range {two_hours_ago}" in run(capsys, ui.performance, "etl-nightly",
+                                                                  **before_the_run)
+    assert f"No lines in the range {two_hours_ago}" in run(capsys, ui.logs, "etl-nightly", **before_the_run)
+    assert "No runs from" in run(capsys, ui.runs, "etl-nightly", **before_the_run)
+    around_the_run = {"since": hour_ago, "until": f"{now - timedelta(minutes=2):%Y-%m-%d %H:%M}"}
+    errors = run(capsys, ui.errors, "etl-nightly", **around_the_run)
+    assert "KeyError" in errors and f"since='{hour_ago}', until=" in errors
+    assert "Runs: 1" in run(capsys, ui.performance, "etl-nightly", **around_the_run)
 
 
 def test_reports_show_times_in_the_zone_picked(ui, capsys):
@@ -3125,6 +3218,21 @@ def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     assert "102 ms 88 of 1,024 MB · cold start 300 ms" in plain(x._slow_rows[0].face.value)
     x._slow_rows[0].button.click()
     assert x._tab == "logs" and x._found_runs[0].request_id == RID
+
+
+def test_explorer_logs_and_performance_tabs_sum_up_their_range(core, explorer):
+    x = explorer("etl-nightly", tab="logs")
+    logs = plain(x.range_views["logs"].value)
+    assert logs.startswith("In the last hour every call CloudWatch counted · the cost estimated at us-east-1 list")
+    assert "Calls 1,000" in logs and "Throttled 3" in logs and "Est. cost" in logs
+    assert "Cold starts (1 run read) 100.0% · 300 ms" in logs and "Memory used (1 run read) 88 of 1,024 MB" in logs
+    x.tab_buttons["performance"].click()
+    perf = plain(x.range_views["performance"].value)
+    assert perf.startswith("In the last 24 hours") and "Calls 1,000" in perf and "Cold starts" not in perf
+    x.logs(since="2026-01-01", until="2026-01-02")
+    assert plain(x.range_views["logs"].value).startswith("In the range 2026-01-01 00:00 – 2026-01-02 00:00 UTC")
+    x._close_function()
+    assert x.range_stats == {} and x.range_views["logs"].value == ""
 
 
 

@@ -209,6 +209,8 @@ class _FunctionTab:
         Back to no function picked: the Functions tab, the header showing the region.
         """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop_range_summaries()
+        self._clear_range_summaries()
         self._stop_live()
         self.function = self.detail = None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
@@ -264,6 +266,7 @@ class _FunctionTab:
         Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened.
         """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop_range_summaries()
         self._stop_live()
         rereading, self._rereading = self._rereading, False
         if rereading:
@@ -327,6 +330,7 @@ class _FunctionTab:
                        self.source_view, self.error_head, self.slow_head, self.run_head):
             self._set(widget, "")
         self.error_rows_box.children = self.slow_rows_box.children = self.files_box.children = []
+        self._clear_range_summaries()
         self.cause_rows_box.children = []
         self.timeline_box.layout.display = "none"
         self.runs_box.children = []

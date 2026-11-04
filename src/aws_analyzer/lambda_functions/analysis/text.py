@@ -4,9 +4,13 @@ How findings say things: a time window in words, and the AWS CLI commands they s
 
 from __future__ import annotations
 
-from ..._kit.fmt import _plural
+from datetime import datetime
+
+from ..._kit.fmt import _fmt_dt, _plural, _utcnow
 
 from ..models import Function
+
+_ENDS_NOW_SECONDS = 120
 
 
 def _window(seconds: float) -> str:
@@ -23,6 +27,17 @@ def _window(seconds: float) -> str:
     if hours <= 48:
         return _plural(hours, "hour")
     return _plural(round(seconds / 86400), "day")
+
+
+def _span_said(start: datetime, end: datetime, now: datetime | None = None) -> str:
+    """
+    A window in words: 'the last 24 hours' when it runs up to now, else 'the range 2026-10-01 00:00 – 2026-10-15
+    00:00 UTC'.
+    """
+    ends_now = abs(((now or _utcnow()) - end).total_seconds()) <= _ENDS_NOW_SECONDS
+    if ends_now:
+        return f"the last {_window((end - start).total_seconds())}"
+    return f"the range {_fmt_dt(start)} – {_fmt_dt(end, zone=True)}"
 
 
 def _cli(fn: Function) -> str:

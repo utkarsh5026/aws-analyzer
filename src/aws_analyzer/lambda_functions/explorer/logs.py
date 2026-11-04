@@ -471,7 +471,7 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, terms_row, draft_row, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
+        page = w.VBox([bar, terms_row, draft_row, self.custom_bar, self._range_summary_view("logs"), chip_row, self._timeline_strip(), self.run_head, self.jump_button,
                        self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
@@ -667,6 +667,7 @@ class _LogsTab:
         self._draw_pager("runs", 0, 0, _RUN_PAGE, "runs", None)
         self._start_reading(_Reading("logs", f"Reading what {fn.name} logged in {self._range_text()}…", start, end,
                                      _RUN_LINES))
+        self._load_range_summary("logs", start, end)
         self._status(f"Reading what {fn.name} logged in {self._range_text()}…", busy=True, owner="logs")
         self._later("logs", lambda: self.core._log_runs(fn, start, end, limit=_RUN_LINES, progress=self._count_lines,
                                                         reached=self._note_reach),
@@ -713,6 +714,7 @@ class _LogsTab:
         self._run_offset = 0
         self._draw_run_chips()
         self._draw_runs(renew=True)
+        self._draw_range_summary("logs")
         self._finish("logs", self._logs_line(), "warn" if page.errors else "", tabs=("logs",))
 
     def _logs_line(self) -> str:

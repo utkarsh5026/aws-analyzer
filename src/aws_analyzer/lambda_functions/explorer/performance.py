@@ -29,7 +29,8 @@ class _PerformanceTab:
         self.perf_view = w.HTML(layout=layout(width="100%"))
         self.slow_head = w.HTML(layout=layout(width="100%"))
         self.slow_rows_box = w.VBox(layout=layout(width="100%"))
-        return self._scroll_page([self.perf_view, self.slow_head, self.slow_rows_box], above=[bar])
+        return self._scroll_page([self._range_summary_view("performance"), self.perf_view, self.slow_head,
+                                  self.slow_rows_box], above=[bar])
 
     def _load_perf(self) -> None:
         if self.function is None:
@@ -43,6 +44,7 @@ class _PerformanceTab:
         self.slow_rows_box.children = []
         self._counted = 0
         self._status(f"Reading {fn.name}'s REPORT lines…", busy=True, owner="performance")
+        self._load_range_summary("performance", start, end)
         self._later("perf", lambda: self.core._performance(fn, start, end,
                                                            progress=lambda n: setattr(self, "_counted", n)),
                     self._got_perf, self._perf_failed,

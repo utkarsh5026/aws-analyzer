@@ -34,6 +34,7 @@ Quick start
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
     ui.runs("etl-nightly", where="duration > 15s")    # its runs as rows: filter, sort, pick columns, group by hour
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
+    ui.stats("etl-nightly", "2026-10-01", "2026-10-15")  # calls, errors, run time, cold starts, memory, cost by day
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
     ui.diff("etl-nightly")                            # what changed since its last published version: files, lines, settings
     ui.how_it_works("etl-nightly")                    # how its Python code works, step by step from the handler
@@ -65,14 +66,17 @@ from .helpers import (
 )
 from .models import (
     AccountLimits, Activity, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
-    ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
-    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
+    ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionStats, FunctionUrl, Invocation, Layer, LibraryChange,
+    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RunSample, RuntimeStatus,
+    SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     masked_config, parse_event_source_mapping, parse_function, parse_policy, parse_version, runtime_status,
 )
-from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
+from .analysis.cost import (
+    function_monthly_cost, function_range_cost, log_storage_monthly_cost, provisioned_monthly_cost,
+)
 from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
 from .analysis.errors import (
@@ -87,6 +91,7 @@ from .analysis.live import (
     timeout_warning,
 )
 from .analysis.performance import percentile, performance_findings, suggest_memory
+from .analysis.stats import busiest_period, run_sample, stats_findings
 from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
 from .analysis.word_search import SearchError, SearchTerms, WordSearch, word_search
 from .analysis.runs import (
@@ -111,6 +116,12 @@ from .view import LambdaView
 from .explorer.window import LambdaExplorer, explore
 
 __all__ = [
+    "FunctionStats",
+    "RunSample",
+    "function_range_cost",
+    "busiest_period",
+    "run_sample",
+    "stats_findings",
     "Activity",
     "LIVE_WINDOW_MINUTES",
     "LiveFunction",

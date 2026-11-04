@@ -327,6 +327,8 @@ The other tabs are the reports below, a click away: **Errors** is [`errors()`](#
 
     The Errors and Performance tabs read the last 24 hours at first. Once you pick a time range in the Logs, Errors or Performance tab, all three read that range.
 
+    The **Logs** and **Performance** tabs open with the range's numbers, like [`stats()`](#stats): every call CloudWatch counted, the error rate, throttled calls, run time, the most running at once and what the range cost. On Logs they also show the cold starts and memory of the runs it read. Pick **Custom range…** for any From and To.
+
 ![orders-etl's Errors tab over the last 24 hours: cards for 35 failed calls, 1,177 calls, a 3.0% error rate, 13 error lines, 3 causes and 3 timeouts; the errors by cause as lines to click, KeyError 8 times, a timeout 3 times and ClientError twice, each with when it last happened and its share; warnings that 3 runs timed out at the 60 s limit, that its role acme-lambda-role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times, each naming the run to read in the Logs tab, and the newest failed runs](images/lambda-explorer-errors-light.webp#only-light){ width="984" height="811" loading=lazy }
 ![orders-etl's Errors tab over the last 24 hours: cards for 35 failed calls, 1,177 calls, a 3.0% error rate, 13 error lines, 3 causes and 3 timeouts; the errors by cause as lines to click, KeyError 8 times, a timeout 3 times and ClientError twice, each with when it last happened and its share; warnings that 3 runs timed out at the 60 s limit, that its role acme-lambda-role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times, each naming the run to read in the Logs tab, and the newest failed runs](images/lambda-explorer-errors-dark.webp#only-dark){ width="984" height="811" loading=lazy }
 /// caption
@@ -535,6 +537,26 @@ ui.performance("orders-etl")
 
     **Try a smaller size, then check again.** Lambda bills memory × run time, and memory also sets the CPU (a full vCPU at 1,769 MB). When runs use far less memory than the function has, the report suggests a smaller size that still leaves 30% room, never less than a quarter of what it has in one step, and what that would save if the run time stays the same. A function held back by its CPU may run slower with less memory, which can cost more, so try it, and run `performance()` again a day later. When runs come close to the memory or the timeout, it says so and gives the command that raises them.
 
+### From one date to another { #stats }
+
+`stats()` sums up a function between two dates: its calls, failures, run time, cold starts, memory and what the range cost.
+{ .gist }
+
+```python
+ui.stats("orders-etl", "2026-10-01", "2026-10-15")   # that range
+ui.stats("orders-etl", "30d")                        # the last 30 days
+```
+
+The cards come first: calls, error rate, throttled calls, average and longest run time, the most running at once, cold starts, the most memory a run used, and the estimated cost. Then a row per day (per hour for a range of two days or less), the cost by part, and the `errors()`, `performance()` and `runs()` calls for the same range. A date without a time is midnight, in the zone reports show times in.
+
+??? more "Where each number comes from"
+
+    - **Calls, failures, throttles, run time and how many ran at once** are CloudWatch's counts, so they cover every call in the range, however long it is (up to 455 days back, as long as CloudWatch keeps hourly numbers). Days are UTC days.
+    - **Cold starts and memory** come from the REPORT line Lambda logs after each run: the newest 5,000 runs in the range (`limit=` reads more, `limit=0` skips the logs). The report says when that's only part of the range, or when the logs hold fewer runs than CloudWatch counted.
+    - **Cost** is requests, compute (memory × run time), `/tmp` above 512 MB and the logs it sent, at list prices and before the free tier. Provisioned concurrency and stored logs are billed by the month, so they're in [`function_info()`](#function-info)'s monthly cost, not here.
+
+`errors()`, `logs()`, `runs()` and `performance()` take `until=` too, so each one can read the same range: `ui.errors("orders-etl", since="2026-10-01", until="2026-10-15")`.
+
 ## Look at the code { #code }
 
 `code()` shows what's in the deployment package and the handler's source, and catches secrets and dead weight packed into it.
@@ -712,6 +734,8 @@ detail.metrics.daily                              # DailyUsage per day: invocati
 
 lam.errors("orders-etl", since="7d").groups       # ErrorGroup: kind, message, count, first, last, request_ids
 lam.performance("orders-etl").to_df()             # one row per run: duration, billed, memory used, cold start
+stats = lam.stats("orders-etl", since="2026-10-01", until="2026-10-15")  # FunctionStats: .metrics, .perf, .cost
+stats.to_df()                                     # one row per day: calls, errors, throttles, run time
 lam.log_events("orders-etl", since="1h", pattern='"KeyError"').to_df()
 runs = lam.log_runs("orders-etl", since="24h").runs   # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
@@ -859,10 +883,11 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
-| `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
-| `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
-| `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
-| `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
+| `stats(name, since="7d", until=None, region=None, limit=5000)` | [From one date to another](#stats): calls, error rate, throttles, run time, cold starts, memory used and cost, day by day |
+| `errors(name, since="24h", until=None, region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
+| `logs(name, since=None, search=None, request_id=None, n=50, until=None, region=None)` | The newest lines it logged, or one run from start to end |
+| `runs(name, since="24h", until=None, where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
+| `performance(name, since="24h", until=None, region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
 | `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |

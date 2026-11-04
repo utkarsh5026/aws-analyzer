@@ -35,14 +35,14 @@ from .models import (
     CodePackage, ErrorReport, Function, FunctionDetail, LogEvent, LogGroup, PackageDownload, Performance, RuntimeStatus,
     SavedPage, Trigger,
 )
-from .analysis.text import _reason, _window
+from .analysis.text import _reason, _span_said, _window
 from .analysis.functions import runtime_status
-from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
+from .analysis.cost import COST_PARTS, function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
 from .analysis.logs import parse_report, readable_line
 from .analysis.word_search import WordSearch, word_search
-from .analysis.performance import percentile, performance_findings
+from .analysis.performance import memory_tight, near_timeout, percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
 )
@@ -58,6 +58,7 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.stats import _stats_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -85,15 +86,6 @@ _SECTIONS = {  # what a section of a report is, and the permission that reads it
     "log_group": ("log group", "logs:DescribeLogGroups"),
     "logs": ("log groups", "logs:DescribeLogGroups"),
     "metrics": ("numbers from CloudWatch", "cloudwatch:GetMetricData"),
-}
-
-_PARTS = {  # function_monthly_cost's parts, in plain English
-    "requests": "Requests",
-    "compute": "Compute (memory x run time)",
-    "storage": "/tmp above 512 MB",
-    "logs": "Logs sent to CloudWatch",
-    "log_storage": "Logs kept in CloudWatch",
-    "provisioned": "Provisioned concurrency",
 }
 
 _VIA = {
@@ -241,6 +233,24 @@ def _since_arg(since: Any, default: str) -> dict[str, Any]:
     return {"since": since} if isinstance(since, str) and since != default else {}
 
 
+def _as_time_arg(value: Any) -> str:
+    """
+    A time for a next step's since= or until=: text as it was given, a datetime as '2026-10-01 09:00' (read back in
+    the zone reports show times in).
+    """
+    return value if isinstance(value, str) else _fmt_dt(value)
+
+
+def _range_arg(since: Any, until: Any, default: str) -> dict[str, Any]:
+    """
+    since= and until= for a next step: until= when the user gave one, with the since= it goes with; else
+    _since_arg's.
+    """
+    if until is None:
+        return _since_arg(since, default)
+    return {"since": _as_time_arg(since), "until": _as_time_arg(until)}
+
+
 class LambdaView(_BaseView):
     """
     Notebook UI over LambdaAnalyzer. Each method renders a report and returns nothing; for the underlying data
@@ -256,7 +266,7 @@ class LambdaView(_BaseView):
     _render_html = staticmethod(_render_html)  # its look: the stylesheet, root class and badge
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "🧭 Explore by clicking": ("explore",),
-        "λ Functions": ("functions", "function_info"),
+        "λ Functions": ("functions", "function_info", "stats"),
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
@@ -554,14 +564,14 @@ class LambdaView(_BaseView):
         status = runtime_status(fn.runtime, package_type=fn.package_type, today=now.date())
         cost = function_monthly_cost(fn, m, detail.provisioned, detail.log_group, prices=prices)
         level = _errors_level(m, now)
-        near_timeout = bool(m and m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
+        timeout_warning = bool(m and m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
         public = any(t.public for t in detail.triggers)
         _, qualifier, _ = parse_function_ref(name or fn.name)
         sections: dict[str, list[Any]] = {part: [] for part in _INFO_ORDER}
         cards: list[tuple[str, ...]] = [
             ("Runtime", status.label, status.tone),
             ("Memory", _mb(fn.memory)),
-            ("Timeout", f"{fn.timeout} s", "warn" if near_timeout else ""),
+            ("Timeout", f"{fn.timeout} s", "warn" if timeout_warning else ""),
             ("Architecture", fn.architecture),
         ]
         if m is not None:
@@ -570,7 +580,7 @@ class LambdaView(_BaseView):
                 ("Error rate", _pct(m.error_rate) if m.invocations else "-", "warn" if level == "warn" else ""),
                 ("Avg / longest run",
                  f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}" if m.invocations else "-",
-                 "warn" if near_timeout else ""),
+                 "warn" if timeout_warning else ""),
             ]
         cards.append(("Est. cost / month", human_money(_total(cost)) if cost else "-"))
         cards.append(("Triggers", f"{len(detail.triggers):,}", "warn" if public else ""))
@@ -716,7 +726,7 @@ class LambdaView(_BaseView):
             basis = (f"{self._price_basis()}; usage over the last {days} days scaled to a month" if m is not None
                      else self._price_basis())
             sections["cost"].append(_Table(
-                ["Part", "Est. $/month"], [[_PARTS.get(part, part), human_money(value)] for part, value in cost.items()],
+                ["Part", "Est. $/month"], [[COST_PARTS.get(part, part), human_money(value)] for part, value in cost.items()],
                 title=f"Estimated monthly cost: {human_money(_total(cost))} ({basis}, before the free tier)",
                 max_rows=0,
             ))
@@ -739,26 +749,28 @@ class LambdaView(_BaseView):
     # ------------------------------------------------------------------ when something goes wrong
 
     @_friendly_errors
-    def errors(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 10_000) -> None:
+    def errors(self, name: str, *, since: Any = "24h", until: Any = None, region: str | None = None,
+               limit: Any = 10_000) -> None:
         """
         A function's errors in the last 24 hours, grouped by cause: timeouts, running out of memory, code that
         can't load, missing permissions and exceptions, each with how often, when, an example and the run to look
         at, next to CloudWatch's count of failed and throttled calls. since='7d' or '2026-10-01' looks further
-        back; reading stops at the newest `limit` error lines.
+        back, and until='2026-10-15' ends the range earlier than now; reading stops at the newest `limit` error lines.
         """
         limit = _as_count(limit, "limit")
         with self._progress("Reading error lines", unit="lines") as tick, self._named(name, region):
-            report = self.core.errors(name, since=since, region=region, limit=limit, progress=tick)
-        self._show(self._errors_blocks(report, since=since, limit=limit))
+            report = self.core.errors(name, since=since, until=until, region=region, limit=limit, progress=tick)
+        self._show(self._errors_blocks(report, since=since, until=until, limit=limit))
 
-    def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
-                       for_window: bool = False) -> list[Any]:
+    def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", until: Any = None,
+                       limit: int | None = 10_000, for_window: bool = False) -> list[Any]:
         """
         errors()'s report, as blocks; for_window=True leaves out the errors by cause and the newest error lines (the
         explorer lists them as lines to click).
         """
         fn, m = report.function, report.metrics
-        window = _window((report.until - report.since).total_seconds())
+        span = _span_said(report.since, report.until)
+        range_arg = _range_arg(since, until, "24h")
         found = error_findings(report)
         timeouts = sum(g.count for g in report.groups if g.kind == "Timeout")
         out_of_memory = sum(g.count for g in report.groups if g.kind == "Out of memory")
@@ -777,7 +789,7 @@ class LambdaView(_BaseView):
             cards.insert(3, ("Throttled calls", _count(round(m.throttles)), "warn"))
         sub = " · ".join(filter(None, [
             f"log group {report.log_group}",
-            f"the last {window} (since {_fmt_dt(report.since, zone=True)})",
+            span + (f" (since {_fmt_dt(report.since, zone=True)})" if until is None else ""),
             fn.region if fn.region != self.core.region else "",
         ]))
         blocks: list[Any] = [_Title(f"Errors in {fn.name}", sub), _Cards(cards)]
@@ -787,7 +799,7 @@ class LambdaView(_BaseView):
                 f"Reading stopped at the newest {_count(limit)} error lines, which reach back to "
                 f"{_fmt_dt(report.covered_from, zone=True)}: pass limit= to read more, or a shorter since=."
             ))
-        empty = (f"No errors in the last {window}: no error lines in its logs"
+        empty = (f"No errors in {span}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
         blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
         if report.groups and not for_window:
@@ -808,10 +820,10 @@ class LambdaView(_BaseView):
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)
         if newest is not None:
-            steps.append((self._call_for("logs", fn, request_id=newest.request_id, **_since_arg(since, "24h")),
+            steps.append((self._call_for("logs", fn, request_id=newest.request_id, **range_arg),
                           "the whole run behind the newest error"))
         if timeouts or out_of_memory:
-            steps.append((self._call_for("performance", fn, **_since_arg(since, "24h")),
+            steps.append((self._call_for("performance", fn, **range_arg),
                           "run times and memory: how close runs come to the limits"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
@@ -844,13 +856,15 @@ class LambdaView(_BaseView):
         search: str | None = None,
         request_id: str | None = None,
         n: Any = 50,
+        until: Any = None,
         region: str | None = None,
     ) -> None:
         """
         The newest lines a function logged (50, from the last hour), with each run's REPORT line summed up: run
         time, memory used and cold start. search='KeyError' keeps lines with that text (case-sensitive; join words
         with AND, OR and NOT, 'KeyError OR Timeout', or pass a CloudWatch Logs filter pattern), request_id= shows one
-        run from start to end (from the last 24 hours), and since='24h' or '2026-10-01' looks further back.
+        run from start to end (from the last 24 hours), since='24h' or '2026-10-01' looks further back, and
+        until='2026-10-02' ends the range earlier than now.
         """
         n = _as_int(n, "n")
         if n < 1:
@@ -861,10 +875,10 @@ class LambdaView(_BaseView):
         pattern = words.pattern() if words is not None else _filter_pattern(search)
         limit = 10_000 if request_id else max(3 * n, 300)
         with self._progress("Reading log lines", unit="lines") as tick, self._named(name, region):
-            page = self.core.log_events(name, since=since, pattern=pattern, request_id=request_id, limit=limit,
-                                        region=region, progress=tick)
+            page = self.core.log_events(name, since=since, until=until, pattern=pattern, request_id=request_id,
+                                        limit=limit, region=region, progress=tick)
         fn = page.function
-        window = _window((page.until - page.since).total_seconds())
+        span = _span_said(page.since, page.until)
         events = page.events
         phrase = _phrase(search)
         if not request_id:
@@ -881,8 +895,8 @@ class LambdaView(_BaseView):
             ("Newest line", human_age(shown[-1].time, page.until) if shown else "-"),
         ]
         what = (f"run {request_id}" if request_id
-                else f"the newest {_plural(len(shown), 'line')} of the last {window}" if shown
-                else f"the last {window}")
+                else f"the newest {_plural(len(shown), 'line')} of {span}" if shown
+                else span)
         sub = " · ".join(filter(None, [
             f"log group {page.log_group}",
             _search_said(search, phrase, words) if search and not request_id else "",
@@ -895,19 +909,19 @@ class LambdaView(_BaseView):
         if not shown and "logs" not in page.errors:
             if request_id:
                 blocks.append(_Note(
-                    f"No run {request_id} in the last {window}. errors() and performance() name runs by their "
+                    f"No run {request_id} in {span}. errors() and performance() name runs by their "
                     "request IDs; pass since= to look further back."
                 ))
             elif page.latest is not None:
                 back = max(1, math.ceil((page.until - page.latest).total_seconds() / 86400) + 1)
                 blocks.append(_Note(
-                    f"No lines{' matching ' + repr(search) if search else ''} in the last {window}. The newest line in "
+                    f"No lines{' matching ' + repr(search) if search else ''} in {span}. The newest line in "
                     f"its log group is from {human_age(page.latest, page.until)}: "
                     f"{self._call_for('logs', fn, since=f'{back}d', **({'search': search} if search else {}))}."
                 ))
             else:
                 blocks.append(_Note(
-                    f"No lines in the last {window}"
+                    f"No lines in {span}"
                     + (f" matching {search!r}" if search else ", and none at all in its log group: it hasn't run, "
                        "or it logs somewhere else") + "."
                 ))
@@ -929,14 +943,17 @@ class LambdaView(_BaseView):
             blocks.append(_Table([f"Time ({_tz_label()})", "Request ID", "Kind", "Line"], rows, max_rows=0,
                                  title="Oldest first, the newest at the bottom"))
         steps = []
+        range_arg = _since_arg(chosen, "24h") if until is None else _range_arg(since, until, "24h")
         if error_lines:
-            steps.append((self._call_for("errors", fn, **_since_arg(chosen, "24h")), "every error, grouped by cause"))
+            steps.append((self._call_for("errors", fn, **range_arg), "every error, grouped by cause"))
             rid = next((e.request_id for e in reversed(error_lines) if e.request_id), None)
             if rid and not request_id:
-                steps.append((self._call_for("logs", fn, request_id=rid), "the whole run behind the newest error"))
-        if not request_id and since == "1h":
+                steps.append((self._call_for("logs", fn, request_id=rid, **_range_arg(since, until, "24h")),
+                              "the whole run behind the newest error"))
+        if not request_id and since == "1h" and until is None:
             steps.append((self._call_for("logs", fn, since="24h"), "the last 24 hours"))
-        steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
+        steps.append((self._call_for("performance", fn, **(range_arg if until is not None else {})),
+                      "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
         self._show(blocks)
 
@@ -946,6 +963,7 @@ class LambdaView(_BaseView):
         name: str,
         *,
         since: Any = "24h",
+        until: Any = None,
         where: str | None = None,
         sort: Any = None,
         columns: Any = None,
@@ -960,53 +978,56 @@ class LambdaView(_BaseView):
         logged. where='duration > 15s and cold' keeps the runs that match (also status, memory, error ~ KeyError, or
         any field its JSON logs or logged event carry: event.Records.s3.object.size > 30MB), sort='-duration' puts
         the longest first, columns=[...] picks what each row shows, group_by='hour' sums them up per hour (or per
-        error_type, version or any field), and since='today' or '7d' reads another range.
+        error_type, version or any field), and since='today' or '7d' reads another range (until='2026-10-02' ends it
+        earlier than now).
         """
         n = _as_int(n, "n")
         limit = _as_count(limit, "limit")
         with self._progress("Reading runs", unit="lines") as tick, self._named(name, region):
-            table = self.core.runs(name, since=since, where=where, sort=sort, fields=fields, limit=limit,
+            table = self.core.runs(name, since=since, until=until, where=where, sort=sort, fields=fields, limit=limit,
                                    region=region, progress=tick)
         fn = table.function
         chosen = [columns] if isinstance(columns, str) else list(columns) if columns else None
         blocks = _runs_blocks(
             table, call=lambda command, **kwargs: self._call_for(command, fn, **kwargs),
-            since_arg=_since_arg(since, "24h"), layout=_RunsLayout(chosen, group_by, n))
+            since_arg=_range_arg(since, until, "24h"), layout=_RunsLayout(chosen, group_by, n))
         blocks[1:1] = self._log_notes(table.errors, fn, fn.log_group)
         self._show(blocks)
 
     @_friendly_errors
-    def performance(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 5_000) -> None:
+    def performance(self, name: str, *, since: Any = "24h", until: Any = None, region: str | None = None,
+                    limit: Any = 5_000) -> None:
         """
         How a function's runs went in the last 24 hours, from the REPORT line Lambda logs after each one: run time
         (median, slowest 1 in 100, longest) against the timeout, memory used against what it has and the size that
         would do, cold starts and their start-up time, timeouts, and the slowest runs. since='7d' looks further
-        back; reading stops at the newest `limit` runs.
+        back and until='2026-10-15' ends the range earlier than now; reading stops at the newest `limit` runs.
         """
         limit = _as_count(limit, "limit")
         with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
-            perf = self.core.performance(name, since=since, region=region, limit=limit, progress=tick)
-        self._show(self._performance_blocks(perf, since=since, limit=limit))
+            perf = self.core.performance(name, since=since, until=until, region=region, limit=limit, progress=tick)
+        self._show(self._performance_blocks(perf, since=since, until=until, limit=limit))
 
-    def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
-                            for_window: bool = False) -> list[Any]:
+    def _performance_blocks(self, perf: Performance, *, since: Any = "24h", until: Any = None,
+                            limit: int | None = 5_000, for_window: bool = False) -> list[Any]:
         """
         performance()'s report, as blocks; for_window=True leaves out the slowest runs (the explorer lists them as runs
         to click).
         """
         fn, runs = perf.function, perf.invocations
-        window = _window((perf.until - perf.since).total_seconds())
+        span = _span_said(perf.since, perf.until)
+        range_arg = _range_arg(since, until, "24h")
         found = performance_findings(perf, prices=self.core.prices)
         blocks: list[Any] = [_Title(
             f"Performance of {fn.name}",
-            f"from {_plural(len(runs), 'REPORT line')} (one per run) in the last {window} · log group "
+            f"from {_plural(len(runs), 'REPORT line')} (one per run) in {span} · log group "
             f"{perf.log_group}",
         )]
         if not runs:
             blocks += self._log_notes(perf.errors, fn, perf.log_group)
             if "logs" not in perf.errors:
                 blocks.append(_Note(
-                    f"No REPORT lines in the last {window}: it wasn't called, or its logs go somewhere else. "
+                    f"No REPORT lines in {span}: it wasn't called, or its logs go somewhere else. "
                     f"{self._call_for('function_info', fn)} shows when it was last called."
                 ))
             return blocks
@@ -1018,15 +1039,13 @@ class LambdaView(_BaseView):
         memory = max((r.memory for r in runs if r.memory), default=fn.memory)
         timeouts = [r for r in runs if r.status == "timeout"]
         longest = max(durations)
-        # the same limits performance_findings() warns at, so a card is amber only when a warning is about it
-        near_timeout = bool(timeouts) or (percentile(durations, 99) or 0) >= 0.8 * fn.timeout * 1000
-        memory_warning = any((r.error_type or "").endswith("OutOfMemory") for r in runs) or (
-            max(used, default=0) >= 0.9 * memory)
+        timeout_warning = near_timeout(perf)
+        memory_warning = memory_tight(perf)
         cards: list[tuple[str, ...]] = [
             ("Runs", _count(len(runs))),
             ("Median run time", human_ms(percentile(durations, 50))),
             ("1 in 100 takes", human_ms(percentile(durations, 99))),
-            ("Longest", f"{human_ms(longest)} of {fn.timeout} s", "warn" if near_timeout else ""),
+            ("Longest", f"{human_ms(longest)} of {fn.timeout} s", "warn" if timeout_warning else ""),
             ("Memory used", f"{max(used, default=0):,.0f} of {memory:,} MB", "warn" if memory_warning else ""),
             ("Cold starts", f"{_pct(len(cold) / len(runs))}" + (f" · {human_ms(sum(init) / len(init))}" if init else "")),
             ("Timeouts", _count(len(timeouts)), "warn" if timeouts else ""),
@@ -1075,13 +1094,33 @@ class LambdaView(_BaseView):
                  for r in slowest],
                 title="The slowest runs", max_rows=0,
             ))
-        steps = [(self._call_for("logs", fn, request_id=slowest[0].request_id, **_since_arg(since, "24h")),
+        steps = [(self._call_for("logs", fn, request_id=slowest[0].request_id, **range_arg),
                   "everything the slowest run logged")]
         if timeouts:
-            steps.append((self._call_for("errors", fn, **_since_arg(since, "24h")), "every error, grouped by cause"))
+            steps.append((self._call_for("errors", fn, **range_arg), "every error, grouped by cause"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
         return blocks
+
+    @_friendly_errors
+    def stats(self, name: str, since: Any = "7d", until: Any = None, *, region: str | None = None,
+              limit: Any = 5_000) -> None:
+        """
+        A function's numbers from one date to another: calls, error rate, throttled calls, average and longest run
+        time, the most running at once, cold starts, memory used and what it all cost, then a row per day (per hour
+        for two days or less). stats('etl', '2026-10-01', '2026-10-15') reads that range, stats('etl', '30d') the
+        last 30 days; cold starts and memory come from the newest `limit` runs' logs (limit=0 skips them).
+        """
+        limit = _as_int(limit, "limit")
+        with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
+            fn = self.core.function(name, region=region)
+            start, end = self.core.time_range(since, until)
+            stats = self.core._stats(fn, start, end, limit=limit, progress=tick)
+        blocks = _stats_blocks(stats, call=lambda command, **kwargs: self._call_for(command, fn, **kwargs),
+                               range_args=_range_arg(since, until, "24h"), price_basis=self._price_basis(),
+                               limit=limit)
+        blocks[2:2] = self._log_notes(stats.errors, fn, fn.log_group)
+        self._show(blocks)
 
     # ------------------------------------------------------------------ code
 
