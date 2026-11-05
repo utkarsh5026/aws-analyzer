@@ -13,8 +13,8 @@ ipython==9.17.1; python_version >= "3.11"
 ipython==8.39.0; python_version < "3.11"
 
 # Tests
-moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs]==5.2.4
-pytest==9.1.1
+moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs]==5.2.5
+pytest==9.2.0
 # Runs the tests on every CPU (CI's `pytest -n auto`); the Pyodide tests share one worker (tests/conftest.py).
 pytest-xdist==3.8.0
 # Write the Avro and Excel test files. The analyzer doesn't need them: it reads Avro itself,
@@ -47,4 +47,4 @@ twine==7.0.0
 readme-renderer[md]==46.0
 
 # Lint
-ruff==0.17.1
+ruff==0.17.3
