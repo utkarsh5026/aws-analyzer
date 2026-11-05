@@ -31,7 +31,7 @@ from aws_analyzer.bedrock_kb import blocks as kb_blocks
 from aws_analyzer.bedrock_kb import style as stylemod
 from aws_analyzer.bedrock_kb.analysis import common as kb_common
 from aws_analyzer.bedrock_kb.explorer import frame as kb_frame
-from aws_analyzer.bedrock_kb.explorer import window as kb_window
+from aws_analyzer.bedrock_kb.explorer import files as kb_files
 from aws_analyzer.bedrock_kb import (
     BEDROCK_PRICES,
     DEFAULT_PROMPT,
@@ -4322,7 +4322,7 @@ def test_explorer_saves_the_list_it_shows(world, tmp_path, monkeypatch):
     x.find.value = "no such file"
     x.list_button.click()
     assert plain(x.status.value) == "No file in the list to save: clear the search, or pick All above."
-    monkeypatch.setattr(kb_window, "_LIST_LINK_BYTES", 10)
+    monkeypatch.setattr(kb_files, "_LIST_LINK_BYTES", 10)
     x.find.value = ""
     x.list_button.click()
     assert "href" not in x.saved_view.value and "download it from Jupyter's file browser" in plain(x.status.value)

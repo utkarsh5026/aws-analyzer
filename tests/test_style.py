@@ -74,7 +74,6 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/bedrock_kb/blocks.py": 16,
     "src/aws_analyzer/bedrock_kb/explorer/frame.py": 12,
     "src/aws_analyzer/bedrock_kb/explorer/widgets.py": 1,
-    "src/aws_analyzer/bedrock_kb/explorer/window.py": 30,
     "src/aws_analyzer/bedrock_kb/helpers.py": 7,
     "src/aws_analyzer/bedrock_kb/models.py": 101,
     "src/aws_analyzer/bedrock_kb/style.py": 2,
