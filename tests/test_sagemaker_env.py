@@ -21,7 +21,9 @@ from aws_analyzer.sagemaker_env import (
     GB,
     KB,
     MB,
+    EVENT_ACTIONS,
     SAGEMAKER_PRICES,
+    AccessReport,
     Billable,
     Clearable,
     DiskEntry,
@@ -41,6 +43,8 @@ from aws_analyzer.sagemaker_env import (
     SageMakerAnalyzer,
     SageMakerView,
     Volume,
+    access_by_person,
+    access_findings,
     apply_studio_settings,
     clear_command,
     describe_instance,
@@ -50,6 +54,7 @@ from aws_analyzer.sagemaker_env import (
     env_name,
     env_steps,
     folder_tree,
+    for_notebook,
     hourly_price,
     human_runtime,
     idle_shutdown_commands,
@@ -63,6 +68,8 @@ from aws_analyzer.sagemaker_env import (
     on_start_script,
     output_tail,
     package_list,
+    is_public_ip,
+    parse_access_event,
     parse_app,
     parse_conda_history,
     parse_endpoint,
@@ -658,9 +665,11 @@ class Stubs:
     """
 
     def __init__(self):
-        self.clients = {name: boto3.client(name, region_name=REGION) for name in ("sagemaker", "sts", "cloudwatch")}
+        names = ("sagemaker", "sts", "cloudwatch", "cloudtrail")
+        self.clients = {name: boto3.client(name, region_name=REGION) for name in names}
         self.stubs = {name: Stubber(client) for name, client in self.clients.items()}
         self.sm, self.sts, self.cw = self.stubs["sagemaker"], self.stubs["sts"], self.stubs["cloudwatch"]
+        self.ct = self.stubs["cloudtrail"]
         for stub in self.stubs.values():
             stub.activate()
 
@@ -1030,6 +1039,170 @@ def test_view_validates_its_options(tmp_path):
 def test_environment_label_for_other_kinds():
     assert Environment(kind="other", name="x").label == "x"
     assert Environment().label == "this machine"
+
+
+# ----------------------------------------------------------------------------- access (CloudTrail)
+
+
+def trail_item(name, *, hours=1, who=("role", "priya"), ip="81.2.69.160", params=None, refused=""):
+    """
+    One LookupEvents item, its CloudTrailEvent record written the way CloudTrail writes it.
+    """
+    kind, user = who
+    identity = {
+        "role": {"type": "AssumedRole", "arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/DataScientist/{user}"},
+        "user": {"type": "IAMUser", "arn": f"arn:aws:iam::{ACCOUNT}:user/{user}", "userName": user},
+        "root": {"type": "Root", "arn": f"arn:aws:iam::{ACCOUNT}:root"},
+        "service": {"type": "AWSService", "invokedBy": "sagemaker.amazonaws.com"},
+    }[kind]
+    if params is None and not refused:
+        params = {"notebookInstanceName": "team-nb"}
+    record = {"userIdentity": identity, "eventName": name, "sourceIPAddress": ip, "userAgent": "Mozilla/5.0",
+              "requestParameters": params}
+    if refused:
+        record["errorCode"] = refused
+    return {"EventId": f"{name}-{hours}", "EventName": name, "EventTime": ago(hours=hours), "Username": user,
+            "CloudTrailEvent": json.dumps(record)}
+
+
+def test_parse_access_event():
+    opened = parse_access_event(trail_item("CreatePresignedDomainUrl", params={
+        "domainId": DOMAIN, "spaceName": "churn-analysis", "userProfileName": "priya"}))
+    assert (opened.action, opened.notebook, opened.who, opened.domain_id) == (
+        "opened", "churn-analysis", "DataScientist/priya", DOMAIN)
+    assert opened.is_sign_in and not opened.refused
+    stopped = parse_access_event(trail_item("DeleteApp", who=("service", ""), ip="sagemaker.amazonaws.com",
+                                            params={"domainId": DOMAIN, "userProfileName": "sam"}))
+    assert (stopped.action, stopped.who, stopped.notebook) == ("stopped", "SageMaker itself", "user sam")
+    refused = parse_access_event(trail_item("StartNotebookInstance", who=("user", "eve"), refused="AccessDenied"))
+    assert refused.refused == "AccessDenied" and refused.notebook == "" and refused.who == "eve"
+    assert parse_access_event(trail_item("ListApps")) is None
+    broken = parse_access_event({"EventName": "StopNotebookInstance", "EventTime": ago(hours=2),
+                                 "Username": "ops", "CloudTrailEvent": "{not json"})
+    assert broken.who == "ops" and broken.action == "stopped"
+    assert set(EVENT_ACTIONS.values()) == {"opened", "started", "stopped"}
+    assert is_public_ip("81.2.69.160") and not is_public_ip("10.0.0.4")
+    assert not is_public_ip("sagemaker.amazonaws.com") and not is_public_ip("AWS Internal")
+
+
+def access_report(items, **kwargs):
+    events = sorted((parse_access_event(i) for i in items), key=lambda e: e.when, reverse=True)
+    return AccessReport(REGION, 30, events=events, limit=2000, **kwargs)
+
+
+def test_access_findings():
+    report = access_report([
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=1),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=30),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=50, who=("role", "sam"), ip="89.160.20.112"),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=4, who=("user", "eve"), ip="49.36.112.18",
+                   refused="AccessDenied"),
+        trail_item("StartNotebookInstance", hours=80, who=("root", ""), ip="175.16.199.4"),
+    ])
+    found = access_findings(report)
+    texts = " ".join(text for _, text in found)
+    assert [level for level, _ in found] == ["warn", "warn", "info"]
+    assert "1 attempt to get into a notebook was refused (the last 4h ago, AccessDenied)" in texts
+    assert "AttributeKey=Username,AttributeValue=eve" in texts
+    assert "root user opened or started a notebook once" in texts and "MFA" in texts
+    assert "opened from 2 internet addresses, and 1 internet address only once: 89.160.20.112" in texts
+    people = access_by_person(report.events)
+    assert [(p.who, p.sign_ins, p.refused) for p in people] == [
+        ("DataScientist/priya", 2, 0), ("DataScientist/sam", 1, 0), ("eve", 0, 1)]
+    assert [e.who for e in for_notebook(report.events, "team-nb")] == [
+        "DataScientist/priya", "DataScientist/priya", "DataScientist/sam", "root user"]
+    assert access_findings(access_report([])) == []
+    limits = access_findings(access_report([], cut_short=True, asked_days=120, errors={"cloudtrail": "AccessDenied"}))
+    limit_text = " ".join(text for _, text in limits)
+    assert "keeps 90 days, so this covers 90, not 120" in limit_text
+    assert "stopped at 2,000 events" in limit_text and "access(limit=10000)" in limit_text
+    assert "needs cloudtrail:LookupEvents" in limit_text
+
+
+def queue_trail(stubs, found):
+    """
+    One LookupEvents answer per kind of event, in the order access() asks, each with the items `found` has for it.
+    """
+    for name in EVENT_ACTIONS:
+        stubs.ct.add_response("lookup_events", {"Events": [i for i in found if i["EventName"] == name]}, None)
+
+
+def test_access(stubs, tmp_path):
+    core = stubs.analyzer(tmp_path)
+    queue_trail(stubs, [
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=5),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=2, params={"notebookInstanceName": "other"}),
+        trail_item("StopNotebookInstance", hours=1, who=("user", "ops")),
+    ])
+    ticks = []
+    report = core.access(days=120, progress=lambda done, total: ticks.append((done, total)))
+    assert [(e.action, e.notebook) for e in report.events] == [
+        ("stopped", "team-nb"), ("opened", "other"), ("opened", "team-nb")]
+    assert report.days == 90 and report.asked_days == 120 and not report.cut_short
+    assert ticks[-1] == (6, 6) and report.errors == {}
+    assert list(report.to_df()["who"]) == ["ops", "DataScientist/priya", "DataScientist/priya"]
+
+
+def test_access_one_notebook_and_the_limit(stubs, tmp_path):
+    core = stubs.analyzer(tmp_path)
+    stubs.ct.add_response("lookup_events", {"Events": [
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=1),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=3, params={"notebookInstanceName": "other"}),
+    ]}, None)
+    report = core.access("team-nb", limit=1)
+    assert report.cut_short and [e.notebook for e in report.events] == ["team-nb"]
+    with pytest.raises(ValueError, match="days must be at least 1"):
+        core.access(days=0)
+
+
+def test_access_without_permission(stubs, tmp_path):
+    core = stubs.analyzer(tmp_path)
+    denied(stubs.ct, "lookup_events", "cloudtrail:LookupEvents")
+    report = core.access()
+    assert report.events == [] and report.errors == {"cloudtrail": "AccessDeniedException"}
+
+
+def test_ui_access(stubs, tmp_path, capsys):
+    core = stubs.analyzer(write_root(tmp_path, SPACE_META, home="home/sagemaker-user"))
+    queue_trail(stubs, [
+        trail_item("CreatePresignedDomainUrl", hours=2, params={"domainId": DOMAIN, "spaceName": "churn-analysis"}),
+        trail_item("CreatePresignedDomainUrl", hours=26, params={"domainId": DOMAIN, "spaceName": "churn-analysis"}),
+        trail_item("CreatePresignedNotebookInstanceUrl", hours=9, who=("user", "eve"), ip="49.36.112.18",
+                   refused="AccessDenied"),
+        trail_item("DeleteApp", hours=40, who=("service", ""), ip="sagemaker.amazonaws.com",
+                   params={"domainId": DOMAIN, "spaceName": "forecasting"}),
+    ])
+    out = run(capsys, SageMakerView(core, mode="text").access)
+    for expected in (
+        "Who got into notebooks in us-east-1, last 30 days",
+        "4 events from CloudTrail",
+        "Sign-ins: 2",
+        "Refused: 1 (!)",
+        "Last sign-in: 2h ago",
+        "1 attempt to get into a notebook was refused",
+        "-- Who signed in --",
+        "churn-analysis  📍\u00a0this\u00a0notebook",
+        "refused (AccessDenied)",
+        "SageMaker itself",
+        "inside AWS",
+        "jupyter.log",
+        "access('churn-analysis')",
+        "access(days=90)",
+        "instance('churn-analysis')",
+    ):
+        assert expected in out, expected
+
+
+def test_ui_access_with_nothing_found_or_no_permission(stubs, tmp_path, capsys):
+    core = stubs.analyzer(tmp_path)
+    queue_trail(stubs, [])
+    out = run(capsys, SageMakerView(core, mode="text").access, "team-nb", days=7)
+    assert "Nobody opened, started or stopped team-nb in us-east-1 in the last 7 days" in out
+    assert "access('team-nb', days=90)" in out
+    denied(stubs.ct, "lookup_events", "cloudtrail:LookupEvents")
+    out = run(capsys, SageMakerView(core, mode="text").access)
+    assert "Couldn't read CloudTrail's event history (AccessDeniedException; needs cloudtrail:LookupEvents)" in out
+    assert "Traceback" not in out
 
 
 # ----------------------------------------------------------------------------- Python environments

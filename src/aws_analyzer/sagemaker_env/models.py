@@ -599,3 +599,87 @@ class EnvResult:
     seconds: float = 0.0
     failed: EnvStep | None = None
     leftover: bool = False  # a failed make left a folder that isn't an environment (new_env() won't reuse it)
+
+
+@dataclass
+class AccessEvent:
+    """
+    One CloudTrail record of someone opening, starting or stopping a notebook: who, when, from where, and
+    whether AWS let them.
+    """
+
+    when: datetime
+    event_name: str
+    action: str
+    notebook: str
+    who: str
+    who_arn: str = ""
+    identity_type: str = ""
+    ip: str = ""
+    user_agent: str = ""
+    refused: str = ""
+    domain_id: str = ""
+    username: str = ""
+
+    @property
+    def is_sign_in(self) -> bool:
+        """
+        Whether this is someone opening a notebook (a sign-in link), rather than starting or stopping one.
+        """
+        return self.action == "opened"
+
+
+@dataclass
+class AccessReport:
+    """
+    What access() found in CloudTrail: the sign-ins, starts and stops of notebooks in one region over the last
+    `days` days, newest first. `cut_short` says the read stopped at `limit` events; sections that couldn't be
+    read are in `errors` (section -> error code).
+    """
+
+    region: str
+    days: int
+    events: list[AccessEvent] = field(default_factory=list)
+    name: str = ""
+    asked_days: int = 0
+    limit: int = 0
+    cut_short: bool = False
+    errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def sign_ins(self) -> list[AccessEvent]:
+        """
+        The events that opened a notebook and weren't refused.
+        """
+        return [e for e in self.events if e.is_sign_in and not e.refused]
+
+    @property
+    def refused(self) -> list[AccessEvent]:
+        """
+        The events AWS refused (AccessDenied and the like).
+        """
+        return [e for e in self.events if e.refused]
+
+    def to_df(self):
+        """
+        Every event as a pandas DataFrame, one row each, newest first.
+        """
+        pd = _require("pandas", "AccessReport.to_df()")
+        columns = ["when", "action", "notebook", "who", "who_arn", "identity_type", "ip", "user_agent", "refused",
+                   "event_name", "domain_id", "username"]
+        rows = [{column: getattr(e, column) for column in columns} for e in self.events]
+        return pd.DataFrame(rows, columns=columns)
+
+
+@dataclass
+class PersonAccess:
+    """
+    One identity's sign-ins in an AccessReport: how often it opened notebooks, which, from where, and when last.
+    """
+
+    who: str
+    sign_ins: int = 0
+    notebooks: list[str] = field(default_factory=list)
+    ips: list[str] = field(default_factory=list)
+    refused: int = 0
+    last: datetime | None = None

@@ -1478,6 +1478,7 @@ ui.help()                        # every command, grouped by task
 ui.instance()                    # this notebook: type, cost so far, idle shutdown, CPU / memory / disk / GPU now
 ui.disk()                        # what fills the disk, and the caches and trash that are safe to clear
 ui.running()                     # everything billing by the hour in the region, and what looks forgotten
+ui.access()                      # who opened, started or stopped notebooks in the last 30 days, and from where
 ui.instance("old-experiment")    # another notebook instance, or a Studio space by name
 
 ui.envs()                        # the Python environments and Jupyter kernels here
@@ -1533,6 +1534,7 @@ Grouped the way `ui.help()` lists them.
 | Command                         | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `running(metrics=True, days=7)` | Everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor, Studio Classic), endpoints, and training and processing jobs, with the instance, price per hour, how long each has run and whether it stops when idle, and each endpoint's requests over the last `days` days from CloudWatch. Stopped notebook instances are listed too, because their volumes are still billed. Findings, each with the command that stops it: notebooks and apps running for over 12 hours with nothing to stop them, endpoints with no requests, and the storage that stopped notebook instances keep |
+| `access(name=None, days=30)`   | Who got into your notebooks, from CloudTrail's event history (90 days at most): every sign-in link to a notebook instance or Studio, every start and stop, and every try AWS refused, with who, when and the IP address it came from, a row per person and a row per event. `name` keeps one notebook instance or space. Findings: refused tries (with the CloudTrail call that shows what else that identity did), sign-ins by the account's root user, and internet addresses only one sign-in came from. It shows who got in, not what they did inside Jupyter |
 
 ### Reference
 
@@ -1561,6 +1563,9 @@ result = sm.create_env(plan)                          # EnvResult: runs them; .o
 
 r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
 r.to_df()                                             # one row per notebook, app, endpoint and job
+
+a = sm.access("old-experiment", days=90)              # AccessReport: .events (AccessEvent), .sign_ins, .refused
+a.to_df()                                             # one row per sign-in, start and stop: who, when, IP
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on responses you already have:
@@ -1568,8 +1573,9 @@ The analysis functions are pure (no AWS calls), so they also work on responses y
 `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`,
 `parse_process`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `folder_tree`,
 `idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`,
-`env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, and the findings: `instance_findings`,
-`disk_findings`, `running_findings`, `env_findings`, `plan_findings`.
+`env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, `parse_access_event` (a CloudTrail
+LookupEvents item), `for_notebook`, `access_by_person`, `is_public_ip`, and the findings: `instance_findings`,
+`disk_findings`, `running_findings`, `env_findings`, `plan_findings`, `access_findings`.
 
 </details>
 
@@ -1609,6 +1615,7 @@ Read-only, per command:
 | `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps`                                                                                                                                                                                                                  | `instance("space name")`                          |
 | `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running`                                         |
 | `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`: endpoint requests                      |
+| `cloudtrail:LookupEvents`                                                                                                                                                                                                                                                              | `access`                                          |
 
 `sts:GetCallerIdentity` (who you're signed in as) needs no permission, `disk()` and `envs()` only read local
 files, and `new_env()` only runs conda (or uv) and pip on the notebook. Anything

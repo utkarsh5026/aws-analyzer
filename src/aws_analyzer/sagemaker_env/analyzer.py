@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import difflib
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
@@ -19,7 +19,8 @@ from .._kit.fmt import _utcnow
 
 from .prices import SAGEMAKER_PRICES
 from .helpers import _arn_name, lifecycle_idle
-from .models import _BILLED, Billable, Environment, InstanceReport, NotebookInfo, RunningReport
+from .models import _BILLED, AccessEvent, AccessReport, Billable, Environment, InstanceReport, NotebookInfo, RunningReport
+from .analysis.access import EVENT_ACTIONS, HISTORY_DAYS, LOOKUP_LIMIT, for_notebook, parse_access_event
 from .analysis.machine import parse_metadata
 from .analysis.notebooks import apply_studio_settings, parse_app, parse_notebook_instance, studio_idle
 from .analysis.running import parse_endpoint, parse_processing_job, parse_training_job
@@ -95,6 +96,9 @@ class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _BaseAnalyzer):
                 ),
                 "sts": lambda: self.session.client(
                     "sts", region_name=region, config=self._config
+                ),
+                "cloudtrail": lambda: self.session.client(
+                    "cloudtrail", region_name=region, config=self._config
                 ),
             }
             try:
@@ -632,6 +636,67 @@ class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _BaseAnalyzer):
         env = self.environment()
         for b in report.resources:
             b.this = _is_current(b, env)
+        return report
+
+    def _lookup(self, event_name: str, start: datetime, end: datetime, limit: int) -> tuple[list[AccessEvent], bool]:
+        """
+        One event name's records from CloudTrail's event history between start and end, newest first, at most
+        `limit` of them -> (events, whether there were more).
+        """
+        pages = self._service("cloudtrail").get_paginator("lookup_events").paginate(
+            LookupAttributes=[{"AttributeKey": "EventName", "AttributeValue": event_name}],
+            StartTime=start,
+            EndTime=end,
+        )
+        events: list[AccessEvent] = []
+        for page in pages:
+            for item in page.get("Events", []):
+                if len(events) >= limit:
+                    return events, True
+                event = parse_access_event(item)
+                if event is not None:
+                    events.append(event)
+        return events, False
+
+    def access(
+        self,
+        name: str | None = None,
+        *,
+        days: int = 30,
+        limit: int = LOOKUP_LIMIT,
+        progress: Callable[..., None] | None = None,
+    ) -> AccessReport:
+        """
+        Who opened, started or stopped notebooks in the region over the last `days` days (at most 90, what
+        CloudTrail's event history keeps), from CloudTrail: notebook instances' sign-in links, starts and stops,
+        and Studio's sign-in links and apps made and deleted, including the tries AWS refused. `name` keeps one
+        notebook instance or Studio space. The read stops at `limit` events (`cut_short`); progress is called
+        with (done, total) kinds of event.
+        """
+        if days < 1:
+            raise ValueError(f"days must be at least 1, not {days}.")
+        covered = min(days, HISTORY_DAYS)
+        end = _utcnow()
+        start = end - timedelta(days=covered)
+        report = AccessReport(self.region, covered, name=name or "", limit=limit, asked_days=days)
+        names = list(EVENT_ACTIONS)
+        for done, event_name in enumerate(names, start=1):
+            room = limit - len(report.events)
+            if room <= 0:
+                report.cut_short = True
+                break
+            try:
+                events, more = self._lookup(event_name, start, end, room)
+            except (ClientError, BotoCoreError) as exc:
+                report.errors["cloudtrail"] = _error_name(exc)
+                break
+            report.events += events
+            report.cut_short = report.cut_short or more
+            if progress:
+                progress(done, len(names))
+        if name:
+            report.events = for_notebook(report.events, name)
+        report.events.sort(key=lambda e: e.when, reverse=True)
         return report
 
 

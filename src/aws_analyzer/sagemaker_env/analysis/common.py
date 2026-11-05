@@ -39,6 +39,7 @@ _SECTIONS = {  # section -> (what it is, the permission that reads it)
         "sagemaker:DescribeProcessingJob",
     ),
     "metrics": ("endpoint traffic", "cloudwatch:GetMetricData"),
+    "cloudtrail": ("CloudTrail's event history", "cloudtrail:LookupEvents"),
 }
 
 FULL = 0.85  # a disk or memory this full gets a warning

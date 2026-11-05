@@ -32,10 +32,12 @@ Quick start
     ui.envs()                                         # the Python environments and Jupyter kernels here
     ui.new_env("3.11")                                # a Python 3.11 environment with its own kernel, kept when it stops
     ui.running()                                      # everything running and billing in the region, and what looks forgotten
+    ui.access()                                       # who opened, started or stopped notebooks in the last 30 days
 
     sm = ui.core                                      # same analyzer, raw data
     report = sm.instance()                            # InstanceReport: .notebook (settings), .machine (right now)
     df = sm.running().to_df()                         # one row per notebook, app, endpoint and job
+    logins = sm.access(days=30).to_df()               # one row per sign-in, start and stop, from CloudTrail
     folders = sm.disk().to_df()                       # folder sizes
     envs = sm.environments().to_df()                  # one row per Python environment
 """
@@ -49,11 +51,15 @@ from .helpers import (
     lifecycle_idle, new_env_call, parse_python_version, parse_pyvenv_cfg, shell_path,
 )
 from .models import (
-    Billable, Clearable, DiskEntry, DiskReport, EnvPlan, EnvReport, EnvResult, EnvStep, Environment, GPUInfo,
+    AccessEvent, AccessReport, PersonAccess, Billable, Clearable, DiskEntry, DiskReport, EnvPlan, EnvReport, EnvResult, EnvStep, Environment, GPUInfo,
     InstanceReport, KernelSpec, Machine, NotebookInfo, ProcessInfo, PythonEnv, RunningReport, Volume,
 )
 from .analysis.machine import parse_gpus, parse_loadavg, parse_meminfo, parse_metadata, parse_process
 from .analysis.common import FULL
+from .analysis.access import (
+    EVENT_ACTIONS, HISTORY_DAYS, LOOKUP_LIMIT, access_by_person, access_findings, for_notebook, is_public_ip,
+    parse_access_event,
+)
 from .analysis.notebooks import (
     AUTOSTOP_SAMPLE, apply_studio_settings, idle_shutdown_commands, instance_findings, notebook_costs, parse_app,
     parse_notebook_instance, smaller_type, stop_command, studio_idle,
@@ -71,6 +77,17 @@ from .view import SageMakerView
 
 __all__ = [
     "AUTOSTOP_SAMPLE",
+    "AccessEvent",
+    "AccessReport",
+    "EVENT_ACTIONS",
+    "HISTORY_DAYS",
+    "LOOKUP_LIMIT",
+    "PersonAccess",
+    "access_by_person",
+    "access_findings",
+    "for_notebook",
+    "is_public_ip",
+    "parse_access_event",
     "CHANNEL",
     "FULL",
     "GB",
