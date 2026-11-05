@@ -21,6 +21,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - **Compare** searches the question as Semantic and Hybrid, with more passages too, and shows where each passage ranks.
   - `where=` also takes the filter as text everywhere: `ui.search("refunds", where="team = billing")`.
 
+### Changed
+
+- 📚 **Bedrock Knowledge Bases: the explorer looks like the others**
+  - `explore()` now has the same console look as the S3, Lambda and Step Functions explorers: a monospace font and a code editor's colours, light and dark.
+
 ## [0.47.0] - 2026-11-04
 
 ### Added

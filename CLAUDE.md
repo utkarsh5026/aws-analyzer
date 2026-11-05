@@ -664,8 +664,9 @@ How the View layer works:
   `_SettingsTab`, each tab's status line its `_<tab>_line`; `frame.py` its tabs, stylesheet and `_window_text`,
   `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
   keeps it in `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way, on the
-  windows' kit (an `_Explorer`): ipywidgets styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS`
-  included once in its style widget, so `_html` strips it from each report), no JavaScript, full-row buttons under
+  windows' kit (an `_Explorer`): ipywidgets styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, with `_TERMINAL_CSS`
+  over it, the other explorers' console look on `_terminal_theme`, report CSS `_CSS` included once in its style widget,
+  so `_html` strips it from each report), no JavaScript, full-row buttons under
   their faces (`_FileRow`, the knowledge base field `_Chooser`, a `_Picker`, with its searchable list and `backdrop`),
   custom tab buttons over pages (`_EXPLORER_TABS`, `_tab_bar`, icons from `_explorer_rules()`, which also gives each
   `FILE_STATES` key its colour). Its data is the analyzer's file layer:
