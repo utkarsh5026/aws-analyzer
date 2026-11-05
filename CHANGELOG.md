@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Tries AWS refused, the root user signing in and addresses seen only once are findings, with the call to look further.
   - `access("old-experiment", days=90)` for one notebook; it needs `cloudtrail:LookupEvents`.
 
+- 📚 **Bedrock Knowledge Bases explorer: metadata filters and Compare in Search**
+  - Type a filter under the search options, like `team = billing; year >= 2024`, to search only the files whose metadata matches.
+  - **Compare** searches the question as Semantic and Hybrid, with more passages too, and shows where each passage ranks.
+  - `where=` also takes the filter as text everywhere: `ui.search("refunds", where="team = billing")`.
+
 ### Changed
 
 - 📚 **Bedrock Knowledge Bases: the explorer looks like the others**

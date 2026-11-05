@@ -73,7 +73,7 @@ from .models import (
 from .analysis.prompting import DEFAULT_PROMPT, SYSTEM_PROMPT, build_prompt, parse_citation_markers
 from .analysis.parsing import parse_converse, parse_data_source, parse_ingestion_job, parse_knowledge_base, parse_rag
 from .analysis.settings import describe_chunking, describe_parsing, describe_vector_store, store_name
-from .analysis.filters import describe_filter
+from .analysis.filters import describe_filter, parse_where
 from .analysis.deciding import changed_since, compare_retrievals, retrieval_metrics, summarize_documents
 from .analysis.cost import idle_cost_label, vector_store_monthly_cost
 from .analysis.findings import (
@@ -190,6 +190,7 @@ __all__ = [
     "parse_rag",
     "parse_retrieve",
     "parse_time",
+    "parse_where",
     "pick_files",
     "place_chunks",
     "presigned_url",

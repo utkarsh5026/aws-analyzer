@@ -51,7 +51,8 @@ class _SearchCommands:
         """
         Ranked passages for a question, with score bars, source and page, highlighted words and metadata.
         Also findings, time and cost. data_source= searches only one data source (its name or ID, or a list of them);
-        where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}.
+        where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}, or as text,
+        where='team = billing; year >= 2024'.
         """
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="passages"):

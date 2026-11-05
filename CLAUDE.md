@@ -658,8 +658,11 @@ How the View layer works:
   which gives them back as they were), `focus_moved` comes from `_set_status` and `_tab_changed`, and its `focus`
   (`window/focus.py`) is 'chat', 'answer' (the last question, its grounded share and the files cited) or 'test_run'. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
-- `bedrock_kb`'s explorer window, `KBExplorer` (`bedrock_kb/explorer/`: `window.py` with `explore()`, `frame.py` its
-  tabs, stylesheet and `_window_text`, `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
+- `bedrock_kb`'s explorer window, `KBExplorer` (`bedrock_kb/explorer/`: `window.py` with `explore()` composes it from a
+  mixin per tab, `_OverviewTab` (`overview.py`, with the header's cards), `_FilesTab` (`files.py`, the list),
+  `_FilePane` (`file.py`, the right side: a file's page and its question box), `_SyncsTab`, `_SearchTab` and
+  `_SettingsTab`, each tab's status line its `_<tab>_line`; `frame.py` its tabs, stylesheet and `_window_text`,
+  `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
   keeps it in `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way, on the
   windows' kit (an `_Explorer`): ipywidgets styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, with `_TERMINAL_CSS`
   over it, the other explorers' console look on `_terminal_theme`, report CSS `_CSS` included once in its style widget,

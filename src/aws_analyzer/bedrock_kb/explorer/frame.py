@@ -320,6 +320,13 @@ body[class*=vscode-] .kbx-app.kbx-app .kbx-page{height:620px}
 .kbx-app.kbx-app .kbx-ask.kbx-big button.jupyter-button{height:34px;padding:0 20px}
 .kbx-app.kbx-app .kbx-options{gap:8px 12px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
 .kbx-app.kbx-app .kbx-options>*{margin:0}
+.kbx-app.kbx-app .kbx-where{align-items:center;gap:4px;margin:0 0 6px;max-width:760px}
+.kbx-app.kbx-app .kbx-where>*{margin:0}
+.kbx-app.kbx-app .kbx-where input,.kbx-app.kbx-app .kbx-where input:focus{padding-left:32px;background:var(--kx-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linejoin='round'%3E%3Cpath d='M4 5h16l-6 7.5V19l-4-2v-4.5z'/%3E%3C/svg%3E") no-repeat 11px center/14px}
+.kbx-app.kbx-app .kbx-where.kbx-bad input{border-color:var(--kx-bad);box-shadow:0 0 0 3px rgba(239,68,68,.15)}
+.kbx-app.kbx-app .kbx-where.kbx-on input{border-color:var(--kx-accent)}
+.kbx-app.kbx-app .kbx-ask button.kbx-compare{background:transparent;color:var(--kx-accent);border-color:var(--kx-ring)}
+.kbx-app.kbx-app .kbx-ask button.kbx-compare:hover:enabled{background:var(--kx-soft);border-color:var(--kx-accent)}
 .kbx-app .kbx-label{font-size:11px;font-weight:600;opacity:.6;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap}
 .kbx-app.kbx-app .kbx-hits>*{flex:0 0 auto;margin:0}
 .kbx-app.kbx-app .kbx-hit{border:1px solid var(--kx-line);border-radius:12px;padding:0 0 8px;margin:0 0 8px;background:var(--kx-surface);max-width:960px}
@@ -366,6 +373,7 @@ _IN_WINDOW = {  # a command a report names -> where the explorer window shows th
     "kb_info": "the Overview tab",
     "kbs": "the knowledge base list",
     "search": "the Search tab",
+    "compare": "the Search tab's Compare",
     "search_file": "the file's question box",
     "file": "the file's page",
 }

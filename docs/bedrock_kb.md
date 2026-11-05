@@ -243,14 +243,27 @@ The **Search**, **Syncs** and **Settings** tabs are the reports below, a click a
 
 ??? more "What each of those tabs shows"
 
-    - **Search** asks the knowledge base a question: its passages, best first, with their scores and the question's words highlighted. Pick how many passages, the search type (**Semantic** matches meaning, **Hybrid** also exact words such as error codes), a data source and a reranker. **How payment-errors.md was indexed ›** under a passage opens its file's page in the Files tab.
+    - **Search** asks the knowledge base a question: its passages, best first, with their scores and the question's words highlighted. Pick how many passages, the search type (**Semantic** matches meaning, **Hybrid** also exact words such as error codes), a data source and a reranker. Type a metadata filter under them, like `team = billing; year >= 2024`, to search only the files it matches (see [Filter by metadata](#filters)). **How payment-errors.md was indexed ›** under a passage opens its file's page in the Files tab.
+    - **Compare**, beside **Search**, runs the question as Semantic and as Hybrid, with the passages picked and twice as many, and shows each passage's rank under each: the report [`compare()`](#decide) draws, with the window's data source and filter.
     - **Syncs** is the sync history as a timeline, newest first: which data source, when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed.
     - **Settings** has every setting in plain English: the embedding model and its dimensions, the vector store and which of its fields holds each part of a chunk, each data source's location, chunking, parser and deletion policy, and the tags. GetKnowledgeBase and GetDataSource as AWS returns them are folded at the end, with the AWS CLI commands that read them.
 
-    ![The Search tab: What does error E1234 mean? in the search box, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-light.webp#only-light){ width="984" height="846" loading=lazy }
-    ![The Search tab: What does error E1234 mean? in the search box, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-dark.webp#only-dark){ width="984" height="846" loading=lazy }
+    ![The Search tab: What does error E1234 mean? in the search box beside Search and Compare, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), an empty metadata filter box, cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-light.webp#only-light){ width="984" height="846" loading=lazy }
+    ![The Search tab: What does error E1234 mean? in the search box beside Search and Compare, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), an empty metadata filter box, cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-dark.webp#only-dark){ width="984" height="846" loading=lazy }
     /// caption
     **Search**: each passage's **How … was indexed ›** opens its file's page.
+    ///
+
+    ![The Search tab with the metadata filter team = billing; year >= 2024: How long do refunds take? finds 5 passages, the subtitle saying where team = 'billing', year >= 2024, and each passage shows its metadata, team=billing and year=2024 or 2025](images/kb-explorer-filter-light.webp#only-light){ width="984" height="846" loading=lazy }
+    ![The Search tab with the metadata filter team = billing; year >= 2024: How long do refunds take? finds 5 passages, the subtitle saying where team = 'billing', year >= 2024, and each passage shows its metadata, team=billing and year=2024 or 2025](images/kb-explorer-filter-dark.webp#only-dark){ width="984" height="846" loading=lazy }
+    /// caption
+    A **metadata filter** under the options: only the files whose `.metadata.json` matches.
+    ///
+
+    ![Compare for How long do refunds take? with the filter team = billing, scrolled to its findings (10 passages add gift-cards.md; Semantic and Hybrid return the same passages in the same order) and the table of each passage's rank under Semantic and Hybrid at 5 and 10 passages: refund-policy.pdf first under every setting, gift-cards.md found only at 10](images/kb-explorer-compare-light.webp#only-light){ width="984" height="846" loading=lazy }
+    ![Compare for How long do refunds take? with the filter team = billing, scrolled to its findings (10 passages add gift-cards.md; Semantic and Hybrid return the same passages in the same order) and the table of each passage's rank under Semantic and Hybrid at 5 and 10 passages: refund-policy.pdf first under every setting, gift-cards.md found only at 10](images/kb-explorer-compare-dark.webp#only-dark){ width="984" height="846" loading=lazy }
+    /// caption
+    **Compare**: where each passage ranks with each search type and number of passages.
     ///
 
     ![The Syncs tab: cards for 6 syncs, 1 failed, the last successful one a day ago and documents failed; a warning that the last sync of docs-s3 couldn't index 2 documents and that the Files tab's Failed filter shows them; then a timeline of the six syncs, green for done, amber for the one that couldn't parse 2 documents, red for the one that failed because the role wasn't allowed s3:GetObject; and the sync commands to copy](images/kb-explorer-syncs-light.webp#only-light){ width="984" height="846" loading=lazy }
@@ -555,6 +568,8 @@ ui.search("error E1234", where={"team": "billing", "year": (">=", 2024)})
     | `{"title": ("contains", "refund")}` | Text containing this, or a list with an element containing it |
     | `{"tags": ("list_contains", "gdpr")}` | A list attribute holding exactly this element |
 
+    The same can be typed as text, as in the explorer's Search tab: `where="team = billing; year >= 2024"`, `"region in eu, uk"`, `"year between 2020 and 2024"`, `"doc_id begins with POL-"`, `"title contains refund"` or `"tags has gdpr"`, with `;`, `,` or `and` between conditions and quotes around a value that holds them. `parse_where` gives the dict.
+
     Values are typed: `2024` and `"2024"` are different. It's the same vocabulary as the DynamoDB analyzer's filters. For `OR`, pass a Bedrock `RetrievalFilter` instead, and it's sent unchanged:
 
     ```python
@@ -649,7 +664,7 @@ kb.metadata_file(f)                               # MetadataFile: the .metadata.
 kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank across the knowledge base
 ```
 
-The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
+The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `parse_where`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
 
 ## Cost { #cost }
 

@@ -18,6 +18,7 @@ from ..._kit.view import _friendly_errors
 from ..analysis.filters import _source_arg, describe_filter
 from ..analysis.deciding import _setting
 from ..analysis.findings import _search_label, comparison_findings, eval_findings
+from ..models import SearchComparison
 from ..blocks import _Link
 
 
@@ -41,7 +42,8 @@ class _MeasureCommands:
     ) -> None:
         """
         One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings.
-        data_source= compares searches of one data source only.
+        data_source= compares searches of one data source only, and where= of the files whose metadata matches
+        (a dict, or text like 'team = billing; year >= 2024').
         """
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="searches") as tick:
@@ -54,6 +56,13 @@ class _MeasureCommands:
                 data_source=data_source,
                 progress=tick,
             )
+        self._show(self._compare_blocks(c, where))
+
+    def _compare_blocks(self, c: SearchComparison, where: Any = None) -> list[Any]:
+        """
+        compare()'s report: the overlap cards, the findings, each passage's rank under each setting, and the next
+        call. The explorer window's Compare draws the same.
+        """
         labels = list(c.runs)
         seconds = sum(r.seconds for r in c.runs.values())
         pairs = [
@@ -119,7 +128,7 @@ class _MeasureCommands:
                     ]
                 )
             )
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def evaluate(
