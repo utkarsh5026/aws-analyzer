@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Tries AWS refused, the root user signing in and addresses seen only once are findings, with the call to look further.
   - `access("old-experiment", days=90)` for one notebook; it needs `cloudtrail:LookupEvents`.
 
+### Changed
+
+- 📚 **Bedrock Knowledge Bases: the explorer looks like the others**
+  - `explore()` now has the same console look as the S3, Lambda and Step Functions explorers: a monospace font and a code editor's colours, light and dark.
+
 ## [0.47.0] - 2026-11-04
 
 ### Added
