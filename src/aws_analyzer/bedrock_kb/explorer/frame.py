@@ -11,7 +11,7 @@ from typing import Any
 from ..._kit.fmt import _fmt_dt, human_age, human_size
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
-from ..._kit.window import _icon_url
+from ..._kit.window import _icon_url, _terminal_theme
 
 from ..helpers import file_type, human_duration
 from ..models import FILE_STATES, IngestionJob, KBFile
@@ -85,6 +85,80 @@ _EXPLORER_DARK = ("--kx-accent:#60a5fa;--kx-accent-2:#a78bfa;--kx-soft:rgba(96,1
                   ".38);--kx-raised:rgba(255,255,255,.11);--kx-shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,"
                   ".28);--kx-ink-bad:#f87171;--kx-ink-warn:#fbbf24;--kx-ink-ok:#34d399"
                   + "".join(f";--kx-s-{state}:{dark}" for state, (_, dark) in _STATE_INKS.items()))
+
+_TERMINAL_TOKENS = ("--kx-accent:var(--kbt-accent);--kx-button:var(--kbt-accent);--kx-accent-2:var(--kbt-prompt);"
+                    "--kx-soft:var(--kbt-hover);--kx-ring:var(--kbt-accent);--kx-line:var(--kbt-line);"
+                    "--kx-line-2:var(--kbt-line);--kx-tint:transparent;--kx-tint-2:var(--kbt-hover);--kx-bg:var(--kbt-bg);"
+                    "--kx-surface:transparent;--kx-raised:var(--kbt-hover);--kx-shadow:none;--kx-ok:var(--kbt-ok);"
+                    "--kx-warn:var(--kbt-warn);--kx-bad:var(--kbt-bad);--kx-ink-ok:var(--kbt-ok);"
+                    "--kx-ink-warn:var(--kbt-warn);--kx-ink-bad:var(--kbt-bad)")
+
+_BEDROCK_TEAL = "#01a88d"
+
+_TERMINAL_CSS = _terminal_theme((".kbx-app",), "kbt") + """
+.kbx-app.kbx-app.kbx-app.kbx-app{""" + _TERMINAL_TOKENS + """}
+.kbx-app.kbx-app{font-family:var(--kbt-mono);font-size:12.5px;border-radius:10px;box-shadow:none}
+.kbx-app.kbx-app .widget-html-content,.kbx-app.kbx-app .widget-label,.kbx-app.kbx-app input,.kbx-app.kbx-app select{font-family:var(--kbt-mono)}
+.kbx-app.kbx-app button.jupyter-button{font-family:var(--kbt-mono);font-size:12px;border-radius:6px;background:transparent;font-weight:400}
+.kbx-app.kbx-app button.jupyter-button:hover:enabled{background:transparent;border-color:var(--kbt-accent);color:var(--kbt-accent)}
+.kbx-app.kbx-app button.jupyter-button.mod-primary,.kbx-app.kbx-app button.jupyter-button.mod-primary:hover:enabled{background:transparent;border-color:var(--kbt-accent);color:var(--kbt-accent);font-weight:700;filter:none}
+.kbx-app.kbx-app .widget-text input,.kbx-app.kbx-app .jupyter-widget-text input,.kbx-app.kbx-app .widget-dropdown>select,.kbx-app.kbx-app .jupyter-widget-dropdown>select{height:28px;border-radius:6px;font-size:12.5px}
+.kbx-app.kbx-app .widget-text input:focus,.kbx-app.kbx-app .jupyter-widget-text input:focus,.kbx-app.kbx-app .widget-dropdown>select:focus,.kbx-app.kbx-app .jupyter-widget-dropdown>select:focus{box-shadow:none}
+.kbx-app.kbx-app .widget-toggle-buttons,.kbx-app.kbx-app .jupyter-widget-toggle-buttons{padding:0;gap:4px;border-radius:0;background:transparent}
+.kbx-app.kbx-app .widget-toggle-buttons .widget-toggle-button,.kbx-app.kbx-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{border:1px solid var(--kbt-line);border-radius:6px;opacity:1;color:var(--kbt-dim)}
+.kbx-app.kbx-app .widget-toggle-buttons .widget-toggle-button.mod-active,.kbx-app.kbx-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button.mod-active{background:transparent;border-color:var(--kbt-accent);color:var(--kbt-accent);font-weight:700;box-shadow:none}
+.kbx-app .kbx-logo{width:30px;height:30px;border-radius:7px;color:""" + _BEDROCK_TEAL + """;background:transparent;box-shadow:inset 0 0 0 1px var(--kbt-line)}
+.kbx-app .kbx-name{font-size:14px;font-weight:700}
+.kbx-app .kbx-name::before{content:"\\276F  ";color:var(--kbt-prompt)}
+.kbx-app .kbx-name span{color:var(--kbt-comment);opacity:1;font-size:12px}
+.kbx-app .kbx-sub{color:var(--kbt-comment);opacity:1;font-size:11.5px}
+.kbx-app .kbx-stat{border-radius:6px;background:transparent;padding:4px 10px}
+.kbx-app .kbx-stat .l{font-size:10.5px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--kbt-comment);opacity:1}
+.kbx-app .kbx-stat .l::before{content:"# "}
+.kbx-app .kbx-stat b{font-size:14px}
+.kbx-app .kbx-stat.warn{border-color:var(--kbt-warn);background:transparent}
+.kbx-app .kbx-stat.warn b{color:var(--kbt-warn)}
+.kbx-app .kbx-stat.bad{border-color:var(--kbt-bad);background:transparent}
+.kbx-app .kbx-stat.bad b{color:var(--kbt-bad)}
+.kbx-app .kbx-stat.ok{border-color:var(--kbt-line)}
+.kbx-app .kbx-stat.ok b{color:var(--kbt-ok)}
+.kbx-app.kbx-app .kbx-trig>.kbx-trig-b{border-radius:6px;box-shadow:none}
+.kbx-app.kbx-app .kbx-open .kbx-trig>.kbx-trig-b{box-shadow:none}
+.kbx-app .fxl{font-size:10.5px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--kbt-comment);opacity:1}
+.kbx-app .fxl::before{content:"# "}
+.kbx-app .fxi,.kbx-app .opi{font-family:var(--kbt-mono);color:var(--kbt-comment);opacity:1}
+.kbx-app.kbx-app .kbx-pop{border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18)}
+.kbx-app.kbx-app .kbx-opt>.kbx-opt-b,.kbx-app.kbx-app .kbx-row>.kbx-row-b{border-radius:5px}
+.kbx-app.kbx-app .kbx-opt.kbx-on>.kbx-opt-b{border-color:transparent;box-shadow:inset 2px 0 0 var(--kbt-accent)}
+.kbx-app.kbx-app .kbx-tabs{gap:4px;padding:0;border-radius:0;background:transparent;border-bottom:1px solid var(--kbt-line)}
+.kbx-app.kbx-app button.kbx-tab{height:30px;border-radius:0;border:0;opacity:.7;color:var(--kbt-dim)}
+.kbx-app.kbx-app button.kbx-tab:hover:enabled{background:transparent;color:var(--kbt-accent);opacity:1}
+.kbx-app.kbx-app button.kbx-tab.kbx-on,.kbx-app.kbx-app button.kbx-tab.kbx-on:hover:enabled{background:transparent;box-shadow:inset 0 -2px 0 var(--kbt-accent);color:var(--kbt-accent);font-weight:700}
+.kbx-app.kbx-app button.kbx-small,.kbx-app.kbx-app button.kbx-chip,.kbx-app.kbx-app button.kbx-x,.kbx-app.kbx-app .kbx-hit button.kbx-link{border-radius:6px}
+.kbx-app.kbx-app button.kbx-chip.kbx-on,.kbx-app.kbx-app button.kbx-chip.kbx-on:hover:enabled{background:transparent;border-color:var(--kbt-accent);font-weight:700}
+.kbx-app.kbx-app .kbx-left{border-radius:8px}
+.kbx-app.kbx-app .kbx-row.kbx-on>.kbx-row-b,.kbx-app.kbx-app .kbx-row.kbx-on>.kbx-row-b:hover:enabled{background:transparent;border-color:transparent;box-shadow:inset 2px 0 0 var(--kbt-accent)}
+.kbx-app .ft{border-radius:4px;font-family:var(--kbt-mono);font-weight:700;letter-spacing:0}
+.kbx-app .ff,.kbx-app .fz,.kbx-app .opn{color:var(--kbt-comment);opacity:1}
+.kbx-app .kbx-pager .widget-html-content,.kbx-app .kbx-pager .jupyter-widget-html-content{color:var(--kbt-dim);opacity:1}
+.kbx-app.kbx-app .kbx-pager{border-top:0}
+.kbx-app .kbx-label{font-weight:400;letter-spacing:0;text-transform:none;color:var(--kbt-comment);opacity:1}
+.kbx-app .kbx-label::before{content:"# "}
+.kbx-app.kbx-app .kbx-ask{border-radius:6px}
+.kbx-app.kbx-app .kbx-ask:focus-within{box-shadow:none}
+.kbx-app.kbx-app .kbx-ask::before{content:"\\203A";padding:0 2px 0 4px;font-size:15px;font-weight:700;color:var(--kbt-prompt)}
+.kbx-app.kbx-app .kbx-ask button.jupyter-button{border-radius:6px}
+.kbx-app.kbx-app .kbx-ask.kbx-big{box-shadow:none}
+.kbx-app.kbx-app .kbx-hit{border-radius:8px}
+.kbx-app .kbx-hint{border-radius:6px;color:var(--kbt-dim);opacity:1}
+.kbx-app .kba .card{border-radius:6px}
+.kbx-app .kba .note,.kbx-app .kba .fi{border-radius:3px 6px 6px 3px}
+.kbx-app .kba details.ck,.kbx-app .kba .psg,.kbx-app .kba .pipe .ps,.kbx-app .kba pre,.kbx-app .kba .json{border-radius:6px}
+.kbx-app .kbx-status{color:var(--kbt-dim)}
+.kbx-app .kbx-status .st{opacity:1}
+.kbx-app .kbx-status .st:not(.warn):not(.ok):not(:has(.spin))::before{content:"\\25CF  ";color:var(--kbt-ok)}
+.kbx-app .kbx-status code{border-radius:4px;color:var(--kbt-s)}
+"""
 
 _EXPLORER_CSS = """<style>
 .kbx-app{--kx-accent:#2563eb;--kx-button:#2563eb;--kx-accent-2:#7c3aed;--kx-soft:rgba(37,99,235,.10);--kx-ring:rgba(37,99,235,.28);--kx-line:rgba(127,127,127,.22);--kx-line-2:rgba(127,127,127,.36);--kx-tint:rgba(127,127,127,.06);--kx-tint-2:rgba(127,127,127,.11);--kx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kx-raised:var(--kx-surface);--kx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--kx-ok:#10b981;--kx-warn:#f59e0b;--kx-bad:#ef4444;--kx-ink-bad:#dc2626;--kx-ink-warn:#b45309;--kx-ink-ok:#047857}
@@ -281,7 +355,7 @@ body[class*=vscode-] .kbx-app.kbx-app .kbx-page{height:620px}
 .kbx-app .kbx-hint{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:6px 0 10px;border:1px dashed var(--kx-line-2);border-radius:12px;opacity:.85;line-height:1.5}
 .kbx-app .kbx-hint b{font-weight:650}
 @media (prefers-reduced-motion:reduce){.kbx-app *,.kbx-app *::before{transition:none!important;animation-duration:2.5s!important}}
-""" + _explorer_rules() + "\n</style>"
+""" + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
 
 
 _IN_WINDOW = {  # a command a report names -> where the explorer window shows the same
