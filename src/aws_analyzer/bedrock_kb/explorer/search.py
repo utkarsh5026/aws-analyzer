@@ -186,10 +186,13 @@ class _SearchTab:
         self._searching(True, button)
         self._set(self.search_head, _skeleton(note))
         self.hits.children = []
+        self._status(note, busy=True)
 
     def _search_failed(self, exc: BaseException) -> None:
         self._searching(False)
-        self._set(self.search_head, self._html([_Note(self._error_text(exc), "warn")]))
+        text = self._error_text(exc)
+        self._set(self.search_head, self._html([_Note(text, "warn")]))
+        self._status(text, "warn")
 
     def _searched(self, r: Retrieval) -> None:
         self._searching(False)

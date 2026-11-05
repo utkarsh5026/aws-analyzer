@@ -40,7 +40,7 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("kb-explorer", "kb-explorer-file", "kb-explorer-chunks", "kb-explorer-ask", "kb-explorer-failed",
-           "kb-explorer-search", "kb-explorer-compare", "kb-explorer-syncs")
+           "kb-explorer-search", "kb-explorer-filter", "kb-explorer-compare", "kb-explorer-syncs")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -138,9 +138,25 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     page.mouse.move(1, 1)
     shot("kb-explorer-search")
     box.fill("How long do refunds take?")
-    page.locator(".kbx-app input[placeholder^='Metadata filter']").fill("team = billing")
-    page.locator(".kbx-app button.kbx-compare").first.click()
+    where = page.locator(".kbx-app input[placeholder^='Metadata filter']")
+    where.fill("team = billing; year >= 2024")
+    where.press("Enter")
     settled()
+    page.mouse.move(1, 1)
+    shot("kb-explorer-filter")
+    where.fill("team = billing")
+    page.locator(".kbx-app button.kbx-compare").first.click()
+    page.wait_for_function("!document.querySelector('.kbx-app button.kbx-compare').disabled", timeout=30_000)
+    settled()
+    page.evaluate("""() => {  // the findings' end and the table of ranks in view
+        const title = [...document.querySelectorAll('.kbx-app .kba h4')]
+            .find(el => el.textContent.includes('Rank of each passage'));
+        let box = title && title.parentElement;
+        while (box && !(box.scrollHeight > box.clientHeight + 4 && getComputedStyle(box).overflowY !== 'visible')) {
+            box = box.parentElement;
+        }
+        if (box) box.scrollTop += title.getBoundingClientRect().top - box.getBoundingClientRect().top - 260;
+    }""")
     page.mouse.move(1, 1)
     shot("kb-explorer-compare")
     tab("Syncs")

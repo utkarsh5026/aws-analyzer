@@ -4461,6 +4461,11 @@ def test_explorer_search_tab_compares_search_settings(world):
     assert x.compared.question == "refund window" and "where team = 'billing'" in plain(x.search_head.value)
     x.search("refund window")
     assert x.compared is None and x.found is not None
+    world.errors["retrieve"] = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "not allowed"}}, "Retrieve")
+    x.compare_button.click()
+    assert "not allowed" in plain(x.status.value) and "not allowed" in plain(x.search_head.value)
+    assert not x.compare_button.disabled and not x.search_button.disabled
 
 
 def test_explorer_focus_says_what_you_are_looking_at(world):
