@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧪 **SageMaker: who got into your notebooks**
+- 🧪 **SageMaker: who got into your notebooks** ([#203](https://github.com/utkarsh5026/aws-analyzer/pull/203))
   - `ui.access()` lists every sign-in, start and stop of a notebook in the last 30 days, from CloudTrail: who, when and from which IP.
   - Tries AWS refused, the root user signing in and addresses seen only once are findings, with the call to look further.
   - `access("old-experiment", days=90)` for one notebook; it needs `cloudtrail:LookupEvents`.
