@@ -1041,9 +1041,6 @@ def test_environment_label_for_other_kinds():
     assert Environment().label == "this machine"
 
 
-# ----------------------------------------------------------------------------- access (CloudTrail)
-
-
 def trail_item(name, *, hours=1, who=("role", "priya"), ip="81.2.69.160", params=None, refused=""):
     """
     One LookupEvents item, its CloudTrailEvent record written the way CloudTrail writes it.
