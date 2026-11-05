@@ -64,7 +64,7 @@ The examples run in a Studio JupyterLab space called `churn-analysis` on an `ml.
 
 ## Start here { #tour }
 
-Four questions to ask about the notebook you're in. Only `new_env()` changes anything: it makes the environment you ask for.
+Five questions to ask about the notebook you're in. Only `new_env()` changes anything: it makes the environment you ask for.
 { .gist }
 
 <div class="quick" markdown>
@@ -93,6 +93,14 @@ Four questions to ask about the notebook you're in. Only `new_env()` changes any
 
     [Everything that's running](#running)
 
+-   **Who has been getting into my notebooks?**
+
+    ```python
+    ui.access()
+    ```
+
+    [Who got in](#access)
+
 -   **I need another Python version.**
 
     ```python
@@ -103,7 +111,7 @@ Four questions to ask about the notebook you're in. Only `new_env()` changes any
 
 </div>
 
-Run `instance()` and `disk()` in the notebook you want to know about: they look at the machine they run on. `running()` and `instance("name")` only ask AWS, so they work from anywhere.
+Run `instance()` and `disk()` in the notebook you want to know about: they look at the machine they run on. `running()`, `access()` and `instance("name")` only ask AWS, so they work from anywhere.
 
 ??? more "How to read a report"
 
@@ -284,6 +292,28 @@ ui.running(metrics=False)    # skip CloudWatch
 
 Its findings name what looks forgotten, each with the command that stops it: notebooks and apps running over 12 hours with nothing to stop them, endpoints that got no requests, and the storage stopped notebooks keep.
 
+## Who got into your notebooks { #access }
+
+`access()` shows who opened, started or stopped a notebook in the last 30 days, when, and from which IP address.
+{ .gist }
+
+Nobody gets into a notebook without AWS credentials: opening one means asking SageMaker for a sign-in link, and CloudTrail records every ask, including the ones it refused. `access()` reads those records: a row per person (how often they signed in, to which notebooks, from where) and a row per event, newest first; 📍 marks the notebook you're in.
+
+```python
+ui.access()                              # every notebook in the region, last 30 days
+ui.access("old-experiment")              # one notebook instance, or a Studio space by name
+ui.access(days=90)                       # the whole 90 days CloudTrail keeps
+```
+
+Its findings are the ones worth a look: tries AWS refused (with the `aws cloudtrail lookup-events` call that shows what else that identity did), sign-ins by the account's root user, and internet addresses only one sign-in came from.
+
+!!! tip "Worth knowing"
+    "Direct internet access" on a notebook is about the notebook reaching the internet, not the internet reaching it. `access()` shows who got in, not what they did inside Jupyter: a notebook instance's own log of requests is in CloudWatch Logs, log group `/aws/sagemaker/NotebookInstances`, stream `<name>/jupyter.log`.
+
+??? more "What it reads"
+
+    CloudTrail's event history (`LookupEvents`) for `CreatePresignedNotebookInstanceUrl` and `CreatePresignedDomainUrl` (opened), `StartNotebookInstance` and `CreateApp` (started), and `StopNotebookInstance` and `DeleteApp` (stopped), in the analyzer's region. The history keeps 90 days; older events are only kept by a trail that delivers to S3. The read stops at 2,000 events and says so (`limit=` reads more).
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -308,13 +338,16 @@ d.to_df()                                             # one row per folder
 r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
 r.to_df()                                             # one row per notebook, app, endpoint and job
 
+a = sm.access("old-experiment", days=90)              # AccessReport: .events, .sign_ins, .refused, .errors
+a.to_df()                                             # one row per sign-in, start and stop: who, when, IP
+
 e = sm.environments()                                 # EnvReport: .envs, .kernels, .tools, .folder
 e.to_df()                                             # one row per Python environment
 plan = sm.env_plan("3.11", packages="pandas")         # EnvPlan: where it goes, what makes it, .steps (the commands)
 result = sm.create_env(plan)                          # EnvResult: runs them; .ok, .python, .failed
 ```
 
-The analysis functions don't call AWS, so they work on responses and text you already have: `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`, `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`, `env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, and the findings, `instance_findings`, `disk_findings`, `running_findings`, `env_findings` and `plan_findings`.
+The analysis functions don't call AWS, so they work on responses and text you already have: `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`, `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`, `env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, `parse_access_event`, `for_notebook`, `access_by_person`, `is_public_ip`, and the findings, `instance_findings`, `disk_findings`, `running_findings`, `env_findings`, `plan_findings` and `access_findings`.
 
 ```python
 from aws_analyzer.sagemaker_env import describe_instance, hourly_price, smaller_type
@@ -388,6 +421,12 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Effect": "Allow",
       "Action": "cloudwatch:GetMetricData",
       "Resource": "*"
+    },
+    {
+      "Sid": "ReadWhoGotIn",
+      "Effect": "Allow",
+      "Action": "cloudtrail:LookupEvents",
+      "Resource": "*"
     }
   ]
 }
@@ -399,6 +438,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | `instance()` in Studio | `DescribeApp`, `DescribeSpace`, `DescribeDomain`, `DescribeUserProfile` |
 | `instance("space name")` | also `ListDomains`, `ListSpaces`, `ListApps` |
 | `running()` | the `List` and `Describe` actions for notebook instances, apps, endpoints and jobs, `DescribeDomain`, and `cloudwatch:GetMetricData` for endpoint traffic |
+| `access()` | `cloudtrail:LookupEvents` |
 | `disk()` | nothing: it reads local files |
 | `envs()`, `new_env()` | nothing: they read local files, and `new_env()` runs conda (or uv) and pip on the notebook |
 
@@ -453,6 +493,7 @@ Every `SageMakerView` command. `ui.help()` prints the same list grouped by task,
 | `envs()` | The Python environments and Jupyter kernels here: each one's Python version, where it is, whether it's kept when the notebook stops, and kernels that fail to start |
 | `new_env(python="3.11", name=None, packages=None, path=None, tool="auto", dry_run=False)` | Makes a Python environment with that version where it's kept when the notebook stops, installs `packages=` in it and adds its Jupyter kernel; `dry_run=True` shows the commands instead |
 | `running(metrics=True, days=7)` | Everything billing by the hour in the region, the stopped notebook instances' storage, and what looks forgotten |
+| `access(name=None, days=30, limit=2000)` | Who opened, started or stopped notebooks, when and from which IP address, from CloudTrail; refused tries, root sign-ins and one-off addresses as findings |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

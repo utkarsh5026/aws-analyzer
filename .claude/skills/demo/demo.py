@@ -1263,7 +1263,76 @@ def seed_sagemaker_env() -> dict:
         "UserId": "AROAEXAMPLE:SageMaker", "Account": ACCOUNT,
         "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/{SM_ROLE.rsplit('/', 1)[1]}/SageMaker"}})
     cloudwatch = _FakeAWS("cloudwatch", {"get_metric_data": metric_data})
-    return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch}, "root": str(root)}
+    cloudtrail = _FakeAWS("cloudtrail", {"lookup_events": _sagemaker_trail(now)})
+    return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch, "cloudtrail": cloudtrail},
+            "root": str(root)}
+
+
+def _sagemaker_trail(now: datetime):
+    """
+    CloudTrail's LookupEvents over a month of acme's notebooks: priya and sam opening Studio spaces, an admin
+    starting and stopping a notebook instance, SageMaker's idle shutdown, a refused try and a root sign-in.
+    """
+    def person(kind: str, name: str) -> dict:
+        if kind == "role":
+            return {"type": "AssumedRole", "arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/DataScientist/{name}",
+                    "principalId": f"AROAEXAMPLE:{name}"}
+        if kind == "user":
+            return {"type": "IAMUser", "arn": f"arn:aws:iam::{ACCOUNT}:user/{name}", "userName": name}
+        if kind == "root":
+            return {"type": "Root", "arn": f"arn:aws:iam::{ACCOUNT}:root"}
+        return {"type": "AWSService", "invokedBy": "sagemaker.amazonaws.com"}
+
+    def studio(space: str) -> dict:
+        return {"domainId": SM_DOMAIN, "spaceName": space, "userProfileName": "priya"}
+
+    def instance(name: str) -> dict:
+        return {"notebookInstanceName": name}
+
+    happened = [
+        (2, "CreatePresignedDomainUrl", ("role", "priya"), "81.2.69.160", studio("churn-analysis"), ""),
+        (26, "CreatePresignedDomainUrl", ("role", "priya"), "81.2.69.160", studio("churn-analysis"), ""),
+        (50, "CreatePresignedDomainUrl", ("role", "priya"), "81.2.69.160", studio("churn-analysis"), ""),
+        (53, "CreateApp", ("role", "priya"), "81.2.69.160", {**studio("churn-analysis"), "appType": "JupyterLab",
+                                                              "appName": "default"}, ""),
+        (74, "CreatePresignedDomainUrl", ("role", "sam"), "81.2.69.160", studio("forecasting"), ""),
+        (122, "CreatePresignedDomainUrl", ("role", "sam"), "89.160.20.112", studio("forecasting"), ""),
+        (6, "StartNotebookInstance", ("user", "ops-admin"), "81.2.69.142", instance("team-reporting"), ""),
+        (5, "CreatePresignedNotebookInstanceUrl", ("user", "ops-admin"), "81.2.69.142", instance("team-reporting"), ""),
+        (220, "CreatePresignedNotebookInstanceUrl", ("user", "ops-admin"), "81.2.69.142", instance("old-experiment"), ""),
+        (222, "StartNotebookInstance", ("user", "ops-admin"), "81.2.69.142", instance("old-experiment"), ""),
+        (840, "StopNotebookInstance", ("user", "ops-admin"), "81.2.69.142", instance("sandbox"), ""),
+        (98, "DeleteApp", ("service", ""), "sagemaker.amazonaws.com", {**studio("forecasting"), "appType": "CodeEditor",
+                                                                      "appName": "default"}, ""),
+        (14, "CreatePresignedNotebookInstanceUrl", ("user", "contractor-2023"), "49.36.112.18",
+         None, "AccessDenied"),
+        (15, "CreatePresignedNotebookInstanceUrl", ("user", "contractor-2023"), "49.36.112.18", None, "AccessDenied"),
+        (410, "CreatePresignedNotebookInstanceUrl", ("root", ""), "175.16.199.4", instance("old-experiment"), ""),
+    ]
+
+    def item(hours: float, name: str, who: tuple, ip: str, parameters: dict | None, refused: str) -> dict:
+        identity = person(*who)
+        record = {"eventVersion": "1.09", "userIdentity": identity, "eventTime": "", "eventSource":
+                  "sagemaker.amazonaws.com", "eventName": name, "awsRegion": REGION, "sourceIPAddress": ip,
+                  "userAgent": "Mozilla/5.0" if who[0] != "service" else "sagemaker.amazonaws.com",
+                  "requestParameters": parameters}
+        if refused:
+            record["errorCode"] = refused
+            record["errorMessage"] = f"User: {identity['arn']} is not authorized to perform: sagemaker:{name}"
+        when = now - timedelta(hours=hours)
+        record["eventTime"] = when.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {"EventId": f"ev-{name}-{hours}", "EventName": name, "ReadOnly": "false", "EventTime": when,
+                "EventSource": "sagemaker.amazonaws.com", "Username": who[1] or ("root" if who[0] == "root" else ""),
+                "CloudTrailEvent": json.dumps(record)}
+
+    events = [item(*row) for row in happened]
+
+    def lookup_events(LookupAttributes: list, StartTime, EndTime, **_) -> dict:
+        wanted = LookupAttributes[0]["AttributeValue"]
+        found = [e for e in events if e["EventName"] == wanted and StartTime <= e["EventTime"] <= EndTime]
+        return {"Events": sorted(found, key=lambda e: e["EventTime"], reverse=True)}
+
+    return lookup_events
 
 
 # ----------------------------------------------------------------------------- OpenSearch

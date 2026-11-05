@@ -9,7 +9,7 @@ from typing import Any
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from .._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _fmt_dt, _plural, _utcnow, human_age, human_money, human_size,
+    HOURS_PER_MONTH, _as_count, _as_int, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money, human_size,
 )
 from .._kit.render import _call
 from .._kit.view import _BaseView, _friendly_errors
@@ -18,7 +18,8 @@ from .helpers import (
     _arn_name, _arn_part, _minor, _since, _tilde, app_label, describe_instance, human_runtime, new_env_call,
     shell_path,
 )
-from .models import Billable, EnvPlan, InstanceReport, Machine
+from .models import AccessEvent, AccessReport, Billable, EnvPlan, InstanceReport, Machine
+from .analysis.access import LOOKUP_LIMIT, _is_address, access_by_person, access_findings, is_public_ip
 from .analysis.common import _full
 from .analysis.notebooks import _gpu_idle, idle_shutdown_commands, instance_findings, notebook_costs
 from .analysis.disk import disk_findings, folder_tree
@@ -69,6 +70,66 @@ def _where(b: Billable) -> str:
     return " · ".join(filter(None, [owner, b.domain_id]))
 
 
+_ACTION_WORDS = {
+    "opened": "🔑 opened",
+    "started": "▶ started",
+    "stopped": "■ stopped",
+}
+
+
+def _access_result(event: AccessEvent) -> Any:
+    """
+    'ok', or the error AWS refused it with as a warning pill.
+    """
+    return _Tone(f"refused ({event.refused})", "warn") if event.refused else "ok"
+
+
+def _source(ip: str) -> str:
+    """
+    Where a call came from: its IP address, 'inside AWS' when a service made it, or '-'.
+    """
+    if not ip:
+        return "-"
+    return ip if _is_address(ip) else "inside AWS"
+
+
+def _event_rows(report: AccessReport, this: str) -> list[list[Any]]:
+    """
+    access()'s table of every event, newest first, the notebook this code runs in marked.
+    """
+    rows = []
+    for event in report.events:
+        notebook = event.notebook or "-"
+        if this and event.notebook == this:
+            notebook += "  📍\u00a0this\u00a0notebook"
+        rows.append([
+            _fmt_dt(event.when),
+            _ACTION_WORDS.get(event.action, event.action),
+            notebook,
+            event.who,
+            _source(event.ip),
+            _access_result(event),
+        ])
+    return rows
+
+
+def _people_rows(report: AccessReport, now: Any) -> list[list[Any]]:
+    """
+    access()'s table of who signed in: a row per identity.
+    """
+    return [
+        [
+            person.who,
+            f"{person.sign_ins:,}",
+            _Tone(f"{person.refused:,}", "warn") if person.refused else "0",
+            ", ".join(person.notebooks) or "-",
+            ", ".join(_source(ip) for ip in person.ips) or "-",
+            human_age(person.last, now),
+        ]
+        for person in access_by_person(report.events)
+    ]
+
+
 def _notebook_ref(b: Billable) -> str | None:
     """
     What instance() takes to describe this notebook: its name, or the space ('d-abc/analysis' form).
@@ -95,13 +156,14 @@ class SageMakerView(_BaseView):
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💻 This notebook": ("instance", "disk"),
         "🐍 Python environments": ("envs", "new_env"),
-        "☁️ Your account": ("running",),
+        "☁️ Your account": ("running", "access"),
         "❓ Help": ("help",),
     }
     _START = (
         ("instance()", "this notebook: its type, cost, idle shutdown, memory and disk"),
         ("disk()", "what fills the disk, and what's safe to clear"),
         ("running()", "everything running and billing in this region"),
+        ("access()", "who opened, started or stopped notebooks in the last 30 days, and from where"),
         ("new_env('3.11')", "a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops"),
     )
 
@@ -1135,4 +1197,89 @@ class SageMakerView(_BaseView):
                 (_call("running", days=30), "endpoint traffic over the last 30 days")
             )
         blocks.append(_Next(steps))
+        self._show(blocks)
+
+    def _this_notebook(self) -> str:
+        """
+        The name access() events give the notebook this code runs in: its notebook instance's, or its space's.
+        """
+        env = self.core.environment()
+        if env.kind == "notebook instance":
+            return env.name
+        return env.space if env.kind == "studio" else ""
+
+    @staticmethod
+    def _access_cards(report: AccessReport, now: Any) -> list[tuple[str, ...]]:
+        """
+        access()'s cards: sign-ins, people, internet addresses, refused tries and the last sign-in.
+        """
+        sign_ins = report.sign_ins
+        refused = len(report.refused)
+        addresses = {e.ip for e in sign_ins if is_public_ip(e.ip)}
+        last = max((e.when for e in sign_ins), default=None)
+        return [
+            ("Sign-ins", f"{len(sign_ins):,}"),
+            ("People", f"{len({e.who for e in sign_ins}):,}"),
+            ("Internet addresses", f"{len(addresses):,}"),
+            ("Refused", f"{refused:,}", "warn" if refused else "ok"),
+            ("Last sign-in", human_age(last, now) if last else "none"),
+        ]
+
+    @staticmethod
+    def _access_next(report: AccessReport) -> list[tuple[str, str]]:
+        """
+        The calls worth running after access(): one notebook's history, a longer window, the notebook itself.
+        """
+        steps = []
+        opened = [e.notebook for e in report.sign_ins if e.notebook]
+        busiest = max(set(opened), key=opened.count) if opened else ""
+        if busiest and not report.name:
+            steps.append((_call("access", busiest), "only that notebook, the one opened most"))
+        if report.days < 90:
+            named = (report.name,) if report.name else ()
+            steps.append((_call("access", *named, days=90), "the whole 90 days CloudTrail keeps"))
+        target = report.name or busiest
+        if target and not target.startswith("user "):
+            steps.append((_call("instance", target), "its settings, network and role"))
+        return steps
+
+    @_friendly_errors
+    def access(self, name: str | None = None, *, days: int = 30, limit: int = LOOKUP_LIMIT) -> None:
+        """
+        Who got into your notebooks: every time someone opened a notebook instance or Studio, started or
+        stopped one, or tried and was refused, with who it was, when and from which IP address, from CloudTrail.
+
+        `name` keeps one notebook instance or Studio space; `days` is how far back to look (at most 90, what
+        CloudTrail's event history keeps). It shows who got in, not what they did inside Jupyter.
+        """
+        days = _as_int(days, "days")
+        limit = _as_int(limit, "limit")
+        with self._progress("Reading CloudTrail", unit="kinds of event") as tick:
+            report = self.core.access(name, days=days, limit=limit, progress=tick)
+        now = _utcnow()
+        where = report.name or f"notebooks in {report.region}"
+        read = f"{_plural(len(report.events), 'event')} from CloudTrail" + (" (stopped at the limit)" if report.cut_short else "")
+        blocks: list[Any] = [
+            _Title(f"Who got into {where}, last {report.days} days", f"{read} · this tool changes nothing"),
+            _Cards(self._access_cards(report, now)),
+            _Findings(access_findings(report, now), empty="No refused tries, no root sign-ins, no one-off addresses."),
+        ]
+        if not report.events and not report.errors:
+            blocks.append(_Note(
+                f"Nobody opened, started or stopped {report.name or 'a notebook'} in {report.region} in the last "
+                f"{report.days} days. CloudTrail is regional: SageMakerView(SageMakerAnalyzer(region='us-west-2')) "
+                "looks in another region."
+            ))
+        person_rows = _people_rows(report, now)
+        if person_rows:
+            blocks.append(_Table(["Who", "Sign-ins", "Refused", "Notebooks", "From", "Last"], person_rows,
+                                 title="Who signed in"))
+        if report.events:
+            blocks.append(_Table([f"When ({_tz_label()})", "What", "Notebook", "Who", "From", "Result"],
+                                 _event_rows(report, self._this_notebook()), title="Every event, newest first"))
+            blocks.append(_Note(
+                "This is who got in, not what they did: Jupyter's own log of requests is in CloudWatch Logs, log "
+                "group /aws/sagemaker/NotebookInstances, stream <notebook>/jupyter.log (notebook instances only)."
+            ))
+        blocks.append(_Next(self._access_next(report)))
         self._show(blocks)
