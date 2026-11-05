@@ -66,6 +66,7 @@ from aws_analyzer.bedrock_kb import (
     data_source_filter,
     describe_chunking,
     describe_filter,
+    parse_where,
     describe_parsing,
     describe_sources,
     describe_vector_store,
@@ -897,6 +898,43 @@ def test_build_filter_combines_passes_through_and_rejects():
     assert describe_filter(
         {"team": "billing", "year": (">=", 2024), "y": ("between", 1, 2), "r": ["a"]}
     ) == ("team = 'billing', year >= 2024, y between 1 and 2, r in ['a']")
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("", None),
+    ("  ", None),
+    ("team = billing", {"team": "billing"}),
+    ("team: billing", {"team": "billing"}),
+    ("team = billing; year >= 2024", {"team": "billing", "year": (">=", 2024)}),
+    ("team == billing and year < 2024.5", {"team": "billing", "year": ("<", 2024.5)}),
+    ("team != billing, draft = false", {"team": ("!=", "billing"), "draft": False}),
+    ("region in eu, uk, year > 2020", {"region": ["eu", "uk"], "year": (">", 2020)}),
+    ("region NOT IN [eu, uk]", {"region": ("not_in", ["eu", "uk"])}),
+    ("year between 2020 and 2024 and team = x", {"year": ("between", 2020, 2024), "team": "x"}),
+    ("doc_id begins with POL-", {"doc_id": ("begins_with", "POL-")}),
+    ("doc_id starts with POL-", {"doc_id": ("begins_with", "POL-")}),
+    ("title contains terms and conditions", {"title": ("contains", "terms and conditions")}),
+    ("tags has gdpr", {"tags": ("list_contains", "gdpr")}),
+    ('title = "Refunds; returns, and more"', {"title": "Refunds; returns, and more"}),
+    ("code = '007'", {"code": "007"}),
+    ("x-amz-bedrock-kb-source-uri = 's3://b/a.pdf'", {"x-amz-bedrock-kb-source-uri": "s3://b/a.pdf"}),
+])
+def test_parse_where_reads_a_typed_filter(text, expected):
+    assert parse_where(text) == expected
+    if expected:
+        assert build_filter(parse_where(text)) == build_filter(expected)
+
+
+def test_parse_where_says_how_to_write_what_it_cant_read():
+    with pytest.raises(ValueError, match="Can't read 'team' as a condition: write an attribute, an operator"):
+        parse_where("team")
+    with pytest.raises(ValueError, match="Can't read 'team ='"):
+        parse_where("year >= 2024; team =")
+    with pytest.raises(ValueError, match="'year' is named twice"):
+        parse_where("year >= 2020 and year <= 2024")
+    with pytest.raises(ValueError, match="'between' takes two values"):
+        parse_where("year between 2020")
+    assert describe_filter("team = billing; year >= 2024") == "team = 'billing', year >= 2024"
 
 
 
@@ -4371,6 +4409,58 @@ def test_explorer_search_tab_opens_each_passages_file(world):
     assert x._tab == "files" and x.selected.name == "refund-policy.pdf" and x.chunks.chunks[0].chunk_id == "r1"
     x.search("refund window")  # from code, as typing it does
     assert x._tab == "search" and x.found.question == "refund window"
+
+
+def test_explorer_search_tab_filters_on_metadata(world):
+    x = explorer(world)
+    x.tab_buttons["search"].click()
+    x.question.value = "How long do refunds take?"
+    x.where_box.value = "team"
+    enter(x.where_box)
+    assert not world.runtime.called("retrieve")
+    assert "kbx-bad" in x.where_row._dom_classes
+    assert plain(x.status.value).startswith("Metadata filter: Can't read 'team' as a condition")
+    x.where_box.value = "team = billing; year >= 2024"
+    enter(x.where_box)
+    sent = world.runtime.called("retrieve")[-1]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert sent["filter"] == {"andAll": [{"equals": {"key": "team", "value": "billing"}},
+                                         {"greaterThanOrEquals": {"key": "year", "value": 2024}}]}
+    assert "kbx-on" in x.where_row._dom_classes and "kbx-bad" not in x.where_row._dom_classes
+    head = plain(x.search_head.value)
+    assert "4 of up to 5 passages · Bedrock's default search · where team = 'billing', year >= 2024" in head
+    assert x.focus.value("filter") == "team = 'billing', year >= 2024"
+    x.search("refund window", where="")
+    assert "filter" not in world.runtime.called("retrieve")[-1]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert len(x.found.passages) == 4 and "kbx-on" not in x.where_row._dom_classes
+    x.where_box.value = "team = billing"
+    x.open("sales")
+    assert x.where_box.value == "" and x.found is None
+
+
+def test_explorer_search_tab_compares_search_settings(world):
+    x = explorer(world)
+    x.tab_buttons["search"].click()
+    x.compare_button.click()
+    assert plain(x.status.value) == "Type a question first, then press Enter."
+    x.question.value = "How long do refunds take?"
+    x.n_pick.value = 10
+    x.compare_button.click()
+    sent = [call["retrievalConfiguration"]["vectorSearchConfiguration"] for call in world.runtime.called("retrieve")]
+    assert sorted((c["overrideSearchType"], c["numberOfResults"]) for c in sent) == [
+        ("HYBRID", 10), ("HYBRID", 20), ("SEMANTIC", 10), ("SEMANTIC", 20)]
+    assert x.found is None and list(x.compared.runs) == ["SEMANTIC n=10", "SEMANTIC n=20", "HYBRID n=10", "HYBRID n=20"]
+    head = plain(x.search_head.value)
+    assert "Compare searches in support-docs" in head and "Rank of each passage under each setting" in head
+    assert "search(" not in head
+    assert x.hits.children == () and not x.compare_button.disabled and x.compare_button.description == "Compare"
+    assert plain(x.status.value).startswith("Compared 4 search settings in")
+    assert x._tab_line("search") == "4 search settings compared for 'How long do refunds take?'"
+    x.compare("refund window", where="team = billing")
+    assert world.runtime.called("retrieve")[-1]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": "team", "value": "billing"}}
+    assert x.compared.question == "refund window" and "where team = 'billing'" in plain(x.search_head.value)
+    x.search("refund window")
+    assert x.compared is None and x.found is not None
 
 
 def test_explorer_focus_says_what_you_are_looking_at(world):

@@ -942,7 +942,8 @@ browser tab). Without it, or outside Jupyter, it shows the same as reports: `fil
 | Get the list of files              | **⬇ List**, beside the sort, saves the `s3://` path of every file the list shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt` beside the notebook. **⬇ Download** under the list then saves it on your computer |
 | See how a file was indexed         | Click it. Its page has its state and what to do about it, then each step from S3 into the vector store, the one that failed in red. Its chunks follow as a bar of their sizes (for a .txt or .md file, also where each sits in the file and what no chunk holds), then a line each with its page, size and first words that opens to the chunk's text, the part it repeats from the chunk before marked, and its metadata. Last, its `.metadata.json` next to what its chunks carry, and Bedrock's record of it |
 | Check that a question finds a file | On its page, type a question in **Ask a question…** and press Enter: the file's own best passages for it, and where it ranks among the whole knowledge base's. When an answer, which sees the top 5, wouldn't see it, a finding says what to change |
-| Search the knowledge base          | **Search**: a question's passages with their scores and the question's words highlighted. Pick the number of passages, the search type (**Semantic** or **Hybrid**), a data source and a reranker. **How refund-policy.pdf was indexed ›** under a passage opens its file's page |
+| Search the knowledge base          | **Search**: a question's passages with their scores and the question's words highlighted. Pick the number of passages, the search type (**Semantic** or **Hybrid**), a data source and a reranker, and type a metadata filter under them (`team = billing; year >= 2024`) to search only the files whose `.metadata.json` matches. **How refund-policy.pdf was indexed ›** under a passage opens its file's page |
+| Pick a search setting              | **Compare**, beside **Search**: the question searched as Semantic and as Hybrid, with the passages picked and twice as many, and each passage's rank under each, with how much the settings agree and what one finds that the others miss (`compare()`) |
 | Read the sync history              | **Syncs**: every sync, newest first, as a timeline: when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed |
 | Read the settings                  | **Settings**: every setting in plain English (the embedding model and its dimensions, the vector store and where it keeps each part of a chunk, each data source's location, chunking, parser and deletion policy, the tags), then GetKnowledgeBase and GetDataSource as AWS returns them, folded |
 
@@ -950,7 +951,8 @@ Everything is read in the background, so a click shows what's known at once and 
 window keeps answering. Like the rest of the file it only reads: where a sync would help, it shows the command.
 `explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is
 what you're looking at (the knowledge base, the tab and the file or search open), and `x.ui` is a `BedrockKBView` for
-reports in other cells.
+reports in other cells. `x.search("refund window", where="team = billing")` and `x.compare(...)` do from code what the
+Search tab's box and buttons do.
 
 ### Commands (`BedrockKBView`)
 
@@ -1053,7 +1055,11 @@ condition must match:
 | `{"title": ("contains", "refund")}`   | text containing this, or a list with an element containing it |
 | `{"tags": ("list_contains", "gdpr")}` | a list attribute holding exactly this element                 |
 
-Values are typed: `2024` and `"2024"` differ. For OR, pass a Bedrock `RetrievalFilter` instead, e.g.
+`where=` also takes the same as text, the way the explorer's Search tab does: `where="team = billing; year >= 2024"`,
+`"region in eu, uk"`, `"year between 2020 and 2024"`, `"doc_id begins with POL-"`, `"title contains refund"`,
+`"tags has gdpr"`, with `;`, `,` or `and` between conditions and quotes around a value that holds them
+(`parse_where` turns it into the dict). Values are typed: `2024` and `"2024"` differ. For OR, pass a Bedrock
+`RetrievalFilter` instead, e.g.
 `where={"orAll": [{"equals": {"key": "team", "value": "a"}}, {"equals": {"key": "team", "value": "b"}}]}`; it is
 sent unchanged.
 
@@ -1104,7 +1110,7 @@ kb.models("claude")                                 # [ModelInfo]: what to pass 
 
 The analysis functions are pure (no AWS calls), so they also work on responses and passages you already have:
 `parse_knowledge_base`, `parse_data_source`, `parse_ingestion_job`, `parse_retrieve`, `parse_rag`, `parse_converse`,
-`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`,
+`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`, `parse_where`,
 `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`
 (and `DEFAULT_PROMPT`), `parse_citation_markers`, `question_terms`, `best_snippet`, `retrieval_metrics`,
 `match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,

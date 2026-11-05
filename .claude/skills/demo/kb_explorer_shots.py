@@ -9,8 +9,8 @@ light and dark.
 shots.py renders reports, which are plain HTML. The explorer is ipywidgets, which only draw in a browser connected to
 a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock (support-docs), then
 uses it the way a person would: reads the Overview, opens the Files tab and clicks warranty.pdf, opens one of its
-chunks, asks it a question, filters the list to the failed files and opens one, searches the knowledge base, and opens
-the Syncs tab. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
+chunks, asks it a question, filters the list to the failed files and opens one, searches the knowledge base, compares
+search settings for a question with a metadata filter, and opens the Syncs tab. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/bedrock_kb.md, by shots.py's
 set_height.
 
@@ -40,7 +40,7 @@ from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLa
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("kb-explorer", "kb-explorer-file", "kb-explorer-chunks", "kb-explorer-ask", "kb-explorer-failed",
-           "kb-explorer-search", "kb-explorer-syncs")
+           "kb-explorer-search", "kb-explorer-compare", "kb-explorer-syncs")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -137,6 +137,12 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     settled()
     page.mouse.move(1, 1)
     shot("kb-explorer-search")
+    box.fill("How long do refunds take?")
+    page.locator(".kbx-app input[placeholder^='Metadata filter']").fill("team = billing")
+    page.locator(".kbx-app button.kbx-compare").first.click()
+    settled()
+    page.mouse.move(1, 1)
+    shot("kb-explorer-compare")
     tab("Syncs")
     settled()
     shot("kb-explorer-syncs")

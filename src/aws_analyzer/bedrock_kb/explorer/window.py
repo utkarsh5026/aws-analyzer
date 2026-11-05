@@ -16,7 +16,7 @@ from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, 
 
 from ..models import (
     FILE_STATES, DocumentChunks, FileInventory, FileProbe, IngestionJob, KBFile, KnowledgeBaseInfo, MetadataFile,
-    Retrieval,
+    Retrieval, SearchComparison,
 )
 from ..analysis.files import find_files
 from ..analyzer.kb_analyzer import BedrockKBAnalyzer
@@ -50,7 +50,10 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
                    the whole knowledge base's passages for an answer to see it. ⬇ List saves the s3:// paths of the
                    files listed, one per line, in a .txt file beside the notebook, with a link that downloads it.
         Syncs      the sync history: when, how long, what each read, added, changed and deleted, and why it failed
-        Search     what a question retrieves, with scores and highlighted words; each passage opens its file's page
+        Search     what a question retrieves, with scores and highlighted words; each passage opens its file's page.
+                   A metadata filter (team = billing; year >= 2024) keeps to the files whose metadata matches, and
+                   Compare searches the question as Semantic and Hybrid, with more passages too, to show which
+                   setting finds what
         Settings   every setting in plain English, and as AWS returns it (JSON)
 
     kb: the knowledge base to open (a name, ID or ARN); without it, the only one in the region, or the first active
@@ -89,7 +92,8 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
         What the window holds: kb (the knowledge base shown, its ID), kbs (the region's, as listed for the field),
         info (its settings, data sources and recent syncs), inventory (its files), selected (the file open in the
         Files tab, with its chunks and metadata once read, and probe, the last question asked of it), jobs (the Syncs
-        tab's history, once read), found (the Search tab's last search) and saved (the list ⬇ List saved last).
+        tab's history, once read), found (the Search tab's last search), compared (its last Compare) and saved (the
+        list ⬇ List saved last).
         _visible is the files the list's filters let through, in order; _want_file opens once the files are listed.
         """
         if mode not in ("auto", "widgets", "text"):
@@ -114,6 +118,7 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
         self.probe: FileProbe | None = None
         self.jobs: list[IngestionJob] | None = None
         self.found: Retrieval | None = None
+        self.compared: SearchComparison | None = None
         self.saved: SavedFileList | None = None
         self._want_file = file
         self._query, self._state, self._source, self._sort, self._offset = "", "", "", "problems", 0
@@ -160,16 +165,34 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
         self._open_file(found[0])
 
     @_window_errors
-    def search(self, question: str) -> None:
+    def search(self, question: str, *, where: str | None = None) -> None:
         """
-        Searches the knowledge base in the Search tab, as typing the question there does.
+        Searches the knowledge base in the Search tab, as typing the question there does. where= types a metadata
+        filter in its box ('team = billing; year >= 2024'); without it, the box keeps what it holds.
         """
         if self._w is None:
-            self.ui.search(question, kb=self.kb)
+            self.ui.search(question, kb=self.kb, where=where)
             return
-        self._quietly(self.question, value=str(question))
-        self._show_tab("search")
+        self._fill_search(question, where)
         self._search()
+
+    @_window_errors
+    def compare(self, question: str, *, where: str | None = None) -> None:
+        """
+        Compares search settings for a question in the Search tab, as its Compare button does: Semantic and Hybrid,
+        with the passages picked and twice as many, and where each passage ranks under each.
+        """
+        if self._w is None:
+            self.ui.compare(question, kb=self.kb, where=where)
+            return
+        self._fill_search(question, where)
+        self._compare()
+
+    def _fill_search(self, question: str, where: str | None) -> None:
+        self._quietly(self.question, value=str(question))
+        if where is not None:
+            self.where_box.value = str(where)
+        self._show_tab("search")
 
     @_window_errors
     def refresh(self) -> None:
@@ -317,12 +340,14 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
         self.kb = self.ui.kb = kb_id
         self.ui._conversation = None
         self.info = self.inventory = self.selected = self.chunks = self.metadata = self.probe = None
-        self.jobs, self.found, self.saved, self._want_file = None, None, None, file
+        self.jobs, self.found, self.compared, self.saved, self._want_file = None, None, None, None, file
         self._query = self._state = self._source = ""
         self._offset = 0
         self._quietly(self.find, value="")
         self._quietly(self.source_pick, options=[("All data sources", "")], value="")
         self._quietly(self.search_source, options=[("Every data source", "")], value="")
+        self._quietly(self.where_box, value="")
+        self._mark_filter()
         self.search_source.layout.display = self.source_pick.layout.display = "none"
 
     def _open_kb(self, kb_id: str, file: str | None = None) -> None:
@@ -438,6 +463,7 @@ def explore(
         explore()                                   # the only knowledge base in the region, or the first active one
         explore("support-docs")                     # by name, ID or ARN
         explore("support-docs", file="refund-policy.pdf")   # with one file open in the Files tab
+        explore("support-docs").search("refund window", where="team = billing")   # a search with a filter
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 
     The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only

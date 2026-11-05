@@ -243,7 +243,8 @@ The **Search**, **Syncs** and **Settings** tabs are the reports below, a click a
 
 ??? more "What each of those tabs shows"
 
-    - **Search** asks the knowledge base a question: its passages, best first, with their scores and the question's words highlighted. Pick how many passages, the search type (**Semantic** matches meaning, **Hybrid** also exact words such as error codes), a data source and a reranker. **How payment-errors.md was indexed ›** under a passage opens its file's page in the Files tab.
+    - **Search** asks the knowledge base a question: its passages, best first, with their scores and the question's words highlighted. Pick how many passages, the search type (**Semantic** matches meaning, **Hybrid** also exact words such as error codes), a data source and a reranker. Type a metadata filter under them, like `team = billing; year >= 2024`, to search only the files it matches (see [Filter by metadata](#filters)). **How payment-errors.md was indexed ›** under a passage opens its file's page in the Files tab.
+    - **Compare**, beside **Search**, runs the question as Semantic and as Hybrid, with the passages picked and twice as many, and shows each passage's rank under each: the report [`compare()`](#decide) draws, with the window's data source and filter.
     - **Syncs** is the sync history as a timeline, newest first: which data source, when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed.
     - **Settings** has every setting in plain English: the embedding model and its dimensions, the vector store and which of its fields holds each part of a chunk, each data source's location, chunking, parser and deletion policy, and the tags. GetKnowledgeBase and GetDataSource as AWS returns them are folded at the end, with the AWS CLI commands that read them.
 
@@ -555,6 +556,8 @@ ui.search("error E1234", where={"team": "billing", "year": (">=", 2024)})
     | `{"title": ("contains", "refund")}` | Text containing this, or a list with an element containing it |
     | `{"tags": ("list_contains", "gdpr")}` | A list attribute holding exactly this element |
 
+    The same can be typed as text, as in the explorer's Search tab: `where="team = billing; year >= 2024"`, `"region in eu, uk"`, `"year between 2020 and 2024"`, `"doc_id begins with POL-"`, `"title contains refund"` or `"tags has gdpr"`, with `;`, `,` or `and` between conditions and quotes around a value that holds them. `parse_where` gives the dict.
+
     Values are typed: `2024` and `"2024"` are different. It's the same vocabulary as the DynamoDB analyzer's filters. For `OR`, pass a Bedrock `RetrievalFilter` instead, and it's sent unchanged:
 
     ```python
@@ -649,7 +652,7 @@ kb.metadata_file(f)                               # MetadataFile: the .metadata.
 kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank across the knowledge base
 ```
 
-The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
+The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `parse_where`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
 
 ## Cost { #cost }
 

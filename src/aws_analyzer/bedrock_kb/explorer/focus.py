@@ -9,6 +9,7 @@ from ..._kit.focus import Focus, FocusPart
 from ..._kit.text import _clip
 
 from ..models import FILE_STATES, FileInventory, FileProbe, KBFile, Retrieval
+from ..analysis.filters import describe_filter
 from .frame import _EXPLORER_TABS
 
 _FOCUS_FILES = 20
@@ -55,12 +56,18 @@ def _file_parts(file: KBFile, inventory: FileInventory | None, probe: FileProbe 
 
 def _search_parts(found: Retrieval | None) -> list[FocusPart]:
     """
-    The Search tab's last search: its question and how many passages came back.
+    The Search tab's last search: its question, its metadata filter when it had one, and how many passages came
+    back.
     """
     if found is None:
         return []
     passages = len(found.passages)
-    return [_question_part(found.question, "search"), FocusPart("passages", str(passages), _plural(passages, "passage"))]
+    parts = [_question_part(found.question, "search")]
+    if found.where is not None:
+        where = describe_filter(found.where)
+        parts.append(FocusPart("filter", where, f"where {_clip(where, _CHIP_CHARS)}"))
+    parts.append(FocusPart("passages", str(passages), _plural(passages, "passage")))
+    return parts
 
 
 class _FocusReads:

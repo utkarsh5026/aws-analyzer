@@ -25,6 +25,7 @@ from ..._kit.fmt import _as_int
 from ..models import Answer, Retrieval
 from ..analysis.prompting import _as_passages, _question_text, build_prompt
 from ..analysis.parsing import parse_converse, parse_rag
+from ..analysis.filters import parse_where
 
 
 class _SearchReads:
@@ -71,7 +72,7 @@ class _SearchReads:
     ) -> dict[str, Any]:
         """
         The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate. sources: the IDs of the only
-        data sources to search.
+        data sources to search. where= may be typed as text ('team = billing; year >= 2024', parse_where).
         """
         n = _as_int(n, "n")
         if not 1 <= n <= 100:
@@ -79,7 +80,8 @@ class _SearchReads:
                 f"n can be 1 to 100 (a search returns at most 100 passages); got {n}"
             )
         config: dict[str, Any] = {"numberOfResults": n}
-        condition = with_data_sources(build_filter(where), sources)
+        typed = parse_where(where) if isinstance(where, str) else where
+        condition = with_data_sources(build_filter(typed), sources)
         if condition:
             config["filter"] = condition
         if search_type:
@@ -116,7 +118,7 @@ class _SearchReads:
     ) -> Retrieval:
         """
         The n passages (up to 100) that best match `question`, best first. where= filters on the documents'
-        metadata (see build_filter); search_type='HYBRID' adds keyword matching, where the vector store supports it;
+        metadata (see build_filter), or as text: 'team = billing; year >= 2024' (see parse_where); search_type='HYBRID' adds keyword matching, where the vector store supports it;
         rerank_model re-orders a wider set of results with a reranking model (True = Cohere Rerank 3.5);
         data_source= searches only that data source (a name or ID, or a list of them; see resolve_sources).
         """
