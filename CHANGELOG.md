@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-06
+
 ### Added
 
 - 🧪 **SageMaker: who got into your notebooks** ([#203](https://github.com/utkarsh5026/aws-analyzer/pull/203))
@@ -16,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Tries AWS refused, the root user signing in and addresses seen only once are findings, with the call to look further.
   - `access("old-experiment", days=90)` for one notebook; it needs `cloudtrail:LookupEvents`.
 
-- 📚 **Bedrock Knowledge Bases explorer: metadata filters and Compare in Search**
+- 📚 **Bedrock Knowledge Bases explorer: metadata filters and Compare in Search** ([#205](https://github.com/utkarsh5026/aws-analyzer/pull/205))
   - Type a filter under the search options, like `team = billing; year >= 2024`, to search only the files whose metadata matches.
   - **Compare** searches the question as Semantic and Hybrid, with more passages too, and shows where each passage ranks.
   - `where=` also takes the filter as text everywhere: `ui.search("refunds", where="team = billing")`.
@@ -28,7 +30,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A card for each fix: sync a data source (its changed, new and deleted files, with the command), fix the files that failed, convert the ones Bedrock can't read.
   - The pipeline shows each problem under the step where it happens: the parser, the source or the sync.
 
-- 📚 **Bedrock Knowledge Bases: the explorer looks like the others**
+- 📚 **Bedrock Knowledge Bases: the explorer looks like the others** ([#204](https://github.com/utkarsh5026/aws-analyzer/pull/204))
   - `explore()` now has the same console look as the S3, Lambda and Step Functions explorers: a monospace font and a code editor's colours, light and dark.
 
 ## [0.47.0] - 2026-11-04
@@ -1241,7 +1243,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.48.0...HEAD
+[0.48.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.44.0...v0.45.0
