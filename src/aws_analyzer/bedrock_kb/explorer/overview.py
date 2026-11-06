@@ -15,33 +15,21 @@ from ..models import FILE_STATES, _EPOCH, DataSourceInfo, FileInventory, Knowled
 from ..analysis.settings import describe_chunking, describe_parsing, describe_vector_store, store_name
 from ..analysis.cost import vector_store_monthly_cost
 from ..analysis.findings import kb_findings
-from ..analysis.files import inventory_findings, sync_needed
-from ..blocks import _Pipeline, _Shares
+from ..analysis.actions import file_actions, files_verdict, other_findings, stage_problems
+from ..blocks import _Actions, _Pipeline, _Shares
 from ..view.cells import _KB_TYPES, _job_row, _section, _status_tone, _sync_label, _sync_tone
 from .frame import _LOGO, _parser_name
 
 _RECENT_SYNCS = 5
-_WAITING_STATES = ("failed", "changed", "new")
 _SYNC_COLUMNS = ["Data source", "Started", "Took", "Status", "Scanned", "New", "Modified", "Deleted", "Failed"]
 
 Stage = tuple[str, str, str, str]
 
 
-def _source_files_text(files: Counter | None) -> str:
-    """
-    A data source's files as its Source stage says them: '12 files, 2 failed, 1 changed'.
-    """
-    if not files:
-        return ""
-    listed = f"{sum(files.values()):,} files"
-    waiting = [f"{files[state]:,} {FILE_STATES[state][0].lower()}" for state in _WAITING_STATES if files[state]]
-    return ", ".join([listed, *waiting])
-
-
 def _source_stage(ds: DataSourceInfo, files: Counter | None) -> Stage:
-    where = " · ".join(part for part in (ds.location, _source_files_text(files)) if part)
-    tone = "bad" if ds.status == "FAILED" else "warn" if files and files.get("failed") else ""
-    return ("Source", ds.source_type or "?", where, tone)
+    listed = _plural(sum(files.values()), "file") if files else ""
+    where = " · ".join(part for part in (ds.location, listed) if part)
+    return ("Source", ds.source_type or "?", where, "bad" if ds.status == "FAILED" else "")
 
 
 def _chunking_stage(ds: DataSourceInfo) -> Stage:
@@ -91,6 +79,49 @@ def _counts_by_source(inv: FileInventory | None) -> dict[str, Counter]:
     return counts
 
 
+def _pipeline_row_label(ds: DataSourceInfo) -> str:
+    return f"{ds.name or ds.id} ({ds.id})"
+
+
+_TONE_ORDER = ("", "ok", "warn", "bad")
+
+
+def _worst_tone(tones: list[str]) -> str:
+    return max(tones, key=lambda tone: _TONE_ORDER.index(tone) if tone in _TONE_ORDER else 0, default="")
+
+
+def _pinned_stages(stages: list[Stage], pins: dict[str, list[tuple[str, str, str]]]) -> list[Stage]:
+    """
+    The stages, each in the worst tone of its own and the problems pinned under it.
+    """
+    toned = []
+    for stage, value, detail, tone in stages:
+        pinned = [pin_tone for pin_tone, _, _ in pins.get(stage, [])]
+        toned.append((stage, value, detail, _worst_tone([tone, *pinned])))
+    return toned
+
+
+def _pipeline_block(info: KnowledgeBaseInfo, inv: FileInventory | None) -> _Pipeline | None:
+    """
+    How each data source becomes vectors, with its files' problems pinned under the stage where they happen.
+    """
+    if not info.data_sources:
+        return None
+    counts = _counts_by_source(inv)
+    rows, pins = [], {}
+    for ds in info.data_sources:
+        files = [f for f in inv.files if f.data_source_id == ds.id] if inv else []
+        problems = stage_problems(files)
+        label, stages = _pipeline_row_label(ds), _pipeline_stages(info, ds, counts.get(ds.id))
+        rows.append((label, _pinned_stages(stages, problems)))
+        if problems:
+            pins[label] = problems
+    title = "How each data source becomes vectors"
+    if pins:
+        title += ", and where its files went wrong"
+    return _Pipeline(rows, title=title, pins=pins)
+
+
 def _recent_syncs(info: KnowledgeBaseInfo) -> _Table | None:
     jobs = sorted((job for ds in info.data_sources for job in ds.jobs), key=lambda j: j.started or _EPOCH,
                   reverse=True)[:_RECENT_SYNCS]
@@ -116,8 +147,8 @@ def _file_cards(inv: FileInventory) -> list[tuple[str, str, str]]:
 
 class _OverviewTab:
     """
-    The Overview tab of KBExplorer (what's wrong, how each data source becomes vectors, recent syncs), and the title
-    and cards over every tab.
+    The Overview tab of KBExplorer (the files' verdict, what to do about them, how each data source becomes vectors,
+    recent syncs), and the title and cards over every tab.
     """
 
     def _draw_title(self) -> None:
@@ -158,33 +189,47 @@ class _OverviewTab:
         self._set(self.stats, f'<div class="kbx-stats">{html_cards}</div>')
 
     def _overview_findings(self, info: KnowledgeBaseInfo, inv: FileInventory | None) -> list[Any]:
+        """
+        What's left to say once the action cards have said what to do about the files: the settings', syncs' and
+        cost's findings, and what about the files couldn't be listed.
+        """
         found = kb_findings(info, prices=self.core.prices, files=inv)
         if inv is None:
             return [_Findings(found, empty="No issues found in the settings and syncs."),
                     _Note("Listing the files, to say which are indexed…")]
-        found += inventory_findings(inv)
-        blocks: list[Any] = [_Findings(found, empty="No issues found by these checks: every file is indexed and up to "
-                                                    "date.")]
-        sync = self.ui._sync_block(info.id, sync_needed(inv), inv.sources)
-        if sync:
-            blocks.append(sync)
+        found += other_findings(inv)
+        return [_Findings(found, empty="Nothing else: the settings, syncs and listings check out.")]
+
+    def _overview_head(self, info: KnowledgeBaseInfo, inv: FileInventory | None, actions: list[Any]) -> list[Any]:
+        """
+        The verdict on the files as the title, then their states in one bar and what to do about them.
+        """
+        details = " · ".join(filter(None, [info.id, _clip(info.description, 120)]))
+        verdict = files_verdict(inv, actions) if inv is not None else ""
+        if verdict:
+            blocks: list[Any] = [_Title(verdict, " · ".join(filter(None, [info.name, details])))]
+        else:
+            blocks = [_Title(info.name or info.id, details)]
+        if inv is None or not inv.files:
+            return blocks
+        shares = [(FILE_STATES[state][0], count, state) for state, count in reversed(inv.counts().items())]
+        blocks.append(_Shares(shares, title=f"Its {_plural(len(inv.files), 'file')}, by state (the Files tab "
+                                            "lists them)"))
+        if actions:
+            blocks.append(_Actions(actions, title="What to do, by what fixes it (this tool never syncs or changes "
+                                                  "a file: copy the command)"))
         return blocks
 
     def _draw_overview(self) -> None:
         info, inv = self.info, self.inventory
         if info is None:
             return
-        blocks: list[Any] = [_Title(f"{info.name}", " · ".join(filter(None, [info.id, _clip(info.description, 120)])))]
-        if inv is not None and inv.files:
-            shares = [(FILE_STATES[state][0], count, state) for state, count in reversed(inv.counts().items())]
-            blocks.append(_Shares(shares, title=f"Its {_plural(len(inv.files), 'file')}, by state (the Files tab "
-                                                "lists them)"))
+        actions = file_actions(inv, self.core.region) if inv is not None else []
+        blocks = self._overview_head(info, inv, actions)
         blocks += self._overview_findings(info, inv)
-        counts = _counts_by_source(inv)
-        rows = [(f"{ds.name or ds.id} ({ds.id})", _pipeline_stages(info, ds, counts.get(ds.id)))
-                for ds in info.data_sources]
-        if rows:
-            blocks.append(_Pipeline(rows, title="How each data source becomes vectors"))
+        pipeline = _pipeline_block(info, inv)
+        if pipeline is not None:
+            blocks.append(pipeline)
         elif "data_sources" not in info.errors:
             blocks.append(_Note("It has no data sources yet, so there's nothing to search."))
         recent = _recent_syncs(info)

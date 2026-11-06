@@ -915,7 +915,7 @@ chunks carry, and what to fix.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/kb-explorer-tour-dark.webp">
-  <img src="docs/images/kb-explorer-tour-light.webp" alt="The knowledge base explorer in a notebook, animated: it starts on support-docs&#x27; Overview, its files by state and its findings; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline">
+  <img src="docs/images/kb-explorer-tour-light.webp" alt="The knowledge base explorer in a notebook, animated: it starts on support-docs&#x27; Overview, its verdict on the files and a card for each thing to do; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline">
 </picture>
 
 <p align="center"><sub><code>explore(&quot;support-docs&quot;)</code>: find a file and see how it was indexed, ask whether it answers a question, search the whole knowledge base, then read its syncs.</sub></p>
@@ -937,7 +937,7 @@ browser tab). Without it, or outside Jupyter, it shows the same as reports: `fil
 | To                                 | Do this                                                                                                                                                                                                                                                                                                                                                                |
 | :--------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pick a knowledge base              | Click the field at the top left: the region's knowledge bases, with a search box that finds one by name, part of its ID or its description. Enter picks the first, and a whole ID or ARN works too. The cards beside it say how it's doing: its files, how many are searchable, failed or waiting for a sync, the last sync and the idle cost of its vector store |
-| See what's wrong                   | **Overview**: its files by state in one bar, findings that say what's wrong and what to do, the commands that sync the data sources that need it (to copy: the window never syncs), how each data source becomes vectors (its location, parser, chunking, embedding model and vector store), and the recent syncs |
+| See what's wrong                   | **Overview**: one sentence on the files (how many are indexed and up to date, how many need you, and how many a sync fixes), their states in one bar, a card for each thing to do (a sync per data source with its command to copy, since the window never syncs; the files to fix; the files to convert), the findings left, how each data source becomes vectors (its location, parser, chunking, embedding model and vector store) with each problem pinned under the step where it happens, and the recent syncs |
 | Find a file                        | **Files**: type part of a name, a folder or Bedrock's reason in the search box, click a state's chip (**Failed**, **Changed**, **Not synced**, **Skipped**, **Deleted**, **Ignored**, **Indexed**) to see only those, pick a data source, or sort by name, folder, size, last change or last indexed. Problems come first, 40 to a page with **«** **‹** **›** **»** under the list |
 | Get the list of files              | **⬇ List**, beside the sort, saves the `s3://` path of every file the list shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt` beside the notebook. **⬇ Download** under the list then saves it on your computer |
 | See how a file was indexed         | Click it. Its page has its state and what to do about it, then each step from S3 into the vector store, the one that failed in red. Its chunks follow as a bar of their sizes (for a .txt or .md file, also where each sits in the file and what no chunk holds), then a line each with its page, size and first words that opens to the chunk's text, the part it repeats from the chunk before marked, and its metadata. Last, its `.metadata.json` next to what its chunks carry, and Bedrock's record of it |
@@ -1116,8 +1116,11 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
 `match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
 `vector_store_monthly_cost`, `query_cost`, the file functions: `inventory_files`, `file_state`, `skip_reason`,
 `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`,
-`find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
-`answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`.
+`find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`, what to do about the files:
+`file_actions` (grouped by what fixes them), `files_verdict` (the files in one sentence), `stage_problems` (where
+in the pipeline each problem happens), and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
+`answer_findings`, `eval_findings`, `inventory_findings` (`state_findings` and `listing_findings`, its two parts),
+`other_findings`, `file_findings`, `probe_findings`.
 
 </details>
 

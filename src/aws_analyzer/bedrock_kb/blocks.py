@@ -1,6 +1,6 @@
 """
 bedrock_kb's own render blocks and their drawings: passages, links, steps, the pipeline, a file's
-chunks and shares of a whole.
+chunks, shares of a whole and what to do about the files.
 """
 
 from __future__ import annotations
@@ -13,8 +13,11 @@ from .._bedrock.estimates import estimate_tokens
 from .._bedrock.models import Passage
 from .._bedrock.words import _highlight, best_snippet
 from .._kit.blocks import _Report, _draws
-from .._kit.render import _TONES, _prose
+from .._kit.fmt import _plural
+from .._kit.render import _SELECT, _TONES, _copyable, _prose
 from .._kit.text import _esc, _text_bar
+
+from .models import FileAction
 
 
 @dataclass
@@ -56,13 +59,29 @@ class _Steps:
     title: str = ""
 
 
+Pin = tuple[str, str, str]
+
+
 @dataclass
 class _Pipeline:
     """
     How a knowledge base turns each data source into vectors: a row of stages per data source, left to right.
+    pins puts problems under the stage where they happen: {data source: {stage: [(tone, headline, detail)]}}.
     """
 
     rows: list[tuple[str, list[tuple[str, str, str, str]]]]  # (data source, [(stage, value, detail, tone)])
+    title: str = ""
+    pins: dict[str, dict[str, list[Pin]]] = field(default_factory=dict)
+
+
+@dataclass
+class _Actions:
+    """
+    What to do about a knowledge base's files, a card each: what to do and why, the first few files it covers and
+    the command that does it (file_actions()).
+    """
+
+    items: list[FileAction]
     title: str = ""
 
 
@@ -116,18 +135,44 @@ def _steps_html(block: _Steps, report: _Report) -> str:
     return f'{title}<div class="steps">{rows}</div>'
 
 
+def _pin_html(tone: str, headline: str, detail: str) -> str:
+    return (f'<div class="pin {tone if tone in _TONES else ""}"><b>{_esc(headline)}</b>'
+            + (f'<span>{_prose(detail)}</span>' if detail else "") + "</div>")
+
+
 @_draws(_Pipeline, "html")
 def _pipeline_html(block: _Pipeline, report: _Report) -> str:
     out = [f"<h4>{_prose(block.title)}</h4>"] if block.title else []
     for label, stages in block.rows:
+        pins = block.pins.get(label, {})
         cells = '<span class="pa">→</span>'.join(
-            f'<div class="ps {tone if tone in _TONES else ""}"><div class="pk">{_esc(stage)}</div>'
+            f'<div class="pc"><div class="ps {tone if tone in _TONES else ""}"><div class="pk">{_esc(stage)}</div>'
             f'<div class="pv">{_esc(value)}</div>' + (f'<div class="pd">{_prose(detail)}</div>' if detail else "")
-            + "</div>"
+            + "</div>" + "".join(_pin_html(*pin) for pin in pins.get(stage, [])) + "</div>"
             for stage, value, detail, tone in stages
         )
         out.append(f'<div class="pipe"><div class="pl">{_esc(label)}</div><div class="pr">{cells}</div></div>')
     return "".join(out)
+
+
+def _action_html(action: FileAction) -> str:
+    files = "".join(f'<li><span class="an">{_esc(name)}</span> <span class="ax">{_esc(text)}</span></li>'
+                    for name, text in action.files)
+    more = f'<div class="am">and {action.more:,} more</div>' if action.more else ""
+    command = ""
+    if action.command:
+        command = _copyable(f'<pre class="code"{_SELECT}>{_esc(action.command)}</pre>', action.command,
+                            "the command")
+    return (f'<div class="act {action.tone if action.tone in _TONES else ""}"><div class="ah">'
+            f'<span class="at">{_esc(action.title)}</span><span class="ac">{_plural(action.count, "file")}</span>'
+            f'</div><div class="aw">{_prose(action.why)}</div><ul class="af">{files}</ul>{more}{command}</div>')
+
+
+@_draws(_Actions, "html")
+def _actions_html(block: _Actions, report: _Report) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    cards = "".join(_action_html(action) for action in block.items)
+    return f'{title}<div class="acts">{cards}</div>'
 
 
 def _raw_offset(text: str, flat_offset: int) -> int:
@@ -214,9 +259,28 @@ def _steps_lines(block: _Steps, report: _Report) -> list[str]:
 def _pipeline_lines(block: _Pipeline, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
     for label, stages in block.rows:
+        pins = block.pins.get(label, {})
         out.append(f"{label}:")
         for stage, value, detail, tone in stages:
             out.append(f"  {_STEP_MARKS.get(tone, '[ ]')} {stage}: {value}" + (f" ({detail})" if detail else ""))
+            for pin_tone, headline, pin_detail in pins.get(stage, []):
+                out.append(f"      {_STEP_MARKS.get(pin_tone, '[ ]')} {headline}"
+                           + (f": {pin_detail}" if pin_detail else ""))
+    return out
+
+
+@_draws(_Actions, "text")
+def _actions_lines(block: _Actions, report: _Report) -> list[str]:
+    out = ["", f"-- {block.title} --"] if block.title else [""]
+    for number, action in enumerate(block.items, 1):
+        out.append(f"{number}. {_STEP_MARKS.get(action.tone, '[ ]')} {action.title} "
+                   f"({_plural(action.count, 'file')})")
+        out += textwrap.wrap(action.why, 100, initial_indent="   ", subsequent_indent="   ")
+        out += [f"   - {name}: {text}" for name, text in action.files]
+        if action.more:
+            out.append(f"   - and {action.more:,} more")
+        if action.command:
+            out.append(f"   {action.command}")
     return out
 
 

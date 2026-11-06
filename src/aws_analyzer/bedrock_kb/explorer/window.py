@@ -40,8 +40,10 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
     The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
 
-        Overview   what's wrong and what to do, how each data source becomes vectors (source, parser, chunking,
-                   embedding model, vector store), and each data source's files and last sync
+        Overview   the files in one sentence, a card for each thing to do (sync a data source, fix the files that
+                   failed, convert the ones Bedrock can't read), how each data source becomes vectors (source,
+                   parser, chunking, embedding model, vector store) with each problem under the step where it
+                   happens, and the recent syncs
         Files      every file next to Bedrock's record of it: indexed, failed and why, changed in S3 since it was
                    indexed, added after the last sync, skipped, deleted. Search, filter by state or data source, sort,
                    and click a file to see how it was indexed: the parser, every chunk in document order (with the

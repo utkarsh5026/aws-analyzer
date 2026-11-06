@@ -44,6 +44,7 @@ from aws_analyzer.bedrock_kb import (
     DocumentChunks,
     EvalCase,
     EvalReport,
+    FileAction,
     FileChange,
     FileInventory,
     FileProbe,
@@ -81,7 +82,11 @@ from aws_analyzer.bedrock_kb import (
     human_duration,
     human_tokens,
     inventory_files,
+    file_actions,
+    files_verdict,
     inventory_findings,
+    other_findings,
+    stage_problems,
     kb_findings,
     match_expected,
     find_files,
@@ -3480,6 +3485,123 @@ def test_inventory_findings_quote_bedrocks_reasons():
                                                         "been synced.")]
 
 
+def acted_on():
+    """
+    Files in every state an action covers, in two data sources: docs-s3 synced 3 days ago, manuals never.
+    """
+    return inventory(
+        state(kbfile("scanned.pdf", "FAILED", reason="The file is a scanned image with no text layer; use a "
+                                                     "foundation model parser to read it"), "failed"),
+        state(kbfile("locked.pdf", "FAILED", reason="The file is encrypted"), "failed"),
+        state(kbfile("tables.xlsx", "PARTIALLY_INDEXED", reason="Page 3 timed out"), "partial"),
+        state(kbfile("refund-policy.pdf", modified=ago(hours=5)), "changed"),
+        state(kbfile("added.md", "", modified=ago(days=1)), "new"),
+        state(kbfile("gone.pdf", size=None), "deleted"),
+        state(kbfile("forgotten.pdf", "NOT_FOUND", size=None), "deleted"),
+        state(kbfile("manual.pdf", "", ds_id=DS2_ID, modified=ago(hours=2)), "new"),
+        state(kbfile("deck.pptx", ""), "skipped"),
+        state(kbfile("clip.mov", "IGNORED", reason="Unsupported file type: .mov."), "ignored"),
+        state(kbfile("ok.pdf"), "indexed"),
+        state(kbfile("busy.pdf", "IN_PROGRESS"), "indexing"),
+        sources={DS_ID: "docs-s3", DS2_ID: "manuals"}, kinds={DS_ID: "S3", DS2_ID: "S3"},
+        last_sync={DS_ID: IngestionJob("job-1", DS_ID, "COMPLETE", started=ago(days=3)), DS2_ID: None},
+    )
+
+
+def test_file_actions_group_the_files_by_what_fixes_them():
+    actions = file_actions(acted_on(), "us-east-1")
+    assert [(a.kind, a.title, a.count, a.tone) for a in actions] == [
+        ("sync", "Sync docs-s3", 4, "warn"), ("sync", "Sync manuals", 1, "warn"),
+        ("fix", "Fix 3 files, then sync", 3, "bad"), ("convert", "Convert or remove 2 files", 2, "warn")]
+    docs, manuals, fix, convert = actions
+    assert isinstance(docs, FileAction) and docs.source == "docs-s3" and docs.more == 1
+    assert docs.why == "Searches use what it indexed 3d ago."
+    assert docs.files == [("refund-policy.pdf", "changed in S3 5h ago: answers use the old version"),
+                          ("added.md", "added 1d ago: not searchable yet"),
+                          ("gone.pdf", "deleted from S3: answers can still cite it")]
+    assert docs.command == f"aws bedrock-agent start-ingestion-job --knowledge-base-id {KB_ID} --data-source-id " \
+                           f"{DS_ID} --region us-east-1"
+    assert manuals.why == "It has never finished a sync, so none of these is searchable."
+    assert fix.why == "Nothing in them is searchable, and syncing again won't change that." and not fix.command
+    assert fix.files == [
+        ("scanned.pdf", "The file is a scanned image with no text layer; use a foundation model parser to read it."),
+        ("locked.pdf", "The file is encrypted. Save it without a password."),
+        ("tables.xlsx", "only partly indexed: Page 3 timed out")]
+    assert convert.files == [("deck.pptx", "skipped: .pptx isn't a type Bedrock reads"),
+                             ("clip.mov", "ignored: Unsupported file type: .mov")]
+    assert "up to 50 MB" in convert.why and convert.source == "docs-s3"
+
+    gone_only = file_actions(inventory(state(kbfile("forgotten.pdf", "NOT_FOUND", size=None), "deleted")))
+    assert gone_only[0].files == [("forgotten.pdf", "deleted from S3: the next sync forgets it")]
+    ignored_only = file_actions(inventory(state(kbfile("clip.mov", "IGNORED"), "ignored")))
+    assert ignored_only[0].tone == "" and ignored_only[0].files == [("clip.mov", "ignored: usually because of its type")]
+    partial_only = file_actions(inventory(state(kbfile("t.xlsx", "PARTIALLY_INDEXED"), "partial")))
+    assert partial_only[0].tone == "warn" and partial_only[0].why == "Only part of it is searchable."
+    assert file_actions(inventory(state(kbfile("ok.pdf"), "indexed"))) == []
+
+
+def test_files_verdict_says_how_many_need_you():
+    assert files_verdict(acted_on()) == ("1 of 12 files is indexed and up to date. 9 need you, and syncing docs-s3 "
+                                         "and manuals fixes 5 of them.")
+    one_sync = inventory(state(kbfile("a.pdf"), "indexed"), state(kbfile("b.pdf", modified=ago(hours=1)), "changed"))
+    assert files_verdict(one_sync) == ("1 of 2 files is indexed and up to date. 1 needs you, and one sync of "
+                                       "docs-s3 fixes it.")
+    two = inventory(state(kbfile("a.pdf"), "indexed"), state(kbfile("b.pdf", modified=ago(hours=1)), "changed"),
+                    state(kbfile("c.pdf", ""), "new"), state(kbfile("d.pdf", "FAILED"), "failed"))
+    assert files_verdict(two).endswith("3 need you, and one sync of docs-s3 fixes 2 of them.")
+    no_sync = inventory(state(kbfile("a.pdf"), "indexed"), state(kbfile("d.pdf", "FAILED"), "failed"))
+    assert files_verdict(no_sync) == "1 of 2 files is indexed and up to date. 1 needs you."
+    assert files_verdict(inventory(state(kbfile("a.pdf"), "indexed"), state(kbfile("b.pdf"), "indexed"))) == (
+        "All 2 files are indexed and up to date.")
+    assert files_verdict(inventory(state(kbfile("a.pdf"), "indexed"))) == "Its one file is indexed and up to date."
+    assert files_verdict(inventory(state(kbfile("a.pdf"), "indexed"), state(kbfile("c.mov", "IGNORED"), "ignored"))) \
+        == "1 of 2 files is indexed and up to date. None of the others needs you."
+    assert files_verdict(inventory()) == ""
+
+
+def test_other_findings_leave_out_what_the_actions_say():
+    inv = acted_on()
+    inv.truncated = {DS2_ID: ["files"]}
+    text = "\n".join(message for _, message in other_findings(inv))
+    assert "being indexed or removed now" in text and "Listing the bucket's files for manuals stopped" in text
+    for said in ("failed to index", "changed in S3", "added after the last sync", "no record of", "gone from S3",
+                 "partly indexed", "ignored"):
+        assert said not in text
+    assert other_findings(inventory()) == inventory_findings(inventory())
+
+
+def test_stage_problems_pin_each_problem_where_it_happens():
+    files = acted_on().files + [state(kbfile("secret.pdf", "FAILED", reason="Access denied by the KMS key"), "failed")]
+    pins = stage_problems([f for f in files if f.data_source_id == DS_ID])
+    assert pins == {
+        "Source": [("warn", "4 files waiting for a sync", "1 changed, 1 new, 2 deleted"),
+                   ("bad", "1 file the role can't read", "secret.pdf"),
+                   ("warn", "1 file skipped", "deck.pptx")],
+        "Parser": [("bad", "2 files failed here", "scanned.pdf and locked.pdf")],
+        "Last sync": [("warn", "1 file only partly indexed", "tables.xlsx")],
+    }
+    assert stage_problems([state(kbfile("ok.pdf"), "indexed")]) == {}
+
+
+def test_actions_and_pinned_pipeline_render_and_escape():
+    actions = file_actions(acted_on(), "us-east-1")
+    actions[0].files[0] = ("<b>x</b>.pdf", "changed <i>today</i>")
+    pins = {"docs-<s3>": {"Parser": [("bad", "2 files failed <here>", "a.pdf and <b>.pdf")]}}
+    blocks = [kb_blocks._Actions(actions, title="What to do"),
+              kb_blocks._Pipeline([("docs-<s3>", [("Source", "S3", "", ""), ("Parser", "Default", "", "bad")])],
+                                  title="Pipeline", pins=pins)]
+    html = stylemod._render_html(blocks, 50)
+    assert "<b>x</b>" not in html and "<i>today" not in html and "<here>" not in html
+    assert '<div class="act warn">' in html and '<div class="act bad">' in html and ">4 files<" in html
+    assert "and 1 more" in html and 'class="copy"' in html and "start-ingestion-job" in html
+    assert '<div class="pin bad"><b>2 files failed &lt;here&gt;</b>' in html
+    text = _render_text(blocks, 50)
+    assert "1. [!] Sync docs-s3 (4 files)" in text and "   - <b>x</b>.pdf: changed <i>today</i>" in text
+    assert "   - and 1 more" in text and "4. [!] Convert or remove 2 files (2 files)" in text
+    assert "3. [x] Fix 3 files, then sync (3 files)" in text
+    assert "  [x] Parser: Default\n      [x] 2 files failed <here>: a.pdf and <b>.pdf" in text
+
+
 def test_parse_metadata_file_reads_both_forms_and_says_whats_wrong():
     plain = parse_metadata_file('{"metadataAttributes": {"team": "billing", "year": 2024, "tags": ["a", "b"], '
                                 '"public": true}}', FOLDER + "a.pdf.metadata.json")
@@ -4229,9 +4351,16 @@ def test_explorer_opens_the_knowledge_base_and_lists_its_files(world):
     assert re.fullmatch(r"6 files listed in \d+\.\ds · 4 files to look at: the Files tab lists them first",
                         plain(x.status.value))
     overview = plain(x.overview.value)
-    assert "Its 6 files, by state" in overview and "1 file failed to index (scanned.pdf)" in overview
+    assert "2 of 6 files are indexed and up to date. 4 need you, and one sync of docs-s3 fixes 2 of them." in overview
+    assert "Its 6 files, by state" in overview and "Sync docs-s3 2 files Searches use what it indexed 3d ago." in overview
+    assert "Fix 1 file, then sync 1 file" in overview and "scanned.pdf The file is a scanned image" in overview
+    assert "Convert or remove 1 file 1 file" in overview and "video.mp4 skipped: .mp4 isn't a type" in overview
+    assert "failed to index" not in overview
     assert "help-site is a WEB data source" in overview and "the Syncs tab shows how many each sync read" in overview
     assert "aws bedrock-agent start-ingestion-job" in overview and "docs-s3" in overview
+    assert "1 file failed here scanned.pdf" in overview and "1 file skipped video.mp4" in overview
+    assert [type(b).__name__ for b in x.shown["overview"]] == ["_Title", "_Shares", "_Actions", "_Findings",
+                                                               "_Pipeline", "_Table"]
     assert not any(isinstance(b, kitblocks._Next) for b in x.shown["overview"])  # no calls to copy into a cell
     assert repr(x) == "KBExplorer(support-docs) · help(KBExplorer) says what it shows"
 
