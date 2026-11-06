@@ -89,6 +89,7 @@ report still renders.
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Its Python environments, and a new one (Python 3.11, say) with its own kernel in one call<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env/`](src/aws_analyzer/sagemaker_env/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
+| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **OpenSearch explorer**             | • Every domain and Serverless collection and how it is, warnings first: click one to open it<br>• Its indexes, vector indexes first: each vector field, the memory it needs and the query to copy<br>• A sample of an index's documents, the ones without a vector first: click one for its text and fields<br>• The documents nearest a question or a document, each a click away | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• What's running now, every few seconds: runs in flight and their lines<br>• Its logs run by run, failed runs in red: search them, pick a time range (or any From and To), or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions**             | • Every state machine's executions, failures, cost and logging<br>• Where and why executions fail, grouped by the state they stopped at<br>• One execution step by step: each state, its tries and how long it took<br>• For a failed Lambda step, the log lines of that very run<br>• What a definition risks: Lambda tasks with no retry, waits with no timeout | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) |
@@ -130,7 +131,7 @@ Then install it in the notebook from there:
 
 ```python
 from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView,
-                                 # S3Explorer, KBExplorer, LambdaExplorer, chat
+                                 # S3Explorer, KBExplorer, LambdaExplorer, OpenSearchExplorer, chat
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -145,7 +146,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > Each service is a module of the package: `aws_analyzer.s3`, `aws_analyzer.dynamodb`, `aws_analyzer.bedrock_kb`,
 > `aws_analyzer.bedrock_chat`, `aws_analyzer.sagemaker_env`, `aws_analyzer.opensearch`,
 > `aws_analyzer.lambda_functions` and `aws_analyzer.s3_explorer`, and the agent is `aws_analyzer.agent`. The Analyzer
-> and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
+> and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer`, `OpenSearchExplorer` and `chat` also come straight
+> from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone, freeing the disk</summary>
@@ -1669,6 +1671,7 @@ ui.sample()                                  # ...a few documents, and how healt
 ui.search("how do I get my money back?")     # the documents nearest a question (embedded with Bedrock)
 ui.search(like="art-00156")                  # the documents nearest an existing one: no model needed
 ui.search(vector=model.encode("refunds"), where={"lang": "en"})   # your own vector, filtered
+ui.explore()                                 # all of it in a window, by clicking (Jupyter, ipywidgets)
 ```
 
 > [!NOTE]
@@ -1702,6 +1705,12 @@ Grouped the way `ui.help()` lists them.
 | :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sample(index=None, n=10, check=200, where=None)`                           | A few random documents with their text, source and fields (each vector as its dimensions and length), and a check of 200 documents' vectors: one size, unit length or not, **all-zero vectors and exact repeats**. `where={"embedding": ("missing",)}` shows documents with no vector                                                                                                               |
 | `search(query=None, index=None, vector=, like=, k=10, where=, field=, model=, embed=)` | The k nearest documents with their score and **the similarity it stands for** (cosine, inner product or distance), text, source and fields. The question is embedded with a Bedrock model (Titan Text Embeddings V2 for 256, 512 or 1,024 dimensions, or `model=`) or `embed=your_function`; `vector=` searches with your own vector and `like="doc-id"` with a document's own. Notes repeated texts and a query vector that doesn't look like the stored ones |
+
+#### Explore by clicking
+
+| Command                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                  |
+| :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explore(where=None, tab=None, height=None)` | A window you use by clicking: every domain and Serverless collection (status, k-NN memory, cost, warnings; search, chips and sortable columns), and for the one you open its indexes (each as `index_info()` shows it), a random sample of an index's documents with **the ones without a vector first** (click one for its text and fields, and **≈ Nearest documents**), and a search box for the documents nearest a question or a document. `where="vectors-prod/support-docs"` opens one index; `x.search("a question", model=...)`, `x.document(id)`, `x.index(name)` and `x.open(...)` drive it from code. Needs Jupyter and ipywidgets; outside Jupyter it shows the reports. `OpenSearchExplorer(...)` is the same window |
 
 ### Filters (`where=`)
 

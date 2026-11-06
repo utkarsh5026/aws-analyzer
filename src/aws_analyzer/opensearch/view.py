@@ -13,7 +13,9 @@ from typing import Any, Callable
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from .._kit.deps import _require
 from .._kit.errors import _Hint, _error_code, _why
+from .._kit.jsontree import _JsonTree
 from .._kit.fmt import _as_int, _count, _fmt_dt, _plural, _total, human_age, human_money, human_size
 from .._kit.render import _call
 from .._kit.text import _clip
@@ -21,7 +23,9 @@ from .._kit.view import _BaseView, _friendly_errors
 
 from .prices import EMBEDDING_MODELS, SERVERLESS_MIN_OCUS
 from .helpers import _format_value, parse_location, values_at, vector_summary
-from .models import Collection, Domain, Endpoint, IndexInfo, Overview, VectorField
+from .models import (
+    Collection, Domain, Endpoint, IndexInfo, KnnStats, Overview, Sample, SearchResult, StoreReport, VectorField,
+)
 from .analysis.parsing import _BEST, _SPACE_NAMES, _TEXT_TYPES, score_meaning, similarity_name, source_field, source_of
 from .analysis.vectors import domain_knn_memory, index_vector_memory, vector_count, vector_memory
 from .analysis.cost import _key_label, domain_monthly_cost, ocu_monthly_cost, serverless_minimum
@@ -189,6 +193,25 @@ def _metadata_columns(docs: list[dict[str, Any]], skip: set[str], limit: int) ->
     return [name for name, _ in counts.most_common(limit or None)]
 
 
+def _vectors_summarized(value: Any, paths: list[str], prefix: str = "") -> Any:
+    """
+    A document's fields with each vector (at one of `paths`, nested documents too) replaced by its summary
+    ('[0.0123, -0.0441, …] 1,024 dims · length 1.00'), so a tree of the fields isn't a thousand numbers long.
+    """
+    if isinstance(value, list):
+        return [_vectors_summarized(item, paths, prefix) for item in value]
+    if not isinstance(value, dict):
+        return value
+    summarized: dict[str, Any] = {}
+    for key, item in value.items():
+        path = f"{prefix}{key}"
+        if path in paths and isinstance(item, (list, tuple)):
+            summarized[key] = vector_summary(item)
+        else:
+            summarized[key] = _vectors_summarized(item, paths, f"{path}.")
+    return summarized
+
+
 def _filter_rows(info: IndexInfo) -> list[list[str]]:
     """
     Fields a where= filter can use, with an example for each.
@@ -230,6 +253,7 @@ class OpenSearchView(_BaseView):
         "🗂️ Domains and collections": ("overview", "use"),
         "📇 Indexes": ("indexes", "index_info"),
         "🧭 Vectors": ("sample", "search"),
+        "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
     _START = (
@@ -253,6 +277,7 @@ class OpenSearchView(_BaseView):
         self.max_columns = max_columns
         self.target: str | None = None  # what use() picked: a domain or collection name, or a URL
         self.index: str | None = None
+        self.explorer: Any = None
         if index:
             self.target, self.index = parse_location(index)
 
@@ -475,6 +500,13 @@ class OpenSearchView(_BaseView):
         """
         with self._progress("Checking domains", unit="domains") as tick:
             ov = self.core.overview(match=match, metrics=metrics, progress=tick)
+        self._show(self._overview_blocks(ov, match))
+
+    def _overview_blocks(self, ov: Overview, match: str | None = None) -> list[Any]:
+        """
+        overview()'s report: the cards, the domains' and collections' tables, Serverless capacity, warnings and
+        next steps.
+        """
         prices = self.core.prices
         domains = sorted(ov.domains, key=lambda d: d.name)
         collections = sorted(ov.collections, key=lambda c: c.name)
@@ -555,8 +587,7 @@ class OpenSearchView(_BaseView):
                 "OpenSearchView(OpenSearchAnalyzer(region='us-west-2')). An OpenSearch you run yourself works by URL: "
                 "indexes('https://localhost:9200')."
             ))
-            self._show(blocks)
-            return
+            return blocks
         if unreadable:
             blocks.append(_Note(f"Couldn't describe {', '.join(unreadable)}.", "warn"))
         if domains:
@@ -593,7 +624,7 @@ class OpenSearchView(_BaseView):
                 (_call("indexes", look), "its indexes, which hold vectors, and their memory"),
                 (_call("use", look), "make it the one later commands use"),
             ]))
-        self._show(blocks)
+        return blocks
 
     def _serverless_blocks(
         self, ov: Overview, groups: list[tuple[str, float, list[str]]], minimum: float, used: float | None
@@ -655,6 +686,14 @@ class OpenSearchView(_BaseView):
         store = self._store(target)
         with self._progress("Counting vectors", unit="indexes") as tick:
             report = self.core.indexes(store, hidden=hidden, progress=tick)
+        self._show(self._indexes_blocks(report, hidden=hidden))
+
+    def _indexes_blocks(self, report: StoreReport, *, hidden: bool = False) -> list[Any]:
+        """
+        indexes()'s report on a domain or collection: its cards, findings, a line per index, warnings and next
+        steps.
+        """
+        store = report.store
         knn_memory = domain_knn_memory(store) if isinstance(store, Domain) else None
         version = store.version if isinstance(store, Domain) else None
         data_nodes = store.instance_count if isinstance(store, Domain) else (
@@ -716,8 +755,7 @@ class OpenSearchView(_BaseView):
         blocks.append(_Findings(own + store_findings(report, knn_memory)))
         if not report.indexes:
             blocks.append(_Note(f"No indexes in {store.label} yet{'' if hidden else ' (hidden=True adds system ones)'}."))
-            self._show(blocks)
-            return
+            return blocks
         if not report.vector_indexes:
             blocks.append(_Note("None of these indexes has a vector (knn_vector) field."))
         blocks.append(_Table(
@@ -745,7 +783,7 @@ class OpenSearchView(_BaseView):
                  else "its vector fields in plain English, and the query to copy"),
                 (_call("sample", ref), "a few documents, and how healthy the vectors are"),
             ]))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def index_info(self, index: str | None = None) -> None:
@@ -757,14 +795,30 @@ class OpenSearchView(_BaseView):
         """
         store, name = self._index_ref(index, "index_info")
         info = self.core.index(store, name)
+        knn, knn_problem = self._knn_stats(store, info)
+        self._show(self._index_info_blocks(store, info, knn, knn_problem))
+
+    def _knn_stats(self, store: Any, info: IndexInfo) -> tuple[KnnStats | None, str]:
+        """
+        The k-NN plugin's memory numbers index_info() shows for a vector index outside Serverless, and what went
+        wrong reading them ('' when nothing did, or when there's nothing to read).
+        """
+        if not info.vectors or _is_serverless(store):
+            return None, ""
+        try:
+            return self.core.knn_stats(store), ""
+        except OpenSearchError as exc:
+            return None, f"{exc.status} {exc.kind}"
+
+    def _index_info_blocks(self, store: Any, info: IndexInfo, knn: KnnStats | None, knn_problem: str = "") -> list[Any]:
+        """
+        index_info()'s report on one index: cards, findings, its vector fields, the fields to filter on, its
+        mapping and settings, and next steps.
+        """
         serverless = _is_serverless(store)
         blocks: list[Any] = [_Title(f"Index {info.name}", f"{store.label} · {store.url or 'no endpoint'}")]
-        knn = None
-        if info.vectors and not serverless:
-            try:
-                knn = self.core.knn_stats(store)
-            except OpenSearchError as exc:
-                blocks.append(_Note(f"Couldn't read the k-NN plugin's memory numbers ({exc.status} {exc.kind})."))
+        if knn_problem:
+            blocks.append(_Note(f"Couldn't read the k-NN plugin's memory numbers ({knn_problem})."))
         knn_memory = domain_knn_memory(store) if isinstance(store, Domain) else None
         version = store.version if isinstance(store, Domain) else None
         data_nodes = store.instance_count if isinstance(store, Domain) else None
@@ -830,7 +884,7 @@ class OpenSearchView(_BaseView):
                 (_call("search", "a question your documents answer", **self._ref_kwargs(store, info.name)),
                  "the documents nearest to it"),
             ]))
-        self._show(blocks)
+        return blocks
 
     def _vector_blocks(self, store: Any, info: IndexInfo) -> list[Any]:
         rows = []
@@ -883,7 +937,14 @@ class OpenSearchView(_BaseView):
         store, name = self._index_ref(index, "sample")
         n = _as_int(n, "n")
         result = self.core.sample(store, name, n, check=check, where=where)
-        info = result.info or IndexInfo(name)
+        self._show(self._sample_blocks(store, result, n, where))
+
+    def _sample_blocks(self, store: Any, result: Sample, n: int, where: Any = None) -> list[Any]:
+        """
+        sample()'s report: the vectors' health as cards and findings, the first n documents, each vector field's
+        check, and next steps.
+        """
+        info = result.info or IndexInfo(result.index)
         docs = result.docs
         shown = docs[: max(0, n)]
         how = "random documents" if result.random else "the first documents (random sampling isn't available here)"
@@ -918,8 +979,7 @@ class OpenSearchView(_BaseView):
         blocks.append(_Cards(cards))
         if not docs:
             blocks.append(_Note("No documents" + (f" match {describe_filter(where)}." if where else " in this index.")))
-            self._show(blocks)
-            return
+            return blocks
         blocks.append(_Findings(findings, empty="The sampled vectors look healthy: one size, no zeros, no repeats."
                                 if info.vectors else ""))
         text_field = info.text_field
@@ -972,7 +1032,7 @@ class OpenSearchView(_BaseView):
                           "the documents nearest to the first one"))
         steps.append((_call("index_info", *self._ref_args(store, result.index)), "its settings and memory in plain English"))
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def search(
@@ -998,7 +1058,15 @@ class OpenSearchView(_BaseView):
         store, name = self._index_ref(index, "search")
         result = self.core.search(store, name, query, vector=vector, like=like, k=k, field=field, where=where,
                                   model=model, embed=embed)
-        info = result.info or IndexInfo(name)
+        self._show(self._search_blocks(store, result, where=where, model=model))
+
+    def _search_blocks(self, store: Any, result: SearchResult, *, where: Any = None,
+                       model: str | None = None) -> list[Any]:
+        """
+        search()'s report: cards, which model embedded the question, findings, the hits, how to read their scores,
+        the search as Python, and next steps.
+        """
+        info = result.info or IndexInfo(result.index)
         vf = info.vector(result.field) if info.vectors else VectorField(result.field)
         if result.like is not None:
             title = f"Nearest to document {result.like}"
@@ -1078,4 +1146,60 @@ class OpenSearchView(_BaseView):
                           "the documents nearest to the top result"))
         steps.append((_call("sample", *self._ref_args(store, result.index)), "a few documents, and how healthy the vectors are"))
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
+
+    def _document_blocks(self, store: Any, info: IndexInfo, doc: dict[str, Any], *, with_vectors: bool = True,
+                         ) -> list[Any]:
+        """
+        One document, as the explorer's Documents tab shows it: its vectors as cards, a warning when one is missing,
+        its text, its fields as a tree (vectors summarized), and the search for the documents nearest to it.
+        with_vectors=False: the document came without its vectors (a search's hit), so none is said to be missing.
+        """
+        doc_id = str(doc.get("_id", ""))
+        source = {key: value for key, value in doc.items() if key != "_id"}
+        cards: list[tuple[str, ...]] = []
+        missing: list[str] = []
+        for vf in info.vectors if with_vectors else ():
+            vectors = values_at(source, vf.path)
+            if not vectors:
+                missing.append(vf.path)
+            cards.append((f"Vector ({vf.path})", vector_summary(vectors[0]) if vectors else "none",
+                          "" if vectors else "warn"))
+        origin = source_of(source)
+        if origin:
+            cards.append(("Source", _clip(origin, 80)))
+        blocks: list[Any] = [_Title(f"Document {doc_id}", f"{info.name} in {store.label}")]
+        if cards:
+            blocks.append(_Cards(cards))
+        blocks.append(_Findings([
+            ("warn", f"Document {doc_id} has no '{path}': vector search never returns it. Embed its text and index it "
+                     f"again; sample(where={{{path!r}: ('missing',)}}) finds the others like it.")
+            for path in missing
+        ]))
+        text = values_at(source, info.text_field) if info.text_field else []
+        if text and text[0] not in (None, ""):
+            blocks.append(_Text(str(text[0]), title=f"Text ({info.text_field})"))
+        shown = _vectors_summarized(source, [vf.path for vf in info.vectors])
+        blocks.append(_JsonTree(shown, title="Fields", name="doc"))
+        if info.vectors and not missing:
+            blocks.append(_Next([(_call("search", like=doc_id, **self._ref_kwargs(store, info.name)),
+                                  "the documents nearest to it")]))
+        return blocks
+
+    @_friendly_errors
+    def explore(self, where: str | None = None, *, tab: str | None = None, height: int | str | None = None) -> None:
+        """
+        The explorer window: every domain and Serverless collection and what needs attention, and for the one you
+        click its indexes (vector fields, memory, the query to copy), a sample of its documents with how healthy
+        their vectors are, and a search box for the documents nearest a question or a document. Needs Jupyter and
+        ipywidgets; view.explorer is the window.
+        """
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, overview() lists every "
+                "domain and collection, indexes('name') its indexes, and index_info('name/index') one of them."
+            )
+        _require("ipywidgets", "The explorer window")
+        from .explorer.window import OpenSearchExplorer
+
+        self.explorer = OpenSearchExplorer(where, tab=tab, view=self, height=height, mode="widgets")

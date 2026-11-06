@@ -6,12 +6,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._kit.jsontree import _json_tree_css
 from .._kit.render import _base_css, _Look, _report_html
 
 
 _ROOT = "osv"  # the class around each report's HTML: its stylesheet's rules are scoped to it
 
-_CSS = _base_css(_ROOT)
+_CSS = _base_css(_ROOT, _json_tree_css(_ROOT))
 
 _BADGE = "🔎 OpenSearch"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
