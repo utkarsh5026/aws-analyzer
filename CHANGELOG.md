@@ -23,7 +23,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- 📚 **Bedrock Knowledge Bases explorer: an Overview that says what to do**
+- 📚 **Bedrock Knowledge Bases explorer: an Overview that says what to do** ([#206](https://github.com/utkarsh5026/aws-analyzer/pull/206))
   - It opens on one sentence: how many files are indexed and up to date, how many need you, and how many one sync fixes.
   - A card for each fix: sync a data source (its changed, new and deleted files, with the command), fix the files that failed, convert the ones Bedrock can't read.
   - The pipeline shows each problem under the step where it happens: the parser, the source or the sync.
