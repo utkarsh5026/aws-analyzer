@@ -212,9 +212,18 @@ def inventory_findings(inv: FileInventory) -> list[tuple[str, str]]:
     What a knowledge base's files say to do -> [(level, message)]: failed, changed, not yet synced, skipped and
     deleted files, and what couldn't be listed. sync_needed() says which data sources a sync would fix.
     """
+    return state_findings(inv.files, limit=inv.limit) + listing_findings(inv)
+
+
+def state_findings(files: Iterable[KBFile], *, limit: int | None = None) -> list[tuple[str, str]]:
+    """
+    What these files' states say to do -> [(level, message)], a finding per state: failed, changed, not yet synced,
+    skipped, deleted, partly indexed, ignored, being indexed and not checked (limit: where the document list
+    stopped, for that last one).
+    """
     found: list[tuple[str, str]] = []
     by_state: dict[str, list[KBFile]] = {}
-    for f in inv.files:
+    for f in files:
         by_state.setdefault(f.state, []).append(f)
 
     def they(files: list[KBFile], one: str, many: str) -> str:
@@ -278,10 +287,22 @@ def inventory_findings(inv: FileInventory) -> list[tuple[str, str]]:
                               "removed now: their state changes when the sync finishes."))
     unchecked = by_state.get("unchecked", [])
     if unchecked:
-        found.append(("info", f"Bedrock's document list stopped at {inv.limit:,}, so {_plural(len(unchecked), 'file')} "
-                              "in S3 weren't checked: .core.file_inventory(..., limit=None) reads everything."))
+        found.append(("info", f"Bedrock's document list stopped at {limit or 0:,}, so "
+                              f"{_plural(len(unchecked), 'file')} in S3 weren't checked: "
+                              ".core.file_inventory(..., limit=None) reads everything."))
+    return found
+
+
+def listing_findings(inv: FileInventory) -> list[tuple[str, str]]:
+    """
+    What couldn't be listed, or was listed only in part, for a knowledge base's files -> [(level, message)]: a
+    document list or bucket listing that stopped at the limit, a section that couldn't be read, data sources whose
+    documents aren't listed, and no files at all.
+    """
+    found: list[tuple[str, str]] = []
+    has_unchecked = any(f.state == "unchecked" for f in inv.files)
     for ds_id, parts in inv.truncated.items():
-        if parts == ["documents"] and unchecked:
+        if parts == ["documents"] and has_unchecked:
             continue
         what = " and ".join("Bedrock's document list" if p == "documents" else "the bucket's files" for p in parts)
         found.append(("info", f"Listing {what} for {inv.sources.get(ds_id, ds_id)} stopped at {inv.limit:,}, so the "

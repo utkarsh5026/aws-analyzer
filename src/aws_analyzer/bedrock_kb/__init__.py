@@ -67,7 +67,7 @@ from .helpers import (
 )
 from .models import (
     FILE_STATES, Answer, ChunkStats, DataSourceInfo, DocumentChunks, DocumentSummary, EvalCase, EvalReport,
-    FileChange, FileInventory, FileProbe, IngestionJob, KBFile, KnowledgeBaseInfo, MetadataFile, Retrieval,
+    FileAction, FileChange, FileInventory, FileProbe, IngestionJob, KBFile, KnowledgeBaseInfo, MetadataFile, Retrieval,
     SearchComparison, SyncFreshness,
 )
 from .analysis.prompting import DEFAULT_PROMPT, SYSTEM_PROMPT, build_prompt, parse_citation_markers
@@ -82,8 +82,10 @@ from .analysis.findings import (
 )
 from .analysis.files import (
     SOURCE_KEY, file_findings, file_state, file_steps, find_files, inventory_files, inventory_findings,
-    parse_file_state, pick_files, probe_findings, skip_reason, sort_files, sync_needed,
+    listing_findings, parse_file_state, pick_files, probe_findings, skip_reason, sort_files, state_findings,
+    sync_needed,
 )
+from .analysis.actions import file_actions, files_verdict, other_findings, stage_problems
 from .analysis.metadata import parse_metadata_file
 from .analysis.chunks import chunk_overlap, chunk_stats, order_chunks, place_chunks
 from .analyzer.kb_analyzer import BedrockKBAnalyzer
@@ -121,6 +123,7 @@ __all__ = [
     "DocumentSummary",
     "EvalCase",
     "EvalReport",
+    "FileAction",
     "FileChange",
     "FileInventory",
     "FileProbe",
@@ -154,12 +157,14 @@ __all__ = [
     "estimate_tokens",
     "eval_findings",
     "explore",
+    "file_actions",
     "file_findings",
     "file_list_lines",
     "file_list_name",
     "file_state",
     "file_steps",
     "file_type",
+    "files_verdict",
     "find_files",
     "freshness_findings",
     "generation_cost",
@@ -172,9 +177,11 @@ __all__ = [
     "inventory_files",
     "inventory_findings",
     "kb_findings",
+    "listing_findings",
     "match_expected",
     "model_price",
     "order_chunks",
+    "other_findings",
     "parse_citation_markers",
     "parse_converse",
     "parse_data_source",
@@ -205,6 +212,8 @@ __all__ = [
     "sort_files",
     "source_name",
     "split_metadata",
+    "stage_problems",
+    "state_findings",
     "store_name",
     "summarize_documents",
     "sync_call",

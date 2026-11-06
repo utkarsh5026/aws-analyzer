@@ -575,6 +575,35 @@ class FileInventory:
 
 
 @dataclass
+class FileAction:
+    """
+    One thing to do about a knowledge base's files, and the files it covers: sync a data source (its changed, new
+    and deleted files), fix files that failed to index, or convert files Bedrock can't read.
+
+    kind is 'sync', 'fix' or 'convert'; title says what to do ('Sync docs-s3') and why what happens until it's done.
+    files holds the first few (name, what's wrong with it) and count all the files it covers, listed or not. tone is
+    'bad', 'warn' or '' (nothing searchable is lost). command is the AWS CLI command that does it, '' when it's done
+    by hand, and source the data source it's about, by name ('' for several).
+    """
+
+    kind: str
+    title: str
+    why: str
+    files: list[tuple[str, str]] = field(default_factory=list)
+    count: int = 0
+    tone: str = ""
+    command: str = ""
+    source: str = ""
+
+    @property
+    def more(self) -> int:
+        """
+        Files it covers beyond the ones listed.
+        """
+        return max(0, self.count - len(self.files))
+
+
+@dataclass
 class MetadataFile:
     """
     A file's <file>.metadata.json: the attributes in it (what where= filters match) and what's wrong with it, in

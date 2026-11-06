@@ -70,15 +70,38 @@ _EXTRA_CSS = """\
 .kba .st .sx{font-size:12px;opacity:.6;margin-top:1px;overflow-wrap:anywhere}
 .kba .pipe{margin:6px 0 12px}
 .kba .pipe .pl{font-size:12px;font-weight:600;margin:10px 0 5px}
-.kba .pipe .pr{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px}
-.kba .pipe .ps{flex:1 1 150px;max-width:280px;min-width:0;border:1px solid rgba(127,127,127,.3);border-radius:8px;padding:6px 10px}
+.kba .pipe .pr{display:flex;flex-wrap:wrap;align-items:flex-start;gap:6px}
+.kba .pipe .pc{flex:1 1 118px;max-width:280px;min-width:0;display:flex;flex-direction:column;gap:5px}
+.kba .pipe .ps{min-height:62px;box-sizing:border-box;border:1px solid rgba(127,127,127,.3);border-radius:8px;padding:6px 10px}
+.kba .pipe .pin{border-radius:7px;padding:5px 9px;font-size:12px;line-height:1.4;overflow-wrap:anywhere;border:1px solid rgba(127,127,127,.28);background:rgba(127,127,127,.07)}
+.kba .pipe .pin b{display:block;font-weight:650}
+.kba .pipe .pin span{opacity:.8}
+.kba .pipe .pin.warn{border-color:rgba(245,158,11,.55);background:rgba(245,158,11,.1)}
+.kba .pipe .pin.bad{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.09)}
+.kba .acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0 14px}
+.kba .act{min-width:0;border:1px solid rgba(127,127,127,.3);border-top:3px solid rgba(127,127,127,.45);border-radius:9px;padding:9px 12px 10px;display:flex;flex-direction:column;gap:6px}
+.kba .act.warn{border-top-color:#f59e0b}
+.kba .act.bad{border-top-color:#ef4444}
+.kba .act .ah{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.kba .act .at{font-weight:650;font-size:14px}
+.kba .act .ac{flex:0 0 auto;font-size:11px;font-weight:600;padding:1px 8px;border-radius:9px;background:rgba(127,127,127,.12)}
+.kba .act.warn .ac{background:rgba(245,158,11,.16)}
+.kba .act.bad .ac{background:rgba(239,68,68,.14)}
+.kba .act .aw{opacity:.85;line-height:1.45}
+.kba .act .af{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:3px;font-size:12.5px;line-height:1.4}
+.kba .act .an{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600;overflow-wrap:anywhere}
+.kba .act .ax{opacity:.8}
+.kba .act .am{font-size:12px;opacity:.65}
+.kba .act .pre{margin:auto 0 0;padding-top:2px;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.kba .act .pre>.copy{position:static}
+.kba .act pre.code{align-self:stretch;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;margin:0}
 .kba .pipe .ps.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.07)}
 .kba .pipe .ps.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.07)}
 .kba .pipe .ps.ok{border-color:rgba(16,185,129,.55)}
 .kba .pipe .pk{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.55}
 .kba .pipe .pv{font-weight:600;overflow-wrap:anywhere;margin-top:1px}
 .kba .pipe .pd{font-size:12px;opacity:.65;overflow-wrap:anywhere;margin-top:1px}
-.kba .pipe .pa{align-self:center;opacity:.35;font-size:15px}
+.kba .pipe .pa{align-self:flex-start;margin-top:20px;opacity:.35;font-size:15px}
 .kba .ckbar{display:flex;gap:2px;height:16px;margin:6px 0 2px;max-width:900px;border-radius:4px;overflow:hidden}
 .kba .ckbar i{display:block;min-width:3px;background:rgba(59,130,246,.62)}
 .kba .ckbar i:nth-child(even){background:rgba(59,130,246,.36)}
