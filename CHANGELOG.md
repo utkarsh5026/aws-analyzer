@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔎 **OpenSearch: an explorer window** ([#208](https://github.com/utkarsh5026/aws-analyzer/pull/208))
+  - `ui.explore()` opens every domain and Serverless collection in a window, the ones with warnings first; click one for its indexes.
+  - Click an index for its vector fields and memory; the Documents tab samples it, the documents without a vector first.
+  - The Search tab finds the documents nearest a question or a document, each a click away.
+
 ## [0.48.0] - 2026-11-06
 
 ### Added

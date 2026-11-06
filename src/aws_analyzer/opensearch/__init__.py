@@ -4,9 +4,9 @@ opensearch.py - Amazon OpenSearch toolkit for vector (k-NN) indexes, for SageMak
 Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import OpenSearchView``.
 
 Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich
-HTML output. All are preinstalled on SageMaker. No OpenSearch client library is
-needed: requests to a domain or collection are signed with your AWS credentials
-by botocore, the way boto3 signs its own.
+HTML output, ipywidgets only for the explorer window. All are preinstalled on SageMaker.
+No OpenSearch client library is needed: requests to a domain or collection are signed
+with your AWS credentials by botocore, the way boto3 signs its own.
 
 The file has two layers:
 
@@ -31,6 +31,7 @@ Quick start
     ui.search("how do refunds work?")                 # nearest neighbours of a question (embedded with Bedrock)
     ui.search(like="doc-17")                          # the documents closest to doc-17 (no model needed)
     ui.search(vector=my_model.encode("refunds"), where={"lang": "en", "year": (">=", 2024)})
+    ui.explore("vectors-prod")                        # a window to click through it all (Jupyter, ipywidgets)
 
     aos = ui.core                                     # same analyzer, raw data
     info = aos.index("vectors-prod", "docs")          # IndexInfo: info.vectors[0].dimension, .engine, ...
@@ -66,6 +67,7 @@ from .analysis.findings import (
 from .http import OpenSearchError
 from .analyzer import OpenSearchAnalyzer
 from .view import OpenSearchView
+from .explorer.window import OpenSearchExplorer, explore
 
 __all__ = [
     "EMBEDDING_MODELS",
@@ -87,6 +89,7 @@ __all__ = [
     "KnnStats",
     "OpenSearchAnalyzer",
     "OpenSearchError",
+    "OpenSearchExplorer",
     "OpenSearchView",
     "Overview",
     "Sample",
@@ -103,6 +106,7 @@ __all__ = [
     "domain_knn_memory",
     "domain_monthly_cost",
     "endpoint_service",
+    "explore",
     "guess_text_field",
     "human_age",
     "human_money",

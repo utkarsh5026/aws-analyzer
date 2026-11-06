@@ -8,7 +8,7 @@ AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as 
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
-OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
+OpenSearch vector indexes in Service domains and Serverless collections (and `explore()`, a window to click through them), `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
 (a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
 and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
@@ -792,6 +792,19 @@ How the View layer works:
   Overview, Performance and Stages tabs draw the View's `_api_blocks`, `_performance_blocks` and `_stages_blocks`.
   Its own blocks (`blocks.py`): `_Path` (where a route sends a request, box by box) and `_TimeSplit` (where a call's
   time went: authorizer, integration, API Gateway).
+- `opensearch`'s explorer window, `OpenSearchExplorer` (`opensearch/explorer/`: `window.py` with `explore()`, composed
+  of `_StoresTab` (`stores.py`, every domain and collection: `overview()`'s cards above the list, its Serverless
+  capacity and warnings below, `_split_overview`), `_IndexesTab` (`indexes.py`, the store's indexes beside the one
+  picked, as `_index_info_blocks` draws it), `_DocumentsTab` (`documents.py`, `core.sample()` read when the tab is first
+  opened: the documents without a vector first, the one picked drawn by the View's `_document_blocks`, and ≈ Nearest
+  documents) and `_SearchTab` (`search.py`, a question or `like=` a document, the hits on the left opening in the
+  Documents tab), and `_FocusReads` (`focus.py`); `frame.py` its tabs, stylesheet (`.osx-app`, derived from the API
+  Gateway explorer's, on `_terminal_theme`), faces and `_window_text` (a call with `where=` stays a call);
+  `widgets.py` the `_StoreField` and `_Line`; `OpenSearchView.explore()` imports it lazily and keeps it in
+  `view.explorer`), is the seventh interactive UI, built on the windows' kit like `APIGatewayExplorer`. The View's
+  reports are split into `_<command>_blocks` so the window draws them, and its `_error_text` says a failed REST request
+  in words through the View's `_explain_http`. `.claude/skills/demo/os_explorer_shots.py` makes the guide's
+  `os-explorer*` figures in a real JupyterLab on demo.py's OpenSearch.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,

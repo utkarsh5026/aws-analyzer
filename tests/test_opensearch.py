@@ -1,7 +1,11 @@
+import asyncio
+import html as html_lib
 import io
 import json
 import math
 import random
+import re
+import threading
 from types import SimpleNamespace
 
 import boto3
@@ -14,6 +18,7 @@ from moto import mock_aws
 
 from aws_analyzer import opensearch as osmod
 from aws_analyzer.opensearch import helpers, style
+from aws_analyzer.opensearch.explorer.frame import _window_text
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.opensearch import (
     GB,
@@ -27,6 +32,7 @@ from aws_analyzer.opensearch import (
     KnnStats,
     OpenSearchAnalyzer,
     OpenSearchError,
+    OpenSearchExplorer,
     OpenSearchView,
     SearchResult,
     StoreReport,
@@ -1148,7 +1154,7 @@ def test_ui_html_renders(ui, capsys):
 
 def test_help_lists_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    for name in ("overview", "use", "indexes", "index_info", "sample", "search"):
+    for name in ("overview", "use", "indexes", "index_info", "sample", "search", "explore"):
         assert f"{name}(" in out
     assert "Other" not in out
     assert set(_commands(OpenSearchView)) == {name for names in OpenSearchView._GROUPS.values() for name in names}
@@ -1160,3 +1166,201 @@ def test_instance_prices_are_complete():
     for name, (price, cpus, memory) in INSTANCE_TYPES.items():
         assert name.endswith(".search") and price > 0 and cpus > 0 and memory > 0
         assert OPENSEARCH_PRICES[name] == price
+
+
+
+def plain(value):
+    return " ".join(html_lib.unescape(re.sub(r"<[^>]+>", " ", value)).split())
+
+
+@pytest.fixture
+def region(aws):
+    """
+    Two domains (vectors-prod, and open-dev, open to anyone) and two Serverless collections, over the fake cluster.
+    """
+    make_domain(aws)
+    make_domain(aws, "open-dev", EngineVersion="OpenSearch_2.11", AccessPolicies=OPEN_POLICY,
+                ClusterConfig={"InstanceType": "t3.small.search", "InstanceCount": 1},
+                EBSOptions={"EBSEnabled": True, "VolumeType": "gp2", "VolumeSize": 10})
+    aoss = serverless([collection_detail(), collection_detail("app-logs", "ddd111eee222fff333gg", kind="TIMESERIES")])
+    return OpenSearchAnalyzer(region=REGION, http=cluster(), clients={
+        "opensearchserverless": aoss, "cloudwatch": cloudwatch(), "sts": sts(), "bedrock-runtime": bedrock()})
+
+
+def explorer(core, where=None, **kwargs):
+    return OpenSearchExplorer(where, core=core, mode="widgets", **kwargs)
+
+
+def test_window_wording():
+    assert _window_text("index_info() shows the savings.") == "The Indexes tab shows the savings."
+    assert _window_text("See them with sample('vectors-prod/docs').") == "See them with the Documents tab."
+    assert _window_text("Run client.search(index='docs').") == "Run client.search(index='docs')."
+    kept = "sample(where={'embedding': ('missing',)}) finds them"
+    assert _window_text(kept) == kept
+
+
+def test_explorer_opens_the_domain_with_the_most_vector_memory(region):
+    x = explorer(region)
+    assert x.store.name == "vectors-prod" and x.index_name == "docs" and x._tab == "stores"
+    assert [line.store.name for line in x.stores_shown][0] == "open-dev"
+    assert "OpenSearch explorer" in x.title.value and "Vector memory / k-NN 24.3 KB of 12.0 GB" in plain(x.stats.value)
+    assert [i.name for i in x.indexes_shown] == ["docs", "logs"]
+    assert plain(x.status.value) == "docs: 61 documents · 1 vector field"
+    kinds = [type(b).__name__ for b in x.shown["stores"]]
+    assert "_Next" not in kinds and "Serverless capacity" in plain(x.stores_tail.value)
+    assert "Anyone on the internet" in plain(x.stores_tail.value)
+    assert "Index docs" in plain(x.index_view.value) and "The k-NN query, to copy" in plain(x.index_view.value)
+    assert "Indexes in domain vectors-prod" in plain(x.overview_view.value)
+    assert repr(x).startswith("OpenSearchExplorer(vectors-prod/docs)")
+
+
+def test_explorer_domains_tab_searches_filters_and_sorts(region):
+    x = explorer(region)
+    x.store_find.value = "logs"
+    assert [line.store.name for line in x.stores_shown] == ["app-logs"]
+    x.store_find.value = ""
+    chip = next(c for c in x.store_chips.children if c.description.startswith("Vector collections"))
+    chip.click()
+    assert [line.store.name for line in x.stores_shown] == ["kb-vectors"]
+    chip.click()
+    x.column_buttons["name"].click()
+    assert [line.store.name for line in x.stores_shown] == ["app-logs", "kb-vectors", "open-dev", "vectors-prod"]
+    x.column_buttons["name"].click()
+    assert x.stores_shown[0].store.name == "vectors-prod"
+    next(row for row in x._store_rows if row.key == "open-dev").button.click()
+    assert x.store.name == "open-dev" and x._tab == "indexes"
+
+
+def test_explorer_indexes_tab(region):
+    x = explorer(region, "vectors-prod", tab="indexes")
+    assert x._tab == "indexes" and x.index_name == "docs"
+    chip = next(c for c in x.index_chips.children if c.description.startswith("Vector"))
+    chip.click()
+    assert [i.name for i in x.indexes_shown] == ["docs"]
+    chip.click()
+    x.index_find.value = "lo"
+    assert [i.name for i in x.indexes_shown] == ["logs"]
+    x._index_rows[0].button.click()
+    assert x.index_name == "logs" and "no vector (knn_vector) fields" in plain(x.index_view.value)
+    x.index("docs")
+    assert x.index_name == "docs"
+    x.index("nope")
+    assert "No index 'nope' in domain vectors-prod" in plain(x.status.value)
+
+
+def test_explorer_documents_tab_samples_and_shows_a_document(region):
+    x = explorer(region, "vectors-prod/docs", tab="documents")
+    assert x._tab == "documents" and x.sample is not None and x.doc is not None
+    assert len(x.docs_shown) == 40 and len(x.sample.docs) == 61 and "Sample of docs" in plain(x.doc_view.value)
+    assert plain(x.doc_count.value) == "40 of 61 sampled"
+    missing = next(d for d in x.sample.docs if "embedding" not in d)
+    x.document(missing["_id"])
+    page = plain(x.doc_view.value)
+    assert f"Document {missing['_id']}" in page and "Vector search never returns it" in page
+    assert "sample(where={'embedding': ('missing',)})" in page
+    assert x.similar_button.layout.display == "none"
+    x.doc_find.value = "doc-17"
+    assert [d["_id"] for d in x.docs_shown] == ["doc-17"]
+    x._doc_rows[0].button.click()
+    assert x.doc["_id"] == "doc-17" and "Fields" in plain(x.doc_view.value)
+    assert "dims" in plain(x.doc_view.value) and x.similar_button.layout.display == ""
+    first = x.sample
+    x.resample_button.click()
+    assert x.sample is not first
+
+
+def test_explorer_search_tab_finds_the_nearest_and_opens_a_hit(region):
+    x = explorer(region, "vectors-prod/docs", tab="documents")
+    x.document("doc-17")
+    x.similar_button.click()
+    assert x._tab == "search" and x.result.like == "doc-17" and x.mode_pick.value == "like"
+    assert "Nearest to document doc-17" in plain(x.search_view.value)
+    hit = x._hit_rows[0].key
+    x._hit_rows[0].button.click()
+    assert x._tab == "documents" and x.doc["_id"] == hit
+    x.mode_pick.value = "text"
+    x.query_box.value = "how do refunds work?"
+    x.search_button.click()
+    assert "Which model embedded these 16-dimension vectors?" in plain(x.search_view.value)
+    x.search("how do refunds work?", model="amazon.titan-embed-text-v2:0")
+    assert x.model == "amazon.titan-embed-text-v2:0" and "The query vector has 1,024 numbers" in plain(x.status.value)
+    x.query_box.value = ""
+    x.search_button.click()
+    assert "Type a question" in plain(x.status.value)
+    x.search("refunds", like="doc-1")
+    assert "and not both" in plain(x.status.value)
+
+
+def test_explorer_starts_where_asked_and_refuses_what_it_hasnt(region):
+    with pytest.raises(ValueError, match="tab is one of"):
+        explorer(region, tab="logs")
+    x = explorer(region, "kb-vectors")
+    assert x.store.name == "kb-vectors" and x.field.value == "kb-vectors"
+    x.open("vectors-prod/logs")
+    assert x.store.name == "vectors-prod" and x.index_name == "logs" and x._tab == "indexes"
+    x.open("vector-prod")
+    assert "vector-prod" in plain(x.status.value) and x.store.name == "vectors-prod"
+    x.field._clicked("open-dev")
+    assert x.store.name == "open-dev"
+    x._show_tab("search")
+    x.refresh()
+    assert x.store.name == "open-dev" and x._tab == "search"
+    assert x.focus.service == "opensearch" and "open-dev" in x.focus.chips()
+
+
+def test_explorer_says_when_nothing_can_be_listed(aws):
+    core = OpenSearchAnalyzer(region=REGION, clients={"opensearchserverless": serverless(fail="list_collections")})
+    x = explorer(core)
+    assert x.store is None and "No OpenSearch domains or Serverless collections" in plain(x.status.value)
+    assert "Couldn't list the collections" in plain(x.stores_view.value)
+
+
+def test_explorer_says_what_a_failed_request_means(region):
+    def refuse(method, url, body, headers):
+        return 403, json.dumps({"error": {"type": "security_exception", "reason": "no permissions"}}).encode()
+
+    region._transport = refuse
+    x = explorer(region, "vectors-prod")
+    assert "es:ESHttpGet" in plain(x.status.value) and x.report is None
+
+
+def test_explorer_without_widgets_shows_reports(region, capsys):
+    OpenSearchExplorer("vectors-prod/docs", core=region, mode="text")
+    assert "Index docs" in capsys.readouterr().out
+    html_view = OpenSearchView(region, mode="html")
+    html_view._show = lambda blocks: None
+    html_view.explore("vectors-prod")
+    assert html_view.explorer.store.name == "vectors-prod"
+    text_view = OpenSearchView(region, mode="text")
+    assert "needs Jupyter" in run(capsys, text_view.explore)
+
+
+def test_explorer_reads_in_the_background(region):
+    hold = threading.Event()
+    answer = region._transport
+
+    def held(method, url, body, headers):
+        hold.wait(10)
+        return answer(method, url, body, headers)
+
+    region._transport = held
+
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*list(x._tasks.values()))
+
+    async def main():
+        x = explorer(region, "vectors-prod")
+        assert list(x._tasks) == ["list"] and x.store is None
+        await asyncio.gather(x._tasks["list"])
+        assert "store" in x._tasks and "Reading the indexes in vectors-prod" in plain(x.status.value)
+        x.field._clicked("open-dev")
+        hold.set()
+        await settle(x)
+        assert x.store.name == "open-dev" and x.index_name == "docs"
+        x._show_tab("documents")
+        assert "sample" in x._tasks
+        await settle(x)
+        assert x.sample is not None and x.doc is not None
+
+    asyncio.run(main())

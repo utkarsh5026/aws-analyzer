@@ -24,6 +24,9 @@ Quick start
     from aws_analyzer import LambdaExplorer  # a window to look through your Lambda functions: their logs run by
     LambdaExplorer("orders-etl", tab="logs") # run, errors, run times, code and settings, by clicking
 
+    from aws_analyzer import OpenSearchExplorer  # a window to look through OpenSearch vector indexes: each domain
+    OpenSearchExplorer("vectors-prod")           # and collection, its indexes, documents and searches, by clicking
+
     from aws_analyzer import set_timezone    # times in your own zone instead of UTC, in every report and window
     set_timezone("Asia/Kolkata")             # or "local", "+05:30"; AWS_ANALYZER_TZ=Asia/Kolkata does it for good
 
@@ -62,7 +65,7 @@ if TYPE_CHECKING:
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
     from .lambda_functions import LambdaAnalyzer, LambdaExplorer, LambdaView
-    from .opensearch import OpenSearchAnalyzer, OpenSearchView
+    from .opensearch import OpenSearchAnalyzer, OpenSearchExplorer, OpenSearchView
     from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
     from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
@@ -87,6 +90,7 @@ __all__ = [
     "SageMakerView",
     "OpenSearchAnalyzer",
     "OpenSearchView",
+    "OpenSearchExplorer",
     "LambdaAnalyzer",
     "LambdaView",
     "LambdaExplorer",
@@ -121,6 +125,7 @@ _EXPORTS = {  # name -> the module it comes from
     "SageMakerView": "sagemaker_env",
     "OpenSearchAnalyzer": "opensearch",
     "OpenSearchView": "opensearch",
+    "OpenSearchExplorer": "opensearch",
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
     "LambdaExplorer": "lambda_functions",

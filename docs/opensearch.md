@@ -69,7 +69,7 @@ The examples use `vectors-prod`, a domain holding `support-docs` (the help-cente
 
 ## Start here { #tour }
 
-Five questions people bring to a vector index, and the one line that answers each. None of them change anything.
+Six questions people bring to a vector index, and the one line that answers each. None of them change anything.
 { .gist }
 
 <div class="quick" markdown>
@@ -113,6 +113,14 @@ Five questions people bring to a vector index, and the one line that answers eac
     ```
 
     [Search](#search)
+
+-   **Can I just click through it?**
+
+    ```python
+    ui.explore()
+    ```
+
+    [Explore by clicking](#explorer)
 
 </div>
 
@@ -304,6 +312,53 @@ A score isn't a similarity: OpenSearch turns each distance into a score where hi
 
 For unit-length vectors (most embedding models return them), L2 distance, inner product and cosine all rank documents the same way.
 
+## Explore by clicking { #explorer }
+
+`explore()` opens a window with every domain and collection; click one to read its indexes, look through a sample of an index's documents, and search it, without typing a command for each.
+{ .gist }
+
+```python
+ui.explore()                                      # the domain with the most memory for vectors
+ui.explore("vectors-prod/support-docs")           # straight to one index
+ui.explore("kb-support", tab="documents")         # a Serverless collection, on its documents
+```
+
+![The OpenSearch explorer: the region's cards, then a search box, chips and six domains and collections with their status, k-NN memory, monthly cost and warnings under column headers that sort](images/os-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The OpenSearch explorer: the region's cards, then a search box, chips and six domains and collections with their status, k-NN memory, monthly cost and warnings under column headers that sort](images/os-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+`ui.explore()`: every domain and collection, the ones with warnings first; search them, pick a chip (With warnings, Domains, Vector collections, ...) or click a column to sort.
+///
+
+The **Indexes** tab lists the indexes of the one you opened, vector indexes first, each with its first vector field, its documents and size, and a dot for its health or warnings. Click one to read it as `index_info()` shows it: its vector fields in plain English, the memory they need against what the nodes have, the fields to filter on and the k-NN query to copy.
+
+![The Indexes tab: vectors-prod's four indexes on the left, and support-docs open on the right, with cards for its documents, the 99% that have a vector and the 15.7 GB its vectors need against 12.0 GB of k-NN memory, and warnings about both](images/os-explorer-index-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Indexes tab: vectors-prod's four indexes on the left, and support-docs open on the right, with cards for its documents, the 99% that have a vector and the 15.7 GB its vectors need against 12.0 GB of k-NN memory, and warnings about both](images/os-explorer-index-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+`support-docs` in the Indexes tab: 27,000 documents have no vector, and the graphs don't fit in the k-NN memory.
+///
+
+The **Documents** tab reads a random sample of the index: how healthy its vectors are (sizes, lengths, all-zero vectors, repeats) and a line per document, the ones without a vector first. Click one to see its text and fields, its vector summarized; **≈ Nearest documents** searches for the ones closest to it.
+
+![The Documents tab: a sample of support-docs on the left, two documents without a vector at the top, and one of them open on the right, under the sample's vector check, with a warning that vector search never returns it](images/os-explorer-documents-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Documents tab: a sample of support-docs on the left, two documents without a vector at the top, and one of them open on the right, under the sample's vector check, with a warning that vector search never returns it](images/os-explorer-documents-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+A document the search can never find: it has no `embedding`.
+///
+
+The **Search** tab asks for the documents nearest a question, embedded with a Bedrock model that fits the index's vectors, or nearest one of its documents (**Like a document**). The results are on the left, best first, each opening in the Documents tab, and the search as `search()` shows it on the right, with what the scores mean and the search as Python.
+
+![The Search tab: the question how do I get a refund? with its ten nearest documents on the left, and on the right the best score, the model that embedded the question, a note that two results repeat each other and the table of results](images/os-explorer-search-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Search tab: the question how do I get a refund? with its ten nearest documents on the left, and on the right the best score, the model that embedded the question, a note that two results repeat each other and the table of results](images/os-explorer-search-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+"how do I get a refund?" in the Search tab: the nearest articles, and two of them indexed twice.
+///
+
+**Overview** is `indexes()`. The window only reads, like the reports, and outside Jupyter `explore()` shows the reports instead. `x.search("a question", model="...")` picks the embedding model when the index's vectors came from another one.
+
+??? more "How the window reads"
+
+    AWS and OpenSearch are read off the notebook's event loop, so a click returns at once: the domains and collections first, then the one you pick with its indexes, then the index worth a look (the vector index with the most warnings, else the biggest). The sample is read the first time you open the Documents tab, and again with **↻ New sample**. Pick another domain or index while one is still being read and the first one's result is dropped when it comes back.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -477,6 +532,7 @@ Every `OpenSearchView` command. `ui.help()` prints the same list grouped by task
 | `index_info(index=None)` | One index: vector fields and their settings, what a score means, memory, fields to filter on, findings, the query to copy |
 | `sample(index=None, n=10, check=200, where=None)` | A few random documents, and a check of the vectors: sizes, lengths, zeros, repeats |
 | `search(query=None, index=None, vector=, like=, k=10, where=, field=, model=, embed=)` | The k nearest documents, with score and similarity, text, source and fields |
+| `explore(where=None, tab=None, height=None)` | A window to click through it all: every domain and collection, its indexes, a sample of documents, and search |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>
