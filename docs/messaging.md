@@ -221,10 +221,18 @@ The field at the top switches to another queue, topic or rule, and its cards say
 The Map tab: where orders-events' messages go, and the two queues that keep them out.
 ///
 
-**Dead letters** lists every dead-letter queue, the fullest first, with what it catches failures from; click one to open it. **Live** looks at the queue open (else the fullest few) every 5 seconds while its tab is open: how many messages wait, a bar per look, and which way the backlog is going, with when it would be empty.
+**Dead letters** lists every dead-letter queue, the fullest first, with what it catches failures from; click one to open it.
 
-![The Live tab: email-jobs draining 40 messages a minute, empty in about 2 minutes, a bar per look getting shorter, and the counts of the last look](images/msg-explorer-live-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Live tab: email-jobs draining 40 messages a minute, empty in about 2 minutes, a bar per look getting shorter, and the counts of the last look](images/msg-explorer-live-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+![The Dead letters tab: cards with two dead-letter queues, one holding 42 messages, the oldest 2.5 days old; the findings that orders-dlq holds 42 failed messages and keeps them no longer than orders, with the commands; then a line per dead-letter queue and what it catches failures from](images/msg-explorer-dead-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Dead letters tab: cards with two dead-letter queues, one holding 42 messages, the oldest 2.5 days old; the findings that orders-dlq holds 42 failed messages and keeps them no longer than orders, with the commands; then a line per dead-letter queue and what it catches failures from](images/msg-explorer-dead-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+The Dead letters tab: orders-dlq holds 42 failed orders, and the command that moves them back once the cause is fixed.
+///
+
+**Live** looks at the queue open (else the fullest few) every 5 seconds while its tab is open: how many messages wait, a bar per look, and which way the backlog is going, with when it would be empty.
+
+![The Live tab: email-jobs draining 40 messages a minute, empty in about 2.4 minutes, a bar per look getting shorter, and 96 waiting now, 116 at the first look 30 seconds before](images/msg-explorer-live-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Live tab: email-jobs draining 40 messages a minute, empty in about 2.4 minutes, a bar per look getting shorter, and 96 waiting now, 116 at the first look 30 seconds before](images/msg-explorer-live-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
 Live: email-jobs draining after its reader was turned back on.
 ///

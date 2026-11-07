@@ -317,6 +317,8 @@ body[class*=vscode-] .mgx-app.mgx-app .mgx-page{height:620px}
 """
 
 _OWN_CSS = """
+.mgx-app .fz b{display:block;font-weight:600;opacity:1}
+.mgx-app .fz.warn b{color:var(--mx-ink-warn)}
 .mgx-app.mgx-app .mgx-items .mgx-row,.mgx-app.mgx-app .mgx-hops .mgx-row,.mgx-app.mgx-app .mgx-dead .mgx-row{height:52px}
 .mgx-app.mgx-app .mgx-hops .mgx-row{height:44px}
 .mgx-app .hr{display:flex;align-items:center;gap:10px;height:44px;padding:0 10px 0 8px;min-width:0}
