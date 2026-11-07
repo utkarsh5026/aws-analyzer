@@ -2883,7 +2883,7 @@ core = AgentAnalyzer(
     provider="bedrock",                   # or "openai", "azure", any LangChain provider; worked out when left out
     model="sonnet",                       # a model ID, profile or short name; "openai:gpt-4.1" names both
     # Azure OpenAI's own: deployment=, endpoint=, api_key=, api_version="2024-10-21", azure_ad_token_provider=
-    model_prices={"claude-sonnet-5": (2.00, 10.00)},   # USD per 1M input and output tokens, over the list prices
+    model_prices={"claude-sonnet-5": (2.00, 10.00)},   # USD per 1M input and output tokens (then cached ones), over the list prices
     timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account (or a .md file)
@@ -2970,7 +2970,8 @@ reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices
 (the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
 on the plan, the region and the deployment type, so there are no built-in ones). Without a price the cost shows as
-unknown, never a guess, and each question's budget is checked against it when there is one. The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
+unknown, never a guess, and each question's budget is checked against it when there is one. The rules and the tools' descriptions (about 12,000 tokens with the built-in tools, the same for every question) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
+The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
 $0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. A knowledge
 base search embeds its question (about $0.0000004 at Titan Embeddings' price); the vector store bills by its own
 terms (OpenSearch Serverless by the hour, whether it's searched or not). Reading logs

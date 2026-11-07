@@ -39,7 +39,7 @@ from .prompt import asked_at, parse_query_reply, query_prompt
 from .chats import ChatSummary
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
-from .llm import model_place, no_model_hint, provider_info
+from .llm import Rates, cache_saving, model_place, no_model_hint, provider_info
 from .model_setup import (
     AGENT_MODULES,
     KernelState,
@@ -276,10 +276,52 @@ def _cost_basis(answer: AgentAnswer) -> str:
         return (f"The model's cost is unknown: pass its prices, AgentView(model_prices={{{_price_key(answer)!r}: "
                 f"(input_price, output_price)}}) (USD per 1M input and output tokens, from {sheet}).")
     if rates.source == "list":
-        return (f"Model cost is an estimate: {tokens} at Amazon Bedrock's list prices for {_price_key(answer)} "
-                f"({_per_million(rates.price_in)} in and {_per_million(rates.price_out)} out per 1M tokens; "
-                "model_prices= sets your own).")
-    return f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
+        basis = (f"Model cost is an estimate: {tokens} at Amazon Bedrock's list prices for {_price_key(answer)} "
+                 f"({_per_million(rates.price_in)} in and {_per_million(rates.price_out)} out per 1M tokens; "
+                 "model_prices= sets your own).")
+    else:
+        basis = f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
+    cache = _cache_text(answer, rates)
+    return f"{basis} {cache}" if cache else basis
+
+
+def _cache_parts(answer: AgentAnswer, rates: Rates) -> list[str]:
+    """
+    What an answer's input tokens did with the prompt cache, with the price of each: '11,820 were read from the
+    prompt cache at $0.11 per 1M', '2,100 written to it at $1.38 per 1M'.
+    """
+    parts = []
+    if answer.cache_read_tokens:
+        parts.append(f"{answer.cache_read_tokens:,} were read from the prompt cache at "
+                     f"{_per_million(rates.cache_read or 0.0)} per 1M")
+    if answer.cache_write_tokens:
+        write_price = rates.price_in if rates.cache_write is None else rates.cache_write
+        where = "to it" if parts else "to the prompt cache"
+        verb = "" if parts else "were "
+        parts.append(f"{answer.cache_write_tokens:,} {verb}written {where} at {_per_million(write_price)} per 1M")
+    return parts
+
+
+def _cache_text(answer: AgentAnswer, rates: Rates) -> str:
+    """
+    What the prompt cache did to the answer's cost: how many input tokens it read from the cache and wrote to it,
+    and what that saved; when only writes happened, that a follow-up within five minutes reads them; and when the
+    prices passed in model_prices= don't say what a cached token costs, that the cost is an upper bound and how to
+    give it. '' when nothing went through the cache.
+    """
+    cached = answer.cache_read_tokens + answer.cache_write_tokens
+    if not cached:
+        return ""
+    if rates.cache_read is None:
+        return (f"{cached:,} of the input tokens went through the model's prompt cache and are priced here as ordinary "
+                f"input, so the cost is an upper bound: give the cache's prices after the others, "
+                f"AgentView(model_prices={{{_price_key(answer)!r}: (input, output, cache_read, cache_write)}}).")
+    lead = f"Of the input tokens, {' and '.join(_cache_parts(answer, rates))}"
+    saved = cache_saving(rates, cache_read=answer.cache_read_tokens, cache_write=answer.cache_write_tokens)
+    if saved <= 0:
+        return f"{lead}: a follow-up within 5 minutes reads them at {_per_million(rates.cache_read)} per 1M."
+    full_price = (answer.cost or 0.0) + saved
+    return f"{lead}, which cut the model cost by {saved / full_price:.0%} ({human_money(saved)})."
 
 
 def _installed(module: str) -> bool:
