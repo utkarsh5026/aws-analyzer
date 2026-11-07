@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- 🤖 **Agent: follow-ups cost less on Bedrock** ([#217](https://github.com/utkarsh5026/aws-analyzer/pull/217))
+  - Tokens read from Bedrock's prompt cache (Claude, Amazon Nova) are priced at the cache's price, a tenth of the input price for Claude.
+  - The note under each answer says how many input tokens the cache served and what that saved.
+  - `model_prices=` takes cached prices after the others: `{"gpt-4.1": (2.00, 8.00, 0.50)}`.
+
 ## [0.52.0] - 2026-11-07
 
 ### Added

@@ -75,14 +75,16 @@ def test_each_way_to_fail_is_named():
 
 
 def test_summaries_and_compare_say_what_changed():
-    passing = evals.CaseResult("which-failed", "fact", 1, facts=2, facts_total=2, max_calls=5, tool_calls=2)
+    passing = evals.CaseResult("which-failed", "fact", 1, facts=2, facts_total=2, max_calls=5, tool_calls=2,
+                               input_tokens=30_000, cache_read_tokens=18_000)
     failing = evals.CaseResult("which-failed", "fact", 2, facts=1, facts_total=2, max_calls=5, tool_calls=4,
-                               missed=["report-api"], ungrounded=["99 times"])
+                               missed=["report-api"], ungrounded=["99 times"], input_tokens=10_000)
     [summary] = evals.summarize([passing, failing])
     assert (summary.runs, summary.passed, summary.facts, summary.ungrounded, summary.calls) == (2, 1, 0.75, 0.5, 3.0)
     table = evals.render([summary])
     assert re.search(r"which-failed\s+fact\s+1/2\s+75%", table)
     assert "0/1 cases passed every run; 1/2 runs passed; facts 75%" in table
+    assert table.endswith("prompt cache served 45% of 40,000 input tokens")
     lines, worse = evals.compare_lines(evals.summarize([passing]), [summary])
     assert worse and lines[1].endswith("▼") and "1/1 → 1/2" in lines[1]
     assert not evals.compare_lines([summary], evals.summarize([passing]))[1]

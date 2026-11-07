@@ -204,8 +204,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     instead) and api_version= (or OPENAI_API_VERSION, else AZURE_API_VERSION).
     Another LangChain provider takes api_key= (else its own environment variable) and endpoint= as its base URL.
     chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
-    10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
-    either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
+    10.00)} (USD per 1M input and output tokens, then optionally per 1M tokens read from the prompt cache and written
+    to it: (2.50, 10.00, 1.25)) puts a price on each answer, over Bedrock's list prices; without either the cost is
+    unknown and only the tokens are counted. On Bedrock, Claude and Amazon Nova keep the rules and the tools'
+    descriptions in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth (Nova: a quarter)
+    of the input price; OpenAI caches by itself. max_tokens caps each of the model's replies.
     temperature (0 by default) makes the model pick its likeliest words, so the same question over the same data
     gets the same answer; None leaves the provider's default, and a model that takes only its own (OpenAI's o-series
     and GPT-5, told by name) is sent none. A chat_model= passed in keeps its own settings.
@@ -287,7 +290,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         api_version: str | None = None,
         azure_ad_token_provider: Callable[[], str] | None = None,
         chat_model: Any = None,
-        model_prices: dict[str, tuple[float, float]] | None = None,
+        model_prices: dict[str, tuple[float, ...]] | None = None,
         timezone: str | tzinfo | None = None,
         regions: Any = None,
         notes: str | os.PathLike = "",
@@ -1137,7 +1140,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         answer.aws_cost = run.aws_cost + sum(t.request_cost(answer.aws_calls) for t in self.toolkits)
         answer.rates = model_rates(answer.model, self.prices, self.provider)
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
-                                  provider=self.provider)
+                                  provider=self.provider, cache_read=answer.cache_read_tokens,
+                                  cache_write=answer.cache_write_tokens)
         answer.seconds = run.elapsed
         if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
             answer.recheck.fixed = check_grounding(answer, self.earlier(answer)).ok

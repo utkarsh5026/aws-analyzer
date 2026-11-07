@@ -4,7 +4,7 @@ with the notebook's own AWS credentials, so nothing leaves AWS), OpenAI or any s
 or vLLM gateway, OpenRouter), an Azure OpenAI deployment, any other provider LangChain's init_chat_model knows
 ('anthropic:claude-sonnet-4-5', 'google_genai:gemini-2.5-pro', 'ollama:llama3.1'), or a LangChain chat model passed
 in. pick_provider() works out which from the settings and the environment; the makers here build it; model_name(),
-model_rates(), answer_cost(), model_place() and explain_model_error() name it, price its tokens, say where what it's
+model_rates(), answer_cost(), cache_saving(), model_place() and explain_model_error() name it, price its tokens, say where what it's
 sent goes and what a failed call to it means. A provider that needs handling of its own (a key, a client, its
 errors) gets an entry in PROVIDERS and a maker here; any other goes through init_chat_model as it is.
 
@@ -445,42 +445,112 @@ def model_place(provider: str, model: str, endpoint: str | None = None) -> str:
 class Rates(NamedTuple):
     """
     What a model's tokens cost: USD per 1M input tokens and per 1M output tokens, and whose prices they are
-    ('model_prices=', the ones you passed, or 'list', Amazon Bedrock's list prices in _bedrock's MODEL_PRICES).
+    ('model_prices=', the ones you passed, or 'list', Amazon Bedrock's list prices in _bedrock's MODEL_PRICES), then
+    per 1M input tokens read from the prompt cache and written to it. None for a cache price means it isn't known,
+    and those tokens are priced as ordinary input tokens.
     """
 
     price_in: float
     price_out: float
     source: str
+    cache_read: float | None = None
+    cache_write: float | None = None
 
 
-def model_rates(model: str, model_prices: dict[str, tuple[float, float]] | None,
+CACHE_SHARES: tuple[tuple[str, float, float], ...] = (
+    ("anthropic", 0.10, 1.25),
+    ("claude", 0.10, 1.25),
+    ("nova", 0.25, 0.0),
+)
+
+
+def _listed_cache_prices(model: str, price_in: float) -> tuple[float | None, float | None]:
+    """
+    A Bedrock model's prompt-cache prices (read, write) per 1M tokens from its input price; (None, None) for a model
+    Bedrock doesn't cache for. CACHE_SHARES holds them as shares of the input price, by a word in the model's ID:
+    Claude reads at a tenth and writes at a quarter more (the 5-minute cache the agent asks for), Amazon Nova reads
+    at a quarter and writes for nothing. From the AWS Price List (AmazonBedrock and AmazonBedrockFoundationModels,
+    us-east-1, read 2026-11-07).
+    """
+    wanted = model.lower()
+    for word, read_share, write_share in CACHE_SHARES:
+        if word in wanted:
+            return price_in * read_share, price_in * write_share
+    return None, None
+
+
+def _given_rates(prices: tuple[float, ...]) -> Rates:
+    """
+    Rates from a model_prices= entry: (input, output), with the cache read and cache write prices after them when
+    given.
+    """
+    price_in, price_out, *cache = prices
+    cache_read = cache[0] if cache else None
+    cache_write = cache[1] if len(cache) > 1 else None
+    return Rates(price_in, price_out, "model_prices=", cache_read, cache_write)
+
+
+def model_rates(model: str, model_prices: dict[str, tuple[float, ...]] | None,
                 provider: str = "") -> Rates | None:
     """
     What the model's tokens cost: model_prices= first (a deployment or model name, the longest that appears in
-    `model` wins), then for Amazon Bedrock its list prices (by model family; a 'global.' profile's own where it
-    costs less). None when neither knows the model, so its cost is unknown rather than a guess.
+    `model` wins; (input, output) per 1M tokens, then optionally the cache read and cache write prices), then for
+    Amazon Bedrock its list prices (by model family; a 'global.' profile's own where it costs less) with its
+    prompt-cache prices (CACHE_SHARES). None when neither knows the model, so its cost is unknown rather than a guess.
     """
     if model and model_prices:
         wanted = model.lower()
         for key in sorted(model_prices, key=len, reverse=True):
             if key.lower() in wanted:
-                price_in, price_out = model_prices[key]
-                return Rates(price_in, price_out, "model_prices=")
+                return _given_rates(tuple(model_prices[key]))
     listed = model_price(model) if provider == "bedrock" and model else None
-    return Rates(listed[0], listed[1], "list") if listed else None
+    if not listed:
+        return None
+    cache_read, cache_write = _listed_cache_prices(model, listed[0])
+    return Rates(listed[0], listed[1], "list", cache_read, cache_write)
 
 
-def answer_cost(model: str, input_tokens: int, output_tokens: int,
-                model_prices: dict[str, tuple[float, float]] | None, *, provider: str = "") -> float | None:
+def token_cost(rates: Rates, input_tokens: int, output_tokens: int, *, cache_read: int = 0,
+               cache_write: int = 0) -> float:
+    """
+    USD for a model's tokens at these rates. input_tokens counts every input token, the ones read from the prompt
+    cache (cache_read) and written to it (cache_write) included, as LangChain reports them; those are priced at the
+    cache's prices, or as input when the rates don't know them.
+    """
+    read_price = rates.price_in if rates.cache_read is None else rates.cache_read
+    write_price = rates.price_in if rates.cache_write is None else rates.cache_write
+    plain_input = max(input_tokens - cache_read - cache_write, 0)
+    dollars_per_million = (plain_input * rates.price_in + cache_read * read_price + cache_write * write_price
+                           + output_tokens * rates.price_out)
+    return dollars_per_million / 1e6
+
+
+def cache_saving(rates: Rates, *, cache_read: int, cache_write: int) -> float:
+    """
+    What the prompt cache saved, in USD, against sending the same tokens uncached: the reads' discount less what
+    writing to the cache cost over the input price. Negative when a question only wrote to the cache (the next one
+    within five minutes reads it). 0 when the rates don't know the cache's prices.
+    """
+    if rates.cache_read is None:
+        return 0.0
+    write_price = rates.price_in if rates.cache_write is None else rates.cache_write
+    saved = cache_read * (rates.price_in - rates.cache_read) - cache_write * (write_price - rates.price_in)
+    return saved / 1e6
+
+
+def answer_cost(model: str, input_tokens: int, output_tokens: int,  # noqa: PLR0913
+                model_prices: dict[str, tuple[float, ...]] | None, *, provider: str = "", cache_read: int = 0,
+                cache_write: int = 0) -> float | None:
     """
     Estimated USD for the tokens, at model_rates(): model_prices maps a deployment or model name to (USD per 1M
-    input tokens, per 1M output tokens), and a Bedrock model without one has its list price. None when no price
-    matches.
+    input tokens, per 1M output tokens, and optionally per 1M cache-read and cache-write tokens), and a Bedrock model
+    without one has its list price. Tokens read from or written to the prompt cache (counted in input_tokens too)
+    are priced at the cache's prices. None when no price matches.
     """
     rates = model_rates(model, model_prices, provider)
     if rates is None:
         return None
-    return input_tokens / 1e6 * rates.price_in + output_tokens / 1e6 * rates.price_out
+    return token_cost(rates, input_tokens, output_tokens, cache_read=cache_read, cache_write=cache_write)
 
 
 _CONNECTION_ERRORS = ("APIConnectionError", "APITimeoutError", "ConnectError", "ConnectTimeout")

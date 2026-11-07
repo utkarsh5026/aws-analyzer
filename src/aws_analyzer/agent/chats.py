@@ -207,6 +207,8 @@ def answer_from_record(text: str) -> AgentAnswer:
         model_calls=int(record.get("model_calls") or 0),
         input_tokens=int(record.get("input_tokens") or 0),
         output_tokens=int(record.get("output_tokens") or 0),
+        cache_read_tokens=int(record.get("cache_read_tokens") or 0),
+        cache_write_tokens=int(record.get("cache_write_tokens") or 0),
         cost=record.get("cost"),
         rates=Rates(*rates) if rates else None,
         seconds=float(record.get("seconds") or 0.0),

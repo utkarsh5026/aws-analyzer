@@ -765,7 +765,7 @@ from aws_analyzer import AgentAnalyzer, AgentView
 
 core = AgentAnalyzer(
     provider="bedrock", model="sonnet",              # or model="openai:gpt-4.1", deployment=..., ...
-    model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens, over the list prices
+    model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens (then cached), over the list prices
     timezone="Asia/Kolkata",                         # for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account (or a file)
@@ -820,6 +820,8 @@ Its tools get the same budget, error handling and report as the built-in ones, a
 ## Cost { #cost }
 
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices, so each answer shows its estimated cost and the budget's `usd` limit applies. OpenAI's and Azure OpenAI's prices depend on the plan, the region and the deployment type, so there are none built in: pass `model_prices=` for them (or to override Bedrock's). Without a price the cost shows as unknown, never a guess.
+
+The rules and the tools' descriptions (about 12,000 tokens with the built-in tools, the same for every question) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
 
 On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005. A knowledge base search embeds its question, a fraction of a cent; the vector store bills by its own terms (OpenSearch Serverless by the hour, searched or not).
 
