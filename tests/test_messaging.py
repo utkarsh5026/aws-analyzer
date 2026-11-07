@@ -428,6 +428,8 @@ def test_the_backlog_trend_says_which_way_a_queue_goes():
 def test_window_wording():
     assert _window_text("queue_info('orders-dlq') shows why.") == "The Overview tab of orders-dlq shows why."
     assert _window_text("See follow('orders').") == "See the Map tab of orders."
+    listed = "3 more findings: each one's own are in queue_info(), topic_info() and rule_info()."
+    assert _window_text(listed) == "3 more findings: each one's own are in the Overview tab."
     kept = "LambdaView().errors('orders-etl') says why"
     assert _window_text(kept) == kept
 

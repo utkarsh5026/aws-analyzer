@@ -358,12 +358,14 @@ _FIRST_TEXT_RE = re.compile(r"\(\s*['\"]([^'\"]+)['\"]")
 
 _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(t)(?=he [\w ]+ tab)")
 
+_SAME_TAB_RE = re.compile(r"(the [\w ]+? tab)(?:, \1)* and \1\b")
+
 
 def _window_text(text: str) -> str:
     """
     A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab,
-    with the queue, topic or rule it names (queue_info('orders-dlq') -> "the Overview tab of orders-dlq"),
-    capitalised where it starts a sentence. Calls on other Views and AWS CLI commands stay.
+    with the queue, topic or rule it names (queue_info('orders-dlq') -> "the Overview tab of orders-dlq"), the
+    same tab said once where a sentence lists it again, capitalised where it starts a sentence. Calls on other Views and AWS CLI commands stay.
     """
 
     def swap(match: re.Match[str]) -> str:
@@ -374,7 +376,7 @@ def _window_text(text: str) -> str:
         named = _FIRST_TEXT_RE.search(call)
         return f"{_IN_WINDOW[name]} of {named.group(1)}" if named else _IN_WINDOW[name]
 
-    swapped = _CALL_RE.sub(swap, str(text or ""))
+    swapped = _SAME_TAB_RE.sub(r"\1", _CALL_RE.sub(swap, str(text or "")))
     return _SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2).upper(), swapped)
 
 

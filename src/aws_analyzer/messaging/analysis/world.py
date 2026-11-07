@@ -131,8 +131,8 @@ def overview_findings(overview: Overview, prices: dict[str, float]) -> list[Find
     shown = warnings[:MOST_WARNINGS] + notes[:MOST_NOTES]
     hidden = len(findings) - len(shown)
     if hidden > 0:
-        shown.append(("info", f"{_plural(hidden, 'more finding')} for single queues, topics and rules: "
-                              "queue_info(), topic_info() and rule_info() show each one's."))
+        shown.append(("info", f"{_plural(hidden, 'more finding')} for single queues, topics and rules: each one's "
+                              "own are in queue_info(), topic_info() and rule_info()."))
     return shown
 
 
