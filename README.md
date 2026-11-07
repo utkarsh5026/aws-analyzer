@@ -109,7 +109,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 ```python
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
-%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite (Python 3.11+)
+%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite, mcp (Python 3.11+)
 %pip install "aws-analyzer[agent,sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
 ```
 
@@ -2503,7 +2503,7 @@ nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. T
 
 ### Quick start
 
-The agent needs a few more packages (deepagents, langchain-openai, langchain-aws and langgraph-checkpoint-sqlite), which need Python 3.11 or
+The agent needs a few more packages (deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp), which need Python 3.11 or
 newer. Everything else in aws-analyzer still works on 3.10 with boto3 alone.
 
 ```python
@@ -2762,9 +2762,43 @@ model carries on (LangGraph's checkpoints), in one SQLite file. What's kept is w
 anything that looks like a key or password hidden before the model saw them. Saving chats is off unless you turn it on,
 and `clean_up()` leaves the file alone.
 
+### MCP servers (`mcp=`)
+
+Give the agent the tools of any [MCP](https://modelcontextprotocol.io) server: your ticket tracker, a docs search,
+GitHub, AWS's own MCP servers. Their tools sit beside its AWS tools, so one question can use both ("Is there a
+ticket about the orders-etl failure?").
+
+```python
+agent = AgentView(provider="bedrock")                      # mcp=True: servers kept in ~/.cache/aws-analyzer/agent/mcp.json
+agent.add_mcp("npx -y @modelcontextprotocol/server-memory")   # a command it runs on this machine
+agent.add_mcp("https://example.com/mcp", headers={"Authorization": "Bearer ${env:EXAMPLE_TOKEN}"})
+agent.add_mcp('{"mcpServers": {"docs": {"command": "uvx", "args": ["awslabs.aws-documentation-mcp-server@latest"]}}}')
+agent.mcp()                                                # each server: connected or why not, its tools, its calls
+agent.import_mcp()                                         # the mcp.json files your editor keeps (VS Code, Cursor, ...)
+agent.import_mcp(".vscode/mcp.json")                       # add their servers
+agent.disable_mcp("memory"); agent.enable_mcp("memory")    # switch one off and on
+agent.remove_mcp("memory")
+agent = AgentView(mcp=".vscode/mcp.json")                  # or use an editor's file as it is
+```
+
+In the chat window, **🔌 mcp** shows how many servers are connected (`🔌 mcp 2/3`) and opens a panel: a line per
+server with a dot (connected, connecting, failed, off), what it runs, its tools and calls, and why it failed. **tools ▸**
+lists its tools, a box each to turn one off, with when it asks first; **↻** connects it again, **off** / **on**
+switches it, **✕** removes it. **+ add a server** takes a command, a URL or a pasted mcp.json, guesses a name, takes
+environment variables or headers, and connects before it saves. The editor's mcp.json files are offered to import.
+
+> [!NOTE]
+> MCP tools aren't AWS reads: they're your servers', outside the agent's read-only guard. So before a tool runs that
+> doesn't say it only reads (its `readOnlyHint`), the agent stops and asks: **run** or **skip** (after `ask()`, `go()`
+> or `skip()`). `asks="every"` asks before every call, `asks="never"` never. A stdio server gets PATH and HOME and
+> the variables you give it, not the notebook's AWS credentials. What a tool returns goes to the model with anything
+> that looks like a secret hidden; pictures are named, not sent. The servers' file is readable only by you: write a key
+> as `${env:NAME}` to keep it out of the file. Signing in with OAuth isn't supported: give a remote server its key as a
+> header.
+
 ### Safe and bounded
 
-- **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
+- **It only reads.** (MCP servers' tools are theirs: see above.) The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
   operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a
   knowledge base) before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
@@ -2795,7 +2829,7 @@ and `clean_up()` leaves the file alone.
 
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🗂 chats** lists the saved chats to open one again, rename it or delete it (with `chats=True`); **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
+| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🗂 chats** lists the saved chats to open one again, rename it or delete it (with `chats=True`); **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **🔌 mcp** adds, switches and watches your MCP servers and their tools; **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
 | `ask(question, new=False, focus=None)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. `focus=` takes an explorer window (or its `x.focus`): the model is told what it shows, so "this" means the function, run, folder or file you have open. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
@@ -2808,6 +2842,11 @@ and `clean_up()` leaves the file alone.
 | `delete_chat(chat)`         | Removes a saved chat from this machine: its answers and the conversation the model would carry on |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
 | `runbooks()`                | The runbooks the agent follows when a question matches one: each one's name, what it's for, where it's from and the toolkits it needs, and any that didn't load and why (a missing name or description, a name that isn't its folder's) |
+| `mcp()`                     | Your MCP servers: whether each is connected (or why not), what it runs or where it is, its tools and which ask before they run, the calls it has answered, and what to fix |
+| `add_mcp(server, *, name="", env=None, headers=None, asks=None, replace=False)` | Adds an MCP server (a command, a URL or its mcp.json JSON), connects it and saves it in the agent's mcp.json |
+| `remove_mcp(name)` / `enable_mcp(name)` / `disable_mcp(name)` | Removes a server, or switches it on (connecting it) or off |
+| `reconnect_mcp(name=None)`  | Connects a server again (every one that's on, without a name), after fixing what made it fail |
+| `import_mcp(path=None)`     | The mcp.json files your editor and apps keep (VS Code's `.vscode/mcp.json`, Claude Code's `.mcp.json`, Cursor's, Claude Desktop's) and their servers; with a path, adds that file's servers |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
 | `setup(provider=None)` | How to set up the model, as cells to copy: every provider with whether it's ready in this notebook, then for one (`setup('azure')`) the install line, a settings cell that asks for the key with `getpass` (never saved in the notebook), the call that starts the agent, and the lines for every notebook. It checks the Python, the packages and which variables are set, never their values |
 | `use_model(provider=None, model=None, *, endpoint=None, api_key=None, api_version=None, chat_model=None)` | Switches the model the agent answers with (`use_model('bedrock', 'sonnet')`, `use_model('openai', 'gpt-4.1', api_key=...)`), then says where what it sends goes. A new conversation starts; a missing key or package is said, and the agent keeps the model it had |

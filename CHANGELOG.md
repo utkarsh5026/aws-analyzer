@@ -25,6 +25,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `ui.endpoints()` shows which endpoints nobody calls and what each costs a month, with the command to delete it.
   - `ui.pipeline_run("name")` shows the step that broke as a graph and a waterfall; `training_jobs()` and `pipelines()` list them.
 
+- 🤖 **Agent: tools from your MCP servers** ([#211](https://github.com/utkarsh5026/aws-analyzer/pull/211))
+  - `agent.add_mcp("npx -y @modelcontextprotocol/server-memory")` (or a URL, or an mcp.json) gives the agent that server's tools.
+  - The chat window's 🔌 mcp panel adds, switches and watches them; `import_mcp()` brings in your editor's mcp.json.
+  - A tool that doesn't say it only reads asks run or skip first; `mcp=False` turns MCP off.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added

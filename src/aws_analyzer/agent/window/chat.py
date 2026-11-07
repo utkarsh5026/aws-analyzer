@@ -22,9 +22,11 @@ tells its steps (AgentStep) from whichever thread they happen on, into a queue t
 event loop, where the widgets are drawn. Without a running loop (a script, the tests) the question runs right away
 and the steps are drawn when it's done.
 
-The head names the open chat (its title: its first question, or the one it was renamed to). Its 🗂 chats, ⚙ model
-and 🧠 memory open their panels under it, one at a time (chats_panel.py, model_panel.py, memory_panel.py): with
-chats=True, 🗂 chats lists the saved chats, and a click opens one here to carry on.
+The head names the open chat (its title: its first question, or the one it was renamed to). Its 🗂 chats, 🧠 memory,
+🔌 mcp and ⚙ model open their panels under it, one at a time (chats_panel.py, memory_panel.py, mcp_panel.py,
+model_panel.py): with chats=True, 🗂 chats lists the saved chats, and a click opens one here to carry on; 🔌 mcp adds
+and watches the MCP servers whose tools the agent has (their calls carry the 🔌 badge, and one that may change
+something asks Run or Skip first).
 
 Each step is a widget of its own while the agent works, so a line that changes redraws only itself and a line someone
 opened stays open. Plain widgets and CSS, no JavaScript, on the windows' kit (_Window). Widgets live in the kernel: a
@@ -55,10 +57,13 @@ from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _runn
 from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, answer_next, services_of
 from ..grounding import calls_by_ref
 from ..llm import provider_info
+from ..mcp_servers import FAILED
+from ..mcp_servers.config import split_tool_name
 from ..prompt import focus_of
 from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
 from .chats_panel import _CHATS_CSS, _ChatsPanel
 from .drawer import _DRAWER_CSS, Target, _focus_html, focus_questions, target_for
+from .mcp_panel import _MCP_CSS, _McpPanel, mcp_button_label
 from .memory_panel import _MEMORY_CSS, _MemoryPanel
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
@@ -106,6 +111,7 @@ _SERVICES = {
     "sagemaker": _Service("Amazon SageMaker", "sagemaker", _MACHINE_LEARNING, "hex"),
     "es": _Service("Amazon OpenSearch Service", "opensearch", _ANALYTICS, "search"),
     "aoss": _Service("Amazon OpenSearch Serverless", "opensearch", _ANALYTICS, "search"),
+    "mcp": _Service("An MCP server's tool (not an AWS read)", "mcp", "#5B6B8A", "plug"),
 }
 
 _DRAWINGS = {
@@ -120,6 +126,7 @@ _DRAWINGS = {
     "spark": "<path d='M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z'/>",
     "hex": "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/>",
     "search": "<circle cx='11' cy='11' r='6'/><path d='M20 20l-4.5-4.5'/>",
+    "plug": "<path d='M9 3v5M15 3v5'/><path d='M6 8h12v3a6 6 0 0 1-12 0z'/><path d='M12 17v4'/>",
 }
 
 
@@ -220,6 +227,7 @@ _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file", 
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 _CHOICE_BUTTONS = (("go", "go ▸", "Read all of it"), ("smaller", "smaller", "Read the smaller part instead"),
                    ("skip", "skip", "Answer without it"))
+_RUN_BUTTONS = (("go", "run ▸", "Let this MCP tool run, this once"), ("skip", "skip", "Answer without it"))
 _LIMIT_BUTTONS = (("go", "raise ▸", "Raise the limit for this question and go on"),
                   ("smaller", "answer now", "Answer with what it found"))
 
@@ -375,7 +383,7 @@ def _service_rules() -> str:
 
 def _window_css() -> str:
     return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _PANEL_CSS, _MEMORY_CSS,
-                      _CHATS_CSS, _DRAWER_CSS, _json_tree_css(_ROOT)])
+                      _CHATS_CSS, _MCP_CSS, _DRAWER_CSS, _json_tree_css(_ROOT)])
 
 
 def _wrap(inner: str) -> str:
@@ -487,6 +495,9 @@ def _tool_words(call: ToolCall, *, running: bool) -> str:
     errors" once it's done. A tool the window doesn't know reads as its name.
     """
     words = _TOOL_WORDS.get(call.name)
+    mcp_tool = split_tool_name(call.name) if words is None and "mcp" in call.services else None
+    if mcp_tool is not None:
+        return f"{mcp_tool[1].replace('_', ' ')}, on {mcp_tool[0]}"
     if words is None:
         return call.name.replace("_", " ")
     template = words.running if running else words.done
@@ -574,6 +585,10 @@ def _asked_html(call: ToolCall) -> str:
     read = call.waiting
     if read is None:
         return ""
+    if not read.smaller and not read.limit:
+        return (f'<div class="ag-asked"><b>✋ Run this MCP tool?</b> {_prose(read.what)}'
+                f'<span class="ag-k"># run: {_esc(read.go)}</span><span class="ag-k"># skip: answer without it '
+                "· MCP tools are your servers', outside the agent's read-only guard</span></div>")
     if read.limit:
         return (f'<div class="ag-asked"><b>✋ Limit reached: raise it, or answer now?</b> {_prose(read.what)}'
                 f'<span class="ag-k"># raise: {_esc(read.go)}</span>'
@@ -599,6 +614,8 @@ def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
     waiting = next((call.waiting for call in turn.calls if call.waiting is not None), None)
     if turn.ask is not None and waiting is not None and waiting.limit:
         doing = "Waiting for you: raise the limit, or answer now?"
+    elif turn.ask is not None and waiting is not None and not waiting.smaller:
+        doing = "Waiting for you: run or skip?"
     elif turn.ask is not None:
         doing = "Waiting for you: go, smaller or skip?"
     elif running:
@@ -728,18 +745,24 @@ class _AgentChat(_Window):
                                           "agc-new")
         self.chats_button = self._button("🗂 chats", "Your saved chats: open one to carry it on, or rename this one",
                                          lambda: self._toggle(self.chats_panel), "agc-new")
+        self.mcp_button = self._button(mcp_button_label(self._mcp_states()), "Your MCP servers: add one, see which "
+                                       "are connected and their tools", lambda: self._toggle(self.mcp_panel), "agc-new")
         self.new_button = self._button("new chat", "Start over: the next question starts a new conversation",
                                        self._new_chat, "agc-new")
-        head = w.HBox([self.title, self.chats_button, self.memory_button, self.model_button, self.new_button],
+        head = w.HBox([self.title, self.chats_button, self.memory_button, self.mcp_button, self.model_button,
+                       self.new_button],
                       layout=layout(width="100%"))
         head.add_class("agc-head")
         focus_row = self._focus_row()
+        if self.view.core.mcp_kit is None:
+            self.mcp_button.layout.display = "none"
         if self.is_drawer:
             self.chats_button.layout.display = self.memory_button.layout.display = "none"
             self.title.layout.overflow = "hidden"
         self.panel = _ModelPanel(self, w, os.environ)
         self.memory_panel = _MemoryPanel(self, w)
         self.chats_panel = _ChatsPanel(self, w)
+        self.mcp_panel = _McpPanel(self, w)
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto",
                                         height=_css_height(height), width="100%"))
         self.log.add_class("agc-log")
@@ -752,8 +775,8 @@ class _AgentChat(_Window):
         composer = w.HBox([prompt, self.question, self.send_button], layout=layout(width="100%"))
         composer.add_class("agc-composer")
         self.status = w.HTML(layout=layout(width="100%"))
-        root = w.VBox([style, head, focus_row, self.panel.root, self.memory_panel.root, self.chats_panel.root, self.log,
-                       composer, self.status], layout=layout(width="100%"))
+        root = w.VBox([style, head, focus_row, self.panel.root, self.memory_panel.root, self.chats_panel.root,
+                       self.mcp_panel.root, self.log, composer, self.status], layout=layout(width="100%"))
         root.add_class("agc-app")
         if self.is_drawer:
             root.add_class("agc-drawer")
@@ -859,17 +882,33 @@ class _AgentChat(_Window):
         button.on_click(self._safely(lambda _button: on_click()))
         return button
 
-    def _toggle(self, panel: _ModelPanel | _MemoryPanel | _ChatsPanel) -> None:
+    def _toggle(self, panel: _ModelPanel | _MemoryPanel | _ChatsPanel | _McpPanel) -> None:
         """
-        Opens a panel under the head (🗂 chats, ⚙ model, 🧠 memory), closing the others, or closes it when it's open.
+        Opens a panel under the head (🗂 chats, 🧠 memory, 🔌 mcp, ⚙ model), closing the others, or closes it when
+        it's open.
         """
         if panel.is_open:
             panel.close()
             return
-        for other in (self.panel, self.memory_panel, self.chats_panel):
+        for other in (self.panel, self.memory_panel, self.chats_panel, self.mcp_panel):
             if other is not panel and other.is_open:
                 other.close()
         panel.open()
+
+    def _mcp_states(self) -> list[Any]:
+        kit = self.view.core.mcp_kit
+        return kit.states if kit is not None else []
+
+    def mcp_changed(self) -> None:
+        """
+        The agent's MCP servers changed (in this window's panel, another window's, or from code): the head says
+        how many are connected, and an open panel draws them again.
+        """
+        self.mcp_button.description = mcp_button_label(self._mcp_states())
+        _class_if(self.mcp_button, "agc-warn", any(state.status == FAILED for state in self._mcp_states()))
+        self._set(self.title, self._title_html())
+        if self.mcp_panel.is_open:
+            self.mcp_panel.refresh()
 
     def _services(self) -> list[str]:
         """
@@ -948,7 +987,14 @@ class _AgentChat(_Window):
         named = f'<span class="ag-ct" title="{_esc(chat)}">{_esc(chat)}</span>' if chat else ""
         name = "✦ Ask" if self.is_drawer else "aws-agent"
         return (f'<div class="ag-head"><b>{name}</b>{named}<span class="ag-dim">{_esc(self._model_where())}</span>'
-                f'{_badges(self._services())}<span class="ag-ro">● read-only</span></div>')
+                f'{_badges(self._services())}<span class="ag-ro">{_esc(self._read_only_text())}</span></div>')
+
+    def _read_only_text(self) -> str:
+        """
+        What the head says the agent may do: read-only, or read-only on AWS when MCP tools (the servers') join in.
+        """
+        has_mcp = any(state.is_ready for state in self._mcp_states())
+        return "● read-only on AWS" if has_mcp else "● read-only"
 
     def _set_status(self, text: str, level: str = "") -> None:
         """
@@ -1348,8 +1394,12 @@ class _AgentChat(_Window):
         if id(call) in turn.lines:
             self._set(turn.lines[id(call)], _wrap(_tool_html(call, running=False)))
         at_limit = bool(call.waiting is not None and call.waiting.limit)
+        is_run = bool(call.waiting is not None and not call.waiting.smaller and not at_limit)
+        choices = _RUN_BUTTONS if is_run else _CHOICE_BUTTONS
+        if at_limit:
+            choices = _LIMIT_BUTTONS
         buttons = []
-        for choice, label, tooltip in _LIMIT_BUTTONS if at_limit else _CHOICE_BUTTONS:
+        for choice, label, tooltip in choices:
             button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto"))
             button.add_class("agc-choice")
             button.add_class(f"agc-{choice}")
@@ -1363,6 +1413,10 @@ class _AgentChat(_Window):
         if at_limit:
             self._set_status("The agent is waiting for you: raise the limit for this question, or have it answer "
                              "now with what it found.", "warn")
+            return
+        if is_run:
+            self._set_status("The agent is waiting for you: run lets this MCP tool run once, skip answers without "
+                             "it.", "warn")
             return
         self._set_status("The agent is waiting for you: go reads it all, smaller the smaller part, skip answers "
                          "without it.", "warn")
@@ -1407,6 +1461,7 @@ class _AgentChat(_Window):
         if self.memory_panel.is_open:
             self.memory_panel.refresh()
         self.renamed()
+        self.mcp_changed()
         self._say_ready()
         if answer.error and self.queued:
             self._set_status(_QUEUE_HELD, "warn")
