@@ -39,6 +39,12 @@ _SECTIONS = {  # section -> (what it is, the permission that reads it)
         "sagemaker:DescribeProcessingJob",
     ),
     "metrics": ("endpoint traffic", "cloudwatch:GetMetricData"),
+    "logs": ("the job's logs", "logs:DescribeLogStreams and logs:GetLogEvents"),
+    "pipelines": ("pipelines", "sagemaker:ListPipelines"),
+    "pipeline runs": ("some pipelines' runs", "sagemaker:ListPipelineExecutions"),
+    "run": ("the run", "sagemaker:DescribePipelineExecution"),
+    "steps": ("the run's steps", "sagemaker:ListPipelineExecutionSteps"),
+    "definition": ("the run's definition", "sagemaker:DescribePipelineDefinitionForExecution"),
     "cloudtrail": ("CloudTrail's event history", "cloudtrail:LookupEvents"),
 }
 

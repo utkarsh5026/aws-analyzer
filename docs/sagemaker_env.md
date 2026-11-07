@@ -1,13 +1,13 @@
 ---
 title: SageMaker Guide
-description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, and how to make a Python environment with another version that survives restarts, with aws-analyzer's sagemaker_env.py."
+description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, why a training job failed, which endpoints are idle and where a pipeline broke, and how to make a Python environment with another version that survives restarts, with aws-analyzer's sagemaker_env.py."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> Amazon SageMaker <code>sagemaker_env.py</code></p>
 
 # Know what this notebook costs, and stop paying for idle
 
-What this notebook is costing you, whether it stops when you walk away, what's filling its disk, and what else is still running and billing. And another Python version, with its own Jupyter kernel, in one call.
+What this notebook is costing you, whether it stops when you walk away, what's filling its disk, and what else is still running and billing. Why a training job failed, which endpoints nobody calls, and where a pipeline broke. And another Python version, with its own Jupyter kernel, in one call.
 { .lede }
 
 <ul class="pills">
@@ -64,7 +64,7 @@ The examples run in a Studio JupyterLab space called `churn-analysis` on an `ml.
 
 ## Start here { #tour }
 
-Five questions to ask about the notebook you're in. Only `new_env()` changes anything: it makes the environment you ask for.
+Eight questions to ask about the notebook you're in and what you launch from it. Only `new_env()` changes anything: it makes the environment you ask for.
 { .gist }
 
 <div class="quick" markdown>
@@ -108,6 +108,30 @@ Five questions to ask about the notebook you're in. Only `new_env()` changes any
     ```
 
     [Python environments](#envs)
+
+-   **Why did my training job fail?**
+
+    ```python
+    ui.training_jobs()
+    ```
+
+    [Training jobs](#training)
+
+-   **Which endpoints are idle and still costing me money?**
+
+    ```python
+    ui.endpoints()
+    ```
+
+    [Idle endpoints](#endpoints)
+
+-   **Where did my pipeline break?**
+
+    ```python
+    ui.pipeline_run("churn-pipeline")
+    ```
+
+    [Pipelines](#pipelines)
 
 </div>
 
@@ -314,6 +338,76 @@ Its findings are the ones worth a look: tries AWS refused (with the `aws cloudtr
 
     CloudTrail's event history (`LookupEvents`) for `CreatePresignedNotebookInstanceUrl` and `CreatePresignedDomainUrl` (opened), `StartNotebookInstance` and `CreateApp` (started), and `StopNotebookInstance` and `DeleteApp` (stopped), in the analyzer's region. The history keeps 90 days; older events are only kept by a trail that delivers to S3. The read stops at 2,000 events and says so (`limit=` reads more).
 
+## Why a training job failed { #training }
+
+`training_jobs()` lists the week's training jobs with why each failed one failed; `training_job(name)` says what to change and shows the error in its log.
+{ .gist }
+
+```python
+ui.training_jobs()                          # the last 7 days, newest first
+ui.training_jobs("30d", status="Failed")    # every failure in 30 days
+ui.training_job("churn-xgb-0517")           # one job: why, the error in its log, its timeline and cost
+```
+
+A failure reason like `AlgorithmError: ExecuteUserScriptError: ExitCode 1` doesn't tell you what to do. `training_job()` reads the reason and the end of each instance's log in CloudWatch Logs, recognises the usual causes, and says what to change:
+
+- a **missing package** (`No module named 'lightgbm'`): add it to a `requirements.txt` beside the script;
+- the instance or the **GPU running out of memory** (exit code 137, `CUDA out of memory`): a smaller batch, or a type with twice the memory, named with its price;
+- a **full disk**: a bigger `volume_size`, or `input_mode='FastFile'`;
+- **no capacity** for the instance type, or the account's **quota** used up: nothing in your code is wrong;
+- the **time limit** or a **spot interruption**: a longer `max_run`, and checkpoints;
+- the role **unable to read S3**, or **input data that isn't there**.
+
+![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-light.webp#only-light){ width="984" height="1056" loading=lazy }
+![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-dark.webp#only-dark){ width="984" height="1056" loading=lazy }
+/// caption
+`ui.training_job("churn-xgb-0517")`: `ExecuteUserScriptError` becomes "add lightgbm to requirements.txt".
+///
+
+Under the finding comes the traceback the log ends in, then what the job went through (starting, downloading, training, uploading) and how long each took, a table of each instance's log, and the log itself, folded but for the instance that failed.
+
+!!! tip "Worth knowing"
+    A job that failed before its container started (no capacity, no quota) has no log at all; the report says so instead of showing an empty one. A long wait for instances or a long download gets a note with what speeds it up, and a long on-demand job one with what managed spot training would have saved (an estimate at 70%).
+
+## Idle endpoints { #endpoints }
+
+`endpoints()` shows every endpoint with what it costs a month and how often it was called in the last 30 days: the endpoints nobody calls come first.
+{ .gist }
+
+An endpoint bills every hour it's in service, called or not, which makes a forgotten one the most common surprise on a SageMaker bill. `endpoints()` reads each endpoint's requests and 5xx errors per day from CloudWatch, and prices its instances for a month.
+
+```python
+ui.endpoints()              # the last 30 days
+ui.endpoints(days=90)       # a longer look back
+```
+
+![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-light.webp#only-light){ width="984" height="547" loading=lazy }
+![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-dark.webp#only-dark){ width="984" height="547" loading=lazy }
+/// caption
+`ui.endpoints()`: churn-v1 hasn't been called in a month and costs $83.95 a month.
+///
+
+Its findings each end in the command to run: endpoints with no requests (deleting one keeps its configuration, so the finding also gives the command that brings it back), endpoints nobody has called for a week, barely used ones that serverless inference would be cheaper for, and endpoints failing more than 1% of their requests, with the command that tails their container's log.
+
+## Where a pipeline run broke { #pipelines }
+
+`pipelines()` shows which pipelines are failing; `pipeline_run(name)` shows the step that broke, why, and the steps it never reached.
+{ .gist }
+
+```python
+ui.pipelines()                          # every pipeline, with its last 5 runs
+ui.pipeline_run("churn-pipeline")       # its latest run
+ui.pipeline_run("churn-pipeline", 1)    # the run before
+```
+
+![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-light.webp#only-light){ width="984" height="1493" loading=lazy }
+![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-dark.webp#only-dark){ width="984" height="1493" loading=lazy }
+/// caption
+`ui.pipeline_run("churn-pipeline")`: the training step broke, and the four steps after it never ran.
+///
+
+A run is drawn as a graph of its steps, each coloured by how it went (a condition's if and else branches are labelled), and as a waterfall of when each step ran, so the slow step is plain to see. The failed step's finding names the job it started and the call that shows that job's log: `training_job(...)` for a training step, the `aws logs tail` command for a processing step. When steps were never reached, it also gives the command that retries the run from the failed step.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -417,6 +511,16 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Resource": "*"
     },
     {
+      "Sid": "ReadTrainingLogsAndPipelines",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams", "logs:GetLogEvents",
+        "sagemaker:ListPipelines", "sagemaker:ListPipelineExecutions", "sagemaker:DescribePipelineExecution",
+        "sagemaker:DescribePipelineDefinitionForExecution", "sagemaker:ListPipelineExecutionSteps"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "ReadEndpointTraffic",
       "Effect": "Allow",
       "Action": "cloudwatch:GetMetricData",
@@ -439,6 +543,11 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | `instance("space name")` | also `ListDomains`, `ListSpaces`, `ListApps` |
 | `running()` | the `List` and `Describe` actions for notebook instances, apps, endpoints and jobs, `DescribeDomain`, and `cloudwatch:GetMetricData` for endpoint traffic |
 | `access()` | `cloudtrail:LookupEvents` |
+| `training_jobs()` | `ListTrainingJobs`, `DescribeTrainingJob` |
+| `training_job()` | `DescribeTrainingJob`, and `logs:DescribeLogStreams` and `logs:GetLogEvents` for its log |
+| `endpoints()` | `ListEndpoints`, `DescribeEndpoint`, `DescribeEndpointConfig`, and `cloudwatch:GetMetricData` for traffic |
+| `pipelines()` | `ListPipelines`, `ListPipelineExecutions` |
+| `pipeline_run()` | `ListPipelineExecutions`, `DescribePipelineExecution`, `DescribePipelineDefinitionForExecution`, `ListPipelineExecutionSteps` |
 | `disk()` | nothing: it reads local files |
 | `envs()`, `new_env()` | nothing: they read local files, and `new_env()` runs conda (or uv) and pip on the notebook |
 
@@ -494,6 +603,11 @@ Every `SageMakerView` command. `ui.help()` prints the same list grouped by task,
 | `new_env(python="3.11", name=None, packages=None, path=None, tool="auto", dry_run=False)` | Makes a Python environment with that version where it's kept when the notebook stops, installs `packages=` in it and adds its Jupyter kernel; `dry_run=True` shows the commands instead |
 | `running(metrics=True, days=7)` | Everything billing by the hour in the region, the stopped notebook instances' storage, and what looks forgotten |
 | `access(name=None, days=30, limit=2000)` | Who opened, started or stopped notebooks, when and from which IP address, from CloudTrail; refused tries, root sign-ins and one-off addresses as findings |
+| `training_jobs(since="7d", status=None, limit=100)` | The region's training jobs: status, run time, instances, cost, and why each failed one failed |
+| `training_job(name, lines=1000)` | One training job: why it failed and what to change, the error in its log, its timeline, cost, metrics and each instance's log |
+| `endpoints(days=30)` | Every endpoint with its cost a month, requests and 5xx errors over `days` days, the idle ones first, each with the command to delete it |
+| `pipelines(runs=5)` | The region's pipelines and how their latest runs went |
+| `pipeline_run(pipeline, run=None)` | One run: the step that broke and why, the steps as a graph and a waterfall, and the call that shows the failed job's log |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

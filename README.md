@@ -87,7 +87,7 @@ report still renders.
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#explorer)              |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
-| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Its Python environments, and a new one (Python 3.11, say) with its own kernel in one call<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env/`](src/aws_analyzer/sagemaker_env/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
+| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Its Python environments, and a new one (Python 3.11, say) with its own kernel in one call<br>• Everything running and billing in the region, and what looks forgotten<br>• Why a training job failed, in plain words, with its log<br>• Which endpoints nobody calls, and what each costs a month<br>• Where a pipeline run broke, as a graph and a waterfall              | [`sagemaker_env/`](src/aws_analyzer/sagemaker_env/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **OpenSearch explorer**             | • Every domain and Serverless collection and how it is, warnings first: click one to open it<br>• Its indexes, vector indexes first: each vector field, the memory it needs and the query to copy<br>• A sample of an index's documents, the ones without a vector first: click one for its text and fields<br>• The documents nearest a question or a document, each a click away | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
@@ -1462,7 +1462,8 @@ with a note naming the missing permission, and its search box takes an ID instea
 <img src="docs/images/aws/sagemaker.svg" width="22" height="22" alt="" align="absmiddle"> **The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
 costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, its Python
 environments (and a new one with another Python version, in one call), and which notebooks, apps and endpoints in
-the region look forgotten.
+the region look forgotten. And what you launch from it: why a training job failed and what to change, which
+endpoints nobody calls and what they cost a month, and where a pipeline run broke.
 
 📄 [`src/aws_analyzer/sagemaker_env/`](src/aws_analyzer/sagemaker_env/) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
 
@@ -1495,6 +1496,12 @@ ui.instance("old-experiment")    # another notebook instance, or a Studio space 
 ui.envs()                        # the Python environments and Jupyter kernels here
 ui.new_env("3.11")               # a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops
 ui.new_env("3.12", packages="pandas boto3")   # with packages in it ('-r requirements.txt' works too)
+
+ui.training_jobs()               # the training jobs of the last 7 days, and why each failed one failed
+ui.training_job("churn-xgb-0517")   # one job: why it failed and what to change, the error in its log, its timeline
+ui.endpoints()                   # every endpoint: requests in 30 days, $/month, and the idle ones with the delete command
+ui.pipelines()                   # the pipelines and how their latest runs went
+ui.pipeline_run("churn-pipeline")   # its latest run: the step that broke, as a graph and a waterfall
 ```
 
 > [!NOTE]
@@ -1547,6 +1554,26 @@ Grouped the way `ui.help()` lists them.
 | `running(metrics=True, days=7)` | Everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor, Studio Classic), endpoints, and training and processing jobs, with the instance, price per hour, how long each has run and whether it stops when idle, and each endpoint's requests over the last `days` days from CloudWatch. Stopped notebook instances are listed too, because their volumes are still billed. Findings, each with the command that stops it: notebooks and apps running for over 12 hours with nothing to stop them, endpoints with no requests, and the storage that stopped notebook instances keep |
 | `access(name=None, days=30)`   | Who got into your notebooks, from CloudTrail's event history (90 days at most): every sign-in link to a notebook instance or Studio, every start and stop, and every try AWS refused, with who, when and the IP address it came from, a row per person and a row per event. `name` keeps one notebook instance or space. Findings: refused tries (with the CloudTrail call that shows what else that identity did), sign-ins by the account's root user, and internet addresses only one sign-in came from. It shows who got in, not what they did inside Jupyter |
 
+#### Training jobs
+
+| Command                                         | Shows |
+| :---------------------------------------------- | :---- |
+| `training_jobs(since="7d", status=None, limit=100)` | The region's training jobs made since `since` (`"24h"`, `"30d"`, a date, or `None` for all), newest first: status, when it was made, how long it ran, its instances, what it cost (billable time at the instances' price) and, for a failed one, why in a few words. `status=` keeps one status. Findings: each failed job with its reason and the call that explains it, a kind of failure that keeps happening, jobs close to their time limit |
+| `training_job(name, lines=1000)`                | **Why one job failed, in plain words, and what to change**: a missing package (add it to `requirements.txt`), the instance or the GPU running out of memory (with a type that has twice the memory), a full disk, no capacity for the instance type, the account's quota, the time limit, a spot interruption, the role unable to read S3, input data that isn't there. Then the error its log ends in (the Python traceback), what it went through (starting, downloading, training, uploading) and how long each took, the billable time and cost, the final metrics, a table of each instance's log and the log itself (its last `lines` lines per instance, from CloudWatch Logs), and its data, settings and hyperparameters. Also: a long wait for instances (a warm pool), a long download (`input_mode='FastFile'`), and what managed spot training would have saved |
+
+#### Endpoints
+
+| Command                | Shows |
+| :--------------------- | :---- |
+| `endpoints(days=30)`   | **Which endpoints are idle and still costing you money**: every endpoint in service with its instances, what it costs a month if left on, its requests and 5xx errors over the last `days` days (CloudWatch, per UTC day) and when it was last called, the idle ones first. Findings, each with the command to run: endpoints with no requests (and what each costs a month; deleting keeps the configuration, so the command that brings it back too), endpoints nobody has called for a week, barely used ones that serverless inference would be cheaper for, and endpoints failing more than 1% of requests (with the command that tails their container's log) |
+
+#### Pipelines
+
+| Command                           | Shows |
+| :-------------------------------- | :---- |
+| `pipelines(runs=5)`               | The region's pipelines, the most recently run first, with how their latest `runs` runs went (✓ ✗ ▶) and why the latest one failed. Findings: pipelines whose latest run failed, and how many runs in a row |
+| `pipeline_run(pipeline, run=None)` | **Where a pipeline run broke**: the step that failed and why, with the call that shows its job's log (`training_job(...)` for a training step, the `aws logs tail` command for a processing step), the steps it never reached and the command that retries the run from the failed step; the steps as a graph coloured by how each went (with a condition's if and else branches), a waterfall of when each ran, and a table of the steps with their jobs. `run=1` is the run before the latest; an ARN or display name works too |
+
 ### Reference
 
 <details>
@@ -1577,6 +1604,14 @@ r.to_df()                                             # one row per notebook, ap
 
 a = sm.access("old-experiment", days=90)              # AccessReport: .events (AccessEvent), .sign_ins, .refused
 a.to_df()                                             # one row per sign-in, start and stop: who, when, IP
+
+jobs = sm.training_jobs(since="30d")                  # TrainingList: .jobs (TrainingJob), .cut_short, .errors
+jobs.to_df()                                          # one row per job: status, seconds, billable seconds, usd
+t = sm.training_job("churn-xgb-0517")                 # TrainingDetail: .job, .hosts (HostLog per instance)
+t.hosts[0].error, t.hosts[0].lines                    # the traceback its log ends in, and every line read
+e = sm.endpoints(days=30)                             # EndpointReport: .endpoints (EndpointUse: requests per day)
+e.to_df()                                             # one row per endpoint: $/month, requests, last called
+run = sm.pipeline_run("churn-pipeline")               # PipelineRun: .steps (PipelineStep: status, job, waits for)
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on responses you already have:
@@ -1586,7 +1621,12 @@ The analysis functions are pure (no AWS calls), so they also work on responses y
 `idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`,
 `env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, `parse_access_event` (a CloudTrail
 LookupEvents item), `for_notebook`, `access_by_person`, `is_public_ip`, and the findings: `instance_findings`,
-`disk_findings`, `running_findings`, `env_findings`, `plan_findings`, `access_findings`.
+`disk_findings`, `running_findings`, `env_findings`, `plan_findings`, `access_findings`. For jobs:
+`parse_training_detail` (a DescribeTrainingJob response), `host_log`, `find_error` (the traceback a log ends in),
+`short_reason`, `failure_kind`, `why_it_failed`, `endpoint_monthly`, `is_idle`, `parse_definition` (a pipeline
+definition's steps and what each waits for), `parse_pipeline_step`, `merge_steps`, `pipeline_layout`,
+`step_waterfall`, `step_next`, and `training_findings`, `training_list_findings`, `endpoint_findings`,
+`pipeline_findings`, `pipelines_findings`.
 
 </details>
 
@@ -1603,6 +1643,12 @@ LookupEvents item), `for_notebook`, `access_by_person`, `is_public_ip`, and the 
 - "Cost since start" is the price per hour times how long it has run: since boot for the notebook instance you're
   in, since the app started for a Studio app, and since its last change (about when it last started) for any other
   notebook instance. Spot training jobs cost less than the on-demand price shown.
+- A training job's cost is its billable time (what SageMaker bills, which already counts spot's saving) times its
+  instances' price; a job still running is priced on demand for its time so far. The saving managed spot training
+  would have made is an estimate at 70%. An endpoint's cost a month is its instances' price for 730 hours.
+- `endpoints()` sums CloudWatch's daily numbers, so "last request" is the UTC day of the last one. `training_job()`
+  reads the last 1,000 lines of at most 8 instances' logs (`lines=` for more); CloudWatch Logs bills reads by the
+  GB scanned, which for a training log is a fraction of a cent.
 - `instance()` reads CPU load (the 15-minute average) and memory as they are now, so the suggestion of a smaller
   instance says "if that's typical". Whether a notebook instance stops when idle is read from its lifecycle
   configuration script: AWS's auto-stop-idle sample and scripts like it.
@@ -1625,7 +1671,12 @@ Read-only, per command:
 | `sagemaker:DescribeApp`, `sagemaker:DescribeSpace`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile`                                                                                                                                                                        | `instance` in Studio; `running` reads the domains |
 | `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps`                                                                                                                                                                                                                  | `instance("space name")`                          |
 | `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running`                                         |
-| `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`: endpoint requests                      |
+| `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`, `endpoints`: endpoint requests         |
+| `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`                                                                                                                                                                                                                          | `training_jobs`, `training_job`                   |
+| `logs:DescribeLogStreams`, `logs:GetLogEvents`                                                                                                                                                                                                                                         | `training_job`: its log                           |
+| `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`                                                                                                                                                                                            | `endpoints`                                       |
+| `sagemaker:ListPipelines`, `sagemaker:ListPipelineExecutions`                                                                                                                                                                                                                          | `pipelines`, `pipeline_run`                       |
+| `sagemaker:DescribePipelineExecution`, `sagemaker:DescribePipelineDefinitionForExecution`, `sagemaker:ListPipelineExecutionSteps`                                                                                                                                                       | `pipeline_run`                                    |
 | `cloudtrail:LookupEvents`                                                                                                                                                                                                                                                              | `access`                                          |
 
 `sts:GetCallerIdentity` (who you're signed in as) needs no permission, `disk()` and `envs()` only read local
