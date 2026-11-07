@@ -7,28 +7,29 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
-from .._kit.fmt import (
+from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from ..._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money, human_size,
 )
-from .._kit.render import _call
-from .._kit.view import _BaseView, _friendly_errors
+from ..._kit.render import _call
+from ..._kit.view import _BaseView, _friendly_errors
 
-from .helpers import (
+from ..helpers import (
     _arn_name, _arn_part, _minor, _since, _tilde, app_label, describe_instance, human_runtime, new_env_call,
     shell_path,
 )
-from .models import AccessEvent, AccessReport, Billable, EnvPlan, InstanceReport, Machine
-from .analysis.access import LOOKUP_LIMIT, _is_address, access_by_person, access_findings, is_public_ip
-from .analysis.common import _full
-from .analysis.notebooks import _gpu_idle, idle_shutdown_commands, instance_findings, notebook_costs
-from .analysis.disk import disk_findings, folder_tree
-from .analysis.running import _forgotten, _unused_endpoint, running_findings
-from .analysis.envs import (
+from ..models import AccessEvent, AccessReport, Billable, EnvPlan, InstanceReport, Machine
+from ..analysis.access import LOOKUP_LIMIT, _is_address, access_by_person, access_findings, is_public_ip
+from ..analysis.common import _full
+from ..analysis.notebooks import _gpu_idle, idle_shutdown_commands, instance_findings, notebook_costs
+from ..analysis.disk import disk_findings, folder_tree
+from ..analysis.running import _forgotten, _unused_endpoint, running_findings
+from ..analysis.envs import (
     LOW_DISK, _SUGGESTED, _disks, env_failure, env_findings, kernels_lifecycle, lost_envs, plan_findings,
 )
-from .analyzer import SageMakerAnalyzer
-from .style import _render_html
+from ..analyzer import SageMakerAnalyzer
+from ..style import _render_html
+from .jobs import _JobCommands
 
 
 def _idle_label(state: str, minutes: int | None) -> str:
@@ -141,7 +142,7 @@ def _notebook_ref(b: Billable) -> str | None:
     return None
 
 
-class SageMakerView(_BaseView):
+class SageMakerView(_JobCommands, _BaseView):
     """
     Notebook UI over SageMakerAnalyzer. Each method renders a report and returns nothing; for the underlying
     data call the same-named method on `view.core` (a SageMakerAnalyzer).
@@ -157,6 +158,9 @@ class SageMakerView(_BaseView):
         "💻 This notebook": ("instance", "disk"),
         "🐍 Python environments": ("envs", "new_env"),
         "☁️ Your account": ("running", "access"),
+        "🏋️ Training jobs": ("training_jobs", "training_job"),
+        "🔌 Endpoints": ("endpoints",),
+        "🔀 Pipelines": ("pipelines", "pipeline_run"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -164,6 +168,8 @@ class SageMakerView(_BaseView):
         ("disk()", "what fills the disk, and what's safe to clear"),
         ("running()", "everything running and billing in this region"),
         ("access()", "who opened, started or stopped notebooks in the last 30 days, and from where"),
+        ("training_jobs()", "the training jobs of the last 7 days, and why each failed one failed"),
+        ("endpoints()", "which endpoints nobody calls, and what each costs a month"),
         ("new_env('3.11')", "a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops"),
     )
 
@@ -194,7 +200,7 @@ class SageMakerView(_BaseView):
         ):
             return (
                 f"{text} Names are case-sensitive, and SageMaker is regional (this is {self.core.region}); "
-                "running() lists what's running."
+                "running() lists what's running, training_jobs() the training jobs and pipelines() the pipelines."
             )
         if (
             code in ("AccessDeniedException", "AccessDenied")

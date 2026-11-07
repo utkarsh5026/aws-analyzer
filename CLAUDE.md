@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
+through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, and what's launched from it (training jobs and their logs, endpoints and their traffic, pipelines and their runs), `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections (and `explore()`, a window to click through them), `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
 (a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
@@ -805,6 +805,17 @@ How the View layer works:
   reports are split into `_<command>_blocks` so the window draws them, and its `_error_text` says a failed REST request
   in words through the View's `_explain_http`. `.claude/skills/demo/os_explorer_shots.py` makes the guide's
   `os-explorer*` figures in a real JupyterLab on demo.py's OpenSearch.
+- `sagemaker_env`'s jobs: `jobs.py`'s `_JobReads` (the analyzer's training jobs, their CloudWatch Logs streams in
+  `/aws/sagemaker/TrainingJobs` read with `DescribeLogStreams` / `GetLogEvents`, endpoints with their daily
+  `AWS/SageMaker` Invocations and 5xx errors, pipelines and one run's steps merged with its definition) and
+  `view/jobs.py`'s `_JobCommands` (`training_jobs`, `training_job`, `endpoints`, `pipelines`, `pipeline_run`; `view/` is
+  a package so `rules.py` reads it as UI). The pure side is `analysis/training.py` (`find_error`, the traceback a
+  log ends in; `_CAUSES`, a failure's kind and what to change), `analysis/endpoints.py` and `analysis/pipelines.py`
+  (`parse_definition` reads `DependsOn` and every `{"Get": "Steps.X..."}` as a wait, a condition's If/Else steps as a
+  branch; `pipeline_layout` puts steps in layers like stepfunctions' `flow_layout`, which it can't import), drawn by
+  `blocks.py`'s `_PipelineGraph` and `_StepWaterfall`. `tests/fake_sagemaker.py` (on fake_stepfunctions' `_Checked`)
+  has acme's jobs, endpoints and runs for `tests/test_sagemaker_jobs.py`; demo.py's SageMaker answers training jobs
+  and pipelines from it.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,

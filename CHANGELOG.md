@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🧪 **SageMaker: training jobs, endpoints and pipelines** ([#210](https://github.com/utkarsh5026/aws-analyzer/pull/210))
+  - `ui.training_job("name")` says why a job failed in plain words and what to change, with the error in its log.
+  - `ui.endpoints()` shows which endpoints nobody calls and what each costs a month, with the command to delete it.
+  - `ui.pipeline_run("name")` shows the step that broke as a graph and a waterfall; `training_jobs()` and `pipelines()` list them.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added
