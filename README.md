@@ -7,7 +7,8 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
-OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs and the SageMaker notebook itself: what's there,
+OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs, SQS queues, SNS topics and
+EventBridge rules, and the SageMaker notebook itself: what's there,
 what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
 your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
@@ -24,7 +25,8 @@ checked.
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
+[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) ·
+[SQS, SNS and EventBridge](#sqs-sns-and-eventbridge) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
 [Changelog](CHANGELOG.md)
 
 </div>
@@ -96,6 +98,7 @@ report still renders.
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **Step Functions explorer**          | • Every state machine and how it's doing, failing ones first: click one to open it<br>• Its executions: filter by outcome, search, pick a time range<br>• An execution's waterfall: each state on one time axis, tries and back-off in place<br>• One log of what happened: Step Functions' events and every Lambda run's lines, merged by time<br>• The flow as a graph, coloured by an execution's path or by where executions stop | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#explorer) |
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway**             | • Every REST, HTTP and WebSocket API's requests, 4xx and 5xx, latency and cost<br>• Routes anyone can call, and routes that run out of time (the 29 s limit)<br>• Which calls fail and why, from the stage's access log<br>• For a failed call, the log lines of the Lambda run behind it<br>• Stages without throttling or an access log, with the command that fixes each | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) |
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **API Gateway explorer**             | • Every API and how it's doing, failing ones first: click one to open it<br>• Its routes as a tree: where a request goes, the step that fails marked<br>• Its calls one by one: where each call's time went, and the Lambda run behind it<br>• How long calls take, route by route, and each stage's settings | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#explorer) |
+| <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **SQS, SNS and EventBridge**      | • Where a message went: a topic, queue or rule followed hop by hop to the function that reads it<br>• Queues backing up, and messages close to being deleted unread<br>• Dead-letter queues holding failed messages, with the command that moves them back<br>• Deliveries that fail, and the policy or key that keeps a sender out, with the command that lets it in | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -2300,6 +2303,126 @@ policy.
 
 </details>
 
+## SQS, SNS and EventBridge
+
+<img src="docs/images/aws/messaging.svg" width="22" height="22" alt="" align="absmiddle"> **Where did my message go?** Every
+queue, SNS topic and EventBridge rule in a region, read as one map: how many messages wait in each queue and how old
+the oldest is, which **dead-letter queues** hold failed messages, which deliveries fail, and the queue policy, function
+permission or encryption key that **keeps a sender out**. `follow()` takes a message from a topic, queue or rule hop by
+hop to the Lambda function that reads it.
+
+📄 [`src/aws_analyzer/messaging/`](src/aws_analyzer/messaging/) · 📖 [SQS, SNS and EventBridge guide](https://utkarsh5026.github.io/aws-analyzer/messaging.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/msg-follow-dark.webp">
+  <img src="docs/images/msg-follow-light.webp" alt="follow('orders-events'): the topic, then a tree of its five subscriptions: shipping-updates with its filter, its reader and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and a Lambda function">
+</picture>
+
+<p align="center"><sub><code>msg.follow("orders-events")</code>: two of the five places the topic delivers to keep it out.</sub></p>
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install.
+
+```python
+from aws_analyzer import MessagingView
+
+msg = MessagingView()                        # uses the notebook's execution role and region
+msg.help()                                   # every command, grouped by task
+
+msg.overview()                               # every queue, topic and rule: what waits, what failed, what it costs
+msg.follow("orders-events")                  # where a message goes from a topic, queue, rule or bus
+msg.dead_letters()                           # failed messages, what they came from, how to move them back
+msg.queue_info("orders")                     # one queue: backlog, readers, senders, settings in plain English
+```
+
+**It never shows what's in a queue.** The only way to read a message is `ReceiveMessage`, which hides it from its
+readers for the visibility timeout and counts as a try towards its dead-letter queue, so even a look changes what
+happens to it. The reports use counts, ages and settings (`GetQueueAttributes` and CloudWatch); why a message failed
+is in its reader's logs, which the [Lambda module](#aws-lambda) reads.
+
+### Commands (`MessagingView`)
+
+Grouped the way `msg.help()` lists them.
+
+#### Where messages go
+
+| Command                 | Shows                                                                                                                                                                                                                                       |
+| :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `overview(days=7)`      | Every queue (messages waiting and in flight, the oldest's age, sent and handled over 7 days, who reads it, its dead-letter queue, cost), every topic (subscriptions, published, delivered, **failed**, filtered out) and every rule (on or off, **what it matches in plain English**, targets, failed). Findings: dead-letter queues holding messages, failed deliveries with nothing to catch them, **senders a policy or key keeps out** (with the command under "Let them in"), messages close to being deleted unread, queues nothing reads, unconfirmed subscriptions, topics publishing to no one |
+| `follow(name, days=7)`  | The way a message takes from a topic, queue, rule or bus: what sends to it, then a tree of every subscription (and its filter), rule target, queue, reader and dead-letter queue, each with its numbers and **where messages get lost** |
+| `dead_letters(days=7)`  | Every dead-letter queue, the fullest first: its failed messages, the oldest's age, how long it keeps them, what it catches failures from (queues, subscriptions, rule targets) and `aws sqs start-message-move-task`, the command that moves them back (shown, never run) |
+
+#### One queue, topic or rule
+
+| Command                             | Shows                                                                                                                                                                                                   |
+| :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queue_info(name, days=7)`          | One queue: backlog, a line per day, **each setting and what it means**, the topics and rules that send to it and whether its policy lets them, the Lambda functions that read it. Findings: a visibility timeout shorter than six times the reader's timeout, a queue falling behind, too few receives before the dead-letter queue, a dead-letter queue that keeps messages no longer than its source, empty receives that long polling would save |
+| `topic_info(name, days=7)`          | One topic: published, delivered, failed and filtered out each day, every subscription with its filter in plain English, whether it's confirmed, its dead-letter queue and whether its queue or function lets the topic in |
+| `rule_info(name, bus=None, days=7)` | One EventBridge rule (`"bus/rule"` for a custom bus): what it matches, its targets with their retries and dead-letter queues, matched and failed each day, and the `aws events test-event-pattern` command when it matched nothing |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>MessagingAnalyzer</code>): queues, topics and rules as Python objects</summary>
+
+`msg.core` is the `MessagingAnalyzer`. Every UI command has a data method on it:
+
+```python
+core = msg.core                                # or MessagingAnalyzer(region="eu-west-1", profile="dev")
+
+ov = core.overview(days=7)                     # Overview: .queues, .topics, .buses, .rules, .queue_numbers, .errors
+ov.queues_df()                                 # every queue and its numbers as a DataFrame
+core.queue_report("orders")                    # QueueReport: .queue, .numbers (.daily), .dlq, .feeders
+core.topic_report("orders-events")             # TopicReport: .topic (.subscriptions), .numbers, .queues, .functions
+core.rule_report("shop/order-placed")          # RuleReport: .rule (.targets, .pattern), .numbers
+core.dead_letters()                            # DeadLetter: .queue, .numbers, .catches
+core.follow("orders-events").hops              # Hop: .kind, .name, .via, .numbers, .problem
+```
+
+The analysis functions are pure (no AWS calls): `describe_pattern` and `describe_filter` (an event pattern or filter
+policy as a sentence), `allows` (whether a queue's or function's policy lets a topic or rule in), `access_fixes`,
+`feeders_of`, `follow_map`, `dead_letters_from`, `queue_monthly`, `topic_monthly`, the parsers (`parse_queue`,
+`parse_subscription`, `parse_topic`, `parse_rule`, `parse_target`, `parse_consumer`), the commands findings show
+(`redrive_command`, `move_back_command`, `queue_attribute_command`, `subscription_dlq_command`, `target_dlq_command`,
+`queue_policy_command`, `lambda_permission_command`), and the findings: `queue_findings`, `topic_findings`,
+`rule_findings`, `overview_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost</b>: the prices used</summary>
+
+- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-11-07 (`MESSAGING_PRICES`,
+  the first tier after the free tier): SQS $0.40 per million requests ($0.50 FIFO), SNS $0.50 per million messages
+  published, $0.60 per million HTTPS and $20 per million email deliveries (SQS and Lambda deliveries are free). A
+  queue's requests are every message sent, received and deleted plus every empty receive: batches make it fewer, so
+  it's the most it can be. For another region or a discount: `MessagingAnalyzer(prices={"sqs_request": 0.00000045})`.
+- `overview()` reads 6 CloudWatch metrics per queue, topic and rule ($0.01 per 1,000) and says how many. Reading
+  queues, topics and rules costs nothing.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                                                                         | For                                                                         |
+| :----------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------- |
+| `sqs:ListQueues`, `sqs:GetQueueAttributes`, `sqs:GetQueueUrl`, `sqs:ListDeadLetterSourceQueues`                    | Every queue, its messages, settings, policy and dead-letter queue            |
+| `sns:ListTopics`, `sns:GetTopicAttributes`, `sns:ListSubscriptions`, `sns:ListSubscriptionsByTopic`, `sns:GetSubscriptionAttributes` | Every topic and its subscriptions, filters and dead-letter queues |
+| `events:ListEventBuses`, `events:ListRules`, `events:DescribeRule`, `events:ListTargetsByRule`, `events:ListRuleNamesByTarget`, `events:ListArchives` | Every bus and rule, and their targets                    |
+| `cloudwatch:GetMetricData`                                                                                         | Sent, received, delivered, failed and matched counts, the oldest message's age |
+| `lambda:ListEventSourceMappings`, `lambda:GetFunctionConfiguration`, `lambda:GetPolicy`                            | Which functions read a queue, their timeout, and who may invoke them         |
+
+There's no `sqs:ReceiveMessage`: nothing here reads, sends, moves or deletes a message, and findings show the `aws sqs`
+/ `aws sns` / `aws events` / `aws lambda` command instead of running it. Anything you can't read shows up as a note
+instead of an error. The [guide](https://utkarsh5026.github.io/aws-analyzer/messaging.html#permissions) has a
+ready-made IAM policy.
+
+</details>
+
 ## Ask in plain English
 
 <img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
@@ -2756,6 +2879,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   The OpenSearch tests use moto for domains, fake Serverless, CloudWatch and Bedrock clients checked the same way, and
   [`tests/fake_opensearch.py`](tests/fake_opensearch.py), a small in-memory OpenSearch that answers the REST calls
   (k-NN searches included) and fails the test if anything but a read is sent.
+  The SQS, SNS and EventBridge tests run on moto alone, CloudWatch's numbers included
+  ([`tests/fake_messaging.py`](tests/fake_messaging.py) seeds them).
   The Lambda tests use moto for functions, triggers, CloudWatch and logs, with the few Lambda reads moto lacks
   (account limits, provisioned concurrency) answered by functions checked against the service model.
   The Step Functions tests use [`tests/fake_stepfunctions.py`](tests/fake_stepfunctions.py): fake Step Functions and
@@ -2775,7 +2900,7 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
   [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
   [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md),
-  [`docs/apigateway.md`](docs/apigateway.md)), and so does the S3
+  [`docs/apigateway.md`](docs/apigateway.md), [`docs/messaging.md`](docs/messaging.md)), and so does the S3
   explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and

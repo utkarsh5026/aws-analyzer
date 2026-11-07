@@ -35,6 +35,7 @@ nav:
   - AWS Lambda: lambda_functions.md
   - AWS Step Functions: stepfunctions.md
   - Amazon API Gateway: apigateway.md
+  - SQS, SNS and EventBridge: messaging.md
   - Ask in plain English: agent.md
   - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 

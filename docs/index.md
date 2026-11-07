@@ -36,6 +36,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a href="lambda_functions.html" title="AWS Lambda"><img src="images/aws/lambda.svg" alt="AWS Lambda" width="32" height="32"></a>
 <a href="stepfunctions.html" title="AWS Step Functions"><img src="images/aws/stepfunctions.svg" alt="AWS Step Functions" width="32" height="32"></a>
 <a href="apigateway.html" title="Amazon API Gateway"><img src="images/aws/apigateway.svg" alt="Amazon API Gateway" width="32" height="32"></a>
+<a href="messaging.html" title="SQS, SNS and EventBridge"><img src="images/aws/messaging.svg" alt="SQS, SNS and EventBridge" width="32" height="32"></a>
 </p>
 
 </div>
@@ -191,6 +192,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <img class="aws-icon" src="images/aws/apigateway.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon API Gateway</span><code>apigateway</code></span>
 <span class="asks"><span>Which calls to my API fail, and why?</span><span>Who can call this route without signing in?</span><span>Did the Lambda behind that 504 finish anyway?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="messaging.html">
+<img class="aws-icon" src="images/aws/messaging.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">SQS, SNS and EventBridge</span><code>messaging</code></span>
+<span class="asks"><span>Where did my message go?</span><span>What's stuck in the dead-letter queue?</span><span>Why does this topic never reach my queue?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="agent.html">

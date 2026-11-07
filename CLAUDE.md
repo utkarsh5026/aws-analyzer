@@ -12,7 +12,9 @@ OpenSearch vector indexes in Service domains and Serverless collections (and `ex
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
 (a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
 and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
-stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call). The code they
+stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call), and
+`messaging/` (a package too) for SQS queues, SNS topics and EventBridge rules read as one map (where did my message
+go?). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -262,6 +264,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `access_log_command` are the format and the `aws apigateway update-stage` command findings show. IAM authorizes
   every read as `apigateway:GET`, so `IAM_ACTION` in `rules.py` maps each operation to it. Nothing sends a request to
   an API: `routes()` shows `curl_command` / `curl_lines` (`analysis/try_it.py`) to copy.
+- `messaging/` reads SQS, SNS, EventBridge, CloudWatch (`AWS/SQS`, `AWS/SNS`, `AWS/Events`) and Lambda (event source
+  mappings, a function's timeout and resource policy) into one model, and never calls `ReceiveMessage`: receiving
+  hides a message from its readers and counts as a try towards its dead-letter queue, so the reports use counts, ages
+  and settings only. `analysis/` is pure: `parsing`, `policy` (`allows` reads a queue's or function's policy for one
+  service principal and source ARN, a condition it can't judge counting as met; `blocks_services` is the AWS managed
+  key `alias/aws/sqs`, which SNS and EventBridge can't use), `words` (`describe_pattern` / `describe_filter`),
+  `commands` (the `aws sqs` / `sns` / `events` commands findings show), `access` (feeders, blocked senders and
+  `access_fixes`, one SetQueueAttributes per queue since it replaces the whole policy), `queues` / `topics` / `rules`
+  (findings), `world` (reports and findings built from an `Overview`) and `flow` (`follow_map`, the tree `follow()`
+  draws). `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`; there's no explorer window.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
   installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
@@ -831,7 +843,8 @@ with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, an
 (x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage, and
 `STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds,
 `APIGATEWAY_PRICES` (`apigateway/prices.py`), REST, HTTP and WebSocket requests, connection minutes and the hourly
-price of each REST cache size;
+price of each REST cache size, `MESSAGING_PRICES` (`messaging/prices.py`), SQS requests (standard and FIFO), SNS
+publishes and deliveries by protocol and EventBridge custom events;
 us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
@@ -1321,6 +1334,10 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   behind the newest 504 and 502) and answers GetMetricData with `FakeCloudWatch` over `traffic()` (`holds` and
   `denied` as in the other fakes). demo.py's `seed_apigateway()` uses the same, and
   `.claude/skills/demo/apigw_explorer_shots.py` makes the guide's `apigw-explorer*` figures in a real JupyterLab.
+- SQS, SNS and EventBridge: moto covers all of it, CloudWatch's `AWS/SQS`, `AWS/SNS` and `AWS/Events` numbers
+  included (put with PutMetricData), so `tests/fake_messaging.py`'s `seed(now)` makes acme's queues, topics, rules and
+  functions there (a subscription waiting for confirmation is marked in moto's backend, which confirms them all).
+  demo.py's `seed_messaging()` uses it, and `shots.py` makes the guide's `msg-*` figures from it.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -1381,7 +1398,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `messaging.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or

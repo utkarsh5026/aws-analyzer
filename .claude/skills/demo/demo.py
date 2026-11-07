@@ -60,6 +60,12 @@ Demo data (moto, us-east-1, everything synthetic):
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
             and support-agent-actions (a Bedrock agent's action group). eu-west-1: gdpr-export (SQS). The run
             c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
+  messaging  tests/fake_messaging.py's acme: orders (read by orders-etl, visibility shorter than six times its
+            timeout) and orders-dlq holding 42 failed messages, email-jobs that nothing reads, partner-webhooks whose
+            policy keeps SNS out, audit-events encrypted with alias/aws/sqs; the topics orders-events (2,310 failed
+            deliveries), price-alerts (no subscriptions) and ops-alarms (an unconfirmed email); the rules
+            shop/order-placed (410 failed, no dead-letter queue), shop/refund-requested (off, its function gone),
+            nightly-report and s3-upload (matched nothing). A week of CloudWatch numbers.
   agent     the lambda_functions data, and a scripted stand-in for the model (the agent's packages must be installed):
             whatever the question, it calls function_health for the last 24 hours and function_errors for the two
             functions that failed most, and answers from what they returned. --live asks your Azure OpenAI deployment.
@@ -2313,10 +2319,24 @@ def seed_apigateway() -> dict:
     return {"clients": {"cloudwatch": cloudwatch(ids)}, "lambda_core": LambdaAnalyzer(region=REGION)}
 
 
+def seed_messaging() -> dict:
+    """
+    acme's queues, topics and EventBridge rules from tests/fake_messaging.py, in moto, with a week of CloudWatch
+    numbers and the Lambda functions that read the queues.
+    """
+    from datetime import datetime, timezone
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_messaging import seed
+
+    seed(datetime.now(timezone.utc).replace(microsecond=0))
+    return {}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
            "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions,
-           "apigateway": seed_apigateway, "agent": seed_agent}
+           "apigateway": seed_apigateway, "messaging": seed_messaging, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run
