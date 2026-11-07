@@ -166,7 +166,7 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <li><a href="sagemaker_env.html">
 <img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon SageMaker</span><code>sagemaker_env.py</code></span>
-<span class="asks"><span>What is this notebook costing me, and does it stop when I leave?</span><span>Why is the disk full?</span><span>What did I leave running?</span></span>
+<span class="asks"><span>What is this notebook costing me, and does it stop when I leave?</span><span>Why did my training job fail?</span><span>Which endpoints are idle and still costing me?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="opensearch.html">
