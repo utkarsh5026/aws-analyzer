@@ -1,5 +1,9 @@
+import asyncio
 import json
-from datetime import datetime, timezone
+import re
+import threading
+from html import unescape
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from botocore.exceptions import ClientError
@@ -10,11 +14,13 @@ from aws_analyzer.messaging import (
     MESSAGING_PRICES,
     Consumer,
     MessagingAnalyzer,
+    MessagingExplorer,
     MessagingView,
     Overview,
     Queue,
     QueueNumbers,
     QueueReport,
+    QueueSample,
     Redrive,
     Rule,
     Subscription,
@@ -24,6 +30,7 @@ from aws_analyzer.messaging import (
     allows,
     arn_kind,
     arn_name,
+    backlog_trend,
     describe_filter,
     describe_pattern,
     follow_map,
@@ -41,6 +48,7 @@ from aws_analyzer.messaging import (
     topic_monthly,
 )
 from aws_analyzer.messaging.analysis import blocks_services, dlq_too_short
+from aws_analyzer.messaging.explorer.frame import _window_text
 from aws_analyzer.messaging.style import _render_html
 
 from fake_messaging import ACCOUNT, REGION, seed
@@ -392,3 +400,160 @@ def test_reports_draw_as_html(core):
     ui = MessagingView(core, mode="html", progress="off")
     html = _render_html(ui._overview_blocks(core.overview()), 50)
     assert 'class="msg' in html and "📨 Messaging" in html and "orders-dlq" in html
+
+
+def plain(html):
+    text = re.sub(r"<style>.*?</style>|<[^>]+>", " ", html, flags=re.S)
+    return re.sub(r"\s+", " ", unescape(text)).strip()
+
+
+def explorer(core, where=None, **kwargs):
+    return MessagingExplorer(where, core=core, mode="widgets", **kwargs)
+
+
+def test_the_backlog_trend_says_which_way_a_queue_goes():
+    start = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
+    looks = [QueueSample(start, 400), QueueSample(start + timedelta(minutes=2), 320)]
+    trend = backlog_trend(looks)
+    assert trend.per_minute == -40 and trend.empty_in_s == 480 and trend.words == "draining 40 a minute, empty in about 8 minutes"
+    assert backlog_trend([QueueSample(start, 5), QueueSample(start + timedelta(minutes=1), 50)]).words == "growing 45 a minute"
+    assert backlog_trend([QueueSample(start, 3), QueueSample(start + timedelta(minutes=5), 3)]).words == "steady"
+    assert backlog_trend(looks[:1]).words == "one look so far"
+
+
+def test_window_wording():
+    assert _window_text("queue_info('orders-dlq') shows why.") == "The Overview tab of orders-dlq shows why."
+    assert _window_text("See follow('orders').") == "See the Map tab of orders."
+    kept = "LambdaView().errors('orders-etl') says why"
+    assert _window_text(kept) == kept
+
+
+def test_explorer_opens_the_failed_messages_first(core):
+    x = explorer(core)
+    assert repr(x).startswith("MessagingExplorer(orders-dlq)") and x._tab == "everything"
+    assert [i.name for i in x.items_shown[:2]] == ["orders-dlq", "orders-events"]
+    assert "Waiting 42" in plain(x.stats.value) and "orders-dlq: 1 problem" in plain(x.status.value)
+    kinds = [type(b).__name__ for b in x.shown["everything"]]
+    assert "_Table" not in kinds and "_Next" not in kinds and "_Text" not in kinds
+    assert "orders-dlq holds 42 messages" in plain(x.everything_view.value)
+    x.open("orders-events")
+    assert "Published · 7d 18,400" in plain(x.stats.value) and "Failed 2,310" in plain(x.stats.value)
+    assert "Subscriptions" in plain(x.item_view.value) and "Let them in" in plain(x.item_view.value)
+
+
+def test_explorer_everything_tab_searches_filters_and_sorts(core):
+    x = explorer(core)
+    x.item_find.value = "orders-etl"
+    assert [i.name for i in x.items_shown] == ["orders"]
+    x.item_find.value = ""
+    chip = next(c for c in x.item_chips.children if c.description.startswith("Dead-letter"))
+    chip.click()
+    assert [i.name for i in x.items_shown] == ["orders-dlq", "shipping-dlq"]
+    chip.click()
+    x.column_buttons["waiting"].click()
+    assert x.items_shown[0].name == "email-jobs"
+    x.column_buttons["name"].click()
+    assert x.items_shown[0].name == "audit-events"
+    next(row for row in x._item_rows if row.key.endswith(":orders")).button.click()
+    assert x._tab == "overview" and repr(x).startswith("MessagingExplorer(orders)")
+    assert "a message not handled by then is deleted" in plain(x.item_view.value)
+
+
+def test_explorer_map_follows_a_click(core):
+    x = explorer(core, "orders-events", tab="map")
+    assert x._tab == "map" and [h.name for h in x.hops_shown][:2] == ["orders-events", "shipping-updates"]
+    blocked = next(h for h in x.hops_shown if h.name == "partner-webhooks")
+    assert blocked.problem == "its policy keeps the topic out"
+    next(row for row in x._hop_rows if row.key.endswith(":partner-webhooks")).button.click()
+    assert x._tab == "map" and x.found.name == "partner-webhooks" and x.hops_shown[0].upstream
+    x.open("orders-events", tab="map")
+    next(row for row in x._hop_rows if "fraud-check" in row.key).button.click()
+    assert "LambdaView().explore('fraud-check')" in plain(x.status.value)
+    x.open("shop", tab="map")
+    assert [h.name for h in x.hops_shown][:2] == ["shop", "shop/order-placed"] and "event bus" in plain(x.item_view.value)
+
+
+def test_explorer_dead_letters_and_live(core):
+    x = explorer(core, tab="dead")
+    assert [d.queue.name for d in x.dead_shown] == ["orders-dlq", "shipping-dlq"]
+    assert "Holding messages 1" in plain(x.dead_view.value) and "orders-dlq holds 42" in plain(x.dead_view.value)
+    x._dead_rows[0].button.click()
+    assert x._tab == "overview" and repr(x).startswith("MessagingExplorer(orders-dlq)")
+    x.watch()
+    assert x._tab == "live" and [q.name for q in x.watched] == ["orders-dlq"] and x.watching
+    assert len(x.looks[x.watched[0].arn]) == 1 and "42 waiting" in plain(x.live_view.value)
+    assert "about" in plain(x.live_note.value) and x.focus.kind == "live"
+    x._show_tab("map")
+    assert not x.watching and x.focus.kind == "queue" and "queue orders-dlq" in x.focus.chips()
+
+
+def test_explorer_starts_where_asked_and_refuses_what_it_hasnt(core):
+    with pytest.raises(ValueError, match="tab is one of"):
+        explorer(core, tab="logs")
+    x = explorer(core, "https://sqs.us-east-1.amazonaws.com/123456789012/email-jobs")
+    assert repr(x).startswith("MessagingExplorer(email-jobs)")
+    x.open("ordrs")
+    assert "No queue, topic, rule or bus named 'ordrs'" in plain(x.status.value)
+    x.field._clicked(f"rule:arn:aws:events:{REGION}:{ACCOUNT}:rule/shop/refund-requested")
+    assert "is disabled" in plain(x.item_view.value)
+    x._show_tab("dead")
+    x.refresh()
+    assert x._tab == "dead" and "refund-requested" in x.item_key
+
+
+def test_explorer_without_widgets_shows_reports(core, capsys):
+    MessagingExplorer("orders-events", core=core, mode="text")
+    assert "Where a message goes from orders-events" in capsys.readouterr().out
+    html_view = MessagingView(core, mode="html")
+    html_view._show = lambda blocks: None
+    html_view.explore("orders")
+    assert repr(html_view.explorer).startswith("MessagingExplorer(orders)")
+    text_view = MessagingView(core, mode="text", progress="off")
+    assert "needs Jupyter" in run(capsys, text_view.explore)
+
+
+def test_explorer_reads_in_the_background(core):
+    hold = threading.Event()
+    real = core.queue_report
+
+    def held(*args, **kwargs):
+        hold.wait(10)
+        return real(*args, **kwargs)
+
+    core.queue_report = held
+
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*list(x._tasks.values()))
+
+    async def main():
+        x = explorer(core)
+        assert list(x._tasks) == ["list"] and x.overview is None
+        await asyncio.gather(x._tasks["list"])
+        assert "item" in x._tasks and "Reading orders-dlq" in plain(x.status.value)
+        x.open("orders")
+        hold.set()
+        await settle(x)
+        assert repr(x).startswith("MessagingExplorer(orders)") and "orders-dlq holds" in plain(x.item_view.value)
+
+    asyncio.run(main())
+
+
+def test_live_watches_on_the_loop(core, monkeypatch):
+    from aws_analyzer.messaging.explorer import live as livemod
+
+    monkeypatch.setattr(livemod, "_WATCH_SECONDS", 0.01)
+
+    async def main():
+        x = explorer(core, "orders")
+        while x._tasks:
+            await asyncio.gather(*list(x._tasks.values()))
+        x.watch()
+        assert "watch" in x._tasks
+        while len(x.looks.get(x.watched[0].arn, [])) < 3:
+            await asyncio.sleep(0.01)
+        x._show_tab("everything")
+        await asyncio.sleep(0.05)
+        assert not x.watching and "watch" not in x._tasks
+
+    asyncio.run(main())

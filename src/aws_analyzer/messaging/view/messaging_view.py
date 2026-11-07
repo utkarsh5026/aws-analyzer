@@ -10,6 +10,8 @@ from typing import Any
 from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from ..._kit.fmt import _count, _plural, human_money
 from ..._kit.render import _call
+from ..._kit.deps import _require
+from ..._kit.errors import _Hint
 from ..._kit.view import _BaseView, _friendly_errors
 
 from ..analysis import (
@@ -98,6 +100,7 @@ class MessagingView(_BaseView):
     _GROUPS = {
         "🗺️ Where messages go": ("overview", "follow", "dead_letters"),
         "🔎 One queue, topic or rule": ("queue_info", "topic_info", "rule_info"),
+        "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
     _START = (
@@ -106,6 +109,8 @@ class MessagingView(_BaseView):
         ("dead_letters()", "the messages that failed for good, and how to move them back"),
     )
     _PROGRESS = ("Reading", "parts")
+
+    explorer: Any = None
 
     def __init__(
         self,
@@ -497,3 +502,21 @@ class MessagingView(_BaseView):
             steps.append(("dead_letters()", "every dead-letter queue, and how to move messages back"))
         steps.append(("overview()", "every queue, topic and rule in the region"))
         return steps[:3]
+
+    @_friendly_errors
+    def explore(self, where: str | None = None, *, tab: str | None = None, days: int = 7,
+                height: int | str | None = None) -> None:
+        """
+        The explorer window: every queue, topic and rule, the one you click in full, where its messages go hop by
+        hop (click a hop to follow it), the dead-letter queues, and Live, a queue's backlog every few seconds while
+        you watch it drain. Needs Jupyter and ipywidgets; view.explorer is the window.
+        """
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, overview() lists every "
+                "queue, topic and rule, and follow('name') maps where a message goes."
+            )
+        _require("ipywidgets", "The explorer window")
+        from ..explorer.window import MessagingExplorer
+
+        self.explorer = MessagingExplorer(where, tab=tab, view=self, days=days, height=height, mode="widgets")

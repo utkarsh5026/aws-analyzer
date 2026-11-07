@@ -24,9 +24,10 @@ from .world import (
     topic_report_from,
 )
 from .flow import follow_map
+from .trend import backlog_trend
 
 __all__ = [
-    "Blocked", "access_fixes", "allows", "blocks_services", "dead_letter_names", "dead_letters_from",
+    "Blocked", "access_fixes", "allows", "backlog_trend", "blocks_services", "dead_letter_names", "dead_letters_from",
     "delivery_logging_command", "describe_filter", "describe_pattern", "dlq_holding", "dlq_too_short",
     "empty_receives_monthly", "enable_rule_command", "feeders_of", "follow_map", "lambda_permission_command",
     "move_back_command", "overview_findings", "parse_consumer", "parse_json", "parse_queue", "parse_rule",

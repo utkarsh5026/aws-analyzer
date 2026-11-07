@@ -14,6 +14,7 @@ See which queues back up and which dead-letter queues hold failed messages, foll
   <li>SQS, SNS and EventBridge in one map</li>
   <li>Read-only: never receives a message</li>
   <li>The fix as a command to copy</li>
+  <li>A window to click through it</li>
   <li>Plain text outside Jupyter</li>
 </ul>
 
@@ -24,6 +25,12 @@ The examples use acme's `orders-events` topic, which delivers to four queues and
 ![overview(): cards with 9 queues, 3 topics and 4 rules, 135 messages waiting, 42 in dead-letter queues and 2,720 failed deliveries, then the findings, warnings first: orders-dlq holds 42 failed messages, orders-events failed 2,310 deliveries, two queues keep it out, and the tables of queues, topics and rules](images/msg-overview-dark.webp#only-dark){ width="984" height="2635" loading=lazy }
 /// caption
 **`msg.overview()`**: what failed first, then every queue, topic and rule, with the commands that fix what's wrong.
+///
+
+![The messaging explorer in a notebook, animated: it opens on the Everything tab, orders-dlq holding 42 failed messages first; the pointer opens orders-events and its Map tab, the subscriptions as a tree with partner-webhooks and audit-events marked because their policy keeps the topic out, clicks partner-webhooks, which the map then follows; it opens the Dead letters tab, then email-jobs and the Live tab, where the backlog drains a few messages at each look](images/msg-explorer-tour-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The messaging explorer in a notebook, animated: it opens on the Everything tab, orders-dlq holding 42 failed messages first; the pointer opens orders-events and its Map tab, the subscriptions as a tree with partner-webhooks and audit-events marked because their policy keeps the topic out, clicks partner-webhooks, which the map then follows; it opens the Dead letters tab, then email-jobs and the Live tab, where the backlog drains a few messages at each look](images/msg-explorer-tour-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+**`msg.explore()`**: from what failed, to where a topic's messages go, to a queue draining as you watch.
 ///
 
 ## Set up in SageMaker { #setup }
@@ -96,6 +103,14 @@ Four questions people bring to a queue or a topic, and the one line that answers
     ```
 
     [One queue, topic or rule](#one)
+
+-   **Can I click through it instead?**
+
+    ```python
+    msg.explore()
+    ```
+
+    [Explore by clicking](#explorer)
 
 </div>
 
@@ -180,6 +195,47 @@ msg.rule_info("shop/order-placed")
 A queue's report explains each setting (the visibility timeout, retention, receive wait, its dead-letter queue), lists the topics and rules that send to it and whether its policy lets them, and the Lambda functions that read it. It warns when the visibility timeout is shorter than six times the function's timeout (AWS's advice: otherwise a message comes back while it's still being worked on), when messages wait and nothing reads them, when the queue falls behind, and when empty receives cost money that long polling would save.
 
 A topic's report lists its subscriptions with their filters, whether each is confirmed, its dead-letter queue and whether the queue or function lets the topic in. A rule's report says which events it matches, and its targets with their retries and dead-letter queues; a rule that matched nothing gets the `aws events test-event-pattern` command to check an event against it.
+
+## Explore by clicking { #explorer }
+
+`explore()` opens a window with every queue, topic and rule, the failed messages first; click one to see it in full, follow its messages on a map, or watch a queue drain.
+{ .gist }
+
+```python
+msg.explore()                              # a dead-letter queue holding messages first, else the most problems
+msg.explore("orders-events", tab="map")    # straight to where a topic's messages go
+msg.explore("email-jobs", tab="live")      # watch a queue's backlog
+```
+
+![The messaging explorer's Everything tab: the region's findings, then a search box, chips and every queue, topic and rule with what came in, what failed, what waits and its problems, under column headers that sort](images/msg-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The messaging explorer's Everything tab: the region's findings, then a search box, chips and every queue, topic and rule with what came in, what failed, what waits and its problems, under column headers that sort](images/msg-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+`msg.explore()`: every queue, topic and rule, the ones that need attention first; search them, pick a chip or click a column to sort.
+///
+
+The field at the top switches to another queue, topic or rule, and its cards say how that one is doing. **Overview** is its report, with the commands that fix what's wrong. The **Map** tab is `follow()` as lines you click: a queue, topic or rule on the way opens there, and the map follows it.
+
+![The Map tab: orders-events at the top, then its subscriptions as a tree, shipping-updates with its reader and dead-letter queue, partner-webhooks and audit-events marked in red because their policy keeps the topic out](images/msg-explorer-map-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Map tab: orders-events at the top, then its subscriptions as a tree, shipping-updates with its reader and dead-letter queue, partner-webhooks and audit-events marked in red because their policy keeps the topic out](images/msg-explorer-map-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+The Map tab: where orders-events' messages go, and the two queues that keep them out.
+///
+
+**Dead letters** lists every dead-letter queue, the fullest first, with what it catches failures from; click one to open it. **Live** looks at the queue open (else the fullest few) every 5 seconds while its tab is open: how many messages wait, a bar per look, and which way the backlog is going, with when it would be empty.
+
+![The Live tab: email-jobs draining 40 messages a minute, empty in about 2 minutes, a bar per look getting shorter, and the counts of the last look](images/msg-explorer-live-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Live tab: email-jobs draining 40 messages a minute, empty in about 2 minutes, a bar per look getting shorter, and the counts of the last look](images/msg-explorer-live-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+Live: email-jobs draining after its reader was turned back on.
+///
+
+!!! tip "Worth knowing"
+
+    Each look Live takes is one `GetQueueAttributes` request per queue it watches, billed like any SQS request ($0.40 per million). The line above the cards says what an hour of watching costs, and Live stops by itself after 10 minutes, or when you leave its tab.
+
+??? more "How the window reads"
+
+    Everything is read once, off the notebook's event loop, so a click returns at once: the queues, topics, rules and their CloudWatch numbers first, then the one you open, in full. The Map and Dead letters tabs are drawn from what's read, with no more requests. Pick another one while one is still being read and the first one's result is dropped when it comes back. Outside Jupyter, `explore()` shows the reports instead.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
@@ -277,6 +333,7 @@ Every `MessagingView` command. `msg.help()` prints the same list grouped by task
 | `queue_info(name, days=7)` | One queue: backlog, settings in plain English, readers, senders and its dead-letter queue |
 | `topic_info(name, days=7)` | One topic: subscriptions, filters, failed deliveries, and which subscribers keep it out |
 | `rule_info(name, bus=None, days=7)` | One EventBridge rule: what it matches, its targets, failed deliveries |
+| `explore(where=None, tab=None, days=7, height=None)` | The explorer window: everything, one in full, its map, the dead-letter queues and Live |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

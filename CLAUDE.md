@@ -273,7 +273,23 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `commands` (the `aws sqs` / `sns` / `events` commands findings show), `access` (feeders, blocked senders and
   `access_fixes`, one SetQueueAttributes per queue since it replaces the whole policy), `queues` / `topics` / `rules`
   (findings), `world` (reports and findings built from an `Overview`) and `flow` (`follow_map`, the tree `follow()`
-  draws). `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`; there's no explorer window.
+  draws), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3 minutes").
+  `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`.
+- `messaging`'s explorer window, `MessagingExplorer` (`messaging/explorer/`: `window.py` with `explore()`, composed of
+  `_EverythingTab` (`items.py`: `region_items` turns the overview into `_Item`s, a line each, with its findings;
+  chips, search and columns as the OpenSearch explorer's Domains tab; a dead-letter queue holding messages sorts and
+  opens first), `_MapTab` (`map.py`: `follow_map` on the overview already read, each hop a line, `hop_key` the queue,
+  topic or rule it opens), `_DeadTab` (`dead.py`) and `_LiveTab` (`live.py`: `core.read_queue` for the queue open,
+  else the fullest `_WATCH_MOST`, every `_WATCH_SECONDS` in an asyncio task while the tab is open, for at most
+  `_WATCH_MINUTES`; `looks` keeps the `QueueSample`s), and `_FocusReads` (`focus.py`); `frame.py` its tabs, stylesheet
+  (`.mgx-app`, derived from the OpenSearch explorer's, on `_terminal_theme`), faces and `_window_text` (a `*_info`
+  call becomes "the Overview tab of <name>"); `widgets.py` the `_ItemField` and `_Line`; `MessagingView.explore()`
+  imports it lazily and keeps it in `view.explorer`), is the eighth interactive UI, built on the windows' kit like
+  `OpenSearchExplorer`. An item's key is `'<queue|topic|rule|bus>:<arn>'` (a bus by its name), from
+  `MessagingAnalyzer._start`. The Overview tab draws the View's `_queue_blocks` / `_topic_blocks` / `_rule_blocks` from
+  the report read in the background (`_read_report`). `.claude/skills/demo/msg_explorer_shots.py` makes the guide's
+  `msg-explorer*` figures in a real JupyterLab (its notebook drains `email-jobs` in moto from a thread, so Live has
+  something to show), and `tour_shots.py`'s `play_messaging` the `msg-explorer-tour`.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
   installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
@@ -1444,7 +1460,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
   plays a scripted model over demo.py's Lambda functions. Every window also has an animated tour like
-  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`,
+  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model and Python 3.11+), at the top of its guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when

@@ -447,3 +447,29 @@ class MessageMap:
     arn: str
     hops: list[Hop]
     overview: Overview
+
+
+@dataclass
+class QueueSample:
+    """
+    One look at a queue's counts, as Live takes them every few seconds: when, and how many messages were visible,
+    being processed and delayed.
+    """
+
+    at: datetime
+    visible: int
+    in_flight: int = 0
+    delayed: int = 0
+
+
+@dataclass
+class Trend:
+    """
+    Which way a queue's backlog is going over the looks taken: per_minute is the change in visible messages a minute
+    (negative while it drains), empty_in_s when it would be empty at that rate (None unless it's draining), and words
+    says it in a few.
+    """
+
+    per_minute: float | None
+    empty_in_s: float | None
+    words: str

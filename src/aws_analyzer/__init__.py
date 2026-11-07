@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
     from .lambda_functions import LambdaAnalyzer, LambdaExplorer, LambdaView
-    from .messaging import MessagingAnalyzer, MessagingView
+    from .messaging import MessagingAnalyzer, MessagingExplorer, MessagingView
     from .opensearch import OpenSearchAnalyzer, OpenSearchExplorer, OpenSearchView
     from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
@@ -104,6 +104,7 @@ __all__ = [
     "APIGatewayExplorer",
     "MessagingAnalyzer",
     "MessagingView",
+    "MessagingExplorer",
     "AgentAnalyzer",
     "AgentView",
     "set_timezone",
@@ -141,6 +142,7 @@ _EXPORTS = {  # name -> the module it comes from
     "APIGatewayExplorer": "apigateway",
     "MessagingAnalyzer": "messaging",
     "MessagingView": "messaging",
+    "MessagingExplorer": "messaging",
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",

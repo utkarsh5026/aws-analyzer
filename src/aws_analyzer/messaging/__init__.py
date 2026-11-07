@@ -3,8 +3,8 @@ messaging - Amazon SQS, SNS and EventBridge analysis for SageMaker / Jupyter not
 
 Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import MessagingView``.
 
-Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich HTML output. Both are preinstalled
-on SageMaker.
+Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich HTML output, ipywidgets for the
+explorer window. All are preinstalled on SageMaker.
 
 The package has two layers:
 
@@ -28,6 +28,7 @@ Quick start
     msg.queue_info("orders")                   # one queue: backlog, readers, senders, settings in plain English
     msg.topic_info("orders-events")            # one topic: subscriptions, filters, failed deliveries
     msg.rule_info("shop/order-placed")         # one EventBridge rule: what it matches, its targets, failures
+    msg.explore("orders-events")               # a window to click through it all (Jupyter, ipywidgets)
 
     core = msg.core                            # the same analyzer, raw data
     overview = core.overview(days=7)
@@ -40,10 +41,10 @@ from .prices import MESSAGING_PRICES
 from .helpers import Ref, arn_kind, arn_name, parse_ref, queue_url, seconds_words
 from .models import (
     Bus, Consumer, DeadLetter, Feeder, FunctionFacts, Hop, MessageMap, Overview, Queue, QueueNumbers, QueueReport,
-    Redrive, Rule, RuleNumbers, RuleReport, Subscription, Target, Topic, TopicNumbers, TopicReport,
+    QueueSample, Redrive, Rule, RuleNumbers, RuleReport, Subscription, Target, Topic, TopicNumbers, TopicReport, Trend,
 )
 from .analysis import (
-    Blocked, access_fixes, allows, dead_letters_from, delivery_logging_command, describe_filter, describe_pattern,
+    Blocked, access_fixes, allows, backlog_trend, dead_letters_from, delivery_logging_command, describe_filter, describe_pattern,
     enable_rule_command, feeders_of, follow_map, lambda_permission_command, move_back_command, overview_findings,
     parse_consumer, parse_queue, parse_rule, parse_subscription, parse_target, parse_topic, queue_attribute_command,
     queue_findings, queue_monthly, queue_policy_command, queue_statement, redrive_command, rule_findings,
@@ -51,6 +52,7 @@ from .analysis import (
 )
 from .analyzer import MessagingAnalyzer
 from .view import MessagingView
+from .explorer.window import MessagingExplorer, explore
 
 __all__ = [
     "MESSAGING_PRICES",
@@ -62,12 +64,14 @@ __all__ = [
     "FunctionFacts",
     "Hop",
     "MessageMap",
+    "MessagingExplorer",
     "MessagingAnalyzer",
     "MessagingView",
     "Overview",
     "Queue",
     "QueueNumbers",
     "QueueReport",
+    "QueueSample",
     "Redrive",
     "Ref",
     "Rule",
@@ -78,15 +82,18 @@ __all__ = [
     "Topic",
     "TopicNumbers",
     "TopicReport",
+    "Trend",
     "access_fixes",
     "allows",
     "arn_kind",
     "arn_name",
+    "backlog_trend",
     "dead_letters_from",
     "delivery_logging_command",
     "describe_filter",
     "describe_pattern",
     "enable_rule_command",
+    "explore",
     "feeders_of",
     "follow_map",
     "lambda_permission_command",
