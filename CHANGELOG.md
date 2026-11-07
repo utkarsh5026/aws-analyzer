@@ -9,13 +9,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-08
+
 ### Added
 
 - 📨 **SQS, SNS and EventBridge: where did my message go?** ([#214](https://github.com/utkarsh5026/aws-analyzer/pull/214))
   - `MessagingView().overview()` shows every queue, topic and rule: what waits, what's in dead-letter queues, what failed.
   - `follow("orders-events")` takes a message hop by hop to the function that reads it, and marks where it gets lost.
-  - `explore()` opens a window: everything, a clickable map, the dead-letter queues, and Live, a queue draining.
-  - `dead_letters()`, `queue_info()`, `topic_info()` and `rule_info()`; read-only, it never receives a message.
+  - `explore()` opens a window to click through it all; read-only, it never receives a message.
 
 ### Changed
 
@@ -1294,7 +1295,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.52.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.53.0...HEAD
+[0.53.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.50.0...v0.51.0
 [0.50.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...v0.50.0
