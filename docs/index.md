@@ -36,6 +36,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a href="lambda_functions.html" title="AWS Lambda"><img src="images/aws/lambda.svg" alt="AWS Lambda" width="32" height="32"></a>
 <a href="stepfunctions.html" title="AWS Step Functions"><img src="images/aws/stepfunctions.svg" alt="AWS Step Functions" width="32" height="32"></a>
 <a href="apigateway.html" title="Amazon API Gateway"><img src="images/aws/apigateway.svg" alt="Amazon API Gateway" width="32" height="32"></a>
+<a href="athena.html" title="Amazon Athena"><img src="images/aws/athena.svg" alt="Amazon Athena" width="32" height="32"></a>
 <a href="messaging.html" title="SQS, SNS and EventBridge"><img src="images/aws/messaging.svg" alt="SQS, SNS and EventBridge" width="32" height="32"></a>
 </p>
 
@@ -167,7 +168,7 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <li><a href="sagemaker_env.html">
 <img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon SageMaker</span><code>sagemaker_env.py</code></span>
-<span class="asks"><span>What is this notebook costing me, and does it stop when I leave?</span><span>Why is the disk full?</span><span>What did I leave running?</span></span>
+<span class="asks"><span>What is this notebook costing me, and does it stop when I leave?</span><span>Why did my training job fail?</span><span>Which endpoints are idle and still costing me?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="opensearch.html">
@@ -192,6 +193,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <img class="aws-icon" src="images/aws/apigateway.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon API Gateway</span><code>apigateway</code></span>
 <span class="asks"><span>Which calls to my API fail, and why?</span><span>Who can call this route without signing in?</span><span>Did the Lambda behind that 504 finish anyway?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="athena.html">
+<img class="aws-icon" src="images/aws/athena.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon Athena</span><code>athena</code></span>
+<span class="asks"><span>Which of my queries cost the most, and why?</span><span>Why did my query fail?</span><span>Which tables point at an empty folder?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="messaging.html">

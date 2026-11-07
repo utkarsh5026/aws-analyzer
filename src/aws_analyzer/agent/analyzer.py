@@ -6,6 +6,7 @@ It never prints; AgentView shows what it returns.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -51,6 +52,16 @@ from .memory import (
     parse_notes,
     remove_note,
 )
+from .mcp_servers import (
+    EditorConfig,
+    McpServer,
+    ServerState,
+    editor_configs,
+    parse_server_text,
+    parse_settings_text,
+    read_servers,
+)
+from .mcp_servers.config import unique_name
 from .llm import (
     AZURE_API_VERSION,
     DEFAULT_TEMPERATURE,
@@ -74,6 +85,7 @@ from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
 from .runtime import as_tool
 from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
+from .toolkits.mcp_tools import McpToolkit, mcp_toolkit
 from .workspace import Workspace, workspace_of
 from .workspace.files import workspace_backend
 
@@ -155,6 +167,13 @@ def _is_python(spec: str | Toolkit | type[Toolkit]) -> bool:
     return isinstance(spec, PythonToolkit)
 
 
+def _settings_of(value: dict[str, str] | str) -> dict[str, str]:
+    """
+    env= or headers= as a dict: given as one, or as 'NAME=value' / 'Header: value' lines.
+    """
+    return parse_settings_text(value) if isinstance(value, str) else dict(value)
+
+
 def _checked_zone(timezone: str | tzinfo | None) -> str | tzinfo | None:
     """
     timezone= as it's kept, after checking it names a zone, so a misspelled one is an error now rather than at the
@@ -185,8 +204,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     instead) and api_version= (or OPENAI_API_VERSION, else AZURE_API_VERSION).
     Another LangChain provider takes api_key= (else its own environment variable) and endpoint= as its base URL.
     chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
-    10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
-    either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
+    10.00)} (USD per 1M input and output tokens, then optionally per 1M tokens read from the prompt cache and written
+    to it: (2.50, 10.00, 1.25)) puts a price on each answer, over Bedrock's list prices; without either the cost is
+    unknown and only the tokens are counted. On Bedrock, Claude and Amazon Nova keep the rules and the tools'
+    descriptions in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth (Nova: a quarter)
+    of the input price; OpenAI caches by itself. max_tokens caps each of the model's replies.
     temperature (0 by default) makes the model pick its likeliest words, so the same question over the same data
     gets the same answer; None leaves the provider's default, and a model that takes only its own (OpenAI's o-series
     and GPT-5, told by name) is sent none. A chat_model= passed in keeps its own settings.
@@ -268,7 +290,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         api_version: str | None = None,
         azure_ad_token_provider: Callable[[], str] | None = None,
         chat_model: Any = None,
-        model_prices: dict[str, tuple[float, float]] | None = None,
+        model_prices: dict[str, tuple[float, ...]] | None = None,
         timezone: str | tzinfo | None = None,
         regions: Any = None,
         notes: str | os.PathLike = "",
@@ -287,6 +309,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         python: Workspace | None = None,
         plan: bool = True,
         runbooks: bool | str | Path | Iterable[str | Path] = True,
+        mcp: bool | str | os.PathLike | dict[str, Any] | Iterable[Any] | McpToolkit = True,
         findings: bool = True,
         verify: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
@@ -323,6 +346,9 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
              "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
              "python": {"workspace": workspace}})]
+        mcp_kit = mcp_toolkit(mcp)
+        if mcp_kit is not None:
+            self.toolkits.append(mcp_kit.bind(self))
         if runbooks is not False and runbooks is not None:
             self.toolkits.append(RunbookToolkit(runbook_sources(runbooks)).bind(self))
         self.interrupt_on = _interrupting(interrupt_on, self.toolkits)
@@ -437,6 +463,138 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         with runbooks=False.
         """
         return next((t for t in self.toolkits if isinstance(t, RunbookToolkit)), None)
+
+    @property
+    def mcp_kit(self) -> McpToolkit | None:
+        """
+        The agent's MCP servers (the MCP toolkit: .servers, .states, .path), or None with mcp=False.
+        """
+        return next((t for t in self.toolkits if isinstance(t, McpToolkit)), None)
+
+    def _mcp(self) -> McpToolkit:
+        kit = self.mcp_kit
+        if kit is None:
+            raise _Hint("MCP servers are off for this agent (mcp=False): AgentView(mcp=True) keeps the ones you add in "
+                        "~/.cache/aws-analyzer/agent/mcp.json, and AgentView(mcp='.vscode/mcp.json') uses an editor's.")
+        return kit
+
+    def _tools_changed(self) -> None:
+        """
+        The tools the agent has changed (an MCP server added, removed or switched): its tools and prompt are made
+        again before the next question, in the same conversation (the checkpointer stays).
+        """
+        self._tools = None
+        self._graph = None
+
+    def mcp_servers(self, *, connect: bool = True) -> list[ServerState]:
+        """
+        The agent's MCP servers as they stand (ServerState: connected or why not, its tools, its calls), connecting
+        the enabled ones that are off first (connect=False doesn't).
+        """
+        kit = self._mcp()
+        if connect:
+            kit.connected()
+        return kit.states
+
+    def add_mcp(  # noqa: PLR0913
+        self,
+        server: str | dict[str, Any] | McpServer,
+        *,
+        name: str = "",
+        env: dict[str, str] | str | None = None,
+        headers: dict[str, str] | str | None = None,
+        asks: str | None = None,
+        replace: bool = False,
+        connect: bool = True,
+    ) -> list[ServerState]:
+        """
+        Adds an MCP server, saved in the agent's mcp.json, and connects it (connect=False doesn't): `server` is the
+        command that starts it ('npx -y @modelcontextprotocol/server-memory'), its URL ('https://.../mcp'), its JSON
+        from an mcp.json (an entry, or a whole file's, which adds each), or an McpServer. name= names it (else it's
+        named from what it runs), env= gives a command its environment variables and headers= a URL its HTTP
+        headers (a dict, or 'NAME=value' lines; '${env:NAME}' reads the kernel's variable when it starts), asks=
+        says when the agent asks before its tools run ('unmarked', the default: unless a tool says it only reads;
+        'every'; 'never'). replace=True puts it in place of the server with its name. Returns each server's state:
+        one that couldn't connect stays, with its error, to fix or remove.
+        """
+        kit = self._mcp()
+        servers = [server] if isinstance(server, McpServer) else self._parsed_servers(server, name)
+        added = []
+        for each in servers:
+            if env is not None and not each.is_remote:
+                each.env = {**each.env, **_settings_of(env)}
+            if headers is not None and each.is_remote:
+                each.headers = {**each.headers, **_settings_of(headers)}
+            if asks is not None:
+                each.asks = asks
+            each.source = each.source or "saved"
+            added.append(kit.add(each, replace=replace).name)
+        if connect:
+            kit.hub.connect(added)
+        return [kit.hub.states[name] for name in added]
+
+    @staticmethod
+    def _parsed_servers(server: str | dict[str, Any], name: str) -> list[McpServer]:
+        if isinstance(server, dict):
+            return parse_server_text(json.dumps(server), name=name)
+        return parse_server_text(str(server), name=name)
+
+    def remove_mcp(self, name: str) -> McpServer:
+        """
+        Removes an MCP server from the agent and its mcp.json (a stdio server's process stops). Returns what it was.
+        """
+        return self._mcp().remove(name)
+
+    def update_mcp(self, name: str, *, enabled: bool | None = None, asks: str | None = None,
+                   tools: dict[str, bool] | None = None) -> ServerState:
+        """
+        Changes what the agent does with an MCP server, saved in its mcp.json: enabled= turns it on or off, asks=
+        when it asks before a tool runs, tools= turns tools on or off by their names ({'delete_file': False}).
+        """
+        kit = self._mcp()
+        server = kit.update(name, enabled=enabled, asks=asks, tools=tools)
+        if server.enabled:
+            kit.hub.connect([server.name])
+        return kit.hub.states[server.name]
+
+    def reconnect_mcp(self, name: str | None = None) -> list[ServerState]:
+        """
+        Connects an MCP server again (every enabled one without a name): after fixing what made it fail, or to see
+        tools it added. The agent's tools are made again before the next question.
+        """
+        kit = self._mcp()
+        names = None if name is None else [kit.find(name).name]
+        states = kit.hub.connect(names, again=True)
+        self._tools_changed()
+        return states
+
+    def mcp_editor_files(self) -> list[EditorConfig]:
+        """
+        The mcp.json files editors and apps keep beside this notebook and in the home folder (VS Code's, Claude
+        Code's, Cursor's, Claude Desktop's), with the servers each holds, for import_mcp().
+        """
+        return editor_configs(skip=self._mcp().path)
+
+    def import_mcp(self, path: str | os.PathLike, *, connect: bool = True) -> list[ServerState]:
+        """
+        Adds the servers of another app's mcp.json (VS Code's .vscode/mcp.json, Claude Desktop's, ...) to the
+        agent's own, leaving that file as it is. A server it has already, started the same way, is left out; one
+        whose name is taken gets a number ('github-2').
+        """
+        kit = self._mcp()
+        source = Path(path).expanduser()
+        servers, problem = read_servers(source, source=str(source))
+        if problem:
+            raise _Hint(problem)
+        added = []
+        for server in servers:
+            if any(server.same_place(mine) for mine in kit.servers):
+                continue
+            server.name = unique_name(server.name, [mine.name for mine in kit.servers])
+            added.append(kit.add(server).name)
+        if connect and added:
+            kit.hub.connect(added)
+        return [kit.hub.states[name] for name in added]
 
     @property
     def workspace(self) -> Workspace | None:
@@ -982,7 +1140,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         answer.aws_cost = run.aws_cost + sum(t.request_cost(answer.aws_calls) for t in self.toolkits)
         answer.rates = model_rates(answer.model, self.prices, self.provider)
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
-                                  provider=self.provider)
+                                  provider=self.provider, cache_read=answer.cache_read_tokens,
+                                  cache_write=answer.cache_write_tokens)
         answer.seconds = run.elapsed
         if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
             answer.recheck.fixed = check_grounding(answer, self.earlier(answer)).ok

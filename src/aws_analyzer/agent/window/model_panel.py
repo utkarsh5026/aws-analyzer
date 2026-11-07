@@ -176,7 +176,7 @@ def key_placeholder(provider: str, *, has_key: bool, environ: Mapping[str, str])
     return f"paste a key, or set {variable}"
 
 
-def price_text(provider: str, model: str, prices: dict[str, tuple[float, float]] | None) -> str:
+def price_text(provider: str, model: str, prices: dict[str, tuple[float, ...]] | None) -> str:
     """
     How the model's tokens would be priced: the prices passed in model_prices=, Amazon Bedrock's list prices, or
     unknown (and how to give them).
@@ -187,7 +187,10 @@ def price_text(provider: str, model: str, prices: dict[str, tuple[float, float]]
         return ("Its cost shows as unknown: AgentView(model_prices={'<model>': (input, output)}) prices it, in USD "
                 "per 1M tokens.")
     whose = "Amazon Bedrock's list prices" if rates.source == "list" else "the prices you passed"
-    return f"Priced at {whose}: {_per_million(rates.price_in)} in, {_per_million(rates.price_out)} out per 1M tokens."
+    priced = f"Priced at {whose}: {_per_million(rates.price_in)} in, {_per_million(rates.price_out)} out"
+    if rates.cache_read is None:
+        return f"{priced} per 1M tokens."
+    return f"{priced}, {_per_million(rates.cache_read)} read from the prompt cache per 1M tokens."
 
 
 def _text(widget: Any) -> str:

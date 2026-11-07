@@ -84,7 +84,8 @@ class BigRead:
         what     what it would read, in a sentence: "find_files has listed 20,000 keys under s3://acme-raw/ and
                  there are more; the bucket holds about 41,200 files."
         go       what Go reads: 'list on, up to 100,000 keys (about 80 more requests, <$0.01)'
-        smaller  what Smaller reads instead: 'stop at the 20,000 keys listed so far'
+        smaller  what Smaller reads instead: 'stop at the 20,000 keys listed so far' ('' when there's no smaller
+                 read, as before an MCP tool runs: then it's Go or Skip)
         cost     the estimated USD of Go's AWS requests, None when they're free
         choice   'go', 'smaller' or 'skip' once the user has answered, else None
         limit    for a used-up limit of the budget, the refusal it lifts ('tool_calls', 'time', ...), else ''
@@ -103,8 +104,11 @@ class BigRead:
     @property
     def question(self) -> str:
         """
-        The question as the user reads it: what it would read, then each choice.
+        The question as the user reads it: what it would read, then each choice (no Smaller when there's none, as
+        before an MCP tool runs).
         """
+        if not self.smaller:
+            return f"{self.what} Go: {self.go}. Skip: answer without it."
         return f"{self.what} Go: {self.go}. Smaller: {self.smaller}. Skip: answer without it."
 
     def as_value(self, call_key: str) -> dict[str, Any]:
@@ -508,6 +512,8 @@ class AgentAnswer:
     model_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     cost: float | None = None
     rates: Rates | None = None
     seconds: float = 0.0

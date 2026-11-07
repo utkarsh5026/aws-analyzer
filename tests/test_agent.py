@@ -40,7 +40,7 @@ from aws_analyzer.agent.model_setup import (
     start_cell,
     suggested_provider,
 )
-from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
+from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names, token_cost
 from aws_analyzer.agent.window.model_panel import (
     bedrock_choices,
     endpoint_placeholder,
@@ -75,6 +75,7 @@ from aws_analyzer.agent import (
     Workspace,
     WorkspaceFile,
     answer_cost,
+    cache_saving,
     answer_findings,
     chart_of,
     check_grounding,
@@ -355,12 +356,77 @@ def test_bedrock_model_id_finds_how_to_call_a_model():
 
 
 def test_bedrock_models_are_priced_at_list_prices():
-    assert model_rates(f"us.{HAIKU}", None, "bedrock") == Rates(1.10, 5.50, "list")
-    assert model_rates(f"global.{HAIKU}", None, "bedrock") == Rates(1.00, 5.00, "list")
+    assert model_rates(f"us.{HAIKU}", None, "bedrock") == pytest.approx(Rates(1.10, 5.50, "list", 0.11, 1.375))
+    assert model_rates(f"global.{HAIKU}", None, "bedrock") == pytest.approx(Rates(1.00, 5.00, "list", 0.10, 1.25))
     assert model_rates(f"us.{HAIKU}", {"haiku-4-5": (0.5, 1.0)}, "bedrock") == Rates(0.5, 1.0, "model_prices=")
     assert model_rates("gpt-4.1", None, "openai") is None and model_rates(f"us.{HAIKU}", None, "") is None
     assert answer_cost("us.amazon.nova-pro-v1:0", 1_000_000, 1_000_000, None, provider="bedrock") == pytest.approx(4.0)
     assert answer_cost("us.anthropic.claude-sonnet-9", 10, 10, None, provider="bedrock") is None
+
+
+def test_prompt_cache_tokens_are_priced_at_the_caches_prices():
+    """
+    Tokens read from Bedrock's prompt cache cost a tenth of the input price for Claude and a quarter for Nova, and
+    writing them a quarter more for Claude and nothing for Nova (the AWS Price List's); input_tokens counts them too,
+    as LangChain reports it. model_prices= takes the cache's prices after the others; without them a cached token is
+    priced as input, and nothing is said to be saved.
+    """
+    haiku = model_rates(f"us.{HAIKU}", None, "bedrock")
+    whole = token_cost(haiku, 12_000, 100)
+    cached = token_cost(haiku, 12_000, 100, cache_read=10_000)
+    assert whole == pytest.approx((12_000 * 1.10 + 100 * 5.50) / 1e6)
+    assert cached == pytest.approx((2_000 * 1.10 + 10_000 * 0.11 + 100 * 5.50) / 1e6)
+    assert cache_saving(haiku, cache_read=10_000, cache_write=0) == pytest.approx(whole - cached)
+    written = token_cost(haiku, 12_000, 100, cache_write=10_000)
+    assert written - whole == pytest.approx(-cache_saving(haiku, cache_read=0, cache_write=10_000))
+    assert answer_cost(f"us.{HAIKU}", 12_000, 100, None, provider="bedrock", cache_read=10_000) == pytest.approx(cached)
+    nova = model_rates("us.amazon.nova-pro-v1:0", None, "bedrock")
+    assert (nova.cache_read, nova.cache_write) == pytest.approx((0.20, 0.0))
+    llama = model_rates("us.meta.llama3-3-70b-instruct-v1:0", None, "bedrock")
+    assert llama is None or llama.cache_read is None
+    given = model_rates("gpt-4.1", {"gpt-4.1": (2.0, 8.0, 0.5)}, "openai")
+    assert given == Rates(2.0, 8.0, "model_prices=", 0.5, None)
+    assert token_cost(given, 1_000_000, 0, cache_read=1_000_000) == pytest.approx(0.5)
+    bare = model_rates("gpt-4.1", {"gpt-4.1": (2.0, 8.0)}, "openai")
+    assert token_cost(bare, 1_000_000, 0, cache_read=1_000_000) == pytest.approx(2.0)
+    assert cache_saving(bare, cache_read=1_000_000, cache_write=0) == 0.0
+
+
+def test_the_cost_note_says_what_the_prompt_cache_did():
+    """
+    The note under an answer says how many input tokens the prompt cache served and what that saved; a question that
+    only wrote to it says the next one reads them cheaper; prices without the cache's say the cost is an upper bound
+    and how to give them; and nothing is said when no token went through the cache.
+    """
+    haiku = model_rates(f"us.{HAIKU}", None, "bedrock")
+
+    def note(rates, **tokens):
+        answer = AgentAnswer("q", model=f"us.{HAIKU}", provider="bedrock", rates=rates, **tokens)
+        answer.cost = token_cost(rates, answer.input_tokens, 0, cache_read=answer.cache_read_tokens,
+                                 cache_write=answer.cache_write_tokens)
+        return viewmod._cost_basis(answer)
+
+    read = note(haiku, input_tokens=20_000, cache_read_tokens=15_000)
+    assert read.endswith("Of the input tokens, 15,000 were read from the prompt cache at $0.11 per 1M, which cut the "
+                         "model cost by 68% ($0.01).")
+    written = note(haiku, input_tokens=20_000, cache_write_tokens=15_000)
+    assert written.endswith("Of the input tokens, 15,000 were written to the prompt cache at $1.38 per 1M: a "
+                            "follow-up within 5 minutes reads them at $0.11 per 1M.")
+    both = note(haiku, input_tokens=20_000, cache_read_tokens=12_000, cache_write_tokens=3_000)
+    assert "12,000 were read from the prompt cache at $0.11 per 1M and 3,000 written to it at $1.38 per 1M" in both
+    bare = note(Rates(2.0, 8.0, "model_prices="), input_tokens=20_000, cache_read_tokens=15_000)
+    assert ("15,000 of the input tokens went through the model's prompt cache and are priced here as ordinary input, "
+            "so the cost is an upper bound") in bare and "(input, output, cache_read, cache_write)" in bare
+    assert "cache" not in note(haiku, input_tokens=20_000)
+
+
+def test_cached_tokens_are_read_from_each_providers_usage():
+    assert harness._cache_tokens({"input_tokens": 9}) == (0, 0)
+    assert harness._cache_tokens({"input_token_details": {"cache_read": 700, "cache_creation": 300}}) == (700, 300)
+    with_ttl = {"cache_read": 0, "cache_creation": 0, "ephemeral_5m_input_tokens": 1200}
+    assert harness._cache_tokens({"input_token_details": with_ttl}) == (0, 1200)
+    openai_tiers = {"audio": 0, "cache_read": 64, "priority_cache_read": 128}
+    assert harness._cache_tokens({"input_token_details": openai_tiers}) == (192, 0)
 
 
 def fn(**kwargs):
@@ -659,7 +725,7 @@ class Notes(Toolkit):
 def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     notes = Notes()
     core = AgentAnalyzer(region=REGION, toolkits=["lambda", notes])
-    assert [t.name for t in core.toolkits] == ["lambda", "notes", "runbooks"] and core.toolkit("notes") is notes
+    assert [t.name for t in core.toolkits] == ["lambda", "notes", "mcp", "runbooks"] and core.toolkit("notes") is notes
     assert notes.agent is core and isinstance(core.toolkit("lambda"), LambdaToolkit)
     assert [t.__name__ for t in core.tools()][-3:] == ["read_note", "list_notes", "read_runbook"]
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
@@ -712,7 +778,7 @@ def test_toolkits_says_what_it_takes():
         AgentAnalyzer(region=REGION, toolkits=[5])
     with pytest.raises(KeyError, match="no 's3' toolkit; it has lambda"):
         AgentAnalyzer(region=REGION, toolkits=["lambda"]).toolkit("s3")
-    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb", "runbooks"]  # the default
+    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb", "mcp", "runbooks"]  # the default
     notes = Notes()
     AgentAnalyzer(region=REGION, toolkits=[notes])
     with pytest.raises(ValueError, match="already belongs to another AgentAnalyzer"):
@@ -2096,8 +2162,9 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     runtime.add_response("converse", converse_reply(
         [{"toolUse": {"toolUseId": "t1", "name": "function_health", "input": {"since": "2h"}}}], "tool_use",
         (1200, 40)), None)
-    runtime.add_response("converse", converse_reply([{"text": "**etl-nightly** failed 40 times."}], "end_turn",
-                                                    (1500, 10)), None)
+    cached_reply = converse_reply([{"text": "**etl-nightly** failed 40 times."}], "end_turn", (1500, 10))
+    cached_reply["usage"].update(cacheReadInputTokens=1000, cacheWriteInputTokens=0)
+    runtime.add_response("converse", cached_reply, None)
     with control, runtime:
         answer = AgentView(core, mode="text", progress="off").core.ask("Which Lambda failed?")
     assert answer.text == "**etl-nightly** failed 40 times." and answer.error is None
@@ -2106,11 +2173,18 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     names = {t["toolSpec"]["name"] for t in sent[0]["toolConfig"]["tools"] if "toolSpec" in t}
     assert {"function_health", "s3_triggers"} <= names and not names & {"task", "execute"}
     assert sent[0]["inferenceConfig"]["maxTokens"] == 4096 and sent[0]["inferenceConfig"]["temperature"] == 0.0
-    assert answer.rates == Rates(1.10, 5.50, "list") and answer.cost == pytest.approx((2700 * 1.10 + 50 * 5.50) / 1e6)
+    for request in sent:
+        assert {"cachePoint": {"type": "default"}} == request["system"][-1] == request["toolConfig"]["tools"][-1]
+    assert sent[0]["system"] == sent[1]["system"] and sent[0]["toolConfig"] == sent[1]["toolConfig"]
+    assert answer.rates == pytest.approx(Rates(1.10, 5.50, "list", 0.11, 1.375))
+    assert (answer.input_tokens, answer.cache_read_tokens, answer.cache_write_tokens) == (3700, 1000, 0)
+    assert answer.cost == pytest.approx((2700 * 1.10 + 1000 * 0.11 + 50 * 5.50) / 1e6)
     view = AgentView(core, mode="text", progress="off")
     view._show(view._answer_blocks(answer))
-    out = capsys.readouterr().out
+    out = " ".join(capsys.readouterr().out.split())
     assert "at Amazon Bedrock's list prices for claude-haiku-4-5 ($1.10 in and $5.50 out per 1M tokens" in out
+    assert ("Of the input tokens, 1,000 were read from the prompt cache at $0.11 per 1M, which cut the model cost by "
+            "23% (<$0.01).") in out
     out = run(capsys, view.tools)
     assert "Provider: Amazon Bedrock" in out and "so it stays in AWS" in out and "To keep it in AWS" not in out
 
@@ -2854,8 +2928,8 @@ def test_the_model_settings_ask_for_what_each_provider_takes():
                                                                                           "empty to use it")
     assert model_placeholder("azure", {"AZURE_OPENAI_DEPLOYMENT": "prod"}) == "from AZURE_OPENAI_DEPLOYMENT: prod"
     assert endpoint_placeholder("azure", {}) == "https://<resource>.openai.azure.com"
-    assert price_text("bedrock", "haiku", None) == ("Priced at Amazon Bedrock's list prices: $1.10 in, $5.50 out per "
-                                                    "1M tokens.")
+    assert price_text("bedrock", "haiku", None) == ("Priced at Amazon Bedrock's list prices: $1.10 in, $5.50 out, "
+                                                    "$0.11 read from the prompt cache per 1M tokens.")
     assert price_text("openai", "gpt-4o", {"gpt-4o": (2.5, 10.0)}).startswith("Priced at the prices you passed")
     assert "cost shows as unknown" in price_text("openai", "gpt-4o", None)
     assert "claude-haiku-4-5" in bedrock_choices(parse_models(BEDROCK_MODELS, BEDROCK_PROFILES, REGION))
@@ -2972,7 +3046,7 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
 
     workspace = Folder(tmp_path)
     core = AgentAnalyzer(region=REGION, python=workspace)
-    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python", "runbooks"] and core.workspace is workspace
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python", "mcp", "runbooks"] and core.workspace is workspace
     assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
     names = [fn.__name__ for fn in core.tools()]
     assert names[-4:] == ["run_python", "workspace_files", "show_chart", "read_runbook"] and "save_function_code" in names
@@ -2983,9 +3057,9 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
     assert "save_function_code" not in plain.instructions()
 
     alone = AgentAnalyzer(region=REGION, toolkits=["python"], python=Folder(tmp_path))
-    assert [t.name for t in alone.toolkits] == ["python", "runbooks"] and alone.region == REGION
+    assert [t.name for t in alone.toolkits] == ["python", "mcp", "runbooks"] and alone.region == REGION
     assert [t.name for t in AgentAnalyzer(region=REGION, toolkits="lambda", python=workspace).toolkits] == [
-        "lambda", "python", "runbooks"]
+        "lambda", "python", "mcp", "runbooks"]
     with pytest.raises(ValueError, match="needs a workspace"):
         AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
     with pytest.raises(TypeError, match="python= takes 'local'"):
@@ -4102,8 +4176,9 @@ def test_an_answer_is_kept_and_read_back_as_it_was():
     answer = AgentAnswer("Which files arrived?", text="**3** files.", calls=[call], charts=[chart],
                          plan=[PlanStep("list the files", "completed")],
                          findings=[AgentFinding("warn", "One is empty.", "S3View().head('x')", "its size")],
-                         aws_calls={"s3:ListObjectsV2": 1}, model="gpt-test", cost=0.0012,
-                         rates=Rates(2.0, 8.0, "model_prices="), thread="t1",
+                         aws_calls={"s3:ListObjectsV2": 1}, model="gpt-test", cost=0.0012, input_tokens=900,
+                         cache_read_tokens=600, cache_write_tokens=100,
+                         rates=Rates(2.0, 8.0, "model_prices=", 0.5, 2.5), thread="t1",
                          asked=datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc), exception=RuntimeError("x"))
     back = answer_from_record(answer_record(answer))
     assert back.exception is None and back.charts[0].data == b"<svg/>" and back.charts[0].spec == {"mark": "bar"}
@@ -4308,7 +4383,7 @@ def test_the_agent_is_offered_the_runbooks_its_toolkits_can_follow(seeded, tmp_p
     assert "\nRunbooks\n- Runbooks are step-by-step guides" in text
     assert "  - etl-retry: Retry an ETL run." in text and "  - lambda-failing: A Lambda function is failing" in text
     assert "s3-trigger-not-firing" not in text and "kb-answer-wrong" not in text
-    assert [t.name for t in core.toolkits] == ["lambda", "runbooks"] and "read_runbook" in {f.__name__ for f in core.tools()}
+    assert [t.name for t in core.toolkits] == ["lambda", "mcp", "runbooks"] and "read_runbook" in {f.__name__ for f in core.tools()}
     read = tool(core, "read_runbook")
     guide = read("Etl Retry")
     assert guide["runbook"] == "etl-retry" and guide["text"] == "1. Do the thing." and guide["files"] == ["commands.md"]

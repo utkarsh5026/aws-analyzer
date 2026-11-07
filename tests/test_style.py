@@ -180,7 +180,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/sagemaker_env/models.py": 100,
     "src/aws_analyzer/sagemaker_env/prices.py": 16,
     "src/aws_analyzer/sagemaker_env/style.py": 2,
-    "src/aws_analyzer/sagemaker_env/view.py": 10,
+    "src/aws_analyzer/sagemaker_env/view/notebook.py": 10,
     "tests/conftest.py": 5,
     "tests/fake_opensearch.py": 11,
     "tests/test_agent.py": 34,

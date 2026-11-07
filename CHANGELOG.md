@@ -17,6 +17,40 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `explore()` opens a window: everything, a clickable map, the dead-letter queues, and Live, a queue draining.
   - `dead_letters()`, `queue_info()`, `topic_info()` and `rule_info()`; read-only, it never receives a message.
 
+### Changed
+
+- 🤖 **Agent: follow-ups cost less on Bedrock** ([#217](https://github.com/utkarsh5026/aws-analyzer/pull/217))
+  - Tokens read from Bedrock's prompt cache (Claude, Amazon Nova) are priced at the cache's price, a tenth of the input price for Claude.
+  - The note under each answer says how many input tokens the cache served and what that saved.
+  - `model_prices=` takes cached prices after the others: `{"gpt-4.1": (2.00, 8.00, 0.50)}`.
+
+## [0.52.0] - 2026-11-07
+
+### Added
+
+- 🏛️ **Athena: what your SQL over S3 costs, and why it fails** ([#213](https://github.com/utkarsh5026/aws-analyzer/pull/213))
+  - `AthenaView().overview()` shows what the week's queries cost and which failed; `expensive()` adds up a query's repeated runs.
+  - `failures()` explains each kind of failure with its fix; `catalog()` finds tables whose S3 folder is empty or gone, and stopped crawlers.
+  - `explore()` opens a window to click through the queries, costs, failures, tables and crawlers; it never runs a query.
+
+## [0.51.0] - 2026-11-07
+
+### Added
+
+- 🤖 **Agent: tools from your MCP servers** ([#211](https://github.com/utkarsh5026/aws-analyzer/pull/211))
+  - `agent.add_mcp("npx -y @modelcontextprotocol/server-memory")` (or a URL, or an mcp.json) gives the agent that server's tools.
+  - The chat window's 🔌 mcp panel adds, switches and watches them; `import_mcp()` brings in your editor's mcp.json.
+  - A tool that doesn't say it only reads asks run or skip first; `mcp=False` turns MCP off.
+
+## [0.50.0] - 2026-11-07
+
+### Added
+
+- 🧪 **SageMaker: training jobs, endpoints and pipelines** ([#210](https://github.com/utkarsh5026/aws-analyzer/pull/210))
+  - `ui.training_job("name")` says why a job failed in plain words and what to change, with the error in its log.
+  - `ui.endpoints()` shows which endpoints nobody calls and what each costs a month, with the command to delete it.
+  - `ui.pipeline_run("name")` shows the step that broke as a graph and a waterfall; `training_jobs()` and `pipelines()` list them.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added
@@ -1260,7 +1294,10 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.52.0...HEAD
+[0.52.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.51.0...v0.52.0
+[0.51.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.50.0...v0.51.0
+[0.50.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.46.0...v0.47.0

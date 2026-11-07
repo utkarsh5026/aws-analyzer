@@ -1,7 +1,7 @@
 """
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
-OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs and SQS / SNS / EventBridge
-messaging, from a SageMaker / Jupyter notebook, and an agent that answers
+OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs, Athena queries and
+SQS / SNS / EventBridge messaging, from a SageMaker / Jupyter notebook, and an agent that answers
 questions about them in plain English.
 
 Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
@@ -12,7 +12,7 @@ Quick start
     %pip install aws-analyzer               # only boto3 is required; aws-analyzer[all] adds every optional package
 
     from aws_analyzer import S3View          # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView,
-                                             # StepFunctionsView, APIGatewayView, MessagingView, S3Explorer
+                                             # StepFunctionsView, APIGatewayView, AthenaView, MessagingView, S3Explorer
     ui = S3View()
     ui.help()                                # every command, grouped by task
 
@@ -45,7 +45,7 @@ Quick start
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions,
-stepfunctions, apigateway, messaging, agent.
+stepfunctions, apigateway, athena, messaging, agent.
 Importing this package loads none of them; each loads the first time one of its names is used.
 """
 
@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from ._kit.window import set_assistant
     from .agent import AgentAnalyzer, AgentView
     from .apigateway import APIGatewayAnalyzer, APIGatewayExplorer, APIGatewayView
+    from .athena import AthenaAnalyzer, AthenaExplorer, AthenaView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
@@ -72,7 +73,7 @@ if TYPE_CHECKING:
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
     from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
-__version__ = "0.49.0"
+__version__ = "0.52.0"
 
 __all__ = [
     "__version__",
@@ -102,6 +103,9 @@ __all__ = [
     "APIGatewayAnalyzer",
     "APIGatewayView",
     "APIGatewayExplorer",
+    "AthenaAnalyzer",
+    "AthenaView",
+    "AthenaExplorer",
     "MessagingAnalyzer",
     "MessagingView",
     "MessagingExplorer",
@@ -140,6 +144,9 @@ _EXPORTS = {  # name -> the module it comes from
     "APIGatewayAnalyzer": "apigateway",
     "APIGatewayView": "apigateway",
     "APIGatewayExplorer": "apigateway",
+    "AthenaAnalyzer": "athena",
+    "AthenaView": "athena",
+    "AthenaExplorer": "athena",
     "MessagingAnalyzer": "messaging",
     "MessagingView": "messaging",
     "MessagingExplorer": "messaging",
@@ -152,7 +159,7 @@ _EXPORTS = {  # name -> the module it comes from
     "clean_up": "_kit.housekeeping",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-            "lambda_functions", "stepfunctions", "apigateway", "messaging", "agent")
+            "lambda_functions", "stepfunctions", "apigateway", "athena", "messaging", "agent")
 
 
 def __getattr__(name: str) -> Any:

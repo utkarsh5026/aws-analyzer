@@ -7,14 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
+through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, and what's launched from it (training jobs and their logs, endpoints and their traffic, pipelines and their runs), `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections (and `explore()`, a window to click through them), `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
 (a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
 and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
-stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call), and
-`messaging/` (a package too) for SQS queues, SNS topics and EventBridge rules read as one map (where did my message
-go?). The code they
+stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call), and `athena/` (a
+package too) for Athena's past queries, what they cost and why they failed, and the Glue Data Catalog's tables and
+crawlers (see "Athena" under "Hard constraints"), and `messaging/` (a package too) for SQS queues, SNS topics and
+EventBridge rules read as one map (where did my message go?). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -225,7 +226,12 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
-  number, so it never replaces a file), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
+  number, so it never replaces a file), the agent's MCP servers (`AgentAnalyzer(mcp=True)`: one mcp.json,
+  `~/.cache/aws-analyzer/agent/mcp.json`, `AWS_ANALYZER_MCP`'s path or the file `mcp=` names, in the `mcpServers` /
+  VS Code `servers` shape; `mcp_servers/files.py`'s `write_servers` keeps its other keys, writes `<name>.part` then
+  renames, mode 0600; only `add_mcp()`, `remove_mcp()`, `update_mcp()`, `import_mcp()` and the 🔌 mcp panel change
+  it, and nothing deletes the file; `tests/conftest.py` sets `AWS_ANALYZER_MCP=off`), and `sagemaker_env`'s
+  `new_env()`, which makes a Python environment and its Jupyter kernel
   (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
   kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
@@ -249,7 +255,11 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
   hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
   Describe, Head, Filter) and `SEARCHES` (Bedrock's `Retrieve`, by name) with `ReadOnlyError` before its request is
-  built; the S3 tools read names, sizes, dates and
+  built. The one exception is the tools of the MCP servers the user adds (`mcp_servers/`, `toolkits/mcp_tools.py`):
+  they're the servers', not AWS calls through a toolkit's analyzer, so the guard can't see them; a tool that doesn't
+  say it only reads (MCP's `readOnlyHint`) pauses for Run or Skip first (`asks_first`, a `BigRead` with no
+  `smaller`), a stdio server gets PATH and HOME and its own env, never the kernel's AWS credentials, and results go
+  through `hide_secrets`. The S3 tools read names, sizes, dates and
   headers, never an object's body; the model is reached through LangChain, not boto3, so
   `rules.py` sees none of it. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
@@ -264,6 +274,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `access_log_command` are the format and the `aws apigateway update-stage` command findings show. IAM authorizes
   every read as `apigateway:GET`, so `IAM_ACTION` in `rules.py` maps each operation to it. Nothing sends a request to
   an API: `routes()` shows `curl_command` / `curl_lines` (`analysis/try_it.py`) to copy.
+- `athena/` reads Athena (workgroups; past queries: `ListQueryExecutions` per workgroup, IDs newest first, stopping
+  at the first page older than `since`, then `BatchGetQueryExecution`; a query's saved results with `GetQueryResults`),
+  the Glue Data Catalog (databases, tables, partitions, crawlers and their metrics) and S3 (`check_location`: one
+  `ListObjectsV2` of `MaxKeys=10` per table, folder markers ignored; `list_location` for one table's size). It never
+  starts a query, since Athena writes every query's results to S3: `query_code()` shows the boto3 / awswrangler code
+  (`analysis/sql.py`'s `run_code`, `pandas_code`) and findings show SQL (`ctas_sql`, `repair_sql`) and `aws athena` /
+  `aws glue` commands. Cost is `analysis/cost.py`'s `billed_bytes` (rounded up to the MB, `minimum_mb`, nothing for
+  FAILED, DDL / UTILITY or a reused result); `query_shapes` groups runs by `normalize_sql`; `analysis/failures.py`
+  sorts messages into kinds (`KNOWN_FAILURES`: meaning, fix); the tables a query reads come from its SQL
+  (`tables_in_sql`), so a query through a view counts for the view.
 - `messaging/` reads SQS, SNS, EventBridge, CloudWatch (`AWS/SQS`, `AWS/SNS`, `AWS/Events`) and Lambda (event source
   mappings, a function's timeout and resource policy) into one model, and never calls `ReceiveMessage`: receiving
   hides a message from its readers and counts as a try towards its dead-letter queue, so the reports use counts, ages
@@ -284,7 +304,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `_WATCH_MINUTES`; `looks` keeps the `QueueSample`s), and `_FocusReads` (`focus.py`); `frame.py` its tabs, stylesheet
   (`.mgx-app`, derived from the OpenSearch explorer's, on `_terminal_theme`), faces and `_window_text` (a `*_info`
   call becomes "the Overview tab of <name>"); `widgets.py` the `_ItemField` and `_Line`; `MessagingView.explore()`
-  imports it lazily and keeps it in `view.explorer`), is the eighth interactive UI, built on the windows' kit like
+  imports it lazily and keeps it in `view.explorer`), is the ninth interactive UI, built on the windows' kit like
   `OpenSearchExplorer`. An item's key is `'<queue|topic|rule|bus>:<arn>'` (a bus by its name), from
   `MessagingAnalyzer._start`. The Overview tab draws the View's `_queue_blocks` / `_topic_blocks` / `_rule_blocks` from
   the report read in the background (`_read_report`). `.claude/skills/demo/msg_explorer_shots.py` makes the guide's
@@ -833,6 +853,29 @@ How the View layer works:
   reports are split into `_<command>_blocks` so the window draws them, and its `_error_text` says a failed REST request
   in words through the View's `_explain_http`. `.claude/skills/demo/os_explorer_shots.py` makes the guide's
   `os-explorer*` figures in a real JupyterLab on demo.py's OpenSearch.
+- `athena`'s explorer window, `AthenaExplorer` (`athena/explorer/`: `window.py` with `explore()`, composed of
+  `_QueriesTab` (`queries.py`, which also opens a query on the right of the Queries, Costs and Failures tabs, one
+  background job per tab, `query-<tab>`, so their first reads don't drop each other), `_CostsTab` and `_FailuresTab`
+  (`costs.py`), `_CatalogTab` and `_CrawlersTab` (`catalog.py`; a table's partitions and folder are read when it's
+  clicked) and `_FocusReads` (`focus.py`); every tab is a `widgets.py` `_ListPage`: a search box, `_Chip`s and pooled
+  `_Line`s on the left, the picked line's report on the right; `frame.py` its tabs, stylesheet (`.atx-app`, derived
+  from the OpenSearch explorer's, on `_terminal_theme`), faces and `_window_text`), is the eighth interactive UI,
+  built on the windows' kit like `OpenSearchExplorer`. It reads the workgroups and history (`history` job) and the
+  catalog (`catalog` job) side by side, the Overview drawn once both are in; the time-range menu reads the history
+  again, and the workgroup menu filters what's read (`_queries_shown`). `AthenaView.explore()` imports it lazily and
+  keeps it in `view.explorer`; `.claude/skills/demo/athena_explorer_shots.py` makes the guide's `athena-explorer*`
+  figures in a real JupyterLab on demo.py's Athena.
+- `sagemaker_env`'s jobs: `jobs.py`'s `_JobReads` (the analyzer's training jobs, their CloudWatch Logs streams in
+  `/aws/sagemaker/TrainingJobs` read with `DescribeLogStreams` / `GetLogEvents`, endpoints with their daily
+  `AWS/SageMaker` Invocations and 5xx errors, pipelines and one run's steps merged with its definition) and
+  `view/jobs.py`'s `_JobCommands` (`training_jobs`, `training_job`, `endpoints`, `pipelines`, `pipeline_run`; `view/` is
+  a package so `rules.py` reads it as UI). The pure side is `analysis/training.py` (`find_error`, the traceback a
+  log ends in; `_CAUSES`, a failure's kind and what to change), `analysis/endpoints.py` and `analysis/pipelines.py`
+  (`parse_definition` reads `DependsOn` and every `{"Get": "Steps.X..."}` as a wait, a condition's If/Else steps as a
+  branch; `pipeline_layout` puts steps in layers like stepfunctions' `flow_layout`, which it can't import), drawn by
+  `blocks.py`'s `_PipelineGraph` and `_StepWaterfall`. `tests/fake_sagemaker.py` (on fake_stepfunctions' `_Checked`)
+  has acme's jobs, endpoints and runs for `tests/test_sagemaker_jobs.py`; demo.py's SageMaker answers training jobs
+  and pipelines from it.
 - `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
   `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
@@ -859,13 +902,14 @@ with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, an
 (x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage, and
 `STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds,
 `APIGATEWAY_PRICES` (`apigateway/prices.py`), REST, HTTP and WebSocket requests, connection minutes and the hourly
-price of each REST cache size, `MESSAGING_PRICES` (`messaging/prices.py`), SQS requests (standard and FIFO), SNS
-publishes and deliveries by protocol and EventBridge custom events;
+price of each REST cache size, `ATHENA_PRICES` (`athena/prices.py`), per TB scanned, the 10 MB minimum and S3 LIST
+requests, `MESSAGING_PRICES` (`messaging/prices.py`), SQS requests (standard and FIFO), SNS publishes and deliveries
+by protocol and EventBridge custom events;
 us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
-AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonApiGateway|AmazonCloudWatch>/current/us-east-1/index.json`;
+AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonApiGateway|AmazonAthena|AmazonCloudWatch>/current/us-east-1/index.json`;
 `index.csv` is easier to grep), which is what AWS bills from. `lambda_functions/helpers.py`'s `RUNTIMES` holds each managed
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
@@ -949,6 +993,22 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
+- **MCP servers** (`mcp_servers/`, with `toolkits/mcp_tools.py` and `window/mcp_panel.py`): `mcp=True` (the default)
+  reads the agent's mcp.json (`mcp_path`), a path reads that file (VS Code's, Claude Desktop's ... as they are), a dict
+  or list gives servers for the session, `False` turns it off. `config.py` (pure) reads `McpServer`s forgivingly
+  (`parse_server_text`: a command line with leading `NAME=value`s, a URL, an mcp.json or one entry; `guess_name` from
+  the package or host) and writes them back (`server_entry`, with this agent's `disabled`, `asks`, `disabledTools`).
+  `client.py`'s `McpHub` keeps one connection per server as a task on its own asyncio loop on its own thread (the MCP
+  SDK's transports must open and close in one task), so tools on LangGraph's threads and the window on the kernel's
+  loop call it blocking (`connect`, `call`, `disconnect`); a FAILED server stays failed until `connect(again=True)`, so
+  one that's down isn't waited for at every question; the `mcp` package loads through `_mcp()` (`_require`).
+  `McpToolkit` (`"mcp"`, added after the others, before runbooks) makes a function per usable tool named
+  `<server>__<tool>`, with a `__signature__` from its schema and `mcp_schema`, which `harness._langchain_tools` hands
+  LangChain as a `StructuredTool` with the JSON schema itself; its `reads` are `MCP_READ` (`mcp:CallTool`), drawn as the
+  🔌 badge and listed by `tools()` as "MCP server x (not an AWS read)". Adding, removing or switching servers calls
+  `AgentAnalyzer._tools_changed()`, which rebuilds the tools and graph on the same checkpointer. `summarize_mcp_result`
+  and `tool_signature` are pure; `findings.py`'s `mcp_findings` feeds `AgentView.mcp()` and the panel.
+  `tests/test_agent_mcp.py` runs `tests/fake_mcp_server.py` (a FastMCP ticket desk over stdio) for real.
 - **Runbooks** (`runbooks/`, with `toolkits/runbook_tools.py`): step-by-step guides, each a folder with a `SKILL.md`
   (Agent Skills front matter: `name`, `description`, `metadata.toolkits`), the built-in ones beside
   `runbooks/__init__.py` (shipped in the wheel). `runbook_sources(runbooks=)` is the built-in folder, then the user's;
@@ -1350,6 +1410,11 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   behind the newest 504 and 502) and answers GetMetricData with `FakeCloudWatch` over `traffic()` (`holds` and
   `denied` as in the other fakes). demo.py's `seed_apigateway()` uses the same, and
   `.claude/skills/demo/apigw_explorer_shots.py` makes the guide's `apigw-explorer*` figures in a real JupyterLab.
+- Athena: moto's Athena keeps no query history, failures or statistics, so `tests/test_athena.py` uses
+  `tests/fake_athena.py`: `FakeAthena` and `FakeGlue` (fake_stepfunctions' `_Checked`: every request and answer
+  checked against the service model, `denied` to refuse an operation) over acme's workgroups, a week of queries whose
+  times don't depend on the hour, tables in each state the findings know and four crawlers, and `seed_buckets` for the
+  tables' folders in moto's S3. demo.py's `seed_athena()` uses the same.
 - SQS, SNS and EventBridge: moto covers all of it, CloudWatch's `AWS/SQS`, `AWS/SNS` and `AWS/Events` numbers
   included (put with PutMetricData), so `tests/fake_messaging.py`'s `seed(now)` makes acme's queues, topics, rules and
   functions there (a subscription waiting for confirmation is marked in moto's backend, which confirms them all).
@@ -1414,7 +1479,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `messaging.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
@@ -1459,7 +1524,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
-  plays a scripted model over demo.py's Lambda functions. Every window also has an animated tour like
+  plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
   `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model and Python 3.11+), at the top of its guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through

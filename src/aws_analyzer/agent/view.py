@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -38,7 +39,7 @@ from .prompt import asked_at, parse_query_reply, query_prompt
 from .chats import ChatSummary
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
-from .llm import model_place, no_model_hint, provider_info
+from .llm import Rates, cache_saving, model_place, no_model_hint, provider_info
 from .model_setup import (
     AGENT_MODULES,
     KernelState,
@@ -56,6 +57,20 @@ from .model_setup import (
     suggested_provider,
     unset_variables,
 )
+from .mcp_servers.config import TOOL_SEPARATOR
+from .toolkits.mcp_tools import MCP_READ
+from .mcp_servers import (
+    ASK_LABELS,
+    FAILED,
+    OFF,
+    READY,
+    McpServer,
+    McpTool,
+    ServerState,
+    mcp_findings,
+    server_entry,
+    shown_settings,
+)
 from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
 from .runbooks import RUNBOOK_FILE, runbook_findings
 
@@ -63,6 +78,7 @@ if TYPE_CHECKING:
     from .window import _AgentChat
 
 _ROOT = "agt"
+_MCP_TOOLS_OPEN = 20
 _EXTRA_CSS = """\
 .agt .ans{font-size:14px;line-height:1.6;margin:8px 0 12px;max-width:900px;overflow-wrap:anywhere}
 .agt .ans>:first-child{margin-top:0}
@@ -220,6 +236,16 @@ def _zone_label(zone: tzinfo | None) -> str:
     return f"{key} ({short})" if key and key != short else short
 
 
+def _reads_text(reads: tuple[str, ...], tool: str) -> str:
+    """
+    A tool's reads as the tools() report lists them: its AWS operations, or the MCP server whose tool it is.
+    """
+    if reads == (MCP_READ,):
+        server = tool.split(TOOL_SEPARATOR, 1)[0]
+        return f"MCP server {server} (not an AWS read)"
+    return ", ".join(reads)
+
+
 def _first_line(doc: str | None) -> str:
     """
     A docstring's first sentence, on one line.
@@ -250,10 +276,52 @@ def _cost_basis(answer: AgentAnswer) -> str:
         return (f"The model's cost is unknown: pass its prices, AgentView(model_prices={{{_price_key(answer)!r}: "
                 f"(input_price, output_price)}}) (USD per 1M input and output tokens, from {sheet}).")
     if rates.source == "list":
-        return (f"Model cost is an estimate: {tokens} at Amazon Bedrock's list prices for {_price_key(answer)} "
-                f"({_per_million(rates.price_in)} in and {_per_million(rates.price_out)} out per 1M tokens; "
-                "model_prices= sets your own).")
-    return f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
+        basis = (f"Model cost is an estimate: {tokens} at Amazon Bedrock's list prices for {_price_key(answer)} "
+                 f"({_per_million(rates.price_in)} in and {_per_million(rates.price_out)} out per 1M tokens; "
+                 "model_prices= sets your own).")
+    else:
+        basis = f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
+    cache = _cache_text(answer, rates)
+    return f"{basis} {cache}" if cache else basis
+
+
+def _cache_parts(answer: AgentAnswer, rates: Rates) -> list[str]:
+    """
+    What an answer's input tokens did with the prompt cache, with the price of each: '11,820 were read from the
+    prompt cache at $0.11 per 1M', '2,100 written to it at $1.38 per 1M'.
+    """
+    parts = []
+    if answer.cache_read_tokens:
+        parts.append(f"{answer.cache_read_tokens:,} were read from the prompt cache at "
+                     f"{_per_million(rates.cache_read or 0.0)} per 1M")
+    if answer.cache_write_tokens:
+        write_price = rates.price_in if rates.cache_write is None else rates.cache_write
+        where = "to it" if parts else "to the prompt cache"
+        verb = "" if parts else "were "
+        parts.append(f"{answer.cache_write_tokens:,} {verb}written {where} at {_per_million(write_price)} per 1M")
+    return parts
+
+
+def _cache_text(answer: AgentAnswer, rates: Rates) -> str:
+    """
+    What the prompt cache did to the answer's cost: how many input tokens it read from the cache and wrote to it,
+    and what that saved; when only writes happened, that a follow-up within five minutes reads them; and when the
+    prices passed in model_prices= don't say what a cached token costs, that the cost is an upper bound and how to
+    give it. '' when nothing went through the cache.
+    """
+    cached = answer.cache_read_tokens + answer.cache_write_tokens
+    if not cached:
+        return ""
+    if rates.cache_read is None:
+        return (f"{cached:,} of the input tokens went through the model's prompt cache and are priced here as ordinary "
+                f"input, so the cost is an upper bound: give the cache's prices after the others, "
+                f"AgentView(model_prices={{{_price_key(answer)!r}: (input, output, cache_read, cache_write)}}).")
+    lead = f"Of the input tokens, {' and '.join(_cache_parts(answer, rates))}"
+    saved = cache_saving(rates, cache_read=answer.cache_read_tokens, cache_write=answer.cache_write_tokens)
+    if saved <= 0:
+        return f"{lead}: a follow-up within 5 minutes reads them at {_per_million(rates.cache_read)} per 1M."
+    full_price = (answer.cost or 0.0) + saved
+    return f"{lead}, which cut the model cost by {saved / full_price:.0%} ({human_money(saved)})."
 
 
 def _installed(module: str) -> bool:
@@ -307,6 +375,22 @@ def _focus_blocks(answer: AgentAnswer) -> list[Any]:
         return []
     return [_Note(f"Looking at: {answer.focus}")]
 
+def _every(lists: Any) -> list[Any]:
+    """
+    The items of several lists, as one list, in order.
+    """
+    return [item for items in lists for item in items]
+
+
+def _mcp_tool_row(tool: McpTool, *, asks: bool) -> list[Any]:
+    """
+    A tool's line in the MCP report: its name, whether it says it only reads, whether it asks first, what it does.
+    """
+    says = "reads only" if tool.read_only else _Tone("may change", "warn")
+    first_line = tool.description.strip().split("\n")[0]
+    return [tool.qualified, says, "yes" if asks else "no", first_line]
+
+
 class AgentView(_BaseView):
     """
     Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
@@ -328,6 +412,7 @@ class AgentView(_BaseView):
         "🧠 Memory": ("memory", "forget", "forget_all"),
         "🔑 Set up": ("setup", "use_model"),
         "🧰 What it can do": ("tools", "runbooks"),
+        "🔌 MCP servers": ("mcp", "add_mcp", "remove_mcp", "enable_mcp", "disable_mcp", "reconnect_mcp", "import_mcp"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -525,9 +610,14 @@ class AgentView(_BaseView):
         """
         call = answer.waiting[0]
         read = call.waiting
+        choices = [("go()", read.go), ("smaller()", read.smaller), ("skip()", "answer without it")]
         if read.limit:
             finding = (f"It stopped at a limit of its budget: {read.what} Pick go() to raise it for this question, "
                        "or smaller() or skip() to have it answer with what it found.")
+        elif not read.smaller:
+            finding = (f"It stopped to ask before one of your MCP servers' tools runs: {read.what} Pick go() to let it "
+                       "run this once, or skip() to have it answer without it.")
+            choices = [choices[0], choices[2]]
         else:
             finding = (f"It stopped to ask before a big read: {read.what} Pick go(), smaller() or skip(); the agent "
                        "only reads, whichever you pick.")
@@ -540,8 +630,7 @@ class AgentView(_BaseView):
         others = len(answer.waiting) - 1
         if others:
             blocks.append(_Note(f"{_plural(others, 'more read')} waits after this one: it's asked next."))
-        blocks.append(_Next([("go()", read.go), ("smaller()", read.smaller), ("skip()", "answer without it")],
-                            title=f"Go on with {call.brief}"))
+        blocks.append(_Next(choices, title=f"Go on with {call.brief}"))
         return blocks
 
     def _answer_line(self, answer: AgentAnswer) -> str:
@@ -710,6 +799,183 @@ class AgentView(_BaseView):
         self._show([_Title("Charts saved", f"{_plural(len(paths), 'file')} in {paths[0].parent}"),
                     _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
+
+    def _kits_line(self) -> str:
+        """
+        The tools() report's subtitle: the toolkits, read-only, and the MCP servers whose tools it has besides.
+        """
+        kits = [t.title for t in self.core.toolkits if t.name not in ("runbooks", "mcp")]
+        line = f"{', '.join(kits)}, read-only"
+        mcp = self.core.mcp_kit
+        ready = [state for state in mcp.states if state.is_ready] if mcp is not None else []
+        if ready:
+            line += f" on AWS, with {_plural(len(ready), 'MCP server')} ({', '.join(s.name for s in ready)})"
+        return line
+
+    def _mcp_tone(self, state: ServerState) -> _Tone:
+        """
+        A server's status as the table's pill: connected, failed, off or connecting.
+        """
+        if state.status == READY:
+            return _Tone("connected", "ok")
+        if state.status == FAILED:
+            return _Tone("failed", "bad")
+        return _Tone("off" if state.status == OFF else state.status, "warn" if state.server.enabled else "")
+
+    def _mcp_blocks(self, states: list[ServerState], *, title: str = "MCP servers") -> list[Any]:
+        """
+        The MCP report's blocks: cards, findings, a line per server, its tools, the file as it's saved.
+        """
+        kit = self.core._mcp()
+        ready = [state for state in states if state.is_ready]
+        failed = [state for state in states if state.status == FAILED]
+        tools = _every(state.usable_tools for state in ready)
+        asking = _every(state.asking_tools for state in ready)
+        where = str(kit.path) if kit.path is not None else "kept for this session only"
+        findings = mcp_findings(states, path=kit.path, problem=kit.problem, missing_package=kit.missing_package)
+        blocks: list[Any] = [
+            _Title(title, f"{_plural(len(states), 'server')} · {where}"),
+            _Cards([("Connected", f"{len(ready):,} of {len(states):,}", *(["warn"] if failed else [])),
+                    ("Tools", f"{len(tools):,}"), ("Ask first", f"{len(asking):,}"),
+                    ("Calls", f"{sum(state.calls for state in states):,}")]),
+            _Findings(findings, empty="Every server is connected, and its tools that may change something ask first."),
+        ]
+        rows = [self._mcp_row(state) for state in states]
+        if rows:
+            columns = ["Server", "Status", "Kind", "Runs", "Tools on", "Before a tool runs", "It says it is"]
+            blocks.append(_Table(columns, rows, code_cols=(3,), sortable=False))
+        tool_rows = [_mcp_tool_row(tool, asks=tool in asking) for tool in tools]
+        if tool_rows:
+            blocks.append(_Table(["Tool", "Says it", "Asks first", "What it does"], tool_rows, title="Their tools",
+                                 prose_cols=(3,), collapsed=len(tool_rows) > _MCP_TOOLS_OPEN))
+        if kit.servers:
+            saved = {server.name: {**server_entry(server), **self._hidden_settings(server)} for server in kit.servers}
+            blocks.append(_Text(json.dumps({"mcpServers": saved}, indent=2), title="As saved (keys hidden)",
+                                collapsed=True, code=True))
+        blocks.append(_Note("MCP tools aren't AWS reads: they're your servers', outside the agent's read-only guard. "
+                            "The model sends them arguments and reads what they return (secrets hidden), and a tool "
+                            "that doesn't say it only reads asks you before it runs."))
+        return blocks
+
+    def _mcp_row(self, state: ServerState) -> list[Any]:
+        """
+        A server's line in the report: name, status, kind, what it runs, its tools that are on, when it asks, and
+        what it calls itself.
+        """
+        tools = f"{len(state.usable_tools):,} of {len(state.tools):,}" if state.tools else "-"
+        return [state.name, self._mcp_tone(state), state.server.transport, state.server.target, tools,
+                ASK_LABELS[state.server.asks], state.info or "-"]
+
+    @staticmethod
+    def _hidden_settings(server: McpServer) -> dict[str, Any]:
+        key = "headers" if server.is_remote else "env"
+        return {key: shown_settings(server.settings)} if server.settings else {}
+
+    def _mcp_next(self, states: list[ServerState]) -> _Next:
+        failed = next((state.name for state in states if state.status == FAILED), None)
+        steps = [("chat()", "the 🔌 mcp panel: add, switch and watch them by clicking")]
+        if failed:
+            steps.insert(0, (f"reconnect_mcp('{failed}')", "try the failed server again"))
+        if not states:
+            steps.insert(0, ("add_mcp('npx -y @modelcontextprotocol/server-memory')", "add a first server"))
+        steps.append(("import_mcp()", "the mcp.json files your editor keeps, to import"))
+        return _Next(steps[:3])
+
+    @_friendly_errors
+    def mcp(self) -> None:
+        """
+        Your MCP servers: whether each is connected (or why not), what it runs or where it is, its tools and which
+        ask before they run, what it has answered in this kernel, and what to fix. It connects the ones that are on
+        first. Add one with add_mcp(), or in the chat window's 🔌 mcp panel.
+        """
+        states = self.core.mcp_servers()
+        self._show([*self._mcp_blocks(states), self._mcp_next(states)])
+
+    def _mcp_changed(self, states: list[ServerState], title: str) -> None:
+        self._tell_windows("mcp_changed")
+        self._show([*self._mcp_blocks(self.core.mcp_servers(connect=False), title=title), self._mcp_next(states)])
+
+    @_friendly_errors
+    def add_mcp(  # noqa: PLR0913
+        self,
+        server: str | dict[str, Any],
+        *,
+        name: str = "",
+        env: dict[str, str] | str | None = None,
+        headers: dict[str, str] | str | None = None,
+        asks: str | None = None,
+        replace: bool = False,
+    ) -> None:
+        """
+        Adds an MCP server and connects it, so the agent can call its tools: the command that starts it
+        ('npx -y @modelcontextprotocol/server-memory'), its URL ('https://example.com/mcp'), or its JSON from an
+        mcp.json. env= gives a command environment variables and headers= a URL its HTTP headers (a key:
+        {'Authorization': 'Bearer ${env:TOKEN}'}); asks='every' asks before each of its tools runs, 'never' never.
+        It's saved in the agent's mcp.json, so the next notebook has it too.
+        """
+        states = self.core.add_mcp(server, name=name, env=env, headers=headers, asks=asks, replace=replace)
+        names = ", ".join(state.name for state in states)
+        self._mcp_changed(states, f"Added {names}")
+
+    @_friendly_errors
+    def remove_mcp(self, name: str) -> None:
+        """
+        Removes an MCP server from the agent and its mcp.json: its tools are gone from the next question on.
+        """
+        removed = self.core.remove_mcp(name)
+        self._mcp_changed([], f"Removed {removed.name}")
+
+    @_friendly_errors
+    def enable_mcp(self, name: str) -> None:
+        """
+        Turns an MCP server back on and connects it: its tools are offered again from the next question on.
+        """
+        state = self.core.update_mcp(name, enabled=True)
+        self._mcp_changed([state], f"{state.name} is on")
+
+    @_friendly_errors
+    def disable_mcp(self, name: str) -> None:
+        """
+        Turns an MCP server off without removing it: its tools aren't offered, and a command it ran stops.
+        """
+        state = self.core.update_mcp(name, enabled=False)
+        self._mcp_changed([state], f"{state.name} is off")
+
+    @_friendly_errors
+    def reconnect_mcp(self, name: str | None = None) -> None:
+        """
+        Connects an MCP server again (every one that's on, without a name): after fixing what made it fail, or to
+        pick up tools it added.
+        """
+        states = self.core.reconnect_mcp(name)
+        self._mcp_changed(states, "Connected again")
+
+    @_friendly_errors
+    def import_mcp(self, path: str | os.PathLike | None = None) -> None:
+        """
+        The mcp.json files your editor and apps keep (VS Code's .vscode/mcp.json, Claude Code's .mcp.json, Cursor's,
+        Claude Desktop's) and the servers in each; with a path, adds that file's servers to the agent's own, leaving
+        the file as it is.
+        """
+        if path is not None:
+            states = self.core.import_mcp(path)
+            self._mcp_changed(states, f"Imported {_plural(len(states), 'server')} from {path}")
+            return
+        found = self.core.mcp_editor_files()
+        rows = [[str(config.path), config.app, ", ".join(s.name for s in config.servers) or "-",
+                 config.problem or "-"] for config in found]
+        blocks: list[Any] = [_Title("MCP servers your editor knows", f"{_plural(len(found), 'file')} found")]
+        if not rows:
+            blocks.append(_Note("No mcp.json here: none in .vscode/, .cursor/ or .mcp.json beside this notebook or "
+                                "above it, nor Cursor's or Claude Desktop's. Add a server with add_mcp(...)."))
+            self._show(blocks)
+            return
+        blocks.append(_Table(["File", "App", "Servers", "Problem"], rows, path_cols=(0,), sortable=False))
+        first = next((config for config in found if config.servers), None)
+        if first is not None:
+            adds = f"add its {_plural(len(first.servers), 'server')}"
+            blocks.append(_Next([(f"import_mcp({str(first.path)!r})", adds), ("mcp()", "the servers the agent has")]))
+        self._show(blocks)
 
     @_friendly_errors
     def runbooks(self) -> None:
@@ -1012,12 +1278,13 @@ class AgentView(_BaseView):
         except (ValueError, BotoCoreError):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
-            _Title("What the agent can do", ", ".join(t.title for t in core.toolkits if t.name != "runbooks") + ", read-only"),
+            _Title("What the agent can do", self._kits_line()),
             _Cards([("Model", model, *([] if is_set_up else ["warn"])), ("Provider", provider),
                     ("Regions", regions), ("Time zone", _zone_label(core.zone)), ("Tools", f"{len(core.tools())}")]),
         ]
         reads = core.reads
-        rows = [[fn.__name__, _first_line(fn.__doc__), ", ".join(reads.get(fn.__name__, ()))] for fn in core.tools()]
+        rows = [[fn.__name__, _first_line(fn.__doc__), _reads_text(reads.get(fn.__name__, ()), fn.__name__)]
+                for fn in core.tools()]
         blocks.append(_Table(["Tool", "What it does", "AWS reads"], rows, title="Tools", prose_cols=(1,),
                              sortable=False))
         limits = self._budget_rows()

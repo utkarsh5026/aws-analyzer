@@ -97,6 +97,8 @@ class CaseResult:
     seconds: float = 0.0
     cost: float | None = None
     tokens: int = 0
+    input_tokens: int = 0
+    cache_read_tokens: int = 0
     answer: str = ""
     calls: list[str] = field(default_factory=list)
 
@@ -159,7 +161,8 @@ def score(case: EvalCase, answer: Any, *, run: int = 1) -> CaseResult:
         max_calls=case.max_calls, ungrounded=_ungrounded(grounding), rechecked=answer.recheck is not None,
         cited=grounding.cited,
         error=answer.error or "", stopped=answer.stopped or "", seconds=round(answer.seconds, 1), cost=answer.cost,
-        tokens=answer.input_tokens + answer.output_tokens, answer=answer.text, calls=[call.call for call in answer.calls])
+        tokens=answer.input_tokens + answer.output_tokens, input_tokens=answer.input_tokens,
+        cache_read_tokens=answer.cache_read_tokens, answer=answer.text, calls=[call.call for call in answer.calls])
 
 
 @dataclass
@@ -239,7 +242,7 @@ class CaseSummary:
     """
     A case over its runs: how many passed, the share of its facts stated, the runs that said something wrong, and
     the averages of what no tool returned, the share of facts cited (over the runs that stated one), tool calls,
-    seconds and cost.
+    seconds and cost, and the input tokens its runs sent and how many of them the prompt cache served.
     """
 
     case: str
@@ -253,6 +256,8 @@ class CaseSummary:
     seconds: float
     cost: float | None
     cited: float | None = None
+    input_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 def _mean(values: list[float]) -> float:
@@ -279,7 +284,8 @@ def summarize(results: list[CaseResult]) -> list[CaseSummary]:
             _mean([_fact_share(r) for r in runs]),
             sum(bool(r.said_wrong) for r in runs), _mean([len(r.ungrounded) for r in runs]),
             _mean([r.tool_calls for r in runs]), _mean([r.seconds for r in runs]),
-            sum(costs) if costs else None, _mean(cited) if cited else None))
+            sum(costs) if costs else None, _mean(cited) if cited else None,
+            sum(r.input_tokens for r in runs), sum(r.cache_read_tokens for r in runs)))
     return summaries
 
 
@@ -291,10 +297,23 @@ def _share(value: float | None) -> str:
     return f"{value:.0%}" if value is not None else "-"
 
 
+def _cache_share(summaries: list[CaseSummary]) -> str:
+    """
+    How much of what the runs sent the model came from its prompt cache: 'prompt cache served 71% of 482,000 input
+    tokens'.
+    """
+    sent = sum(s.input_tokens for s in summaries)
+    cached = sum(s.cache_read_tokens for s in summaries)
+    if not sent:
+        return "prompt cache: no input tokens counted"
+    return f"prompt cache served {cached / sent:.0%} of {sent:,} input tokens"
+
+
 def render(summaries: list[CaseSummary]) -> str:
     """
     The summaries as a table, then the overall line: cases that passed every run, runs passed, facts stated, runs
-    that said something wrong, claims no tool returned per answer, and the cost.
+    that said something wrong, claims no tool returned per answer, the cost, and the share of input tokens the
+    prompt cache served (Bedrock's Claude and Nova, and OpenAI, report it).
     """
     header = f"{'case':<{_WIDTH}} {'kind':<5} {'passed':>7} {'facts':>6} {'wrong':>5} {'ungrnd':>6} {'cited':>5} " \
              f"{'calls':>5} {'secs':>6} {'cost':>8}"
@@ -311,7 +330,7 @@ def render(summaries: list[CaseSummary]) -> str:
                   f"passed; facts {_mean([s.facts for s in summaries]):.0%}; {sum(s.wrong for s in summaries)} runs "
                   f"said something wrong; {_mean([s.ungrounded for s in summaries]):.1f} claims per answer no tool "
                   f"returned; facts cited {_share(_mean(cited) if cited else None)}; cost "
-                  f"{_money(sum(costs) if costs else None)}"]
+                  f"{_money(sum(costs) if costs else None)}; {_cache_share(summaries)}"]
     return "\n".join(lines)
 
 

@@ -27,6 +27,7 @@ findings. So does a model that writes its answer as a message anyway.
 from __future__ import annotations
 
 import functools
+import inspect
 import sys
 import time
 from typing import Any, Callable, Iterable
@@ -58,6 +59,7 @@ _FILE_SUMMARY_CHARACTERS = 80
 _FILE_RESULT_CHARACTERS = 4000
 _OVERTIME_SECONDS = 60
 _WRAP_UP_STEPS = 8
+_CACHE_WRITE_KEYS = ("cache_creation", "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
 _WRAP_UP_SECONDS = 90
 _WRAP_UP = ("[The user pressed stop before you finished. Don't read anything more: your tools won't run. Answer the "
             "question now from what your tools already returned, and say what you didn't get to check.]")
@@ -119,7 +121,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
         extra["response_format"] = _reply_format()
     return deepagents.create_deep_agent(
         model=model,
-        tools=tools,
+        tools=_langchain_tools(tools),
         system_prompt=system_prompt,
         middleware=middleware,
         checkpointer=checkpointer if checkpointer is not None else new_checkpointer(),
@@ -128,8 +130,35 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     )
 
 
+def _object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    A tool's JSON schema as every provider takes it: an object, with properties (an MCP server may leave them out).
+    """
+    return {**schema, "type": "object", "properties": schema.get("properties") or {}}
+
+
+def _langchain_tools(tools: list[Callable[..., Any]]) -> list[Any]:
+    """
+    The tools as deepagents takes them: functions as they are, and an MCP server's tool (one with `mcp_schema`) as a
+    StructuredTool with that JSON schema, so the model sees every detail of its arguments (enums, nested objects,
+    descriptions) rather than what a Python signature can say.
+    """
+    if not any(hasattr(fn, "mcp_schema") for fn in tools):
+        return tools
+    structured = _require("langchain_core.tools", "MCP tools", package="langchain-core").StructuredTool
+    made: list[Any] = []
+    for fn in tools:
+        schema = getattr(fn, "mcp_schema", None)
+        if schema is None:
+            made.append(fn)
+            continue
+        made.append(structured(name=fn.__name__, description=inspect.getdoc(fn) or fn.__name__,
+                               args_schema=_object_schema(schema), func=fn))
+    return made
+
+
 def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
-                model_prices: dict[str, tuple[float, float]] | None = None,
+                model_prices: dict[str, tuple[float, ...]] | None = None,
                 progress: Callable[..., None] | None = None, provider: str = "") -> str:
     """
     Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
@@ -149,7 +178,7 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
 
 
 def resume_turn(graph: Any, choices: dict[str, str], *, thread: str, run: _Run,  # noqa: PLR0913
-                answer: AgentAnswer, model_prices: dict[str, tuple[float, float]] | None = None,
+                answer: AgentAnswer, model_prices: dict[str, tuple[float, ...]] | None = None,
                 progress: Callable[..., None] | None = None, provider: str = "") -> str:
     """
     Goes on with a paused question once the user has chosen: `choices` is each pause's ID (from pauses()) -> 'go',
@@ -187,7 +216,7 @@ def is_pause(exc: BaseException) -> bool:
 
 
 def _stream(graph: Any, start: Any, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
-            model_prices: dict[str, tuple[float, float]] | None, progress: Callable[..., None] | None,
+            model_prices: dict[str, tuple[float, ...]] | None, progress: Callable[..., None] | None,
             provider: str) -> str:
     """
     Streams the graph from `start` (a question's message, or a Command going on after a pause): see stream_turn().
@@ -281,21 +310,38 @@ def _model_messages(update: Any) -> list[Any]:
             if type(msg).__name__ in _AI_MESSAGES]
 
 
-def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
-                 cost_of: Callable[[str, int, int], float | None]) -> None:
+def _cache_tokens(usage: dict[str, Any]) -> tuple[int, int]:
     """
-    Adds one model message to the answer: a model call, its tokens, and the model that served it, which for a
-    deployment reads 'prod-gpt-4o (gpt-4o-2024-11-20)'. Keeps run.cost current for the tools' cost budget, at what
-    cost_of(model, input_tokens, output_tokens) says the tokens so far cost.
+    The input tokens a model message read from the prompt cache and wrote to it, from LangChain's usage_metadata:
+    cache_read (OpenAI's priority_cache_read and flex_cache_read too), and cache_creation or, when the provider says
+    how long each is kept, its ephemeral_5m and ephemeral_1h tokens (it sets cache_creation to 0 then).
+    """
+    details = usage.get("input_token_details") or {}
+    read = sum(int(count or 0) for key, count in details.items() if key.endswith("cache_read"))
+    write = sum(int(details.get(key) or 0) for key in _CACHE_WRITE_KEYS)
+    return read, write
+
+
+def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
+                 cost_of: Callable[..., float | None]) -> None:
+    """
+    Adds one model message to the answer: a model call, its tokens (and how many of its input tokens came from the
+    prompt cache or went into it), and the model that served it, which for a deployment reads 'prod-gpt-4o
+    (gpt-4o-2024-11-20)'. Keeps run.cost current for the tools' cost budget, at what cost_of(model, input_tokens,
+    output_tokens, cache_read=, cache_write=) says the tokens so far cost.
     """
     answer.model_calls += 1
     usage = getattr(message, "usage_metadata", None) or {}
     answer.input_tokens += int(usage.get("input_tokens") or 0)
     answer.output_tokens += int(usage.get("output_tokens") or 0)
+    read, write = _cache_tokens(usage)
+    answer.cache_read_tokens += read
+    answer.cache_write_tokens += write
     served = (getattr(message, "response_metadata", None) or {}).get("model_name")
     if served:
         answer.model = served if base in ("", served) else f"{base} ({served})"
-    cost = cost_of(answer.model, answer.input_tokens, answer.output_tokens)
+    cost = cost_of(answer.model, answer.input_tokens, answer.output_tokens, cache_read=answer.cache_read_tokens,
+                   cache_write=answer.cache_write_tokens)
     with run.lock:
         run.cost = cost or 0.0
 

@@ -590,12 +590,72 @@ Write the steps in terms of the agent's tools (`agent.tools()` lists them). File
 !!! tip "Worth knowing"
     A runbook is followed like your own instructions, so keep the folder to guides your team wrote. It can't widen what the agent does: it still only reads, and a step that would change something becomes a command for you to run. A guide is read from its file each time, so an edit counts at once; a new runbook needs a new `AgentView`.
 
+## Tools from your MCP servers { #mcp }
+
+Add any MCP server (a ticket tracker, a docs search, GitHub) and its tools sit beside the agent's AWS tools, so one question can use both.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock")
+agent.add_mcp("npx -y @modelcontextprotocol/server-memory")      # a command it runs here
+agent.add_mcp("https://example.com/mcp", headers={"Authorization": "Bearer ${env:EXAMPLE_TOKEN}"})
+agent.mcp()                                                       # connected or why not, tools, calls
+agent.import_mcp(".vscode/mcp.json")                              # your editor's servers
+agent.ask("Is there a ticket about the orders-etl failure?")
+```
+
+| Paste this | And it |
+|---|---|
+| `npx -y @modelcontextprotocol/server-memory` | runs it on this machine, named `memory` |
+| `https://mcp.example.com/mcp` | calls it over streamable HTTP (a URL ending in `/sse`: the older SSE) |
+| `{"mcpServers": {...}}` | adds every server in it (VS Code's `{"servers": ...}` too) |
+
+![The chat window with its MCP panel open under the header, where the mcp 1/2 button is highlighted: 2 MCP servers, 1 connected, 1 failed, 4 tools; a green dot beside tickets, stdio, python ticket_desk.py, 4 tools, 1 asks first, with its tools, reconnect, off and remove buttons; a red dot beside jira, failed, saying jira-mcp isn't installed here, or isn't on the kernel's PATH; then a button to import 1 server from VS Code's .vscode/mcp.json, and add a server, reconnect all and close](images/agent-mcp-light.webp#only-light){ width="984" height="875" loading=lazy }
+![The chat window with its MCP panel open under the header, where the mcp 1/2 button is highlighted: 2 MCP servers, 1 connected, 1 failed, 4 tools; a green dot beside tickets, stdio, python ticket_desk.py, 4 tools, 1 asks first, with its tools, reconnect, off and remove buttons; a red dot beside jira, failed, saying jira-mcp isn't installed here, or isn't on the kernel's PATH; then a button to import 1 server from VS Code's .vscode/mcp.json, and add a server, reconnect all and close](images/agent-mcp-dark.webp#only-dark){ width="984" height="875" loading=lazy }
+/// caption
+**🔌 mcp**: a line per server, its dot saying how it stands, and why one failed.
+///
+
+In the chat window, **🔌 mcp** says how many are connected (`🔌 mcp 2/3`) and opens the panel: a line per server with its dot (connected, connecting, failed, off), what it runs, its tools and its calls. **tools ▸** lists its tools, a box each to turn one off. **↻** connects it again, **off** switches it off, **✕** removes it. **+ add a server** takes a command, a URL or a pasted mcp.json, guesses the name and connects before it saves; when it can't, it says why and keeps the form open.
+
+![The MCP panel with the tickets server's tools open under it: a menu saying ask unless the tool is marked read-only, then a ticked box per tool, find_tickets, broken and ticket_counts tagged reads only, close_ticket tagged may change and asks first, each with what it does](images/agent-mcp-tools-light.webp#only-light){ width="984" height="1027" loading=lazy }
+![The MCP panel with the tickets server's tools open under it: a menu saying ask unless the tool is marked read-only, then a ticked box per tool, find_tickets, broken and ticket_counts tagged reads only, close_ticket tagged may change and asks first, each with what it does](images/agent-mcp-tools-dark.webp#only-dark){ width="984" height="1027" loading=lazy }
+/// caption
+**tools ▸**: when it asks first, and a box per tool to turn one off.
+///
+
+![The MCP panel's add form: server, https://mcp.example.com/mcp; name, example, guessed from the URL; headers, Authorization: Bearer ${env:EXAMPLE_TOKEN}; asks, ask unless the tool is marked read-only; the note Calls https://mcp.example.com/mcp over streamable HTTP, as example; and the connect & add and cancel buttons](images/agent-mcp-add-light.webp#only-light){ width="984" height="1120" loading=lazy }
+![The MCP panel's add form: server, https://mcp.example.com/mcp; name, example, guessed from the URL; headers, Authorization: Bearer ${env:EXAMPLE_TOKEN}; asks, ask unless the tool is marked read-only; the note Calls https://mcp.example.com/mcp over streamable HTTP, as example; and the connect & add and cancel buttons](images/agent-mcp-add-dark.webp#only-dark){ width="984" height="1120" loading=lazy }
+/// caption
+**+ add a server**: a command, a URL or a pasted mcp.json; it guesses the name and connects before it saves.
+///
+
+!!! tip "Worth knowing"
+
+    MCP tools are your servers', outside the read-only guard. So before one runs that doesn't say it only reads, the agent stops and asks **run** or **skip** (after `ask()`: `go()` or `skip()`). Pick *ask before every call* or *never ask* per server in the panel.
+
+![A question in the chat window: tickets__find_tickets(text='orders-etl') ran at once and found T-1: orders-etl fails at 02:00; tickets__close_ticket('T-1', note='fixed the KeyError') is waiting, with a box asking Run this MCP tool? close_ticket on your MCP server tickets would run with ticket='T-1', note='fixed the KeyError': it doesn't say it only reads, and run and skip buttons](images/agent-mcp-ask-light.webp#only-light){ width="984" height="680" loading=lazy }
+![A question in the chat window: tickets__find_tickets(text='orders-etl') ran at once and found T-1: orders-etl fails at 02:00; tickets__close_ticket('T-1', note='fixed the KeyError') is waiting, with a box asking Run this MCP tool? close_ticket on your MCP server tickets would run with ticket='T-1', note='fixed the KeyError': it doesn't say it only reads, and run and skip buttons](images/agent-mcp-ask-dark.webp#only-dark){ width="984" height="680" loading=lazy }
+/// caption
+A tool that may change something asks **run** or **skip** first; one that only reads runs at once.
+///
+
+![The answer once run was pressed: the two tool calls, each with the MCP badge, found T-1 and closed T-1, folded above the answer, I closed T-1 (orders-etl fails at 02:00) [1], with your note that the KeyError is fixed [2]](images/agent-mcp-answer-light.webp#only-light){ width="984" height="680" loading=lazy }
+![The answer once run was pressed: the two tool calls, each with the MCP badge, found T-1 and closed T-1, folded above the answer, I closed T-1 (orders-etl fails at 02:00) [1], with your note that the KeyError is fixed [2]](images/agent-mcp-answer-dark.webp#only-dark){ width="984" height="680" loading=lazy }
+/// caption
+Once it ran: the calls, each with the 🔌 badge, and the answer citing them.
+///
+
+??? more "Where they're kept, and what they get"
+
+    The servers go in `~/.cache/aws-analyzer/agent/mcp.json`, in the shape VS Code, Claude Desktop, Cursor and Claude Code read, readable only by you. `AgentView(mcp=".vscode/mcp.json")` uses an editor's file as it is, `mcp=[...]` takes servers for this session only, and `mcp=False` turns MCP off. Write a key as `${env:NAME}`: it's read from the kernel when the server starts, and stays out of the file. A server run here gets PATH and HOME and the variables you give it, never the notebook's AWS credentials. What a tool returns goes to the model with anything that looks like a secret hidden; pictures are named, not sent. Signing in with OAuth isn't supported: give a remote server its key as a header.
+
 ## Safe and bounded { #safety }
 
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file, and with [`chats=True`](#chats), the saved chats). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
+- **It only reads.** (Your [MCP servers' tools](#mcp) are theirs, and ask first.) The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk (with [`memory=True`](#memory), its notes about the account go in one local SQLite file, and with [`chats=True`](#chats), the saved chats). Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -705,7 +765,7 @@ from aws_analyzer import AgentAnalyzer, AgentView
 
 core = AgentAnalyzer(
     provider="bedrock", model="sonnet",              # or model="openai:gpt-4.1", deployment=..., ...
-    model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens, over the list prices
+    model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens (then cached), over the list prices
     timezone="Asia/Kolkata",                         # for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account (or a file)
@@ -760,6 +820,8 @@ Its tools get the same budget, error handling and report as the built-in ones, a
 ## Cost { #cost }
 
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices, so each answer shows its estimated cost and the budget's `usd` limit applies. OpenAI's and Azure OpenAI's prices depend on the plan, the region and the deployment type, so there are none built in: pass `model_prices=` for them (or to override Bedrock's). Without a price the cost shows as unknown, never a guess.
+
+The rules and the tools' descriptions (about 12,000 tokens with the built-in tools, the same for every question) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
 
 On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005. A knowledge base search embeds its question, a fraction of a cent; the vector store bills by its own terms (OpenSearch Serverless by the hour, searched or not).
 
@@ -833,7 +895,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
-| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🗂 chats opens a saved chat again (with `chats=True`); 🧠 memory shows the agent's notes, each with a ✕ to forget it; ⚙ model picks the model |
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; 🗂 chats opens a saved chat again (with `chats=True`); 🧠 memory shows the agent's notes, each with a ✕ to forget it; 🔌 mcp adds and watches your MCP servers; ⚙ model picks the model |
 | `ask(question, new=False, focus=None)` | The answer first, then its findings (what it found, why it matters and what to do), then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. `focus=` asks about what an explorer window shows (the window, or its `x.focus`) |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
@@ -847,6 +909,11 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `rename_chat(title, *, chat=None)` | Gives the chat going on (or the one `chat=` names) a title of your own |
 | `delete_chat(chat)` | Removes a saved chat from this machine |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
+| `mcp()` | Your [MCP servers](#mcp): connected or why not, what each runs, its tools and which ask first, its calls, and what to fix |
+| `add_mcp(server, *, name="", env=None, headers=None, asks=None, replace=False)` | Adds an MCP server (a command, a URL or its JSON), connects it and saves it |
+| `remove_mcp(name)` | Removes a server; `enable_mcp(name)` / `disable_mcp(name)` switch one on or off |
+| `reconnect_mcp(name=None)` | Connects a server again (every one that's on, without a name) |
+| `import_mcp(path=None)` | The mcp.json files your editor keeps, and their servers; with a path, adds that file's |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
 | `setup(provider=None)` | How to set up the model, as cells to copy, checked against this notebook: every provider with whether it's ready here, then one's install line, settings cell (the key asked for with `getpass`) and start cell |
 | `use_model(provider=None, model=None, ...)` | Switches the model the agent answers with, and says where what it sends goes; the window's ⚙ model does it by clicking |
