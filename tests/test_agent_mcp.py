@@ -310,8 +310,9 @@ def test_asks_never_runs_without_asking_and_a_failing_tool_is_an_error():
     core = agent(model, mcp={"mcpServers": {"fake": {"command": sys.executable, "args": [str(FAKE_SERVER)],
                                                      "asks": "never"}}})
     answer = core.ask("Close T-3")
-    closed, broken = answer.calls
-    assert closed.summary == "closed T-3" and not closed.waiting
+    by_name = {call.name: call for call in answer.calls}
+    closed, broken = by_name["fake__close_ticket"], by_name["fake__broken"]
+    assert len(answer.calls) == 2 and closed.summary == "closed T-3" and not closed.waiting
     assert broken.result["error"] == "the tool said it failed" and broken.summary == "failed: Error executing tool " \
         "broken: the desk is down"
     core.mcp_kit.hub.close()
