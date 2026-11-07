@@ -4,8 +4,8 @@ why queries fail, and the tables and crawlers to fix.
 
 Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import AthenaView``.
 
-Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich HTML output. Both are preinstalled
-on SageMaker.
+Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich HTML output, ipywidgets for the
+explorer window. All are preinstalled on SageMaker.
 
 The package has two layers:
 
@@ -30,6 +30,7 @@ Quick start
     athena.table_info("sales.events")              # one table: partitions, size, its queries, SQL to copy
     athena.crawlers()                              # each crawler's schedule and last crawl
     athena.query_code("SELECT ...", database="sales")  # the Python to run a query yourself, and its most cost
+    athena.explore()                               # a window to click through it all (Jupyter, ipywidgets)
 
     core = athena.core                             # the same analyzer, raw data
     history = core.history(since="7d")
@@ -55,10 +56,12 @@ from .analysis import (
 )
 from .analyzer import AthenaAnalyzer
 from .view import AthenaView
+from .explorer.window import AthenaExplorer, explore
 
 __all__ = [
     "ATHENA_PRICES",
     "AthenaAnalyzer",
+    "AthenaExplorer",
     "AthenaView",
     "Catalog",
     "Column",
@@ -86,6 +89,7 @@ __all__ = [
     "detail_findings",
     "did_not_finish",
     "explain_failure",
+    "explore",
     "failure_kind",
     "filters_on",
     "group_failures",

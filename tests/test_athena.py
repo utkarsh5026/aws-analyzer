@@ -3,6 +3,10 @@ Athena and the Glue Data Catalog: the pure functions on their own, the analyzer 
 Glue answered by checked fakes, the tables' folders in moto's S3), and the View's reports in text.
 """
 
+import asyncio
+import html as html_lib
+import re
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -412,3 +416,129 @@ def test_a_client_error_inside_a_report_is_a_note(ui, capsys, fakes):
     fakes[1].denied.add("get_table")
     out = run(capsys, ui.table_info, "sales.orders")
     assert "AccessDeniedException" in out and "Traceback" not in out
+
+
+def explorer(core, what=None, *, mode="widgets", **kwargs):
+    return athenamod.AthenaExplorer(what, core=core, mode=mode, **kwargs)
+
+
+def plain(html):
+    return re.sub(r"<[^>]+>", "", html_lib.unescape(html or ""))
+
+
+def titles(blocks):
+    return [b.text for b in blocks if type(b).__name__ == "_Title"]
+
+
+def test_explorer_opens_on_the_overview_with_every_tab_filled(core):
+    x = explorer(core)
+    assert x._tab == "overview" and titles(x.shown["overview"]) == ["Athena in us-east-1"]
+    assert len(x.query_list.keys) == len(x.history.queries)
+    assert x.cost_list.keys[0] == x.cost_list.selected and titles(x.shown["costs"])[0].startswith("Query ")
+    assert x.failure_list.keys and titles(x.shown["failures"])[0].startswith("Query ")
+    assert set(x.table_list.keys) == {t.full_name for t in x.catalog.tables}
+    assert x.crawler_list.keys[0] != "orders-crawler"
+    stats = plain(x.stats.value)
+    assert "Failed8" in stats.replace(" ", "") and "Table warnings" in stats
+    assert x.focus.kind == "overview" and x.focus.chips() == ["Overview tab", "last 7 days"]
+
+
+def test_explorer_queries_search_chips_and_a_click(core):
+    x = explorer(core)
+    x._show_tab("queries")
+    page = x.query_list
+    page.find.value = "sales.order"
+    sqls = {q.id: q.sql for q in x.history.queries}
+    assert page.keys and all("sales.order" in sqls[key] for key in page.keys)
+    page.find.value = ""
+    failed = next(b for b in page.chips_box.children if b.description.startswith("Failed"))
+    failed.click()
+    assert page.chip == "failed" and len(page.keys) == 8
+    page.rows[0].button.click()
+    assert x.query_id == page.keys[0] and titles(x.shown["queries"]) == [f"Query {page.keys[0][:8]}"]
+    assert x.focus.kind == "query" and x.focus.value("query_id") == page.keys[0]
+    failed.click()
+    assert page.chip == ""
+
+
+def test_explorer_workgroup_and_time_range(core):
+    x = explorer(core)
+    every = len(x._queries_shown())
+    x.workgroup_pick.value = "analysts"
+    assert 0 < len(x._queries_shown()) < every and all(q.workgroup == "analysts" for q in x._queries_shown())
+    assert "workgroup analysts" in x.focus.chips()
+    x.since_pick.value = "24h"
+    assert x.history.since > datetime.now(timezone.utc) - timedelta(hours=25)
+    assert "last 24 hours" in x.focus.chips()
+
+
+def test_explorer_catalog_and_crawlers(core):
+    x = explorer(core)
+    x._show_tab("catalog")
+    page = x.table_list
+    fix = next(b for b in page.chips_box.children if b.description.startswith("To fix"))
+    fix.click()
+    assert "sales.clicks" in page.keys and "marketing.leads" not in page.keys
+    clicks = page.rows[page.keys.index("sales.clicks")]
+    clicks.button.click()
+    assert x.table_name == "sales.clicks" and x.tables["sales.clicks"].partitions == 0
+    assert "the catalog has no partitions" in plain(x.table_list.view.value)
+    assert x.focus.kind == "table" and x.focus.value("table") == "sales.clicks"
+    x._show_tab("crawlers")
+    events = x.crawler_list.rows[x.crawler_list.keys.index("events-crawler")]
+    events.button.click()
+    shown = plain(x.crawler_list.view.value)
+    assert "Crawler events-crawler" in shown and "not authorized to perform: s3:GetObject" in shown
+    assert x.focus.kind == "crawler"
+
+
+def test_explorer_commands_and_mistakes(core, fakes):
+    x = explorer(core, "sales.events")
+    assert x._tab == "catalog" and x.table_name == "sales.events"
+    first = x.history.queries[0].id
+    x.query(first)
+    assert x._tab == "queries" and x.query_list.selected == first
+    x.query("not an id")
+    assert "isn't a query ID" in plain(x.status.value)
+    x.table("sales.ordrs")
+    assert "Did you mean 'sales.orders'" in plain(x.table_list.view.value)
+    listed = len(fakes[0].called("list_work_groups"))
+    x.refresh()
+    assert len(fakes[0].called("list_work_groups")) > listed and x.history is not None
+    with pytest.raises(ValueError, match="tab is one of"):
+        explorer(core, tab="graphs")
+
+
+def test_explorer_window_text_says_where_the_window_shows_it():
+    from aws_analyzer.athena.explorer.frame import _window_text
+
+    assert _window_text("see query('a1b2')") == "see the Queries tab"
+    assert _window_text("table_info('sales.events') shows it") == "The Catalog tab shows it"
+    assert "query_code(" in _window_text("run query_code('SELECT 1')")
+
+
+def test_explorer_reads_in_the_background(core, fakes):
+    athena, _ = fakes
+    hold = athena.holds["list_query_executions"] = threading.Event()
+
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*list(x._tasks.values()))
+
+    async def main():
+        x = explorer(core)
+        assert {"history", "catalog"} <= set(x._tasks) and x.history is None
+        assert "Reading Athena" in plain(x.status.value)
+        hold.set()
+        await settle(x)
+        assert x.history is not None and x.catalog is not None and titles(x.shown["overview"])
+        assert x.cost_list.selected in x.details
+
+    asyncio.run(main())
+
+
+def test_explorer_without_widgets_shows_the_reports(core, capsys):
+    explorer(core, mode="text")
+    assert "Athena in us-east-1" in capsys.readouterr().out
+    view = AthenaView(core, mode="text", progress="off")
+    assert "needs Jupyter" in run(capsys, view.explore)

@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from ._kit.window import set_assistant
     from .agent import AgentAnalyzer, AgentView
     from .apigateway import APIGatewayAnalyzer, APIGatewayExplorer, APIGatewayView
-    from .athena import AthenaAnalyzer, AthenaView
+    from .athena import AthenaAnalyzer, AthenaExplorer, AthenaView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
@@ -103,6 +103,7 @@ __all__ = [
     "APIGatewayExplorer",
     "AthenaAnalyzer",
     "AthenaView",
+    "AthenaExplorer",
     "AgentAnalyzer",
     "AgentView",
     "set_timezone",
@@ -140,6 +141,7 @@ _EXPORTS = {  # name -> the module it comes from
     "APIGatewayExplorer": "apigateway",
     "AthenaAnalyzer": "athena",
     "AthenaView": "athena",
+    "AthenaExplorer": "athena",
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",

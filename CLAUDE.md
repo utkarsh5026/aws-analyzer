@@ -826,6 +826,18 @@ How the View layer works:
   reports are split into `_<command>_blocks` so the window draws them, and its `_error_text` says a failed REST request
   in words through the View's `_explain_http`. `.claude/skills/demo/os_explorer_shots.py` makes the guide's
   `os-explorer*` figures in a real JupyterLab on demo.py's OpenSearch.
+- `athena`'s explorer window, `AthenaExplorer` (`athena/explorer/`: `window.py` with `explore()`, composed of
+  `_QueriesTab` (`queries.py`, which also opens a query on the right of the Queries, Costs and Failures tabs, one
+  background job per tab, `query-<tab>`, so their first reads don't drop each other), `_CostsTab` and `_FailuresTab`
+  (`costs.py`), `_CatalogTab` and `_CrawlersTab` (`catalog.py`; a table's partitions and folder are read when it's
+  clicked) and `_FocusReads` (`focus.py`); every tab is a `widgets.py` `_ListPage`: a search box, `_Chip`s and pooled
+  `_Line`s on the left, the picked line's report on the right; `frame.py` its tabs, stylesheet (`.atx-app`, derived
+  from the OpenSearch explorer's, on `_terminal_theme`), faces and `_window_text`), is the eighth interactive UI,
+  built on the windows' kit like `OpenSearchExplorer`. It reads the workgroups and history (`history` job) and the
+  catalog (`catalog` job) side by side, the Overview drawn once both are in; the time-range menu reads the history
+  again, and the workgroup menu filters what's read (`_queries_shown`). `AthenaView.explore()` imports it lazily and
+  keeps it in `view.explorer`; `.claude/skills/demo/athena_explorer_shots.py` makes the guide's `athena-explorer*`
+  figures in a real JupyterLab on demo.py's Athena.
 - `sagemaker_env`'s jobs: `jobs.py`'s `_JobReads` (the analyzer's training jobs, their CloudWatch Logs streams in
   `/aws/sagemaker/TrainingJobs` read with `DescribeLogStreams` / `GetLogEvents`, endpoints with their daily
   `AWS/SageMaker` Invocations and 5xx errors, pipelines and one run's steps merged with its definition) and

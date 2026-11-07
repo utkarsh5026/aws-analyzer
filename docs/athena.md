@@ -89,6 +89,14 @@ Four questions people bring to Athena, and the one line that answers each. None 
 
     [The Data Catalog](#catalog)
 
+-   **Can I just click through it?**
+
+    ```python
+    athena.explore()
+    ```
+
+    [Explore by clicking](#explorer)
+
 -   **What would this new query cost?**
 
     ```python
@@ -189,6 +197,33 @@ athena.query_code("SELECT * FROM orders WHERE total > 100", database="sales")
 
 The most it could read is the size of its tables' folders; partition filters, and naming only the columns you need on a Parquet or ORC table, read less.
 
+## Explore by clicking { #explorer }
+
+`explore()` opens a window in the notebook to click through it all: the Overview, every query, the costliest ones, the failures, the tables and the crawlers.
+{ .gist }
+
+```python
+athena.explore()                         # or explore(tab="costs", since="30d"), explore("sales.events")
+```
+
+![The Athena explorer on its Costs tab: the cards over the tabs say 52 queries cost $25.16 and 8 failed; on the left the five kinds of query, the dashboard's SELECT * on sales.events first at $22.56 and 90% of the bill; on the right its newest run, 220 GB scanned for $1.07, with a note that it read every column](images/athena-explorer-costs-light.webp#only-light){ width="984" height="864" loading=lazy }
+![The Athena explorer on its Costs tab: the cards over the tabs say 52 queries cost $25.16 and 8 failed; on the left the five kinds of query, the dashboard's SELECT * on sales.events first at $22.56 and 90% of the bill; on the right its newest run, 220 GB scanned for $1.07, with a note that it read every column](images/athena-explorer-costs-dark.webp#only-dark){ width="984" height="864" loading=lazy }
+/// caption
+`athena.explore()`, the Costs tab: a click on a kind of query shows its newest run.
+///
+
+The menus at the top pick the time range (24 hours, 7 days, 30 days) and one workgroup, and the cards under them follow. The **Queries** tab lists every query with chips for the failed, costly, cancelled and running ones; **Costs** adds up each query's runs; **Failures** groups them by kind with the fix; a click on any shows the query's SQL, numbers and saved rows on the right.
+
+![The Athena explorer on its Catalog tab with the To fix chip picked: five tables with a warning, sales.clicks open on the right, partitioned by dt with 0 partitions in the catalog, a warning that its queries return no rows and the MSCK REPAIR TABLE statement that loads them](images/athena-explorer-catalog-light.webp#only-light){ width="984" height="864" loading=lazy }
+![The Athena explorer on its Catalog tab with the To fix chip picked: five tables with a warning, sales.clicks open on the right, partitioned by dt with 0 partitions in the catalog, a warning that its queries return no rows and the MSCK REPAIR TABLE statement that loads them](images/athena-explorer-catalog-dark.webp#only-dark){ width="984" height="864" loading=lazy }
+/// caption
+The Catalog tab, To fix: `sales.clicks` has files in S3 but no partitions in the catalog.
+///
+
+??? more "How the window reads"
+
+    It reads the workgroups and queries, and the catalog with each table's folder checked, side by side in the background, so the window answers at once. A table's partitions and size are read when you click it, and a query's statistics and saved rows when you open it, once each. It only reads, like the reports: `x.query("a1b2...")` and `x.table("sales.events")` open one from code, and `x.history`, `x.catalog` hold what it read.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -285,6 +320,7 @@ The last statement checks the tables' folders and reads past queries' saved resu
 | `table_info(table, since="7d")` | One table: partitions, size, its queries, and SQL to copy |
 | `crawlers()` | Every crawler's schedule and last crawl |
 | `query_code(sql, database=None, workgroup=None)` | The Python to run a query yourself, and the most it could cost |
+| `explore(what=None, tab=None, since="7d", workgroup=None, height=None)` | The explorer window: the Overview, every query, the costliest, the failures, the tables and the crawlers, by clicking |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

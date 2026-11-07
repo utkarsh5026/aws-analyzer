@@ -9,7 +9,8 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
-from .._kit.errors import _why
+from .._kit.deps import _require
+from .._kit.errors import _Hint, _why
 from .._kit.fmt import _count, _duration, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money, human_size
 from .._kit.render import _call
 from .._kit.view import _BaseView, _friendly_errors
@@ -143,6 +144,7 @@ class AthenaView(_BaseView):
         "🧾 Past queries": ("queries", "expensive", "failures", "query"),
         "📚 Data Catalog": ("catalog", "table_info", "crawlers"),
         "▶️ Run a query yourself": ("query_code",),
+        "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
     _START = (
@@ -422,7 +424,9 @@ class AthenaView(_BaseView):
             *self._history_note(history),
         ]
         if not groups:
-            blocks.append(_Note(f"None of the {_plural(len(history.queries), 'query')} in that time failed.", "ok"))
+            count = len(history.queries)
+            blocks.append(_Note(f"None of the {count:,} {'query' if count == 1 else 'queries'} in that time failed.",
+                                "ok"))
             self._show(blocks)
             return
         rows = [[g.kind, _count(g.count), human_age(g.last), f"{_capital(g.meaning)}. Fix: {g.fix}.",
@@ -727,3 +731,22 @@ class AthenaView(_BaseView):
                                 "naming only the columns you need on a Parquet or ORC table, read less."))
         blocks.append(_Next([("queries(since='1h')", "the query once it ran: what it scanned and cost")]))
         self._show(blocks)
+
+    @_friendly_errors
+    def explore(self, what: str | None = None, *, tab: str | None = None, since: str = "7d",
+                workgroup: str | None = None, height: int | str | None = None) -> None:
+        """
+        The explorer window: what queries cost and why they fail, every query (click one for its SQL and the rows it
+        saved), the same query's runs added up, the failures by kind, every Glue table with what's wrong with it, and
+        the crawlers. Needs Jupyter and ipywidgets; view.explorer is the window.
+        """
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, overview() shows what "
+                "queries cost and what to fix, expensive() the costliest queries, and catalog() the tables."
+            )
+        _require("ipywidgets", "The explorer window")
+        from .explorer.window import AthenaExplorer
+
+        self.explorer = AthenaExplorer(what, tab=tab, since=since, workgroup=workgroup, view=self, height=height,
+                                       mode="widgets")

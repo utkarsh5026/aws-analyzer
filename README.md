@@ -97,6 +97,7 @@ report still renders.
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway**             | • Every REST, HTTP and WebSocket API's requests, 4xx and 5xx, latency and cost<br>• Routes anyone can call, and routes that run out of time (the 29 s limit)<br>• Which calls fail and why, from the stage's access log<br>• For a failed call, the log lines of the Lambda run behind it<br>• Stages without throttling or an access log, with the command that fixes each | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) |
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **API Gateway explorer**             | • Every API and how it's doing, failing ones first: click one to open it<br>• Its routes as a tree: where a request goes, the step that fails marked<br>• Its calls one by one: where each call's time went, and the Lambda run behind it<br>• How long calls take, route by route, and each stage's settings | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#explorer) |
 | <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Athena**                  | • Every past query's scan and cost, the same query's runs added up<br>• Why queries failed, in plain words, with the fix<br>• Tables whose S3 folder is empty or gone, or that every query reads in full<br>• Crawlers that failed or stopped running<br>• The Python to run a new query yourself, and the most it could cost | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html) |
+| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Athena explorer**                | • The queries, what they cost and why they fail, with a time range and workgroup to pick<br>• Click a query for its SQL, numbers and saved rows<br>• Every Glue table, with chips for what's wrong: empty or gone, no partitions loaded, read in full<br>• The crawlers, failed or stopped ones first | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -2387,6 +2388,19 @@ athena.table_info("sales.events")            # one table: partitions, size, its 
 Tables are named `"database.table"` (`"sales/events"`, `'"sales"."events"'` and `"AwsDataCatalog.sales.events"` work
 too), and times as `"7d"`, `"24h"` or `"2026-11-01"`. Athena keeps 45 days of query history.
 
+### Explore queries and tables by clicking
+
+`athena.explore()` opens a window (Jupyter and ipywidgets) with an **Overview**, every **query** (chips for the
+failed, costly, cancelled and running ones, and a search box), the **costliest** queries with each one's runs added
+up, the **failures** by kind with the fix, every Glue **table** with chips for what's wrong with it, and the
+**crawlers**. A click on a query shows its SQL, numbers and saved rows; on a table, its partitions, size, the
+queries that read it and the SQL to copy. Menus at the top pick the time range and a workgroup. It reads in the
+background, so the window answers while AWS is read, and it only reads.
+
+```python
+athena.explore(tab="costs", since="30d")    # or explore("sales.events"), explore("a1b2c3d4-...")
+```
+
 ### Commands (`AthenaView`)
 
 Grouped the way `athena.help()` lists them.
@@ -2419,6 +2433,12 @@ Grouped the way `athena.help()` lists them.
 | Command                                          | Shows                                                                                                                                                                                                 |
 | :----------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `query_code(sql, database=None, workgroup=None)` | **The Python to run a query** (boto3, or a DataFrame with awswrangler), and what it could cost: the tables it names, **the most it could read** (their folders' size), and whether it filters on their partitions |
+
+#### Explore by clicking
+
+| Command                                                                  | Shows                                                                                                                                                         |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `explore(what=None, tab=None, since="7d", workgroup=None, height=None)` | The [explorer window](#explore-queries-and-tables-by-clicking): the Overview, every query, the costliest, the failures, every table and the crawlers. `view.explorer` is the window |
 
 ### Reference
 
