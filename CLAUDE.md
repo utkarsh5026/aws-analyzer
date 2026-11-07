@@ -223,7 +223,12 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
   itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
   answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
-  number, so it never replaces a file), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
+  number, so it never replaces a file), the agent's MCP servers (`AgentAnalyzer(mcp=True)`: one mcp.json,
+  `~/.cache/aws-analyzer/agent/mcp.json`, `AWS_ANALYZER_MCP`'s path or the file `mcp=` names, in the `mcpServers` /
+  VS Code `servers` shape; `mcp_servers/files.py`'s `write_servers` keeps its other keys, writes `<name>.part` then
+  renames, mode 0600; only `add_mcp()`, `remove_mcp()`, `update_mcp()`, `import_mcp()` and the 🔌 mcp panel change
+  it, and nothing deletes the file; `tests/conftest.py` sets `AWS_ANALYZER_MCP=off`), and `sagemaker_env`'s
+  `new_env()`, which makes a Python environment and its Jupyter kernel
   (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
   kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
@@ -247,7 +252,11 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
   hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
   Describe, Head, Filter) and `SEARCHES` (Bedrock's `Retrieve`, by name) with `ReadOnlyError` before its request is
-  built; the S3 tools read names, sizes, dates and
+  built. The one exception is the tools of the MCP servers the user adds (`mcp_servers/`, `toolkits/mcp_tools.py`):
+  they're the servers', not AWS calls through a toolkit's analyzer, so the guard can't see them; a tool that doesn't
+  say it only reads (MCP's `readOnlyHint`) pauses for Run or Skip first (`asks_first`, a `BigRead` with no
+  `smaller`), a stdio server gets PATH and HOME and its own env, never the kernel's AWS credentials, and results go
+  through `hide_secrets`. The S3 tools read names, sizes, dates and
   headers, never an object's body; the model is reached through LangChain, not boto3, so
   `rules.py` sees none of it. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
@@ -931,6 +940,22 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
+- **MCP servers** (`mcp_servers/`, with `toolkits/mcp_tools.py` and `window/mcp_panel.py`): `mcp=True` (the default)
+  reads the agent's mcp.json (`mcp_path`), a path reads that file (VS Code's, Claude Desktop's ... as they are), a dict
+  or list gives servers for the session, `False` turns it off. `config.py` (pure) reads `McpServer`s forgivingly
+  (`parse_server_text`: a command line with leading `NAME=value`s, a URL, an mcp.json or one entry; `guess_name` from
+  the package or host) and writes them back (`server_entry`, with this agent's `disabled`, `asks`, `disabledTools`).
+  `client.py`'s `McpHub` keeps one connection per server as a task on its own asyncio loop on its own thread (the MCP
+  SDK's transports must open and close in one task), so tools on LangGraph's threads and the window on the kernel's
+  loop call it blocking (`connect`, `call`, `disconnect`); a FAILED server stays failed until `connect(again=True)`, so
+  one that's down isn't waited for at every question; the `mcp` package loads through `_mcp()` (`_require`).
+  `McpToolkit` (`"mcp"`, added after the others, before runbooks) makes a function per usable tool named
+  `<server>__<tool>`, with a `__signature__` from its schema and `mcp_schema`, which `harness._langchain_tools` hands
+  LangChain as a `StructuredTool` with the JSON schema itself; its `reads` are `MCP_READ` (`mcp:CallTool`), drawn as the
+  🔌 badge and listed by `tools()` as "MCP server x (not an AWS read)". Adding, removing or switching servers calls
+  `AgentAnalyzer._tools_changed()`, which rebuilds the tools and graph on the same checkpointer. `summarize_mcp_result`
+  and `tool_signature` are pure; `findings.py`'s `mcp_findings` feeds `AgentView.mcp()` and the panel.
+  `tests/test_agent_mcp.py` runs `tests/fake_mcp_server.py` (a FastMCP ticket desk over stdio) for real.
 - **Runbooks** (`runbooks/`, with `toolkits/runbook_tools.py`): step-by-step guides, each a folder with a `SKILL.md`
   (Agent Skills front matter: `name`, `description`, `metadata.toolkits`), the built-in ones beside
   `runbooks/__init__.py` (shipped in the wheel). `runbook_sources(runbooks=)` is the built-in folder, then the user's;
@@ -1437,7 +1462,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
-  plays a scripted model over demo.py's Lambda functions. Every window also has an animated tour like
+  plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
   `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model and Python 3.11+), at the top of its guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through

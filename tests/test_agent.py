@@ -659,7 +659,7 @@ class Notes(Toolkit):
 def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     notes = Notes()
     core = AgentAnalyzer(region=REGION, toolkits=["lambda", notes])
-    assert [t.name for t in core.toolkits] == ["lambda", "notes", "runbooks"] and core.toolkit("notes") is notes
+    assert [t.name for t in core.toolkits] == ["lambda", "notes", "mcp", "runbooks"] and core.toolkit("notes") is notes
     assert notes.agent is core and isinstance(core.toolkit("lambda"), LambdaToolkit)
     assert [t.__name__ for t in core.tools()][-3:] == ["read_note", "list_notes", "read_runbook"]
     assert core.reads["read_note"] == ("notes:GetNote",) and "function_health" in core.reads
@@ -712,7 +712,7 @@ def test_toolkits_says_what_it_takes():
         AgentAnalyzer(region=REGION, toolkits=[5])
     with pytest.raises(KeyError, match="no 's3' toolkit; it has lambda"):
         AgentAnalyzer(region=REGION, toolkits=["lambda"]).toolkit("s3")
-    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb", "runbooks"]  # the default
+    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb", "mcp", "runbooks"]  # the default
     notes = Notes()
     AgentAnalyzer(region=REGION, toolkits=[notes])
     with pytest.raises(ValueError, match="already belongs to another AgentAnalyzer"):
@@ -2972,7 +2972,7 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
 
     workspace = Folder(tmp_path)
     core = AgentAnalyzer(region=REGION, python=workspace)
-    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python", "runbooks"] and core.workspace is workspace
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python", "mcp", "runbooks"] and core.workspace is workspace
     assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
     names = [fn.__name__ for fn in core.tools()]
     assert names[-4:] == ["run_python", "workspace_files", "show_chart", "read_runbook"] and "save_function_code" in names
@@ -2983,9 +2983,9 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
     assert "save_function_code" not in plain.instructions()
 
     alone = AgentAnalyzer(region=REGION, toolkits=["python"], python=Folder(tmp_path))
-    assert [t.name for t in alone.toolkits] == ["python", "runbooks"] and alone.region == REGION
+    assert [t.name for t in alone.toolkits] == ["python", "mcp", "runbooks"] and alone.region == REGION
     assert [t.name for t in AgentAnalyzer(region=REGION, toolkits="lambda", python=workspace).toolkits] == [
-        "lambda", "python", "runbooks"]
+        "lambda", "python", "mcp", "runbooks"]
     with pytest.raises(ValueError, match="needs a workspace"):
         AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
     with pytest.raises(TypeError, match="python= takes 'local'"):
@@ -4308,7 +4308,7 @@ def test_the_agent_is_offered_the_runbooks_its_toolkits_can_follow(seeded, tmp_p
     assert "\nRunbooks\n- Runbooks are step-by-step guides" in text
     assert "  - etl-retry: Retry an ETL run." in text and "  - lambda-failing: A Lambda function is failing" in text
     assert "s3-trigger-not-firing" not in text and "kb-answer-wrong" not in text
-    assert [t.name for t in core.toolkits] == ["lambda", "runbooks"] and "read_runbook" in {f.__name__ for f in core.tools()}
+    assert [t.name for t in core.toolkits] == ["lambda", "mcp", "runbooks"] and "read_runbook" in {f.__name__ for f in core.tools()}
     read = tool(core, "read_runbook")
     guide = read("Etl Retry")
     assert guide["runbook"] == "etl-retry" and guide["text"] == "1. Do the thing." and guide["files"] == ["commands.md"]

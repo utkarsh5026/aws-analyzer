@@ -49,6 +49,8 @@ Quick start
     agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
     agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
     agent.save_charts()                                  # those charts as files, in agent-charts/
+    agent.add_mcp("npx -y @modelcontextprotocol/server-memory")   # an MCP server's tools, beside the AWS ones
+    agent.mcp()                                          # your MCP servers: connected or why not, their tools
     agent.go()                                           # it stopped to ask before a big read: read it all
     agent.smaller()                                      # ... or only the smaller part it named
     agent.skip()                                         # ... or answer without it
@@ -105,9 +107,14 @@ One concern per module, so a new service's tools or a new agent capability goes 
                                   Python toolkit's) puts them in the answer and save_charts() writes them to files.
                      sandboxes/   The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
                                   (AgentAnalyzer(python="local")).
+    mcp_servers/     The MCP servers the agent can use (mcp=): McpServer read from a command, a URL or an mcp.json
+                     (config.py), the mcp.json they're kept in and the ones editors keep (files.py), McpHub's
+                     connections on a loop of their own (client.py) and what's worth knowing (findings.py). Their tools
+                     are toolkits/mcp_tools.py's McpToolkit; they're the servers', outside the read-only guard, so one
+                     that doesn't say it only reads asks the user first.
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
-                     (chat.py), its 🗂 chats panel (chats_panel.py), ⚙ model panel (model_panel.py) and 🧠 memory panel
-                     (memory_panel.py).
+                     (chat.py), its 🗂 chats panel (chats_panel.py), ⚙ model panel (model_panel.py), 🧠 memory panel
+                     (memory_panel.py) and 🔌 mcp panel (mcp_panel.py).
 """
 
 from __future__ import annotations
@@ -213,6 +220,8 @@ from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image
 from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
 from .toolkits.runbook_tools import RunbookToolkit, summarize_runbook
+from .toolkits.mcp_tools import McpToolkit, summarize_mcp_result
+from .mcp_servers import McpHub, McpServer, ServerState, parse_server_text
 from .runbooks import Runbook, RunbookProblem, RunbookShelf, load_runbooks, parse_front_matter, runbook_findings
 from .toolkits.s3_listing import count_read, listing_read, save_read
 from .view import AgentView
@@ -254,6 +263,12 @@ __all__ = [
     "TriggerLink",
     "PythonToolkit",
     "RunbookToolkit",
+    "McpHub",
+    "McpServer",
+    "McpToolkit",
+    "ServerState",
+    "parse_server_text",
+    "summarize_mcp_result",
     "Runbook",
     "RunbookProblem",
     "RunbookShelf",
