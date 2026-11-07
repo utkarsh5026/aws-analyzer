@@ -171,17 +171,36 @@ class _MapBuilder:
         return node
 
 
+def _refused(hop: Hop, allowed: bool | None, locked: bool) -> Hop:
+    """
+    Marks a hop that sends to where the map starts when what it sends can't get in: the receiver's policy, or its
+    key, keeps it out.
+    """
+    if allowed is False:
+        hop.tone, hop.problem = "bad", "kept out by its policy"
+    elif locked:
+        hop.tone, hop.problem = "bad", "kept out by its key (alias/aws/sqs)"
+    return hop
+
+
 def _upstream(overview: Overview, arn: str) -> list[Hop]:
     """
-    What sends messages to `arn`: topics subscribing it, rules targeting it, and queues whose dead-letter queue it is.
+    What sends messages to `arn`: topics subscribing it, rules targeting it, and queues whose dead-letter queue it is,
+    each marked when the receiver keeps it out.
     """
+    queues = {q.arn: q for q in overview.queues}
+    locked = arn in queues and blocks_services(queues[arn].kms_key)
     hops = []
     for topic in overview.topics:
-        if any(s.endpoint == arn for s in topic.subscriptions):
-            hops.append(Hop(0, "SNS topic", topic.name, topic.arn, via="subscribes it", upstream=True))
+        for subscription in (s for s in topic.subscriptions if s.endpoint == arn):
+            allowed = subscriber_allowed(subscription, queues=queues, functions=overview.functions)
+            hop = Hop(0, "SNS topic", topic.name, topic.arn, via="subscribes it", upstream=True)
+            hops.append(_refused(hop, allowed, locked))
     for rule in overview.rules:
-        if any(t.arn == arn for t in rule.targets):
-            hops.append(Hop(0, "EventBridge rule", rule.label, rule.arn, via="targets it", upstream=True))
+        for target in (t for t in rule.targets if t.arn == arn):
+            allowed = target_allowed(rule, target, queues=queues, functions=overview.functions)
+            hop = Hop(0, "EventBridge rule", rule.label, rule.arn, via="targets it", upstream=True)
+            hops.append(_refused(hop, allowed, locked))
     for queue in overview.queues:
         if queue.redrive and queue.redrive.dlq_arn == arn:
             hops.append(Hop(0, "SQS queue", queue.name, queue.arn, via="sends its failures here", upstream=True))

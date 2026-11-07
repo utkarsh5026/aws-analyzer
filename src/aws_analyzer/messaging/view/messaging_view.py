@@ -469,7 +469,7 @@ class MessagingView(_BaseView):
         upstream = [h for h in found.hops if h.upstream]
         downstream = [h for h in found.hops if not h.upstream]
         findings = self._follow_findings(found)
-        problems = [h for h in downstream if h.problem]
+        problems = [h for h in found.hops if h.problem]
         cards: list[tuple[str, ...]] = [
             ("Hops", f"{len(downstream) - 1:,}"),
             ("Sends here", f"{len(upstream):,}"),
@@ -485,8 +485,9 @@ class MessagingView(_BaseView):
             *self._overview_notes(found.overview, costs=False),
         ]
         if upstream:
-            blocks.append(_Table(["Sends here", "Kind", "How"], [[h.name, h.kind, h.via] for h in upstream],
-                                 title="What sends to it", sortable=False))
+            sender_rows = [[h.name, h.kind, h.via, _hop_problem(h)] for h in upstream]
+            blocks.append(_Table(["Sends here", "Kind", "How", "Problem"], sender_rows, title="What sends to it",
+                                 sortable=False))
         blocks.append(_Table(["Hop", "Kind", "How it gets there", "Numbers", "Problem"], rows, title="The way down",
                              tree=True, max_rows=0, prose_cols=(2,)))
         blocks.append(_Next(self._follow_next(found)))

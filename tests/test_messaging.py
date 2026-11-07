@@ -314,8 +314,10 @@ def test_dead_letters_say_what_each_catches(core):
 def test_follow_starts_at_a_queue_with_what_sends_to_it(core):
     found = core.follow("orders")
     assert found.kind == "queue" and found.name == "orders"
-    upstream = [h.name for h in found.hops if h.upstream]
-    assert upstream == ["s3-upload"]
+    upstream = [(h.name, h.problem) for h in found.hops if h.upstream]
+    assert upstream == [("s3-upload", "")]
+    audit = core.follow("audit-events")
+    assert [h.problem for h in audit.hops if h.upstream] == ["kept out by its policy"] * 2
     assert [h.name for h in found.hops if not h.upstream][:3] == ["orders", "orders-etl", "orders-dlq"]
     assert core.follow("shop").kind == "bus" and core.follow("shop/order-placed").kind == "rule"
 
@@ -382,6 +384,8 @@ def test_dead_letters_and_follow(ui, capsys):
     out = run(capsys, ui.follow, "orders-events")
     assert "├─ shipping-updates" in out and "its policy keeps the topic out" in out
     assert "topic_info('orders-events')" in out
+    out = run(capsys, ui.follow, "partner-webhooks")
+    assert "-- What sends to it --" in out and "kept out by its policy" in out and "Problems: 1 (!)" in out
 
 
 def test_a_missing_queue_is_a_note_not_a_traceback(ui, capsys):
@@ -466,6 +470,7 @@ def test_explorer_map_follows_a_click(core):
     assert blocked.problem == "its policy keeps the topic out"
     next(row for row in x._hop_rows if row.key.endswith(":partner-webhooks")).button.click()
     assert x._tab == "map" and x.found.name == "partner-webhooks" and x.hops_shown[0].upstream
+    assert x.hops_shown[0].problem == "kept out by its policy" and "orders-events" in plain(x.map_view.value)
     x.open("orders-events", tab="map")
     next(row for row in x._hop_rows if "fraud-check" in row.key).button.click()
     assert "LambdaView().explore('fraud-check')" in plain(x.status.value)
