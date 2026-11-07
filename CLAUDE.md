@@ -12,7 +12,9 @@ OpenSearch vector indexes in Service domains and Serverless collections (and `ex
 region or all of them, and `explore()`, a window to click through them and read their logs run by run), `stepfunctions/`
 (a package too) for Step Functions state machines and their executions, a companion of `lambda_functions` (see below),
 and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
-stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call). The code they
+stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call), and `athena/` (a
+package too) for Athena's past queries, what they cost and why they failed, and the Glue Data Catalog's tables and
+crawlers (see "Athena" under "Hard constraints"). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -262,6 +264,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `access_log_command` are the format and the `aws apigateway update-stage` command findings show. IAM authorizes
   every read as `apigateway:GET`, so `IAM_ACTION` in `rules.py` maps each operation to it. Nothing sends a request to
   an API: `routes()` shows `curl_command` / `curl_lines` (`analysis/try_it.py`) to copy.
+- `athena/` reads Athena (workgroups; past queries: `ListQueryExecutions` per workgroup, IDs newest first, stopping
+  at the first page older than `since`, then `BatchGetQueryExecution`; a query's saved results with `GetQueryResults`),
+  the Glue Data Catalog (databases, tables, partitions, crawlers and their metrics) and S3 (`check_location`: one
+  `ListObjectsV2` of `MaxKeys=10` per table, folder markers ignored; `list_location` for one table's size). It never
+  starts a query, since Athena writes every query's results to S3: `query_code()` shows the boto3 / awswrangler code
+  (`analysis/sql.py`'s `run_code`, `pandas_code`) and findings show SQL (`ctas_sql`, `repair_sql`) and `aws athena` /
+  `aws glue` commands. Cost is `analysis/cost.py`'s `billed_bytes` (rounded up to the MB, `minimum_mb`, nothing for
+  FAILED, DDL / UTILITY or a reused result); `query_shapes` groups runs by `normalize_sql`; `analysis/failures.py`
+  sorts messages into kinds (`KNOWN_FAILURES`: meaning, fix); the tables a query reads come from its SQL
+  (`tables_in_sql`), so a query through a view counts for the view.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
   installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
@@ -831,12 +843,13 @@ with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, an
 (x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage, and
 `STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds,
 `APIGATEWAY_PRICES` (`apigateway/prices.py`), REST, HTTP and WebSocket requests, connection minutes and the hourly
-price of each REST cache size;
+price of each REST cache size, `ATHENA_PRICES` (`athena/prices.py`), per TB scanned, the 10 MB minimum and S3 LIST
+requests;
 us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
-AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonApiGateway|AmazonCloudWatch>/current/us-east-1/index.json`;
+AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonApiGateway|AmazonAthena|AmazonCloudWatch>/current/us-east-1/index.json`;
 `index.csv` is easier to grep), which is what AWS bills from. `lambda_functions/helpers.py`'s `RUNTIMES` holds each managed
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
@@ -1321,6 +1334,11 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   behind the newest 504 and 502) and answers GetMetricData with `FakeCloudWatch` over `traffic()` (`holds` and
   `denied` as in the other fakes). demo.py's `seed_apigateway()` uses the same, and
   `.claude/skills/demo/apigw_explorer_shots.py` makes the guide's `apigw-explorer*` figures in a real JupyterLab.
+- Athena: moto's Athena keeps no query history, failures or statistics, so `tests/test_athena.py` uses
+  `tests/fake_athena.py`: `FakeAthena` and `FakeGlue` (fake_stepfunctions' `_Checked`: every request and answer
+  checked against the service model, `denied` to refuse an operation) over acme's workgroups, a week of queries whose
+  times don't depend on the hour, tables in each state the findings know and four crawlers, and `seed_buckets` for the
+  tables' folders in moto's S3. demo.py's `seed_athena()` uses the same.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -1381,7 +1399,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or

@@ -60,6 +60,12 @@ Demo data (moto, us-east-1, everything synthetic):
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
             and support-agent-actions (a Bedrock agent's action group). eu-west-1: gdpr-export (SQS). The run
             c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
+  athena    tests/fake_athena.py's acme: fake Athena and Glue clients (moto's Athena keeps no history) checked against
+            the service model, and the tables' folders in moto's S3. Workgroups primary (a dashboard's SELECT * on
+            sales.events, a CSV table with no partitions, three times a day: most of the bill), analysts (a 100 GB scan
+            limit, a GROUP BY over sales.orders without a dt filter, and the failed queries) and legacy-etl (engine
+            version 2, no result location). sales.clicks has files but no partitions in the catalog, sales.returns an
+            empty folder, marketing.campaigns a bucket that's gone; crawlers that failed, stopped and were paused.
   agent     the lambda_functions data, and a scripted stand-in for the model (the agent's packages must be installed):
             whatever the question, it calls function_health for the last 24 hours and function_errors for the two
             functions that failed most, and answers from what they returned. --live asks your Azure OpenAI deployment.
@@ -2313,10 +2319,24 @@ def seed_apigateway() -> dict:
     return {"clients": {"cloudwatch": cloudwatch(ids)}, "lambda_core": LambdaAnalyzer(region=REGION)}
 
 
+def seed_athena() -> dict:
+    """
+    acme's Athena and Glue Data Catalog from tests/fake_athena.py: fake Athena and Glue clients (moto's Athena keeps
+    no history) and the tables' folders in moto's S3.
+    """
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_athena import scene, seed_buckets
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    seed_buckets(now)
+    athena, glue = scene(now)
+    return {"clients": {"athena": athena, "glue": glue}}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
            "lambda_functions": seed_lambda_functions, "stepfunctions": seed_stepfunctions,
-           "apigateway": seed_apigateway, "agent": seed_agent}
+           "apigateway": seed_apigateway, "athena": seed_athena, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run

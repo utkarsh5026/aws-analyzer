@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🏛️ **Athena: what your SQL over S3 costs, and why it fails** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - `AthenaView().overview()` shows what the week's queries cost and which failed; `expensive()` adds up a query's repeated runs.
+  - `failures()` explains each kind of failure with its fix; `catalog()` and `crawlers()` find empty or missing table folders and stopped crawlers.
+  - It never runs a query: `query_code(sql)` shows the Python to run it yourself, and the most it could cost.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added
