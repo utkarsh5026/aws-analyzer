@@ -1216,6 +1216,33 @@ def seed_sagemaker_env() -> dict:
                 "SpaceSharingSettings": {"SharingType": "Private"},
                 "Url": f"https://{DomainId}.studio.{REGION}.sagemaker.aws/jupyterlab/default"}
 
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_sagemaker import FakeLogs, FakeSageMaker, scene
+
+    finished_jobs, _, pipeline_runs = scene(now)
+    finished_jobs = [job for job in finished_jobs if job.status != "InProgress"]
+    jobs_scene = FakeSageMaker(finished_jobs, [], pipeline_runs, now)
+    running_job = {"TrainingJobName": "xgb-tuning-7", "TrainingJobArn": arn("training-job", "xgb-tuning-7"),
+                   "CreationTime": now - timedelta(hours=3, minutes=10), "TrainingJobStatus": "InProgress"}
+
+    def list_training_jobs(StatusEquals: str | None = None, CreationTimeAfter=None, NameContains: str = "",
+                           **params) -> dict:
+        """
+        running() asks for the jobs in progress: xgb-tuning-7. training_jobs() asks for the rest too: the finished
+        jobs of tests/fake_sagemaker.py's scene, newest first.
+        """
+        shown = [running_job] if StatusEquals in (None, "InProgress") and NameContains in running_job[
+            "TrainingJobName"] else []
+        if StatusEquals != "InProgress":
+            shown += jobs_scene._list_training_jobs(StatusEquals=StatusEquals, CreationTimeAfter=CreationTimeAfter,
+                                                    NameContains=NameContains)["TrainingJobSummaries"]
+        return {"TrainingJobSummaries": sorted(shown, key=lambda j: j["CreationTime"], reverse=True)}
+
+    def describe_training_job(TrainingJobName: str) -> dict:
+        if TrainingJobName == running_job["TrainingJobName"]:
+            return training_job(TrainingJobName)
+        return jobs_scene._describe_training_job(TrainingJobName)
+
     def training_job(TrainingJobName: str) -> dict:
         return {"TrainingJobName": TrainingJobName, "TrainingJobArn": arn("training-job", TrainingJobName),
                 "TrainingJobStatus": "InProgress", "SecondaryStatus": "Training",
@@ -1249,20 +1276,36 @@ def seed_sagemaker_env() -> dict:
         "list_endpoints": lambda **_: {"Endpoints": [endpoint_summary(n) for n in endpoints]},
         "describe_endpoint": describe_endpoint,
         "describe_endpoint_config": describe_endpoint_config,
-        "list_training_jobs": lambda **_: {"TrainingJobSummaries": [
-            {"TrainingJobName": "xgb-tuning-7", "TrainingJobArn": arn("training-job", "xgb-tuning-7"),
-             "CreationTime": now - timedelta(hours=3, minutes=10), "TrainingJobStatus": "InProgress"}]},
-        "describe_training_job": training_job,
+        "list_training_jobs": list_training_jobs,
+        "describe_training_job": describe_training_job,
         "list_processing_jobs": lambda **_: {"ProcessingJobSummaries": []},
+        "list_pipelines": lambda **params: jobs_scene._list_pipelines(**params),
+        "list_pipeline_executions": lambda **params: jobs_scene._list_pipeline_executions(**params),
+        "describe_pipeline_execution": lambda **params: jobs_scene._describe_pipeline_execution(**params),
+        "describe_pipeline_definition_for_execution":
+            lambda **params: jobs_scene._describe_pipeline_definition_for_execution(**params),
+        "list_pipeline_execution_steps": lambda **params: jobs_scene._list_pipeline_execution_steps(**params),
     })
 
     def metric_data(MetricDataQueries: list, StartTime, EndTime, **_) -> dict:
+        """
+        Each endpoint's requests: one sum over the window for running(), a value per day since it was made for
+        endpoints() (Period of a day), and a few 5xx errors on churn-v2.
+        """
         results = []
         for q in MetricDataQueries:
-            dims = {d["Name"]: d["Value"] for d in q["MetricStat"]["Metric"]["Dimensions"]}
-            count = endpoints.get(dims.get("EndpointName"), (None, None, 0))[2]
-            results.append({"Id": q["Id"], "Label": "Invocations", "StatusCode": "Complete",
-                            "Timestamps": [EndTime] if count else [], "Values": [float(count)] if count else []})
+            stat = q["MetricStat"]
+            dims = {d["Name"]: d["Value"] for d in stat["Metric"]["Dimensions"]}
+            created, _, count = endpoints.get(dims.get("EndpointName"), (now, None, 0))
+            if stat["Metric"]["MetricName"] != "Invocations":
+                count = count // 900
+            moments, values = ([EndTime], [float(count)]) if count else ([], [])
+            if count and stat["Period"] == 86400:
+                days = [day for day in (EndTime - timedelta(days=i + 1) for i in range((EndTime - StartTime).days))
+                        if day >= created - timedelta(days=1)]
+                moments, values = days, [float(count) / len(days)] * len(days)
+            results.append({"Id": q["Id"], "Label": stat["Metric"]["MetricName"], "StatusCode": "Complete",
+                            "Timestamps": moments, "Values": values})
         return {"MetricDataResults": results}
 
     sts = _FakeAWS("sts", {"get_caller_identity": lambda: {
@@ -1270,7 +1313,9 @@ def seed_sagemaker_env() -> dict:
         "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/{SM_ROLE.rsplit('/', 1)[1]}/SageMaker"}})
     cloudwatch = _FakeAWS("cloudwatch", {"get_metric_data": metric_data})
     cloudtrail = _FakeAWS("cloudtrail", {"lookup_events": _sagemaker_trail(now)})
-    return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch, "cloudtrail": cloudtrail},
+    logs = FakeLogs(finished_jobs)
+    return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch, "cloudtrail": cloudtrail,
+                                             "logs": logs},
             "root": str(root)}
 
 

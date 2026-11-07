@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from .._kit.deps import _require
+from .._kit.fmt import HOURS_PER_MONTH, _utcnow
 
 from .helpers import _arn_name, _arn_part, app_label, hourly_price
 
@@ -683,3 +684,338 @@ class PersonAccess:
     ips: list[str] = field(default_factory=list)
     refused: int = 0
     last: datetime | None = None
+
+
+@dataclass
+class StatusChange:
+    """
+    One of a training job's secondary statuses (Starting, Downloading, Training, Uploading, ...): when it began and
+    ended, and what SageMaker said about it.
+    """
+
+    status: str
+    start: datetime | None = None
+    end: datetime | None = None
+    message: str = ""
+
+    def seconds(self, now: datetime | None = None) -> float | None:
+        """
+        How long it lasted (until now when it hasn't ended).
+        """
+        if self.start is None:
+            return None
+        return ((self.end or now or _utcnow()) - self.start).total_seconds()
+
+
+@dataclass
+class TrainingJob:
+    """
+    One training job, from DescribeTrainingJob (or ListTrainingJobs' summary alone when it couldn't be described:
+    `described` is False). `instances` are (instance type, count); `billable_seconds` is what SageMaker billed
+    (less than the run time on spot capacity).
+    """
+
+    name: str
+    status: str = ""
+    secondary: str = ""
+    failure: str = ""
+    created: datetime | None = None
+    started: datetime | None = None
+    ended: datetime | None = None
+    instances: list[tuple[str, int]] = field(default_factory=list)
+    volume_gb: int | None = None
+    spot: bool = False
+    billable_seconds: int | None = None
+    training_seconds: int | None = None
+    max_runtime: int | None = None
+    image: str = ""
+    algorithm: str = ""
+    input_mode: str = ""
+    inputs: list[tuple[str, str]] = field(default_factory=list)
+    output: str = ""
+    model_artifact: str = ""
+    hyperparameters: dict[str, str] = field(default_factory=dict)
+    metrics: list[tuple[str, float]] = field(default_factory=list)
+    transitions: list[StatusChange] = field(default_factory=list)
+    checkpoints: str = ""
+    tuning_job: str = ""
+    arn: str = ""
+    described: bool = True
+
+    @property
+    def instance_label(self) -> str:
+        """
+        'ml.g5.xlarge', 'ml.p3.2xlarge × 2'.
+        """
+        return " + ".join(t if n == 1 else f"{t} × {n}" for t, n in self.instances) or "?"
+
+    @property
+    def is_finished(self) -> bool:
+        return self.status in ("Completed", "Failed", "Stopped")
+
+    def seconds(self, now: datetime | None = None) -> float | None:
+        """
+        How long it ran (from when its instances started, else from when it was made; until now while it runs).
+        """
+        begin = self.started or self.created
+        if begin is None:
+            return None
+        if self.is_finished and self.ended is None:
+            return float(self.training_seconds) if self.training_seconds is not None else None
+        return ((self.ended or now or _utcnow()) - begin).total_seconds()
+
+    def hourly(self, prices: dict[str, float] | None = None) -> float | None:
+        """
+        USD per hour for all its instances on demand; None when the price table lacks one of the types.
+        """
+        total = 0.0
+        for instance_type, count in self.instances:
+            price = hourly_price(instance_type, prices)
+            if price is None:
+                return None
+            total += price * count
+        return total if self.instances else None
+
+    def cost(self, prices: dict[str, float] | None = None, now: datetime | None = None) -> float | None:
+        """
+        What it cost, estimated: its billable time (else its run time) at the on-demand price of its instances.
+        Billable seconds already count spot's savings.
+        """
+        hourly = self.hourly(prices)
+        seconds = self.billable_seconds if self.billable_seconds is not None else self.seconds(now)
+        if hourly is None or seconds is None:
+            return None
+        return hourly * seconds / 3600
+
+
+@dataclass
+class TrainingList:
+    """
+    What training_jobs() found: the region's training jobs made since `since`, newest first, at most `limit`
+    (`cut_short` when there were more). Sections that couldn't be read are in `errors`.
+    """
+
+    region: str
+    since: datetime | None = None
+    status: str = ""
+    jobs: list[TrainingJob] = field(default_factory=list)
+    limit: int = 0
+    cut_short: bool = False
+    errors: dict[str, str] = field(default_factory=dict)
+
+    def to_df(self, prices: dict[str, float] | None = None):
+        """
+        One row per training job, as a pandas DataFrame.
+        """
+        pd = _require("pandas", "TrainingList.to_df()")
+        rows = [
+            {
+                "name": job.name,
+                "status": job.status,
+                "secondary_status": job.secondary,
+                "created": job.created,
+                "seconds": job.seconds(),
+                "billable_seconds": job.billable_seconds,
+                "instances": job.instance_label,
+                "spot": job.spot,
+                "usd": job.cost(prices),
+                "failure": job.failure,
+            }
+            for job in self.jobs
+        ]
+        return pd.DataFrame(rows)
+
+
+@dataclass
+class HostLine:
+    """
+    A line a training job's container wrote, with when CloudWatch Logs got it.
+    """
+
+    when: datetime | None
+    message: str
+
+
+@dataclass
+class HostLog:
+    """
+    One instance's log of a training job (a log stream: '<job>/algo-1-1714569600'): its last lines, newest last,
+    and the error they end in, when there is one (`error`: the traceback or the error lines). `cut_short` when
+    older lines weren't read.
+    """
+
+    stream: str
+    host: str
+    lines: list[HostLine] = field(default_factory=list)
+    error: list[str] = field(default_factory=list)
+    cut_short: bool = False
+
+    @property
+    def first(self) -> datetime | None:
+        return next((line.when for line in self.lines if line.when), None)
+
+    @property
+    def last(self) -> datetime | None:
+        return next((line.when for line in reversed(self.lines) if line.when), None)
+
+
+@dataclass
+class TrainingDetail:
+    """
+    What training_job() found: the job, its hosts' logs (when read) and what couldn't be read (`errors`: 'logs').
+    """
+
+    job: TrainingJob
+    hosts: list[HostLog] = field(default_factory=list)
+    logs_read: bool = False
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class EndpointUse:
+    """
+    One endpoint (a Billable) with its traffic from CloudWatch: requests per UTC day over the window, and the
+    requests that failed with a 5xx error. None when unknown.
+    """
+
+    endpoint: Billable
+    daily: dict[datetime, float] = field(default_factory=dict)
+    requests: float | None = None
+    server_errors: float | None = None
+
+    @property
+    def last_called(self) -> datetime | None:
+        """
+        The start of the last UTC day it got a request in the window.
+        """
+        days = [day for day, count in self.daily.items() if count > 0]
+        return max(days) if days else None
+
+
+@dataclass
+class EndpointReport:
+    """
+    What endpoints() found: every endpoint in the region with its traffic over the last `days` days.
+    """
+
+    region: str
+    days: int = 30
+    endpoints: list[EndpointUse] = field(default_factory=list)
+    errors: dict[str, str] = field(default_factory=dict)
+
+    def to_df(self, prices: dict[str, float] | None = None):
+        """
+        One row per endpoint, as a pandas DataFrame.
+        """
+        pd = _require("pandas", "EndpointReport.to_df()")
+        rows = []
+        for use in self.endpoints:
+            b = use.endpoint
+            hourly = b.hourly(prices)
+            rows.append(
+                {
+                    "name": b.name,
+                    "status": b.status,
+                    "instances": b.instance_label,
+                    "usd_per_month": None if hourly is None else hourly * HOURS_PER_MONTH,
+                    "requests": use.requests,
+                    "server_errors": use.server_errors,
+                    "last_called": use.last_called,
+                    "created": b.since,
+                }
+            )
+        return pd.DataFrame(rows)
+
+
+@dataclass
+class PipelineRunSummary:
+    """
+    One run of a pipeline, as ListPipelineExecutions lists it.
+    """
+
+    arn: str
+    name: str = ""
+    status: str = ""
+    started: datetime | None = None
+    failure: str = ""
+
+
+@dataclass
+class PipelineInfo:
+    """
+    A pipeline and its latest runs, newest first.
+    """
+
+    name: str
+    arn: str = ""
+    description: str = ""
+    created: datetime | None = None
+    last_run: datetime | None = None
+    runs: list[PipelineRunSummary] = field(default_factory=list)
+
+
+@dataclass
+class PipelinesReport:
+    """
+    What pipelines() found: the region's pipelines with their latest runs.
+    """
+
+    region: str
+    pipelines: list[PipelineInfo] = field(default_factory=list)
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class PipelineStep:
+    """
+    One step of a pipeline run: what it is (from the definition: its type and the steps it waits for) and how it
+    went (from ListPipelineExecutionSteps). `job` is the training, processing or other job it started, as
+    (kind, name); `cached` when it reused an earlier run's result. `branch` is the condition step and the side
+    ('if' or 'else') that a step runs on.
+    """
+
+    name: str
+    type: str = ""
+    status: str = ""
+    start: datetime | None = None
+    end: datetime | None = None
+    failure: str = ""
+    attempts: int = 1
+    cached: bool = False
+    job: tuple[str, str] = ("", "")
+    depends_on: list[str] = field(default_factory=list)
+    branch: tuple[str, str] = ("", "")
+
+    def seconds(self, now: datetime | None = None) -> float | None:
+        if self.start is None:
+            return None
+        return ((self.end or now or _utcnow()) - self.start).total_seconds()
+
+
+@dataclass
+class PipelineRun:
+    """
+    What pipeline_run() found: one run of a pipeline, its steps in the definition's order (steps that never ran
+    have no status), and what couldn't be read (`errors`: 'definition', 'steps').
+    """
+
+    pipeline: str
+    arn: str = ""
+    name: str = ""
+    status: str = ""
+    started: datetime | None = None
+    modified: datetime | None = None
+    failure: str = ""
+    steps: list[PipelineStep] = field(default_factory=list)
+    runs: list[PipelineRunSummary] = field(default_factory=list)
+    errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.status in ("Succeeded", "Failed", "Stopped", "CompletedWithFailures")
+
+    def seconds(self, now: datetime | None = None) -> float | None:
+        if self.started is None:
+            return None
+        end = self.modified if self.is_finished else None
+        return ((end or now or _utcnow()) - self.started).total_seconds()

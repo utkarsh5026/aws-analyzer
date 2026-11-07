@@ -16,6 +16,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `failures()` explains each kind of failure with its fix; `catalog()` and `crawlers()` find empty or missing table folders and stopped crawlers.
   - It never runs a query: `query_code(sql)` shows the Python to run it yourself, and the most it could cost.
 
+## [0.50.0] - 2026-11-07
+
+### Added
+
+- 🧪 **SageMaker: training jobs, endpoints and pipelines** ([#210](https://github.com/utkarsh5026/aws-analyzer/pull/210))
+  - `ui.training_job("name")` says why a job failed in plain words and what to change, with the error in its log.
+  - `ui.endpoints()` shows which endpoints nobody calls and what each costs a month, with the command to delete it.
+  - `ui.pipeline_run("name")` shows the step that broke as a graph and a waterfall; `training_jobs()` and `pipelines()` list them.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added
@@ -1259,7 +1268,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.50.0...HEAD
+[0.50.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.46.0...v0.47.0

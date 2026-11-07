@@ -26,6 +26,7 @@ from .analysis.notebooks import apply_studio_settings, parse_app, parse_notebook
 from .analysis.running import parse_endpoint, parse_processing_job, parse_training_job
 from .machine import _MachineReads
 from .envs import _EnvMaking, _EnvReads
+from .jobs import _JobReads
 
 
 def _missing(exc: ClientError) -> bool:
@@ -39,7 +40,7 @@ def _missing(exc: ClientError) -> bool:
     )
 
 
-class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _BaseAnalyzer):
+class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _JobReads, _BaseAnalyzer):
     """
     Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted. The one
     method that makes anything is create_env(), which runs the commands of an env_plan() (a Python environment and its
@@ -48,7 +49,7 @@ class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _BaseAnalyzer):
     instance() and disk() read this machine (SageMaker's metadata file, /proc, the disks, nvidia-smi) as well as
     AWS, so they describe the notebook the code runs in. `root` is where that machine's files are ("/"; tests
     point it at a folder of fake files). `prices` overrides SAGEMAKER_PRICES (storage, and USD per hour by
-    instance type). `clients` pre-fills the boto3 clients by service name ('sagemaker', 'cloudwatch', 'sts'),
+    instance type). `clients` pre-fills the boto3 clients by service name ('sagemaker', 'cloudwatch', 'sts', 'logs'),
     e.g. to use stubbed ones.
     """
 
@@ -99,6 +100,9 @@ class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _BaseAnalyzer):
                 ),
                 "cloudtrail": lambda: self.session.client(
                     "cloudtrail", region_name=region, config=self._config
+                ),
+                "logs": lambda: self.session.client(
+                    "logs", region_name=region, config=self._config
                 ),
             }
             try:

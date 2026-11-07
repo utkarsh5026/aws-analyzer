@@ -1,6 +1,8 @@
 """
 sagemaker_env.py - SageMaker toolkit for SageMaker / Jupyter notebooks: the notebook you're running in, what fills
-its disk, its Python environments, and everything else in SageMaker that's running and billing.
+its disk, its Python environments, everything else in SageMaker that's running and billing, and what you launch
+from it: training jobs (why one failed, and its log), endpoints (which are idle, and what each costs) and pipelines
+(where a run broke).
 
 Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import SageMakerView``. It isn't called
 sagemaker.py, so it's never mixed up with the SageMaker Python SDK (``import sagemaker``).
@@ -33,6 +35,11 @@ Quick start
     ui.new_env("3.11")                                # a Python 3.11 environment with its own kernel, kept when it stops
     ui.running()                                      # everything running and billing in the region, and what looks forgotten
     ui.access()                                       # who opened, started or stopped notebooks in the last 30 days
+    ui.training_jobs()                                # the training jobs of the last 7 days, and why any failed
+    ui.training_job("train-0517")                     # one job: why it failed, what to change, and its log
+    ui.endpoints()                                    # every endpoint: requests in 30 days, $/month, the idle ones
+    ui.pipelines()                                    # the pipelines and how their latest runs went
+    ui.pipeline_run("churn-pipeline")                 # its latest run: the step that broke, as a graph and a waterfall
 
     sm = ui.core                                      # same analyzer, raw data
     report = sm.instance()                            # InstanceReport: .notebook (settings), .machine (right now)
@@ -40,6 +47,10 @@ Quick start
     logins = sm.access(days=30).to_df()               # one row per sign-in, start and stop, from CloudTrail
     folders = sm.disk().to_df()                       # folder sizes
     envs = sm.environments().to_df()                  # one row per Python environment
+    jobs = sm.training_jobs(since="30d").to_df()      # one row per training job
+    detail = sm.training_job("train-0517")            # TrainingDetail: .job, .hosts (each instance's log lines)
+    idle = sm.endpoints(days=30).to_df()              # one row per endpoint, with its requests and $/month
+    run = sm.pipeline_run("churn-pipeline")           # PipelineRun: .steps, each with its status and job
 """
 
 from __future__ import annotations
@@ -53,7 +64,21 @@ from .helpers import (
 from .models import (
     AccessEvent, AccessReport, PersonAccess, Billable, Clearable, DiskEntry, DiskReport, EnvPlan, EnvReport, EnvResult, EnvStep, Environment, GPUInfo,
     InstanceReport, KernelSpec, Machine, NotebookInfo, ProcessInfo, PythonEnv, RunningReport, Volume,
+    EndpointReport, EndpointUse, HostLine, HostLog, PipelineInfo, PipelineRun, PipelineRunSummary, PipelinesReport,
+    PipelineStep, StatusChange, TrainingDetail, TrainingJob, TrainingList,
 )
+from .analysis.training import (
+    LOG_LINES, MOST_HOSTS, TRAINING_LOG_GROUP, failure_kind, find_error, host_log, host_of, parse_training_detail,
+    parse_training_summary, short_reason, training_findings, training_list_findings, why_it_failed,
+)
+from .analysis.endpoints import (
+    LOW_TRAFFIC_PER_DAY, SERVER_ERROR_SHARE, STALE_DAYS, endpoint_findings, endpoint_monthly, is_idle, is_stale,
+)
+from .analysis.pipelines import (
+    StepBar, StepEdge, StepLayout, StepNode, failed_steps, merge_steps, parse_definition, parse_pipeline_step,
+    parse_run_summary, pipeline_findings, pipeline_layout, pipelines_findings, run_reason, step_next, step_waterfall,
+)
+from .jobs import PIPELINE_RUNS, TRAINING_LIMIT
 from .analysis.machine import parse_gpus, parse_loadavg, parse_meminfo, parse_metadata, parse_process
 from .analysis.common import FULL
 from .analysis.access import (
@@ -76,6 +101,56 @@ from .analyzer import SageMakerAnalyzer
 from .view import SageMakerView
 
 __all__ = [
+    "EndpointReport",
+    "EndpointUse",
+    "HostLine",
+    "HostLog",
+    "PipelineInfo",
+    "PipelineRun",
+    "PipelineRunSummary",
+    "PipelinesReport",
+    "PipelineStep",
+    "StatusChange",
+    "TrainingDetail",
+    "TrainingJob",
+    "TrainingList",
+    "LOG_LINES",
+    "MOST_HOSTS",
+    "TRAINING_LOG_GROUP",
+    "failure_kind",
+    "find_error",
+    "host_log",
+    "host_of",
+    "parse_training_detail",
+    "parse_training_summary",
+    "short_reason",
+    "training_findings",
+    "training_list_findings",
+    "why_it_failed",
+    "LOW_TRAFFIC_PER_DAY",
+    "SERVER_ERROR_SHARE",
+    "STALE_DAYS",
+    "endpoint_findings",
+    "endpoint_monthly",
+    "is_idle",
+    "is_stale",
+    "StepBar",
+    "StepEdge",
+    "StepLayout",
+    "StepNode",
+    "failed_steps",
+    "merge_steps",
+    "parse_definition",
+    "parse_pipeline_step",
+    "parse_run_summary",
+    "pipeline_findings",
+    "pipeline_layout",
+    "pipelines_findings",
+    "step_next",
+    "run_reason",
+    "step_waterfall",
+    "PIPELINE_RUNS",
+    "TRAINING_LIMIT",
     "AUTOSTOP_SAMPLE",
     "AccessEvent",
     "AccessReport",
