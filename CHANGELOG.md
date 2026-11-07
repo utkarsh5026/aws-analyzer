@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-07
+
 ### Added
 
 - 🔎 **OpenSearch: an explorer window** ([#208](https://github.com/utkarsh5026/aws-analyzer/pull/208))
@@ -1250,7 +1252,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.48.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.49.0...HEAD
+[0.49.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.45.0...v0.46.0
