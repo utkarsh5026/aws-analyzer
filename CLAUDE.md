@@ -14,7 +14,8 @@ region or all of them, and `explore()`, a window to click through them and read 
 and `apigateway/` (a package too) for API Gateway's REST, HTTP and WebSocket APIs, their routes and the calls their
 stages' access logs record, also a companion of `lambda_functions` (for the Lambda run behind a call), and `athena/` (a
 package too) for Athena's past queries, what they cost and why they failed, and the Glue Data Catalog's tables and
-crawlers (see "Athena" under "Hard constraints"). The code they
+crawlers (see "Athena" under "Hard constraints"), and `messaging/` (a package too) for SQS queues, SNS topics and
+EventBridge rules read as one map (where did my message go?). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
@@ -283,6 +284,32 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   FAILED, DDL / UTILITY or a reused result); `query_shapes` groups runs by `normalize_sql`; `analysis/failures.py`
   sorts messages into kinds (`KNOWN_FAILURES`: meaning, fix); the tables a query reads come from its SQL
   (`tables_in_sql`), so a query through a view counts for the view.
+- `messaging/` reads SQS, SNS, EventBridge, CloudWatch (`AWS/SQS`, `AWS/SNS`, `AWS/Events`) and Lambda (event source
+  mappings, a function's timeout and resource policy) into one model, and never calls `ReceiveMessage`: receiving
+  hides a message from its readers and counts as a try towards its dead-letter queue, so the reports use counts, ages
+  and settings only. `analysis/` is pure: `parsing`, `policy` (`allows` reads a queue's or function's policy for one
+  service principal and source ARN, a condition it can't judge counting as met; `blocks_services` is the AWS managed
+  key `alias/aws/sqs`, which SNS and EventBridge can't use), `words` (`describe_pattern` / `describe_filter`),
+  `commands` (the `aws sqs` / `sns` / `events` commands findings show), `access` (feeders, blocked senders and
+  `access_fixes`, one SetQueueAttributes per queue since it replaces the whole policy), `queues` / `topics` / `rules`
+  (findings), `world` (reports and findings built from an `Overview`) and `flow` (`follow_map`, the tree `follow()`
+  draws), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3 minutes").
+  `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`.
+- `messaging`'s explorer window, `MessagingExplorer` (`messaging/explorer/`: `window.py` with `explore()`, composed of
+  `_EverythingTab` (`items.py`: `region_items` turns the overview into `_Item`s, a line each, with its findings;
+  chips, search and columns as the OpenSearch explorer's Domains tab; a dead-letter queue holding messages sorts and
+  opens first), `_MapTab` (`map.py`: `follow_map` on the overview already read, each hop a line, `hop_key` the queue,
+  topic or rule it opens), `_DeadTab` (`dead.py`) and `_LiveTab` (`live.py`: `core.read_queue` for the queue open,
+  else the fullest `_WATCH_MOST`, every `_WATCH_SECONDS` in an asyncio task while the tab is open, for at most
+  `_WATCH_MINUTES`; `looks` keeps the `QueueSample`s), and `_FocusReads` (`focus.py`); `frame.py` its tabs, stylesheet
+  (`.mgx-app`, derived from the OpenSearch explorer's, on `_terminal_theme`), faces and `_window_text` (a `*_info`
+  call becomes "the Overview tab of <name>"); `widgets.py` the `_ItemField` and `_Line`; `MessagingView.explore()`
+  imports it lazily and keeps it in `view.explorer`), is the ninth interactive UI, built on the windows' kit like
+  `OpenSearchExplorer`. An item's key is `'<queue|topic|rule|bus>:<arn>'` (a bus by its name), from
+  `MessagingAnalyzer._start`. The Overview tab draws the View's `_queue_blocks` / `_topic_blocks` / `_rule_blocks` from
+  the report read in the background (`_read_report`). `.claude/skills/demo/msg_explorer_shots.py` makes the guide's
+  `msg-explorer*` figures in a real JupyterLab (its notebook drains `email-jobs` in moto from a thread, so Live has
+  something to show), and `tour_shots.py`'s `play_messaging` the `msg-explorer-tour`.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
   installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
@@ -876,7 +903,8 @@ with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, an
 `STEPFUNCTIONS_PRICES` (`stepfunctions/prices.py`), Standard state transitions and Express requests and GB-seconds,
 `APIGATEWAY_PRICES` (`apigateway/prices.py`), REST, HTTP and WebSocket requests, connection minutes and the hourly
 price of each REST cache size, `ATHENA_PRICES` (`athena/prices.py`), per TB scanned, the 10 MB minimum and S3 LIST
-requests;
+requests, `MESSAGING_PRICES` (`messaging/prices.py`), SQS requests (standard and FIFO), SNS publishes and deliveries
+by protocol and EventBridge custom events;
 us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
@@ -1387,6 +1415,10 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   checked against the service model, `denied` to refuse an operation) over acme's workgroups, a week of queries whose
   times don't depend on the hour, tables in each state the findings know and four crawlers, and `seed_buckets` for the
   tables' folders in moto's S3. demo.py's `seed_athena()` uses the same.
+- SQS, SNS and EventBridge: moto covers all of it, CloudWatch's `AWS/SQS`, `AWS/SNS` and `AWS/Events` numbers
+  included (put with PutMetricData), so `tests/fake_messaging.py`'s `seed(now)` makes acme's queues, topics, rules and
+  functions there (a subscription waiting for confirmation is marked in moto's backend, which confirms them all).
+  demo.py's `seed_messaging()` uses it, and `shots.py` makes the guide's `msg-*` figures from it.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -1447,7 +1479,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
@@ -1493,7 +1525,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
   plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
-  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`,
+  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model and Python 3.11+), at the top of its guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when

@@ -37,6 +37,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a href="stepfunctions.html" title="AWS Step Functions"><img src="images/aws/stepfunctions.svg" alt="AWS Step Functions" width="32" height="32"></a>
 <a href="apigateway.html" title="Amazon API Gateway"><img src="images/aws/apigateway.svg" alt="Amazon API Gateway" width="32" height="32"></a>
 <a href="athena.html" title="Amazon Athena"><img src="images/aws/athena.svg" alt="Amazon Athena" width="32" height="32"></a>
+<a href="messaging.html" title="SQS, SNS and EventBridge"><img src="images/aws/messaging.svg" alt="SQS, SNS and EventBridge" width="32" height="32"></a>
 </p>
 
 </div>
@@ -198,6 +199,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <img class="aws-icon" src="images/aws/athena.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon Athena</span><code>athena</code></span>
 <span class="asks"><span>Which of my queries cost the most, and why?</span><span>Why did my query fail?</span><span>Which tables point at an empty folder?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="messaging.html">
+<img class="aws-icon" src="images/aws/messaging.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">SQS, SNS and EventBridge</span><code>messaging</code></span>
+<span class="asks"><span>Where did my message go?</span><span>What's stuck in the dead-letter queue?</span><span>Why does this topic never reach my queue?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="agent.html">

@@ -42,6 +42,7 @@ import apigw_explorer_shots  # noqa: E402
 import chat_shots  # noqa: E402
 import kb_explorer_shots  # noqa: E402
 import lambda_explorer_shots  # noqa: E402
+import msg_explorer_shots  # noqa: E402
 import sfn_explorer_shots  # noqa: E402
 import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
@@ -295,6 +296,25 @@ def play_apigateway(page: Any, tour: Tour) -> None:
     tour.hold(3.4)
 
 
+def play_messaging(page: Any, tour: Tour) -> None:
+    """
+    The Everything list, orders-events' map with a click on a queue its policy keeps out, the dead-letter queues,
+    then Live on email-jobs draining.
+    """
+    tour.hold(2.0)
+    tour.click(row(page, "mgx", "orders-events", within=".mgx-items"), hold=1.0, at=0.2)
+    tour.click(tab(page, "mgx", "Map"), hold=2.4)
+    tour.click(row(page, "mgx", "partner-webhooks", within=".mgx-hops"), hold=2.2, at=0.2)
+    tour.click(tab(page, "mgx", "Dead letters"), hold=2.2)
+    tour.click(tab(page, "mgx", "Everything"), hold=0.6)
+    tour.click(row(page, "mgx", "email-jobs", within=".mgx-items"), hold=0.8, at=0.2)
+    tour.click(tab(page, "mgx", "Live"), hold=1.0)
+    for _ in range(5):
+        time.sleep(4.0)
+        tour.hold(0.7)
+    tour.hold(2.4)
+
+
 def play_chat(page: Any, tour: Tour) -> None:
     """
     Two questions answered with their sources, the cited passages opened, six test questions run in the Test tab, then
@@ -371,6 +391,8 @@ TOURS = [
            busy_in(".sfx-app", ".sfx-status"), play_stepfunctions),
     Window("apigw-explorer-tour", "apigateway", apigw_explorer_shots.NOTEBOOK_CODE, ".agx-app",
            busy_in(".agx-app", ".agx-status"), play_apigateway),
+    Window("msg-explorer-tour", "messaging", msg_explorer_shots.NOTEBOOK_CODE, ".mgx-app",
+           busy_in(".mgx-app", ".mgx-status"), play_messaging),
     Window("chat-tour", "bedrock_chat", chat_shots.NOTEBOOK_CODE, ".kbc-app", chat_busy(), play_chat),
     Window("agent-chat-tour", "agent", agent_chat_shots.NOTEBOOK_CODE, ".agc-app", agent_busy(), play_agent,
            loading_frames=AGENT_WORKING_FRAMES),

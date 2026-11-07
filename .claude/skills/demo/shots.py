@@ -23,6 +23,7 @@ Scenes:
               support-docs index, as /demo uses it.
   lambda_functions  demo.py's functions (moto, with patched Lambda and Logs clients for what moto lacks):
               orders-etl, churn-scoring, report-api and the rest, as /demo uses it.
+  messaging   demo.py's acme queues, topics and rules (tests/fake_messaging.py), in moto, as /demo uses it.
   stepfunctions  demo.py's fake Step Functions and CloudWatch (tests/fake_stepfunctions.py's acme scene), with the
               Lambda runs behind order-pipeline's failed execution ord-7f3a in moto, as /demo uses it.
 
@@ -60,7 +61,8 @@ IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
           "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md", "opensearch": "opensearch.md",
           "lambda_functions": "lambda_functions.md", "agent": "agent.md", "stepfunctions": "stepfunctions.md",
-          "apigateway": "apigateway.md", "athena": "athena.md"}
+          "apigateway": "apigateway.md", "athena": "athena.md",
+          "messaging": "messaging.md"}
 # s3_explorer's figures come from explorer_shots.py, bedrock_chat's from chat_shots.py and the knowledge base
 # explorer's from kb_explorer_shots.py, the agent's chat window's from agent_chat_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
@@ -160,6 +162,9 @@ FIGURES = [
            'if type(b).__name__ == "_Tabs").tabs[0][1][:1])'),
     Figure("apigw-apis", "apigateway", "ui.apis()"),
     Figure("apigw-api-info", "apigateway", 'ui.api_info("orders-api")'),
+    Figure("msg-overview", "messaging", "ui.overview()"),
+    Figure("msg-follow", "messaging", 'ui.follow("orders-events")'),
+    Figure("msg-queue-info", "messaging", 'ui.queue_info("orders")'),
     Figure("lambda-how-it-works-steps", "lambda_functions",
            'ui._show(next(b for b in ui._how_blocks(core.code_map("support-agent-actions")) '
            'if type(b).__name__ == "_Tabs").tabs[1][1])', crop=620),
@@ -1003,10 +1008,17 @@ def seed_athena_docs() -> dict:
     return demo.seed_athena()
 
 
+def seed_messaging_docs() -> dict:
+    import demo
+
+    return demo.seed_messaging()
+
+
 SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs,
           "sagemaker_env": seed_sagemaker_docs, "opensearch": seed_opensearch_docs,
           "lambda_functions": seed_lambda_docs, "stepfunctions": seed_stepfunctions_docs,
-          "apigateway": seed_apigateway_docs, "athena": seed_athena_docs}
+          "apigateway": seed_apigateway_docs, "athena": seed_athena_docs,
+          "messaging": seed_messaging_docs}
 
 
 # ----------------------------------------------------------------------------- rendering and screenshots
