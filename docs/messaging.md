@@ -148,8 +148,8 @@ msg.follow("orders")               # a queue: what sends to it, who reads it, wh
 msg.follow("shop/order-placed")    # a rule, or "shop" for the whole bus
 ```
 
-![follow('orders-events'): the topic, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-light.webp#only-light){ width="984" height="1041" loading=lazy }
-![follow('orders-events'): the topic, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-dark.webp#only-dark){ width="984" height="1041" loading=lazy }
+![follow('orders-events'): the topic, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-light.webp#only-light){ width="984" height="1116" loading=lazy }
+![follow('orders-events'): the topic, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-dark.webp#only-dark){ width="984" height="1116" loading=lazy }
 /// caption
 `msg.follow("orders-events")`: two of the five places it delivers to keep it out.
 ///
