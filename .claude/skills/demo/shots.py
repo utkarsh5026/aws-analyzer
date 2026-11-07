@@ -60,7 +60,7 @@ IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
           "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md", "opensearch": "opensearch.md",
           "lambda_functions": "lambda_functions.md", "agent": "agent.md", "stepfunctions": "stepfunctions.md",
-          "apigateway": "apigateway.md"}
+          "apigateway": "apigateway.md", "athena": "athena.md"}
 # s3_explorer's figures come from explorer_shots.py, bedrock_chat's from chat_shots.py and the knowledge base
 # explorer's from kb_explorer_shots.py, the agent's chat window's from agent_chat_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
@@ -168,6 +168,12 @@ FIGURES = [
     Figure("sfn-execution", "stepfunctions", 'ui.execution("order-pipeline/ord-7f3a")'),
     Figure("sfn-state-machine", "stepfunctions", 'ui.state_machine("order-pipeline")'),
     Figure("sfn-graph", "stepfunctions", 'ui.graph("order-pipeline", execution="ord-7f3a")', crop=850),
+    Figure("athena-overview", "athena", "ui.overview()"),
+    Figure("athena-expensive", "athena", "ui.expensive(top=5)"),
+    Figure("athena-failures", "athena", "ui.failures()"),
+    Figure("athena-catalog", "athena", "ui.catalog()"),
+    Figure("athena-table-info", "athena", 'ui.table_info("sales.events")', crop=1000),
+    Figure("athena-query-code", "athena", 'ui.query_code("SELECT * FROM orders WHERE total > 100", database="sales")'),
 ]
 
 
@@ -991,10 +997,16 @@ def seed_apigateway_docs() -> dict:
     return demo.seed_apigateway()
 
 
+def seed_athena_docs() -> dict:
+    import demo
+
+    return demo.seed_athena()
+
+
 SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs,
           "sagemaker_env": seed_sagemaker_docs, "opensearch": seed_opensearch_docs,
           "lambda_functions": seed_lambda_docs, "stepfunctions": seed_stepfunctions_docs,
-          "apigateway": seed_apigateway_docs}
+          "apigateway": seed_apigateway_docs, "athena": seed_athena_docs}
 
 
 # ----------------------------------------------------------------------------- rendering and screenshots

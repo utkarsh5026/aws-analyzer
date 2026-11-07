@@ -7,7 +7,7 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
-OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs and the SageMaker notebook itself: what's there,
+OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs, Athena queries and the SageMaker notebook itself: what's there,
 what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
 your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
@@ -24,7 +24,7 @@ checked.
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
+[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) · [Athena](#amazon-athena) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
 [Changelog](CHANGELOG.md)
 
 </div>
@@ -96,6 +96,8 @@ report still renders.
 | <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **Step Functions explorer**          | • Every state machine and how it's doing, failing ones first: click one to open it<br>• Its executions: filter by outcome, search, pick a time range<br>• An execution's waterfall: each state on one time axis, tries and back-off in place<br>• One log of what happened: Step Functions' events and every Lambda run's lines, merged by time<br>• The flow as a graph, coloured by an execution's path or by where executions stop | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#explorer) |
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway**             | • Every REST, HTTP and WebSocket API's requests, 4xx and 5xx, latency and cost<br>• Routes anyone can call, and routes that run out of time (the 29 s limit)<br>• Which calls fail and why, from the stage's access log<br>• For a failed call, the log lines of the Lambda run behind it<br>• Stages without throttling or an access log, with the command that fixes each | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) |
 | <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **API Gateway explorer**             | • Every API and how it's doing, failing ones first: click one to open it<br>• Its routes as a tree: where a request goes, the step that fails marked<br>• Its calls one by one: where each call's time went, and the Lambda run behind it<br>• How long calls take, route by route, and each stage's settings | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#explorer) |
+| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Athena**                  | • Every past query's scan and cost, the same query's runs added up<br>• Why queries failed, in plain words, with the fix<br>• Tables whose S3 folder is empty or gone, or that every query reads in full<br>• Crawlers that failed or stopped running<br>• The Python to run a new query yourself, and the most it could cost | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html) |
+| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Athena explorer**                | • The queries, what they cost and why they fail, with a time range and workgroup to pick<br>• Click a query for its SQL, numbers and saved rows<br>• Every Glue table, with chips for what's wrong: empty or gone, no partitions loaded, read in full<br>• The crawlers, failed or stopped ones first | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html#explorer) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -2351,6 +2353,158 @@ policy.
 
 </details>
 
+## Amazon Athena
+
+<img src="docs/images/aws/athena.svg" width="22" height="22" alt="" align="absmiddle"> **SQL over S3: what it costs,
+why it fails, and the tables behind it.** Every past query with **what it scanned and cost** ($5 per TB), the same
+query's runs added up so a dashboard that runs 20 times a day shows what it costs in all, **why queries failed** in
+plain words with the fix, and the [Glue Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html):
+**tables that point at an empty or missing S3 folder**, tables with no partitions that every query reads in full,
+partitions never loaded, and **crawlers that failed or stopped running**.
+
+📄 [`src/aws_analyzer/athena/`](src/aws_analyzer/athena/) · 📖 [Athena guide](https://utkarsh5026.github.io/aws-analyzer/athena.html)
+
+> [!NOTE]
+> **Read-only, so it never runs a query.** Athena writes every query's results to S3, so starting one would break
+> the read-only rule. Past queries and the results they saved are read back; for a new query, `query_code()` shows
+> the Python to run it yourself, and the most it could cost.
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install.
+
+```python
+from aws_analyzer import AthenaView
+
+athena = AthenaView()                        # uses the notebook's execution role and region
+athena.help()                                # every command, grouped by task
+
+athena.overview()                            # what the week's queries cost, which fail, and what to fix first
+athena.expensive()                           # the costliest queries, the same query's runs added up
+athena.failures()                            # why queries failed, and how to fix each kind
+athena.table_info("sales.events")            # one table: partitions, size, its queries, SQL to copy
+```
+
+Tables are named `"database.table"` (`"sales/events"`, `'"sales"."events"'` and `"AwsDataCatalog.sales.events"` work
+too), and times as `"7d"`, `"24h"` or `"2026-11-01"`. Athena keeps 45 days of query history.
+
+### Explore queries and tables by clicking
+
+`athena.explore()` opens a window (Jupyter and ipywidgets) with an **Overview**, every **query** (chips for the
+failed, costly, cancelled and running ones, and a search box), the **costliest** queries with each one's runs added
+up, the **failures** by kind with the fix, every Glue **table** with chips for what's wrong with it, and the
+**crawlers**. A click on a query shows its SQL, numbers and saved rows; on a table, its partitions, size, the
+queries that read it and the SQL to copy. Menus at the top pick the time range and a workgroup. It reads in the
+background, so the window answers while AWS is read, and it only reads.
+
+```python
+athena.explore(tab="costs", since="30d")    # or explore("sales.events"), explore("a1b2c3d4-...")
+```
+
+### Commands (`AthenaView`)
+
+Grouped the way `athena.help()` lists them.
+
+#### Athena
+
+| Command            | Shows                                                                                                                                                                                                                                       |
+| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `overview(days=7)` | The region at a glance: what the week's queries scanned and **cost** (and about how much a month at that rate), how many failed, each workgroup's queries, cost and **per-query scan limit**, the costliest kinds of query, and every finding below, warnings first |
+
+#### Past queries
+
+| Command                                                                     | Shows                                                                                                                                                                                                                                   |
+| :-------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queries(since="7d", workgroup=None, status=None, database=None, limit=2000)` | Every query, newest first: when, how it ended, what it scanned and cost, how long it took, its SQL and ID. `status="failed"` (or `"succeeded"`, `"cancelled"`, `"running"`) and `database=` keep some |
+| `expensive(since="7d", top=10, workgroup=None)`                              | **The costliest queries**: the same SQL with other values grouped, so a query run 40 times shows once with its total and its share of the bill, then the single costliest runs. Findings: **a query that runs again and again** (turn on result reuse, or keep its answer with CREATE TABLE AS), costly `SELECT *` |
+| `failures(since="7d", workgroup=None)`                                       | **Why queries failed**, grouped by kind (`TABLE_NOT_FOUND`, `HIVE_BAD_DATA`, `HIVE_PARTITION_SCHEMA_MISMATCH`, an S3 permission, exhausted resources, the scan limit, ...), each with **what it means and how to fix it**, and the newest one's message and ID |
+| `query(query_id, rows=20)`                                                   | One past query: its SQL, how it ended and why, what it scanned and cost, how long it queued and ran, rows in and out, and **the first rows of the results it saved**, read back from S3 without running it again |
+
+#### Data Catalog
+
+| Command                            | Shows                                                                                                                                                                                                                                 |
+| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `catalog(database=None)`           | Every database and table: format, partition keys, location and **whether its S3 folder holds files** (one small S3 request a table, at most 200), and the crawlers. Findings: tables that point at **a bucket that's gone or an empty folder**, partitioned tables **with no partitions loaded** (MSCK REPAIR TABLE), tables whose queries read them in full |
+| `table_info(table, since="7d")`    | One table: format, partitions (with the newest), **size and files in S3**, its columns, **the queries that read it** and what they cost. Findings: no partitions (with what its queries cost), queries that don't filter on its partitions, a row format like CSV or JSON, many small files. Then **SQL to copy**: a first query, `CREATE TABLE AS` to Parquet partitioned by date, `MSCK REPAIR TABLE` |
+| `crawlers()`                       | Every Glue crawler: what it crawls into which database, how often it runs, its last crawl and how it went, and the tables it added, changed or removed. Findings: **a failed last crawl** (with its error), **a paused schedule**, **a scheduled crawler that stopped running**, one that never ran |
+
+#### Run a query yourself
+
+| Command                                          | Shows                                                                                                                                                                                                 |
+| :----------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query_code(sql, database=None, workgroup=None)` | **The Python to run a query** (boto3, or a DataFrame with awswrangler), and what it could cost: the tables it names, **the most it could read** (their folders' size), and whether it filters on their partitions |
+
+#### Explore by clicking
+
+| Command                                                                  | Shows                                                                                                                                                         |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `explore(what=None, tab=None, since="7d", workgroup=None, height=None)` | The [explorer window](#explore-queries-and-tables-by-clicking): the Overview, every query, the costliest, the failures, every table and the crawlers. `view.explorer` is the window |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>AthenaAnalyzer</code>): queries, tables and crawlers as Python objects</summary>
+
+`athena.core` is the `AthenaAnalyzer`. Every UI command has a data method on it:
+
+```python
+core = athena.core                                     # or AthenaAnalyzer(region="eu-west-1", profile="dev")
+
+history = core.history(since="7d")                     # QueryHistory: .queries (Query), .truncated, .errors
+history.to_df()                                        # every query as a DataFrame
+detail = core.query("a1b2c3d4-...")                    # QueryDetail: .query, .rows_in, .rows_out, .results
+core.results("a1b2c3d4-...", limit=10_000).to_df()     # a past query's saved results as a DataFrame
+groups = core.workgroups()                             # Workgroup: .output_location, .bytes_cutoff, .engine_version
+catalog = core.catalog("sales")                        # Catalog: .databases, .tables, .crawlers; catalog.to_df()
+table = core.table("sales.events")                     # Table: .format, .partition_keys, .partitions, .location
+report = core.table_report("sales.events")             # TableReport: .table, .queries that read it
+```
+
+The analysis functions are pure (no AWS calls), so they also work on what you already have: `query_cost` and
+`billed_bytes` (rounded up to the MB, 10 MB at least, nothing for a failed query, DDL or a reused result),
+`query_shapes` (runs of the same SQL with other values), `group_failures`, `failure_kind` and `explain_failure`,
+`tables_in_sql`, `filters_on`, `selects_every_column`, `normalize_sql`, the SQL and code they write (`sample_sql`,
+`ctas_sql`, `repair_sql`, `run_code`, `pandas_code`), the parsers (`parse_query`, `parse_table`, `parse_crawler`,
+`parse_workgroup`, `parse_results`) and the findings: `query_findings`, `workgroup_findings`, `table_findings`,
+`catalog_findings`, `crawler_findings`, `overview_findings`, `detail_findings`, `code_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost</b>: the prices used</summary>
+
+- Costs are at us-east-1 list prices, read from the AWS Price List API on 2026-11-07 (`ATHENA_PRICES`): **$5.00 per
+  TB scanned**, rounded up to the MB with **a 10 MB minimum per query**, for successful and cancelled queries. Failed
+  queries, DDL (`CREATE`, `ALTER`, `MSCK REPAIR TABLE`) and results reused from an earlier run are free. A workgroup
+  on provisioned capacity pays $0.30 per DPU-hour instead, which the reports don't show. For another region or a
+  discount: `AthenaAnalyzer(prices={"scanned_tb": 6.75})`.
+- Reading queries, workgroups and the catalog costs nothing. `catalog()` makes one small S3 LIST request per table
+  ($0.005 per 1,000) and says how many; `table_info()` lists the table's folder, 1,000 keys a request, up to 10,000
+  keys.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                                                  | For                                                                    |
+| :------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------- |
+| `athena:ListWorkGroups`, `athena:GetWorkGroup`                                              | The workgroups and their settings                                      |
+| `athena:ListQueryExecutions`, `athena:BatchGetQueryExecution`, `athena:GetQueryExecution`   | Past queries (`overview`, `queries`, `expensive`, `failures`, `query`) |
+| `athena:GetQueryRuntimeStatistics`                                                          | Rows in and out of one query (`query`)                                 |
+| `athena:GetQueryResults`, and `s3:GetObject` on the result location                         | A past query's saved results (`query`, `core.results`)                 |
+| `glue:GetDatabases`, `glue:GetDatabase`, `glue:GetTables`, `glue:GetTable`, `glue:GetPartitions` | The Data Catalog's databases, tables and partitions               |
+| `glue:GetCrawlers`, `glue:GetCrawlerMetrics`                                                | The crawlers and their last crawl                                      |
+| `s3:ListBucket` on the tables' buckets                                                      | Whether a table's folder holds files, and its size                     |
+
+Nothing here runs a query, starts a crawler or changes a table: findings show the SQL or the `aws athena` /
+`aws glue` command instead. Anything you can't read shows up as a note instead of an error. The
+[Athena guide](https://utkarsh5026.github.io/aws-analyzer/athena.html#permissions) has a ready-made IAM policy.
+
+</details>
+
 ## Ask in plain English
 
 <img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
@@ -2854,6 +3008,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   The API Gateway tests use moto for the APIs (REST in `apigateway`, HTTP and WebSocket in `apigatewayv2`), their
   access logs and the Lambda run behind a call, and [`tests/fake_apigateway.py`](tests/fake_apigateway.py)'s
   CloudWatch, since moto keeps no API Gateway metrics and no percentiles.
+  The Athena tests use [`tests/fake_athena.py`](tests/fake_athena.py): fake Athena and Glue clients checked against
+  the service model, with a week of query history (moto's Athena keeps none), and moto for the tables' S3 folders.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
   window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
   stream event against the service model.
@@ -2865,7 +3021,7 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
   [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
   [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md),
-  [`docs/apigateway.md`](docs/apigateway.md)), and so does the S3
+  [`docs/apigateway.md`](docs/apigateway.md), [`docs/athena.md`](docs/athena.md)), and so does the S3
   explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
