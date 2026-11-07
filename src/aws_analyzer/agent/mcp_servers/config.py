@@ -31,7 +31,8 @@ _DEFAULT_NAME = "server"
 _TRANSPORT_WORDS = {"stdio": STDIO, "local": STDIO, "http": HTTP, "streamable-http": HTTP, "streamablehttp": HTTP,
                     "streamable_http": HTTP, "remote": HTTP, "sse": SSE}
 _REFERENCE = re.compile(r"\$\{(?:(env|input):)?([A-Za-z_][A-Za-z0-9_.-]*)\}")
-_ONLY_REFERENCES = re.compile(r"^(?:\s*(?:Bearer\s+)?\$\{[^}]+\}\s*)+$")
+_ANY_REFERENCE = re.compile(r"\$\{[^}]*\}")
+_AROUND_REFERENCES = ("", "Bearer")
 _SETTING_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 _UNSAFE_NAME = re.compile(r"[^a-z0-9_-]+")
 _UNSAFE_TOOL = re.compile(r"[^A-Za-z0-9_-]+")
@@ -178,7 +179,10 @@ def is_reference(value: str) -> bool:
     Whether a setting's value only names other values ('${env:GITHUB_TOKEN}', 'Bearer ${GITHUB_TOKEN}'), and so
     can be shown as it is: it holds no secret itself.
     """
-    return bool(_ONLY_REFERENCES.match(str(value or "")))
+    text = str(value or "")
+    if "${" not in text:
+        return False
+    return _ANY_REFERENCE.sub("", text).strip() in _AROUND_REFERENCES
 
 
 def shown_settings(settings: Mapping[str, str]) -> dict[str, str]:
