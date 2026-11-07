@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: tools from your MCP servers**
+  - `agent.add_mcp("npx -y @modelcontextprotocol/server-memory")` (or a URL, or an mcp.json) gives the agent that server's tools.
+  - The chat window's 🔌 mcp panel adds, switches and watches them; `import_mcp()` brings in your editor's mcp.json.
+  - A tool that doesn't say it only reads asks run or skip first; `mcp=False` turns MCP off.
+
 ## [0.49.0] - 2026-11-07
 
 ### Added

@@ -27,6 +27,7 @@ findings. So does a model that writes its answer as a message anyway.
 from __future__ import annotations
 
 import functools
+import inspect
 import sys
 import time
 from typing import Any, Callable, Iterable
@@ -119,13 +120,40 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
         extra["response_format"] = _reply_format()
     return deepagents.create_deep_agent(
         model=model,
-        tools=tools,
+        tools=_langchain_tools(tools),
         system_prompt=system_prompt,
         middleware=middleware,
         checkpointer=checkpointer if checkpointer is not None else new_checkpointer(),
         name="aws-analyzer",
         **extra,
     )
+
+
+def _object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """
+    A tool's JSON schema as every provider takes it: an object, with properties (an MCP server may leave them out).
+    """
+    return {**schema, "type": "object", "properties": schema.get("properties") or {}}
+
+
+def _langchain_tools(tools: list[Callable[..., Any]]) -> list[Any]:
+    """
+    The tools as deepagents takes them: functions as they are, and an MCP server's tool (one with `mcp_schema`) as a
+    StructuredTool with that JSON schema, so the model sees every detail of its arguments (enums, nested objects,
+    descriptions) rather than what a Python signature can say.
+    """
+    if not any(hasattr(fn, "mcp_schema") for fn in tools):
+        return tools
+    structured = _require("langchain_core.tools", "MCP tools", package="langchain-core").StructuredTool
+    made: list[Any] = []
+    for fn in tools:
+        schema = getattr(fn, "mcp_schema", None)
+        if schema is None:
+            made.append(fn)
+            continue
+        made.append(structured(name=fn.__name__, description=inspect.getdoc(fn) or fn.__name__,
+                               args_schema=_object_schema(schema), func=fn))
+    return made
 
 
 def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
