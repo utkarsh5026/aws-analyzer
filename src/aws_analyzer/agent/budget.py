@@ -44,6 +44,8 @@ class Budget:
         save_files      the most files one save_s3_files call may copy (only with a Python workspace)
         charts          the most charts show_chart may put in one answer (only with a Python workspace)
         kb_searches     search_kb, file_chunks and answer_kb calls per question (only with the Bedrock knowledge base toolkit)
+        dynamodb_items  the most items one table_shape call may scan (it costs read capacity; only with the DynamoDB
+                        toolkit)
         ask_keys        an S3 listing (find_files, folder_summary, save_s3_files) that goes past this many keys asks
                         the user first: go on (up to s3_keys), stop here, or skip it (with interrupt_on)
         ask_bytes       saving more than this into the workspace asks the user first (with interrupt_on)
@@ -71,6 +73,7 @@ class Budget:
     save_files: int = 500
     charts: int = 8
     kb_searches: int = 10
+    dynamodb_items: int = 1_000
     ask_keys: int = 20_000
     ask_bytes: int = 10 * 1024 * 1024
     memory_bytes: int = 8 * 1024

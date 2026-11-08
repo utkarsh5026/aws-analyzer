@@ -1254,6 +1254,8 @@ class AgentView(_BaseView):
             limits.append(["Notes", human_size(budget.memory_bytes), "a note that would go past it isn't kept"])
         if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
             limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb, file_chunks and answer_kb stop running"])
+        if any(toolkit.name == "dynamodb" for toolkit in core.toolkits):
+            limits.append(["DynamoDB items", f"{budget.dynamodb_items:,}", "table_shape samples no more in one scan"])
         if core.ask_more:
             limits.append(["Used up", "tool calls, time, cost, runs, searches, charts, workspace",
                            "it asks first: raise the limit for the question (twice as much) or answer now"])

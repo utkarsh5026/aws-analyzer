@@ -283,7 +283,7 @@ To ask about what an explorer window shows, pass the window as `focus=`: `agent.
 
 ## What it can call { #tools }
 
-Eighteen read-only tools over Lambda and S3, and seven for [Bedrock knowledge bases](#knowledge-bases). Each returns a compact summary with what it covered, never raw AWS data.
+Eighteen read-only tools over Lambda and S3, seven for [Bedrock knowledge bases](#knowledge-bases), and more for [Step Functions, API Gateway](#across-services), SageMaker, DynamoDB and OpenSearch. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -339,6 +339,68 @@ Eighteen read-only tools over Lambda and S3, and seven for [Bedrock knowledge ba
     | `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them, with findings about the result |
     | `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks and, with `question=`, where its best passage ranks against the whole knowledge base's |
     | `answer_kb(question, knowledge_base, model, n, data_source, search_type)` | The answer the knowledge base gives once a model has read the passages (Bedrock's `RetrieveAndGenerate`): which parts cite which sources, how much of it a citation backs, its estimated cost, and findings |
+
+    **Step Functions**, which [lead to Lambda](#across-services):
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_state_machines(match, days)` | Every state machine's executions over the last days from CloudWatch (started, failed, timed out, throttled), the Lambda functions each calls and its estimated cost, the failing ones first |
+    | `state_machine_details(state_machine, days)` | Its type, logging and tracing, each state in order (what it calls, where it goes next, how it retries and catches errors), and the findings about its definition |
+    | `state_machine_failures(state_machine, since)` | The failed, timed-out and aborted executions grouped by the state they stopped at and the error, each with its share, its newest execution and the Lambda run's function and request ID |
+    | `list_executions(state_machine, status, since, limit)` | Its executions in a window, newest first, with how many ended each way |
+    | `execution_details(execution, state_machine)` | One execution step by step, the step that ended it, and the failed Lambda step's run: its last lines and the file and line its traceback names |
+
+    **API Gateway**, which [leads to Lambda](#across-services) too:
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_apis(match, days)` | Every REST, HTTP and WebSocket API's requests, 4xx and 5xx errors and latency from CloudWatch, its routes, the functions it calls, whether it keeps an access log, its estimated cost |
+    | `api_details(api, stage, days)` | Its URL and stages, each route with who may call it, what it calls and how long API Gateway waits, and the findings |
+    | `api_errors(api, stage, since)` | CloudWatch's counts, the failed calls in the stage's access log grouped by status, error and route, and the Lambda run behind the newest one |
+    | `api_calls(api, stage, since, until, search, status, limit)` | The calls the access log recorded, found by a request ID, a path or any text; with one match, the Lambda run behind it |
+
+    **SageMaker**:
+
+    | Tool | What it returns |
+    |---|---|
+    | `sagemaker_running()` | Everything billing by the hour (notebook instances, Studio apps, endpoints, jobs), the most expensive first, with what looks forgotten and the command that stops it |
+    | `training_jobs(since, status, limit)` | The recent training jobs, each failure in one line and what kind it was (memory, disk, a missing package, capacity) |
+    | `training_job(name)` | One job: why it failed and what to change, how long each stage took, its cost, and the error each instance's log ends in |
+    | `sagemaker_endpoints(days)` | Every endpoint's monthly cost, requests and 5xx errors, and the idle ones |
+    | `sagemaker_pipelines()` and `pipeline_run(pipeline, run)` | How the latest runs went, and one run step by step: the step that broke and the training job it started |
+
+    **DynamoDB**, which never sends an item's values to the model:
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_tables(match)` | Every table's keys, items, size, billing, throttles, estimated cost and warnings |
+    | `table_details(table)` | Keys, indexes and the query that reads each, capacity, stream, TTL, backups, its last day from CloudWatch, its cost by part, and the findings |
+    | `table_shape(table, items, index)` | A sample spread over the table (a parallel Scan, up to the budget's `dynamodb_items`): each attribute's types and fill rate, number ranges, lengths and key shapes like `USER#<number>`, never a value |
+
+    **OpenSearch**:
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_vector_stores(match)` | Domains and Serverless collections: version, nodes, network, encryption, cost, the OCUs Serverless bills when idle, and the findings |
+    | `store_indexes(store)` | Its indexes, which hold vectors, how many documents have one, and whether the graphs fit in the nodes' memory |
+    | `index_details(index)` | One index's vector fields in plain words (engine, similarity, what a score means), the fields to filter on, and the findings |
+    | `check_vectors(index, documents)` | A sample of its stored vectors measured: dimensions, lengths, zero and repeated vectors, documents without one. No document's fields or vectors reach the model |
+
+### Across services { #across-services }
+
+A failure in a workflow or an API often starts in a Lambda function, and the agent follows it there.
+{ .gist }
+
+```python
+agent = AgentView()
+agent.ask("Why did order-pipeline fail last night?")
+agent.ask("Why does orders-api return 504s since this morning?")
+```
+
+Step Functions records the request ID of the Lambda run behind each task, and an API stage's access log can record the one behind each call (`$context.integration.requestId`). So `state_machine_failures` and `execution_details` name the function and the run that broke a workflow, `api_errors` the run behind the newest failed call, and each reads that run's log lines, with the file and line its traceback names. From there the Lambda tools go on: `function_logs(function, search=request_id)` for the whole run, `function_source` for the code. A 504 next to a run that took 41 seconds says the function outran the 29 seconds API Gateway waits.
+
+!!! tip "Worth knowing"
+    Every agent has these toolkits, and their tools' descriptions go to the model with each question: about 20,000 tokens in all, cached on Amazon Bedrock after the first question. `toolkits=["lambda", "s3"]` keeps only what you need. Nothing here starts, redrives, stops or deletes anything: the findings give the command for you to run.
 
 ### Bedrock knowledge bases { #knowledge-bases }
 
@@ -772,7 +834,8 @@ core = AgentAnalyzer(
     memory=True,                                     # keeps notes between conversations; a path picks the file
     chats=True,                                      # saves every conversation with a title; a path picks the file
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
+    toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb", "stepfunctions", "apigateway",
+                                                     # "sagemaker", "dynamodb" and "opensearch"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
     runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
@@ -786,11 +849,11 @@ core = AgentAnalyzer(
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs` and `recheck_request` (what in an answer its tools didn't return, how it cites them, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`), and `cores=` any toolkit's analyzer by its name: `cores={"stepfunctions": StepFunctionsAnalyzer(region="eu-west-1")}`. The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs` and `recheck_request` (what in an answer its tools didn't return, how it cites them, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
-The agent's tools come in toolkits, one per AWS service: `toolkits=["lambda", "s3", "bedrock_kb"]` is the default. A toolkit of your own adds tools beside them. Give it a name, a sentence for the model on what it covers, and `tools()`: plain functions whose type hints and docstrings tell the model how to call them, each returning a dict.
+The agent's tools come in toolkits, one per AWS service: `toolkits=["lambda", "s3", "bedrock_kb", "stepfunctions", "apigateway", "sagemaker", "dynamodb", "opensearch"]` is the default. A toolkit of your own adds tools beside them. Give it a name, a sentence for the model on what it covers, and `tools()`: plain functions whose type hints and docstrings tell the model how to call them, each returning a dict.
 
 ```python
 from aws_analyzer.agent import AgentView, Toolkit
@@ -821,13 +884,13 @@ Its tools get the same budget, error handling and report as the built-in ones, a
 
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices, so each answer shows its estimated cost and the budget's `usd` limit applies. OpenAI's and Azure OpenAI's prices depend on the plan, the region and the deployment type, so there are none built in: pass `model_prices=` for them (or to override Bedrock's). Without a price the cost shows as unknown, never a guess.
 
-The rules and the tools' descriptions (about 12,000 tokens with the built-in tools, the same for every question) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
+The rules and the tools' descriptions (about 20,000 tokens with the built-in tools, the same for every question; about 9,000 with `toolkits=["lambda", "s3"]`) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
 
 On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005. A knowledge base search embeds its question, a fraction of a cent; the vector store bills by its own terms (OpenSearch Serverless by the hour, searched or not).
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. The Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch tools need their guides' read-only policies ([Step Functions](stepfunctions.md#permissions), [API Gateway](apigateway.md#permissions), [SageMaker](sagemaker_env.md#permissions), [DynamoDB](dynamodb.md#permissions), [OpenSearch](opensearch.md#permissions)), with `logs:FilterLogEvents` and `lambda:GetFunction` for the Lambda run behind a step or call, `logs:DescribeLogStreams` and `logs:GetLogEvents` for a training job's log, and `dynamodb:Scan` for `table_shape`. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 

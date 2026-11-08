@@ -66,7 +66,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      tools, the AWS reads they make, its part of the system prompt, and the pure summarize_*
                      functions that turn an analyzer's results into what the model reads. lambda_tools.py is
                      Lambda's and s3_tools.py S3's, with s3_triggers, which joins the two when the agent has both;
-                     bedrock_kb_tools.py is Bedrock Knowledge Bases'. TOOLKITS (toolkits/__init__.py) names them.
+                     bedrock_kb_tools.py is Bedrock Knowledge Bases'; stepfunctions_tools.py, apigateway_tools.py
+                     (both reading the Lambda run behind a failed step or call), sagemaker_tools.py, dynamodb_tools.py
+                     and opensearch_tools.py the other services'. TOOLKITS (toolkits/__init__.py) names them.
     runtime.py       How any tool runs: the budget checked first, the call recorded, errors turned into its result,
                      and a pause to ask the user before a big read (ask_user; interrupt_on=).
     guard.py         The read-only guard every toolkit's AWS clients go through.
@@ -174,6 +176,43 @@ from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findin
 from .prompt import asked_at, focus_of, looking_at, parse_query_reply, query_prompt, system_prompt
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
+from .toolkits.apigateway_tools import (
+    APIGATEWAY_TOOL_READS,
+    APIGatewayToolkit,
+    summarize_api,
+    summarize_api_errors,
+    summarize_apis,
+    summarize_calls,
+    summarize_lambda_run,
+)
+from .toolkits.dynamodb_tools import DYNAMODB_TOOL_READS, DynamoDBToolkit, summarize_shape, summarize_table, summarize_tables
+from .toolkits.opensearch_tools import (
+    OPENSEARCH_TOOL_READS,
+    OpenSearchToolkit,
+    summarize_index,
+    summarize_indexes,
+    summarize_stores,
+    summarize_vectors,
+)
+from .toolkits.sagemaker_tools import (
+    SAGEMAKER_TOOL_READS,
+    SageMakerToolkit,
+    summarize_endpoints,
+    summarize_pipeline_run,
+    summarize_pipelines,
+    summarize_running,
+    summarize_training_job,
+    summarize_training_jobs,
+)
+from .toolkits.stepfunctions_tools import (
+    STEPFUNCTIONS_TOOL_READS,
+    StepFunctionsToolkit,
+    summarize_execution,
+    summarize_executions,
+    summarize_failures,
+    summarize_state_machine,
+    summarize_state_machines,
+)
 from .toolkits.bedrock_kb_tools import (
     KB_TOOL_READS,
     BedrockKBToolkit,
@@ -261,6 +300,16 @@ __all__ = [
     "S3_TOOL_READS",
     "BedrockKBToolkit",
     "KB_TOOL_READS",
+    "APIGATEWAY_TOOL_READS",
+    "APIGatewayToolkit",
+    "DYNAMODB_TOOL_READS",
+    "DynamoDBToolkit",
+    "OPENSEARCH_TOOL_READS",
+    "OpenSearchToolkit",
+    "SAGEMAKER_TOOL_READS",
+    "SageMakerToolkit",
+    "STEPFUNCTIONS_TOOL_READS",
+    "StepFunctionsToolkit",
     "Arrivals",
     "TriggerLink",
     "PythonToolkit",
@@ -371,6 +420,29 @@ __all__ = [
     "kb_sync_row",
     "summarize_knowledge_bases",
     "summarize_kb_health",
+    "summarize_api",
+    "summarize_api_errors",
+    "summarize_apis",
+    "summarize_calls",
+    "summarize_lambda_run",
+    "summarize_endpoints",
+    "summarize_execution",
+    "summarize_executions",
+    "summarize_failures",
+    "summarize_index",
+    "summarize_indexes",
+    "summarize_pipeline_run",
+    "summarize_pipelines",
+    "summarize_running",
+    "summarize_shape",
+    "summarize_state_machine",
+    "summarize_state_machines",
+    "summarize_stores",
+    "summarize_table",
+    "summarize_tables",
+    "summarize_training_job",
+    "summarize_training_jobs",
+    "summarize_vectors",
     "summarize_kb_syncs",
     "summarize_kb_files",
     "summarize_kb_search",

@@ -183,7 +183,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   records), with `log_events`, `split_runs` and `readable_line` only. The `agent/` package imports
   `lambda_functions` (its Lambda toolkit's `_lambda_module()`, imported when the first tool runs; its type hints
   import it under `TYPE_CHECKING`) and reuses it instead of copying it, and so it does with every analyzer a later
-  toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock/` (`SHARED`), for the
+  toolkit reads through (`COMPANIONS["agent"]` lists them; `rules.py` checks each agent module's AWS operations against
+  the services of the analyzers that module imports, `_parents_reached`, and reads a dict's keys as labels), and the third user of `_bedrock/` (`SHARED`), for the
   `_Answer` block its answers are drawn with. `rules.py` checks each of its modules like an analyzer file, reading
   relative imports from the module's own package (`from ..budget import` is the agent's, `from ...lambda_functions
   import` the analyzer). Nothing imports a companion.
@@ -988,9 +989,24 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   in the agent's region (`_kb` takes a name or ID, or the region's only one), with the `summarize_kb_*` functions
   pure. `search_kb` and `file_chunks` call `Retrieve` (the guard's `SEARCHES`) and count against the budget's
   `kb_searches`; their passages go to the model, secrets hidden, and no tool reads a file from S3. A result cut short
-  says where in `stopped_at`, which `answer_findings` repeats. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
-  agent gets; `AgentAnalyzer(toolkits=[...])` takes names, `Toolkit` subclasses or objects (a user's own too), and
-  `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
+  says where in `stopped_at`, which `answer_findings` repeats. `StepFunctionsToolkit` (`stepfunctions_tools.py`:
+  `find_state_machines`, `state_machine_details`, `state_machine_failures`, `list_executions`, `execution_details`)
+  and `APIGatewayToolkit` (`apigateway_tools.py`: `find_apis`, `api_details`, `api_errors`, `api_calls`) make their
+  analyzer with `lambda_core=` the Lambda toolkit's analyzer when the agent has it (`peer("lambda")`), so the Lambda run
+  behind a failed step or call (by the request ID the history or access log records) is read like the Lambda tools
+  read it, and each result names `lambda_run: {function, request_id}` for `function_logs(search=)`; API Gateway's
+  `permission_for` is `apigateway:GET` for every read. `SageMakerToolkit` (`sagemaker_tools.py`: `sagemaker_running`,
+  `training_jobs`, `training_job`, `sagemaker_endpoints`, `sagemaker_pipelines`, `pipeline_run`; the account, never the
+  notebook's own machine), `DynamoDBToolkit` (`dynamodb_tools.py`: `find_tables`, `table_details`, `table_shape`, a
+  parallel Scan capped by the budget's `dynamodb_items`, its read units added to the question's AWS cost, sending only
+  attribute types, counts, number ranges, lengths and key shapes, never a value; the guard's `SEARCHES` let
+  `dynamodb:Scan` through by name) and `OpenSearchToolkit` (`opensearch_tools.py`: `find_vector_stores`,
+  `store_indexes`, `index_details`, `check_vectors`, over the analyzer's own read-only REST requests; no question is
+  embedded). Their `summarize_*` are pure, and `results.py`'s `model_findings` / `clamp_count` and the base's
+  `_region_text` / `_count_cloudwatch` are what they share. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
+  agent gets (all eight services); `AgentAnalyzer(toolkits=[...])` takes names, `Toolkit` subclasses or objects (a user's own too), and
+  `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one, and
+  `cores={name: analyzer}` to any (`_toolkit_settings`). Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
 - **MCP servers** (`mcp_servers/`, with `toolkits/mcp_tools.py` and `window/mcp_panel.py`): `mcp=True` (the default)
@@ -1073,6 +1089,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   (rows and `delete_thread`) are the user's. `AgentView.chats()` / `open_chat()` / `rename_chat()` / `delete_chat()`
   show them, and so does the chat window's **🗂 chats** (`window/chats_panel.py`, `_ChatsPanel`: a `_row_button` per
   chat, ✕ on a second click, a box renaming the open one); the head shows `core.chat_title` (`renamed()`).
+- **The window's words** (`window/tool_words.py`): `_TOOL_WORDS`, what each tool call says it does beside its line; a
+  new tool gets a line there, and a new service a badge in `chat.py`'s `_SERVICES` (`states`, `apigateway`, ...).
 - **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS

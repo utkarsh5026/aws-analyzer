@@ -1,5 +1,6 @@
 """
-The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py, bedrock_kb_tools.py), each a
+The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py, bedrock_kb_tools.py,
+stepfunctions_tools.py, apigateway_tools.py, sagemaker_tools.py, dynamodb_tools.py, opensearch_tools.py), each a
 Toolkit subclass (base.py) with the tools the agent can call about that service. TOOLKITS names the built-in ones;
 AgentAnalyzer(toolkits=[...]) picks which the agent gets, by name or as Toolkit objects (yours too), and
 DEFAULT_TOOLKITS is what it gets without that.
@@ -8,7 +9,8 @@ Adding a service: a module here (`<service>_tools.py`) with a Toolkit subclass t
 analyzer, its name in TOOLKITS (and in DEFAULT_TOOLKITS when every agent should have it), the analyzer in
 COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in README's IAM permissions. A tool that
 joins two services (S3's s3_triggers, which reads Lambda too) goes in one of their toolkits, which offers it when the
-agent has the other (Toolkit.peer()). The Python toolkit (python_tools.py) isn't about a service: it runs the model's
+agent has the other (Toolkit.peer()); Step Functions and API Gateway read the Lambda run behind a failed step or
+call through the agent's Lambda toolkit's analyzer, when it has one, so the Lambda tools can go on from there. The Python toolkit (python_tools.py) isn't about a service: it runs the model's
 code in the agent's workspace (AgentAnalyzer(python=...)), and each service's toolkit offers a save_* tool that puts
 its data there when the agent has it (peer('python')). Nor is the Runbooks toolkit (runbook_tools.py): it reads the
 agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name.
@@ -20,22 +22,30 @@ import difflib
 from typing import Any, Iterable
 
 from .base import Toolkit
+from .apigateway_tools import APIGatewayToolkit
 from .bedrock_kb_tools import BedrockKBToolkit
+from .dynamodb_tools import DynamoDBToolkit
 from .lambda_tools import LambdaToolkit
+from .opensearch_tools import OpenSearchToolkit
 from .python_tools import PythonToolkit
 from .runbook_tools import RunbookToolkit
 from .s3_tools import S3Toolkit
+from .sagemaker_tools import SageMakerToolkit
+from .stepfunctions_tools import StepFunctionsToolkit
 
 TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "bedrock_kb": BedrockKBToolkit,
-                                      "python": PythonToolkit}
-DEFAULT_TOOLKITS = ("lambda", "s3", "bedrock_kb")
+                                      "stepfunctions": StepFunctionsToolkit, "apigateway": APIGatewayToolkit,
+                                      "sagemaker": SageMakerToolkit, "dynamodb": DynamoDBToolkit,
+                                      "opensearch": OpenSearchToolkit, "python": PythonToolkit}
+DEFAULT_TOOLKITS = ("lambda", "s3", "bedrock_kb", "stepfunctions", "apigateway", "sagemaker", "dynamodb",
+                    "opensearch")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
     """
     A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
-    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's and
-    BedrockKBToolkit's analyzer=; PythonToolkit's workspace=).
+    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; every other service
+    toolkit's analyzer=; S3Toolkit's read_files=; PythonToolkit's workspace=).
     """
     if isinstance(spec, Toolkit):
         return spec
@@ -78,5 +88,6 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "BedrockKBToolkit", "LambdaToolkit", "PythonToolkit", "RunbookToolkit", "S3Toolkit", "Toolkit",
-           "default_toolkits", "make_toolkit", "make_toolkits"]
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "APIGatewayToolkit", "BedrockKBToolkit", "DynamoDBToolkit", "LambdaToolkit",
+           "OpenSearchToolkit", "PythonToolkit", "RunbookToolkit", "S3Toolkit", "SageMakerToolkit",
+           "StepFunctionsToolkit", "Toolkit", "default_toolkits", "make_toolkit", "make_toolkits"]

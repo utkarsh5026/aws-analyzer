@@ -66,6 +66,7 @@ from .drawer import _DRAWER_CSS, Target, _focus_html, focus_questions, target_fo
 from .mcp_panel import _MCP_CSS, _McpPanel, mcp_button_label
 from .memory_panel import _MEMORY_CSS, _MemoryPanel
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
+from .tool_words import _TOOL_WORDS
 
 if TYPE_CHECKING:
     from ..view import AgentView
@@ -94,6 +95,7 @@ class _Service:
 
 _COMPUTE, _STORAGE, _MANAGEMENT, _SECURITY = "#ED7100", "#7AA116", "#E7157B", "#DD344C"
 _DATABASE, _MACHINE_LEARNING, _ANALYTICS = "#C925D1", "#01A88D", "#8C4FFF"
+_INTEGRATION, _NETWORKING = "#E7157B", "#8C4FFF"
 _SERVICES = {
     "lambda": _Service("AWS Lambda", "lambda", _COMPUTE, "lambda"),
     "ec2": _Service("Amazon EC2", "ec2", _COMPUTE, "chip"),
@@ -109,6 +111,8 @@ _SERVICES = {
     "bedrock-agent": _Service("Amazon Bedrock", "bedrock", _MACHINE_LEARNING, "spark"),
     "bedrock-agent-runtime": _Service("Amazon Bedrock", "bedrock", _MACHINE_LEARNING, "spark"),
     "sagemaker": _Service("Amazon SageMaker", "sagemaker", _MACHINE_LEARNING, "hex"),
+    "states": _Service("AWS Step Functions", "step functions", _INTEGRATION, "flow"),
+    "apigateway": _Service("Amazon API Gateway", "api gateway", _NETWORKING, "gate"),
     "es": _Service("Amazon OpenSearch Service", "opensearch", _ANALYTICS, "search"),
     "aoss": _Service("Amazon OpenSearch Serverless", "opensearch", _ANALYTICS, "search"),
     "mcp": _Service("An MCP server's tool (not an AWS read)", "mcp", "#5B6B8A", "plug"),
@@ -127,6 +131,9 @@ _DRAWINGS = {
     "hex": "<path d='M12 3l8 4.5v9L12 21l-8-4.5v-9z'/>",
     "search": "<circle cx='11' cy='11' r='6'/><path d='M20 20l-4.5-4.5'/>",
     "plug": "<path d='M9 3v5M15 3v5'/><path d='M6 8h12v3a6 6 0 0 1-12 0z'/><path d='M12 17v4'/>",
+    "flow": "<rect x='4' y='3' width='7' height='5' rx='1'/><rect x='13' y='16' width='7' height='5' rx='1'/>"
+            "<path d='M7.5 8v5h9v3'/>",
+    "gate": "<path d='M4 21V7l8-4 8 4v14'/><path d='M9 21v-7h6v7'/>",
 }
 
 
@@ -165,64 +172,13 @@ _SUGGESTIONS = (
                 ("s3", "lambda", "cloudwatch")),
     _Suggestion(frozenset({"s3", "python"}), "Chart how big each of my buckets is", ("s3", "cloudwatch")),
     _Suggestion(frozenset({"bedrock_kb"}), "Are my knowledge bases up to date?", ("bedrock", "s3")),
+    _Suggestion(frozenset({"stepfunctions", "lambda"}), "Which workflow failed, and which Lambda broke it?",
+                ("states", "lambda", "logs")),
+    _Suggestion(frozenset({"apigateway", "lambda"}), "Why is my API returning 5xx errors?",
+                ("apigateway", "lambda", "logs")),
 )
 
 
-@dataclass(frozen=True)
-class _ToolWords:
-    """
-    What a tool call does, for the comment beside it: while it runs and once it's done, with {t} standing for what
-    it's about (the function, bucket or folder), and what to say when the call names none.
-    """
-
-    running: str
-    done: str
-    nothing: str = ""
-
-
-_TOOL_WORDS = {
-    "find_functions": _ToolWords("finding functions", "found functions"),
-    "function_health": _ToolWords("checking every function's health", "checked every function's health"),
-    "function_errors": _ToolWords("reading {t}'s errors", "read {t}'s errors", "the function"),
-    "function_logs": _ToolWords("reading {t}'s logs", "read {t}'s logs", "the function"),
-    "function_performance": _ToolWords("timing {t}'s runs", "timed {t}'s runs", "the function"),
-    "function_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the function"),
-    "function_code": _ToolWords("reading {t}'s code", "read {t}'s code", "the function"),
-    "function_source": _ToolWords("reading {t}'s source", "read {t}'s source", "the function"),
-    "search_code": _ToolWords("searching {t}'s code", "searched {t}'s code", "the function"),
-    "find_symbol": _ToolWords("looking up a name in {t}'s code", "looked up a name in {t}'s code", "the function"),
-    "find_buckets": _ToolWords("finding buckets", "found buckets"),
-    "bucket_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the bucket"),
-    "list_folder": _ToolWords("listing {t}", "listed {t}", "a folder"),
-    "find_files": _ToolWords("finding files in {t}", "found files in {t}", "a bucket"),
-    "folder_summary": _ToolWords("summing up {t}", "summed up {t}", "a folder"),
-    "file_info": _ToolWords("reading {t}", "read {t}", "a file"),
-    "preview_file": _ToolWords("reading what's in {t}", "read what's in {t}", "a file"),
-    "s3_triggers": _ToolWords("checking what {t} triggers", "checked what {t} triggers", "each bucket"),
-    "find_knowledge_bases": _ToolWords("finding knowledge bases", "found knowledge bases"),
-    "kb_health": _ToolWords("checking {t}'s health", "checked {t}'s health", "the knowledge base"),
-    "kb_syncs": _ToolWords("reading {t}'s syncs", "read {t}'s syncs", "the knowledge base"),
-    "kb_files": _ToolWords("checking {t}'s files", "checked {t}'s files", "the knowledge base"),
-    "search_kb": _ToolWords("searching the knowledge base for '{t}'", "searched the knowledge base for '{t}'",
-                            "a question"),
-    "file_chunks": _ToolWords("reading {t}'s chunks", "read {t}'s chunks", "a file"),
-    "answer_kb": _ToolWords("asking the knowledge base '{t}'", "asked the knowledge base '{t}'", "a question"),
-    "save_function_code": _ToolWords("saving {t}'s code to the workspace", "saved {t}'s code to the workspace",
-                                     "the function"),
-    "save_logs": _ToolWords("saving {t}'s logs to the workspace", "saved {t}'s logs to the workspace", "the function"),
-    "save_s3_files": _ToolWords("saving {t} to the workspace", "saved {t} to the workspace", "files"),
-    "read_runbook": _ToolWords("reading the runbook {t}", "read the runbook {t}", "a runbook"),
-    "run_python": _ToolWords("running Python", "ran Python"),
-    "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
-    "show_chart": _ToolWords("putting {t} in the answer", "put {t} in the answer", "a chart"),
-    "ls": _ToolWords("listing {t}", "listed {t}", "the workspace"),
-    "read_file": _ToolWords("reading {t}", "read {t}", "a file"),
-    "write_file": _ToolWords("writing {t}", "wrote {t}", "a file"),
-    "edit_file": _ToolWords("editing {t}", "edited {t}", "a file"),
-    "glob": _ToolWords("finding files like {t}", "found files like {t}", "a pattern"),
-    "grep": _ToolWords("searching the workspace for {t}", "searched the workspace for {t}", "a text"),
-    "delete": _ToolWords("deleting {t}", "deleted {t}", "a file"),
-}
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file", "knowledge_base")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 _CHOICE_BUTTONS = (("go", "go ▸", "Read all of it"), ("smaller", "smaller", "Read the smaller part instead"),
