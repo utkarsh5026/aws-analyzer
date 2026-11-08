@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -31,7 +31,7 @@ from ..._kit.errors import _error_code
 from ..._kit.fmt import _plural, human_money
 from ..._kit.text import _clip
 from ..budget import Budget
-from ..results import _with_permissions, clamp_count, hide_secrets, model_findings, share_pct
+from ..results import _window, _with_permissions, clamp_count, hide_secrets, model_findings, share_pct
 from .base import Toolkit
 
 if TYPE_CHECKING:
@@ -266,6 +266,7 @@ def summarize_api_errors(report: ErrorReport, run: LambdaRun | None = None) -> d
         "cloudwatch": _api_numbers(report.numbers), "calls_read": len(page.calls) if page else 0,
         "failed_calls": len(failed), "groups": [_error_group_row(g, grouped) for g in report.groups[:_ERROR_GROUPS]],
         "cut_short": bool(page and page.truncated), "findings": model_findings(apigw.error_findings(report)),
+        "window": _window(report.since, page.until if page is not None else datetime.now(timezone.utc)),
     }
     note = _log_note(page, report.stage)
     if note:
@@ -293,7 +294,8 @@ def summarize_calls(page: CallPage, *, limit: int = _DEFAULT_CALLS, status: str 
     out: dict[str, Any] = {"api": page.api.name, "stage": page.stage.name if page.stage else None,
                            "since": page.since, "until": page.until, "calls_read": len(page.calls),
                            "statuses": counts, "matching": len(picked),
-                           "calls": [_call_row(c) for c in picked[:limit]], "cut_short": page.truncated}
+                           "calls": [_call_row(c) for c in picked[:limit]], "cut_short": page.truncated,
+                           "window": _window(page.since, page.until)}
     if len(picked) > limit:
         out["more"] = f"{len(picked) - limit:,} more not listed: narrow with search=, status= or since="
     note = _log_note(page, page.stage)
@@ -334,8 +336,8 @@ class APIGatewayToolkit(Toolkit):
     services = {"GetMetricData": "cloudwatch", "FilterLogEvents": "logs", "DescribeLogGroups": "logs",
                 "GetFunction": "lambda"}
     view = "APIGatewayView"
-    privacy = ("Access log lines (route, status, error, timings and request IDs; never request bodies) and the log "
-               "lines of the Lambda run behind a call go to the model, with anything that looks like a secret hidden.")
+    privacy = ("API Gateway: access log lines (never request bodies) and the Lambda run behind a call, "
+               "secrets hidden.")
     covers = ("Amazon API Gateway: which REST, HTTP and WebSocket APIs exist and how they did (requests, 4xx and "
               "5xx errors, latency, cost), each API's stages and routes (who may call each, what it calls), which "
               "calls fail and why, grouped by status, error and route from the stage's access log, and the Lambda "
@@ -405,8 +407,8 @@ Amazon API Gateway
 
     def find_apis(self, match: str = "", days: int = _DAYS) -> dict[str, Any]:
         """
-        Lists the API Gateway APIs in the region (REST, HTTP and WebSocket) with how they did over the last `days`
-        whole days, from CloudWatch: requests, 4xx and 5xx errors and their rates, latency, each API's stages,
+        Lists the API Gateway APIs in the region (REST, HTTP and WebSocket) with how they did over the last few
+        whole days (days=), from CloudWatch: requests, 4xx and 5xx errors and their rates, latency, each API's stages,
         routes (and how many anyone can call), the Lambda functions it calls, whether it keeps an access log, its
         estimated monthly cost, and the region's findings. The ones with the most 5xx errors come first. match: a
         name glob like 'orders-*'. days: 1 to 90.
@@ -429,7 +431,7 @@ Amazon API Gateway
     def api_details(self, api: str, stage: str = "", days: int = _DAYS) -> dict[str, Any]:
         """
         One API in plain words: its kind, URL and stages (throttling, logging, access log, cache, tracing), the
-        stage's numbers over the last `days` days, each route (who may call it, where it sends a request: the
+        stage's numbers over the last days (days=), each route (who may call it, where it sends a request: the
         Lambda function, URL or AWS call, and how long API Gateway waits), its estimated cost and the findings.
         api: its name or ID ('name/stage' picks a stage). stage: '' for its main one. days: 1 to 90.
         """
@@ -437,6 +439,7 @@ Amazon API Gateway
         report = core.report(api, stage=str(stage or "").strip() or None, days=clamp_count(days, _DAYS, _MOST_DAYS))
         self._count_cloudwatch(report.metrics_read)
         out = summarize_api(report, core.prices)
+        out["region"] = core.region
         numbers = out["numbers"] or {}
         out["_summary"] = (f"{report.api.kind_label}, {_plural(len(report.api.routes), 'route')}"
                            + (f", {numbers['requests']:,} requests, {numbers['errors_5xx']:,} 5xx"
@@ -447,7 +450,7 @@ Amazon API Gateway
 
     def api_errors(self, api: str, stage: str = "", since: str = "24h") -> dict[str, Any]:
         """
-        What's failing in an API's stage since `since`: CloudWatch's request, 4xx and 5xx counts over the window,
+        What's failing in an API's stage in a window: CloudWatch's request, 4xx and 5xx counts over the window,
         and when the stage keeps an access log, its failed calls grouped by status, error and route (the biggest
         group first, each with its share and newest call), plus the log lines of the Lambda run behind the newest
         failed call that called Lambda (found by the request ID the access log recorded), and the findings. api:
@@ -457,6 +460,7 @@ Amazon API Gateway
         report = core.errors(api, stage=str(stage or "").strip() or None, since=since or "24h", limit=_LINES_READ)
         run = self._newest_run(report)
         out = summarize_api_errors(report, run)
+        out["region"] = core.region
         groups = out["groups"]
         out["_summary"] = (f"{_plural(out['failed_calls'], 'failed call')}"
                            + (", " + "; ".join(f"{g['status']} {g['route']} ×{g['count']}" for g in groups[:2])
@@ -478,7 +482,7 @@ Amazon API Gateway
     def api_calls(self, api: str, stage: str = "", since: str = "1h", until: str = "",  # noqa: PLR0913
                   search: str = "", status: str = "", limit: int = _DEFAULT_CALLS) -> dict[str, Any]:
         """
-        The calls an API's stage recorded in its access log between `since` and `until`, newest first: each one's
+        The calls an API's stage recorded in its access log in a window, newest first: each one's
         time, route, status, error, latency (and how much of it the authorizer and integration took) and request
         IDs, with how many got each status. search: text a line must contain, like a request ID, a path or an
         error ('' for all). status: keep calls whose status starts with it ('5', '502'). When exactly one call
@@ -490,6 +494,7 @@ Amazon API Gateway
                           limit=_LINES_READ, pattern=_filter_pattern(search))
         wanted = str(status or "").strip()
         out = summarize_calls(page, limit=clamp_count(limit, _DEFAULT_CALLS, _MOST_CALLS), status=wanted)
+        out["region"] = core.region
         picked = [c for c in page.calls if not wanted or str(c.status or "").startswith(wanted)]
         if len(picked) == 1 and picked[0].lambda_request:
             out["lambda_run"] = summarize_lambda_run(core.lambda_run(page.api, picked[0]))

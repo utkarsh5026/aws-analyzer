@@ -298,8 +298,8 @@ class OpenSearchToolkit(Toolkit):
                 "GetSecurityPolicy": "aoss", "GetAccountSettings": "aoss", "GetMetricData": "cloudwatch"}
     view = "OpenSearchView"
     client_factory = "_service"
-    privacy = ("Index mappings and settings are read; documents are read only to count and measure their vectors "
-               "(check_vectors), and neither their fields nor their vectors are sent to the model.")
+    privacy = ("OpenSearch: mappings and settings; check_vectors measures vectors without sending documents "
+               "or vectors.")
     covers = ("OpenSearch vector search (Service domains and Serverless collections): which domains and collections "
               "exist and what they cost, their indexes and which hold vectors, how many documents have a vector, "
               "whether the vector graphs fit in the nodes' memory, each vector field's engine and similarity in "
@@ -370,6 +370,7 @@ OpenSearch
         core = self.analyzer
         report = core.indexes(str(store or "").split("/")[0].strip())
         out = summarize_indexes(report, core.prices)
+        out["region"] = core.region
         out["_summary"] = (f"{len(report.indexes):,} indexes, "
                            f"{len(report.vector_indexes):,} with vectors")
         out["_next"] = [(self._view_call("indexes", report.store.name), "its indexes and the memory they need")]
@@ -388,6 +389,7 @@ OpenSearch
         info = core.index(store, name)
         knn = self._knn(store, info)
         out = summarize_index(store, info, knn)
+        out["region"] = core.region
         warnings = sum(f["level"] == "warn" for f in out["findings"])
         out["_summary"] = (f"{_plural(info.documents or 0, 'document')}, {_plural(len(info.vectors), 'vector field')}"
                            + (f", {_plural(warnings, 'warning')}" if warnings else ""))
@@ -419,6 +421,7 @@ OpenSearch
         target, name = self._location(index)
         sample = core.sample(target, name, n=1, check=clamp_count(documents, _DEFAULT_CHECKED, _MOST_CHECKED))
         out = summarize_vectors(sample)
+        out["region"] = core.region
         problems = sum(f["level"] == "warn" for f in out["findings"])
         out["_summary"] = (f"{_plural(len(sample.docs), 'document')} checked"
                            + (f", {_plural(problems, 'problem')}" if problems else ", vectors look right"))

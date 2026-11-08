@@ -360,17 +360,27 @@ def _badge(code: str) -> str:
     return f'<span class="ag-svc ag-s-{code}" title="{_esc(service.title)}"></span>'
 
 
+def _one_per_service(codes: Iterable[str]) -> dict[str, str]:
+    """
+    {short name: the first code with it}: each service once, though AWS gives it several codes (OpenSearch's es and
+    aoss, Bedrock's four).
+    """
+    first: dict[str, str] = {}
+    for code in codes:
+        name = _SERVICES[code].short if code in _SERVICES else code
+        first.setdefault(name, code)
+    return first
+
+
 def _badges(codes: Iterable[str]) -> str:
-    return f'<span class="ag-svcs">{"".join(_badge(code) for code in codes)}</span>'
+    return f'<span class="ag-svcs">{"".join(_badge(code) for code in _one_per_service(codes).values())}</span>'
 
 
 def _named_badges(codes: Iterable[str]) -> str:
     """
     Services as their badges with their short names beside them, each service once ('lambda', 'logs', ...).
     """
-    names = {code: _SERVICES[code].short if code in _SERVICES else code for code in codes}
-    shown = dict.fromkeys(names.values())
-    first = {name: next(code for code, short in names.items() if short == name) for name in shown}
+    first = _one_per_service(codes)
     return "".join(f'<span class="ag-named">{_badge(code)}{_esc(name)}</span>' for name, code in first.items())
 
 

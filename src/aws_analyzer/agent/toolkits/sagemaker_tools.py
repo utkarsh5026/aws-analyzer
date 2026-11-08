@@ -27,7 +27,7 @@ from ..._kit.errors import _error_code
 from ..._kit.fmt import HOURS_PER_MONTH, _plural, human_money
 from ..._kit.text import _clip
 from ..budget import Budget
-from ..results import _with_permissions, clamp_count, hide_secrets, model_findings
+from ..results import _window, _with_permissions, clamp_count, hide_secrets, model_findings
 from .base import Toolkit
 
 if TYPE_CHECKING:
@@ -166,6 +166,7 @@ def summarize_training_jobs(report: TrainingList, prices: dict[str, float], *, l
         counts[job.status] = counts.get(job.status, 0) + 1
     costs = [job.cost(prices, now) for job in report.jobs]
     out: dict[str, Any] = {"region": report.region, "since": report.since, "found": len(report.jobs),
+                           "window": _window(report.since, now) if report.since else None,
                            "statuses": counts,
                            "estimated_cost": human_money(sum(c for c in costs if c is not None)),
                            "jobs": [_job_row(job, prices, now) for job in report.jobs[:limit]],
@@ -339,8 +340,8 @@ class SageMakerToolkit(Toolkit):
     services = {"GetMetricData": "cloudwatch", "DescribeLogStreams": "logs", "GetLogEvents": "logs"}
     view = "SageMakerView"
     client_factory = "_service"
-    privacy = ("A training job's hyperparameters and the last lines of its log go to the model with anything that "
-               "looks like a secret hidden. This notebook's files, environments and processes aren't read.")
+    privacy = ("SageMaker: a training job's hyperparameters and last log lines, secrets hidden; this "
+               "notebook's own files aren't read.")
     covers = ("Amazon SageMaker: what's billing by the hour now (notebook instances, Studio apps, endpoints, jobs) and "
               "what looks forgotten, training jobs and why they failed (the error their log ends in and what to "
               "change), endpoints with their traffic and cost, and pipelines with the step that broke a run.")
@@ -402,7 +403,7 @@ Amazon SageMaker
 
     def training_jobs(self, since: str = "7d", status: str = "", limit: int = _DEFAULT_JOBS) -> dict[str, Any]:
         """
-        The region's training jobs made since `since`, newest first: each one's status, how long it ran, its
+        The region's training jobs made in a window, newest first: each one's status, how long it ran, its
         instances and estimated cost, and for a failed one why in one line and what kind of failure it was (memory,
         disk, a missing package, capacity, a script error, ...); with how many ended each way and the findings.
         since: ISO UTC or relative ('24h', '7d'). status: 'Failed', 'InProgress', 'Completed' or 'Stopped' ('' for
@@ -428,6 +429,7 @@ Amazon SageMaker
         core = self.analyzer
         detail = core.training_job(name)
         out = summarize_training_job(detail, core.prices)
+        out["region"] = core.region
         out["_summary"] = (f"{detail.job.status}" + (f": {out['failure_kind']}" if out.get("failure_kind") else "")
                            + f", {_plural(len(detail.hosts), 'host log')}")
         out["_next"] = [(self._view_call("training_job", detail.job.name), "why it failed, and its log")]
@@ -436,7 +438,7 @@ Amazon SageMaker
     def sagemaker_endpoints(self, days: int = _ENDPOINT_DAYS) -> dict[str, Any]:
         """
         Every SageMaker endpoint in the region: its status, instances (or serverless), what it costs a month, its
-        requests and 5xx errors over the last `days` days from CloudWatch and the last day it was called, the most
+        requests and 5xx errors over the last days (days=) from CloudWatch and the last day it was called, the most
         expensive first; and findings on idle endpoints, ones nobody called lately and ones failing requests.
         days: 1 to 90.
         """
@@ -471,6 +473,7 @@ Amazon SageMaker
         core = self.analyzer
         result = core.pipeline_run(pipeline, _run_ref(run))
         out = summarize_pipeline_run(result)
+        out["region"] = core.region
         out["_summary"] = (f"{result.status or 'unknown'}, {_plural(len(result.steps), 'step')}"
                            + (f", failed at {', '.join(out['failed_steps'][:2])}" if out["failed_steps"] else ""))
         out["_next"] = [(self._view_call("pipeline_run", result.pipeline, _run_ref(run)),

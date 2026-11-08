@@ -240,8 +240,8 @@ class DynamoDBToolkit(Toolkit):
     service = "dynamodb"
     services = {"GetMetricData": "cloudwatch"}
     view = "DynamoDBView"
-    privacy = ("Item values are never sent to the model: table_shape reads a sample of items and sends only "
-               "attribute names, types, counts, number ranges, lengths and key shapes.")
+    privacy = ("DynamoDB: never an item's values; table_shape sends only each attribute's types, counts, "
+               "ranges and key shapes.")
     covers = ("Amazon DynamoDB: which tables exist and what they cost, each table's keys, indexes and how to query "
               "them, its capacity, throttles, stream, TTL and backups, and what its items look like (each "
               "attribute's types and how many items have it, the shapes of its keys).")

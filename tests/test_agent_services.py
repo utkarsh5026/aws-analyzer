@@ -20,7 +20,7 @@ from aws_analyzer.agent import (
     AgentAnalyzer, AgentView, Budget, DEFAULT_TOOLKITS, ReadOnlyError, summarize_running,
 )
 from aws_analyzer.agent.toolkits.apigateway_tools import APIGatewayToolkit
-from aws_analyzer.agent.window.chat import _SERVICES, _tool_words
+from aws_analyzer.agent.window.chat import _SERVICES, _badges, _tool_words
 from aws_analyzer.agent.window.tool_words import _TOOL_WORDS
 from aws_analyzer.agent.answers import ToolCall
 from aws_analyzer.apigateway import APIGatewayAnalyzer
@@ -58,6 +58,7 @@ def test_each_toolkit_has_a_badge_and_words_in_the_window():
         kit = AgentAnalyzer(region=REGION, toolkits=[name]).toolkit(name)
         assert all(fn.__name__ in _TOOL_WORDS for fn in kit.tools())
         assert {read.split(":", 1)[0] for reads in kit.reads.values() for read in reads} <= set(_SERVICES)
+    assert _badges(["es", "aoss", "lambda"]).count('class="ag-svc ') == 2
     running = ToolCall("execution_details", {"execution": "order-pipeline/ord-7f3a"}, first="execution")
     assert _tool_words(running, running=True) == "following order-pipeline/ord-7f3a step by step"
     assert _tool_words(ToolCall("api_errors", {"api": "orders-api"}, first="api"), running=False) == \
@@ -98,6 +99,7 @@ def test_a_failed_workflow_leads_to_the_lambda_run_that_broke_it(sfn_world):
     assert top["lambda_run"] == {"function": "orders-etl", "request_id": FAILED_RUN}
     assert top["newest"]["execution"] == "order-pipeline/ord-7f3a"
     assert failures["findings"][0]["level"] == "warn"
+    assert failures["region"] == REGION and failures["window"]["hours"] == 168.0
 
     detail = tool(core, "execution_details")("order-pipeline/ord-7f3a")
     assert detail["failed_step"]["state"] == "LoadOrders" and detail["status"] == "FAILED"
@@ -150,6 +152,7 @@ def test_a_504_leads_to_the_lambda_run_that_took_too_long(apigw_world):
     assert run["lines"][0].endswith(f"START RequestId: {TIMEOUT_RUN} Version: $LATEST")
 
     one = tool(core, "api_calls")("orders-api", since="24h", search=TIMEOUT_RUN)
+    assert one["window"]["hours"] == 24.0 and one["region"] == REGION
     assert one["matching"] == 1 and one["lambda_run"]["request_id"] == TIMEOUT_RUN
     failing = tool(core, "api_calls")("orders-api", since="24h", status="5")
     assert failing["matching"] == sum(n for status, n in failing["statuses"].items() if status.startswith("5"))

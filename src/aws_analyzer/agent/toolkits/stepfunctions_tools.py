@@ -32,7 +32,7 @@ from ..._kit.errors import _error_code
 from ..._kit.fmt import _plural, human_money
 from ..._kit.text import _clip
 from ..budget import Budget
-from ..results import _with_permissions, clamp_count, hide_secrets, model_findings, share_pct
+from ..results import _window, _with_permissions, clamp_count, hide_secrets, model_findings, share_pct
 from .base import Toolkit
 from .lambda_tools import _run_entry
 
@@ -254,6 +254,7 @@ def summarize_failures(report: FailureReport, now: datetime | None = None) -> di
         "histories_read": report.read, "source": report.source,
         "groups": [_failure_group_row(g, grouped, report.machine.name) for g in report.groups[:_FAILURE_GROUPS]],
         "cloudwatch": _machine_numbers(report.numbers), "cut_short": report.truncated,
+        "window": _window(report.since, now),
         "findings": model_findings(sfn.failure_findings(report, now)),
     }
     if len(report.groups) > _FAILURE_GROUPS:
@@ -273,6 +274,7 @@ def summarize_executions(page: ExecutionPage, *, limit: int = _DEFAULT_EXECUTION
     for execution in page.executions:
         counts[execution.status] = counts.get(execution.status, 0) + 1
     out: dict[str, Any] = {"state_machine": page.machine.name, "since": page.since, "source": page.source,
+                           "window": _window(page.since, datetime.now(timezone.utc)) if page.since else None,
                            "found": len(page.executions), "statuses": counts,
                            "executions": [_execution_row(e) for e in page.executions[:limit]],
                            "cut_short": page.truncated}
@@ -378,8 +380,8 @@ class StepFunctionsToolkit(Toolkit):
     services = {"GetMetricData": "cloudwatch", "FilterLogEvents": "logs", "DescribeLogGroups": "logs",
                 "GetFunction": "lambda"}
     view = "StepFunctionsView"
-    privacy = ("An execution's input and output, and the log lines of the Lambda run behind a failed step, go to the "
-               "model cut short and with anything that looks like a secret hidden.")
+    privacy = ("Step Functions: an execution's input and output and its Lambda run's last lines, cut short "
+               "with secrets hidden.")
     covers = ("AWS Step Functions: which state machines exist and how their executions did (started, failed, timed "
               "out, throttled, their cost), what each state does and how it handles errors, where and why "
               "executions fail, grouped by the state they stopped at and the error, and one execution step by step "
@@ -439,8 +441,8 @@ AWS Step Functions
 
     def find_state_machines(self, match: str = "", days: int = _DAYS) -> dict[str, Any]:
         """
-        Lists the Step Functions state machines in the region with how their executions did over the last `days`
-        whole days, from CloudWatch: started, succeeded, failed, timed out, aborted and throttled, the share that
+        Lists the Step Functions state machines in the region with how their executions did over the last few
+        whole days (days=), from CloudWatch: started, succeeded, failed, timed out, aborted and throttled, the share that
         didn't succeed, the average run time, the Lambda functions each calls, the estimated monthly cost, and the
         region's findings. The ones that failed the most come first. Start here for "which workflow is failing".
         match: a name glob like 'order-*'. days: 1 to 90.
@@ -465,7 +467,7 @@ AWS Step Functions
     def state_machine_details(self, state_machine: str, days: int = _DAYS) -> dict[str, Any]:
         """
         One state machine in plain words: its type (Standard or Express), logging and tracing, its executions over
-        the last `days` days from CloudWatch, its estimated monthly cost, and each state in order: what it calls
+        the last days (days=) from CloudWatch, its estimated monthly cost, and each state in order: what it calls
         (the Lambda function, the AWS API), where it goes next, how it retries and catches errors, and its
         timeout; with the findings about its definition (a Lambda task with no retry, a wait with no timeout).
         state_machine: its name or ARN. days: 1 to 90.
@@ -474,6 +476,7 @@ AWS Step Functions
         machine = core.state_machine(state_machine)
         numbers = self._numbers(machine, _days(days))
         out = summarize_state_machine(machine, numbers, core.prices)
+        out["region"] = core.region
         warnings = sum(f["level"] == "warn" for f in out["findings"])
         out["_summary"] = (f"{machine.type.lower()}, {_plural(len(machine.states), 'state')}"
                            + (f", {numbers.unsuccessful:,} of {numbers.started:,} executions unsuccessful"
@@ -498,7 +501,7 @@ AWS Step Functions
 
     def state_machine_failures(self, state_machine: str, since: str = "7d") -> dict[str, Any]:
         """
-        Why a state machine's executions failed since `since`: the newest failed, timed-out and aborted executions
+        Why a state machine's executions failed in a window: the newest failed, timed-out and aborted executions
         (up to 50), grouped by the state they stopped at and the error, the biggest group first, each with its
         cause in one line, its share, how many can still be redriven, its newest execution (to open with
         execution_details) and, for a Lambda state, the function and request ID of the run that failed; with
@@ -508,6 +511,7 @@ AWS Step Functions
         core = self.analyzer
         report = core.failures(state_machine, since=since or "7d", limit=_FAILURES_READ)
         out = summarize_failures(report)
+        out["region"] = core.region
         groups = out["groups"]
         out["_summary"] = (f"{_plural(len(report.failed), 'failed execution')}" + (
             ", " + "; ".join(f"{g['state']}: {g['error'] or 'no error'} ×{g['count']}" for g in groups[:2])
@@ -523,7 +527,7 @@ AWS Step Functions
     def list_executions(self, state_machine: str, status: str = "", since: str = "24h",
                         limit: int = _DEFAULT_EXECUTIONS) -> dict[str, Any]:
         """
-        A state machine's executions started since `since`, newest first: each one's name, ARN, status, start, stop
+        A state machine's executions started in a window, newest first: each one's name, ARN, status, start, stop
         and run time, with how many ended each way. status: 'failed', 'running', 'succeeded', 'timed_out' or
         'aborted' ('' for all). since: ISO UTC or relative ('24h', '7d'). limit: how many to list (at most 100).
         """
@@ -532,6 +536,7 @@ AWS Step Functions
         page = core.executions(state_machine, status=str(status or "").strip() or None, since=since or "24h",
                                limit=max(shown, 200))
         out = summarize_executions(page, limit=shown)
+        out["region"] = core.region
         statuses = out["statuses"]
         out["_summary"] = (f"{_plural(len(page.executions), 'execution')}"
                            + (f" ({', '.join(f'{n} {s.lower()}' for s, n in statuses.items())})" if statuses else ""))
@@ -550,6 +555,7 @@ AWS Step Functions
         core = self.analyzer
         detail = core.execution(execution, machine=str(state_machine or "").strip() or None)
         out = summarize_execution(detail)
+        out["region"] = core.region
         failed = out.get("failed_step")
         out["_summary"] = (f"{detail.execution.status.lower()}, {_plural(len(detail.steps), 'step')}"
                            + (f", failed at {failed['state']}" if failed else "")
