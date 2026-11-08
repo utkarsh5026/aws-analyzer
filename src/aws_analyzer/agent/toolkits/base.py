@@ -33,7 +33,7 @@ import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.render import _call
 from .. import runtime
@@ -43,6 +43,7 @@ from ..budget import Budget, _Refused
 if TYPE_CHECKING:
     from ..analyzer import AgentAnalyzer
 
+CLOUDWATCH_METRICS_PRICE = 0.01
 _NOT_SUGGESTED = frozenset({"help", "explore", "use", "link", "download", "download_zip", "clean_downloads",
                             "save_file_list", "how_it_works_page"})
 
@@ -236,6 +237,23 @@ class Toolkit:
         """
         text = str(regions or "").strip()
         return text or (self.agent.regions if self.agent is not None else None)
+
+    def _region_text(self) -> str:
+        """
+        The region a regional toolkit's tools read, for its section of the prompt; 'the session's region' when it
+        can't be told yet.
+        """
+        try:
+            return self.region or "the session's region"
+        except (BotoCoreError, ValueError):
+            return "the session's region"
+
+    def _count_cloudwatch(self, count: int) -> None:
+        """
+        Counts CloudWatch metrics a tool read with GetMetricData, at CloudWatch's list price
+        (CLOUDWATCH_METRICS_PRICE USD per 1,000), on the question being answered.
+        """
+        self._count_metrics(count, CLOUDWATCH_METRICS_PRICE)
 
     def _count_metrics(self, count: int, price: float) -> None:
         """

@@ -102,7 +102,7 @@ report still renders.
 | <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Athena explorer**                | • The queries, what they cost and why they fail, with a time range and workgroup to pick<br>• Click a query for its SQL, numbers and saved rows<br>• Every Glue table, with chips for what's wrong: empty or gone, no partitions loaded, read in full<br>• The crawlers, failed or stopped ones first | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html#explorer) |
 | <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **SQS, SNS and EventBridge**      | • Where a message went: a topic, queue or rule followed hop by hop to the function that reads it<br>• Queues backing up, and messages close to being deleted unread<br>• Dead-letter queues holding failed messages, with the command that moves them back<br>• Deliveries that fail, and the policy or key that keeps a sender out, with the command that lets it in | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html) |
 | <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **Messaging explorer**            | • Every queue, topic and rule, the failed messages first: click one to open it<br>• Its report, and where its messages go as a map whose hops you click<br>• The dead-letter queues, the fullest first<br>• Live: a queue's backlog every few seconds, and when it would be empty | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html#explorer) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Step Functions and API Gateway, joined to Lambda: which step or call failed, and the run behind it<br>• SageMaker jobs and endpoints, DynamoDB tables and OpenSearch vector indexes<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/`, `bedrock_kb/`, `stepfunctions/`, `apigateway/`, `sagemaker_env/`, `dynamodb/` and `opensearch/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -2657,8 +2657,12 @@ it. Ask "Were last night's uploads to acme-raw processed?" and it joins the buck
 arrived and the function's runs, and finds the files that never ran it (a suffix filter that misses `.CSV`, a
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
-`S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases: whether one is up to date, why
-a sync failed, and what a question finds in it. With `memory=True` it remembers what it learned about your account
+`S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases (whether one is up to date, why
+a sync failed, what a question finds in it), and Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch. A
+problem can cross services: ask "Why did order-pipeline fail?" and it finds the state that failed, then reads the
+log lines of the Lambda run behind it by the request ID the execution's history records, and the line of code that
+raised; ask "Why does orders-api return 504s?" and it groups the failed calls in the stage's access log and reads the
+run behind the newest one. With `memory=True` it remembers what it learned about your account
 ("orders-etl runs in eu-west-1") from one conversation to the next. The model is yours to pick: one on Amazon Bedrock (so
 nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
 [deepagents](https://pypi.org/project/deepagents/).
@@ -2786,6 +2790,40 @@ base: the findings give the `aws bedrock-agent start-ingestion-job` command to r
 `answer_kb` send the passages and answers they get to the model's provider (cut short, secrets hidden), so a model on
 Amazon Bedrock keeps them in AWS; they get 10 calls a question between them (`budget={"kb_searches": 20}` raises it).
 Each `answer_kb` call runs a Bedrock model in your account, and its estimated cost is in the answer's AWS cost.
+
+**Step Functions and API Gateway** have a toolkit each, which every agent gets. Both lead to Lambda: a failed step's
+history and a call's access log line name the request ID of the Lambda run behind them, and these tools read that
+run's lines through the Lambda toolkit's `LambdaAnalyzer`, so `function_logs`, `function_errors` and
+`function_source` go on from there. "Why did order-pipeline fail?" is `state_machine_failures`, then
+`execution_details` on the newest execution of the biggest group; "why does orders-api return 504s?" is `api_errors`.
+
+| Tool                                                  | What it returns                                                                                                                                       |
+| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `find_state_machines(match, days)`                    | Every state machine's executions over the last days from CloudWatch (started, failed, timed out, throttled), the Lambda functions each calls and its estimated cost, the failing ones first |
+| `state_machine_details(state_machine, days)`          | Its type, logging and tracing, each state in order (what it calls, where it goes next, how it retries and catches errors), its cost and the findings about its definition |
+| `state_machine_failures(state_machine, since)`        | The failed, timed-out and aborted executions grouped by the state they stopped at and the error, each with its share, its newest execution, how many can still be redriven, and the Lambda run's function and request ID |
+| `list_executions(state_machine, status, since, limit)` | Its executions in a window, newest first, with how many ended each way (an Express workflow's from its log group)                                  |
+| `execution_details(execution, state_machine)`         | One execution step by step: every state with how it went, its retries, the step that ended it, and the failed Lambda step's run: its last lines and the file and line its traceback names |
+| `find_apis(match, days)`                              | Every REST, HTTP and WebSocket API's requests, 4xx and 5xx errors and latency from CloudWatch, its routes (and how many anyone can call), the functions it calls, whether it keeps an access log, its estimated cost |
+| `api_details(api, stage, days)`                       | Its URL and stages (throttling, logging, access log, cache), each route with who may call it, what it calls and how long API Gateway waits, and the findings |
+| `api_errors(api, stage, since)`                       | CloudWatch's counts over the window, the failed calls in the stage's access log grouped by status, error and route, and the Lambda run behind the newest one |
+| `api_calls(api, stage, since, until, search, status, limit)` | The calls the access log recorded, newest first, found by a request ID, a path or any text; with one match, the Lambda run behind it               |
+
+**SageMaker, DynamoDB and OpenSearch** have a toolkit each too. SageMaker's reads what's billing and why a job failed:
+`sagemaker_running` (everything billing by the hour, the most expensive first, with what looks forgotten),
+`training_jobs` and `training_job` (the error its log ends in and what to change: a bigger instance, a missing
+package), `sagemaker_endpoints` (cost and traffic), `sagemaker_pipelines` and `pipeline_run` (the step that broke,
+and the training job it started). This notebook's own disk and environments aren't read. DynamoDB's are
+`find_tables`, `table_details` (keys, indexes and the query that reads each, capacity, stream, TTL, backups, its
+last day) and `table_shape`, which scans a sample of items spread over the table and sends the model only their
+shape: each attribute's types and fill rate, number ranges, lengths and key shapes (`USER#<number>`), never a value.
+It scans up to 1,000 items a call (`budget={"dynamodb_items": 5_000}` raises it), and the read capacity it used is
+in the answer's AWS cost. OpenSearch's are `find_vector_stores` (domains and Serverless collections, their cost and
+risks), `store_indexes` (which indexes hold vectors, how many documents have one, whether the graphs fit in the
+nodes' memory), `index_details` (each vector field's engine, similarity and what a score means) and
+`check_vectors` (a sample of the stored vectors measured: dimensions, zero and repeated ones; no document's fields
+or vectors reach the model). No question is embedded, so no Bedrock model is called. Nothing in these toolkits
+stops, deletes, writes or starts anything: the findings name the command that would.
 
 ### Running Python (`python=`)
 
@@ -3034,8 +3072,10 @@ core = AgentAnalyzer(
     memory=True,                          # keeps its own notes between conversations (a path: where the SQLite file goes)
     chats=True,                           # saves every conversation with a title, to open again (a path: the file)
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for: all three by default (s3_triggers
+    toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for; by default also "stepfunctions",
+                                          # "apigateway", "sagemaker", "dynamodb" and "opensearch" (s3_triggers
                                           # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
+    cores={"stepfunctions": StepFunctionsAnalyzer(region="eu-west-1")},   # any toolkit's analyzer, by its name
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
     python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
     findings=False,                       # answer in plain text, without findings (on by default)
@@ -3066,7 +3106,13 @@ core.chat_title                # the title of the chat going on
 `summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
 `trigger_findings`, the Bedrock knowledge base toolkit's `summarize_knowledge_bases`, `summarize_kb_health`,
-`summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Python
+`summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Step
+Functions toolkit's `summarize_state_machines`, `summarize_state_machine`, `summarize_failures`, `summarize_executions`
+and `summarize_execution`, API Gateway's `summarize_apis`, `summarize_api`, `summarize_api_errors`, `summarize_calls`
+and `summarize_lambda_run`, SageMaker's `summarize_running`, `summarize_training_jobs`, `summarize_training_job`,
+`summarize_endpoints`, `summarize_pipelines` and `summarize_pipeline_run`, DynamoDB's `summarize_tables`,
+`summarize_table` and `summarize_shape`, OpenSearch's `summarize_stores`, `summarize_indexes`, `summarize_index` and
+`summarize_vectors`, the Python
 toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
 `image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `recheck_request`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
@@ -3104,7 +3150,21 @@ base tools read through `BedrockKBAnalyzer`: `bedrock:ListKnowledgeBases`, `bedr
 `file_chunks`: a search, which changes nothing), `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the
 answering model or inference profile and `bedrock:ListFoundationModels` / `bedrock:ListInferenceProfiles` (for
 `answer_kb`: the same search, then a model writes the answer, which changes nothing) and `s3:ListBucket` on each data source's bucket (`kb_files` and
-`file_chunks` list its files' names, sizes and dates). Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
+`file_chunks` list its files' names, sizes and dates). The Step Functions tools need `states:ListStateMachines`,
+`states:DescribeStateMachine`, `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory`,
+`cloudwatch:GetMetricData` and `logs:FilterLogEvents` (an Express workflow's log group, and the Lambda run behind a
+step, with `lambda:GetFunction` and `logs:DescribeLogGroups`). The API Gateway tools need `apigateway:GET` (IAM's one
+permission for every API Gateway read), `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (the stages' access
+logs, and the Lambda run behind a call). The SageMaker tools need the [SageMaker permissions](#amazon-sagemaker)
+`running`, `training_jobs`, `training_job`, `endpoints`, `pipelines` and `pipeline_run` list, with
+`logs:DescribeLogStreams` and `logs:GetLogEvents` for a training job's log. The DynamoDB tools need
+`dynamodb:ListTables`, `dynamodb:DescribeTable`, `dynamodb:DescribeTimeToLive`, `dynamodb:DescribeContinuousBackups`,
+`dynamodb:ListTagsOfResource`, `cloudwatch:GetMetricData` and, for `table_shape`, `dynamodb:Scan` (the one read
+here that reads items; the guard lets it through by name). The OpenSearch tools need `es:ListDomainNames`,
+`es:DescribeDomains`, `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`,
+`aoss:GetSecurityPolicy`, `aoss:GetAccountSettings`, `cloudwatch:GetMetricData` and, to read indexes,
+`es:ESHttpGet` and `es:ESHttpPost` on a domain (POST to `_search` and `_count` only) or `aoss:APIAccessAll` with a
+data access policy on a collection. Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
 and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
 `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
 `"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the
@@ -3114,7 +3174,8 @@ reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices
 (the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
 on the plan, the region and the deployment type, so there are no built-in ones). Without a price the cost shows as
-unknown, never a guess, and each question's budget is checked against it when there is one. The rules and the tools' descriptions (about 12,000 tokens with the built-in tools, the same for every question) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
+unknown, never a guess, and each question's budget is checked against it when there is one. The rules and the tools' descriptions (about 20,000 tokens with the built-in tools, the same for every question;
+`toolkits=["lambda", "s3"]` brings it to about 9,000) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
 The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
 $0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. A knowledge
 base search embeds its question (about $0.0000004 at Titan Embeddings' price); the vector store bills by its own

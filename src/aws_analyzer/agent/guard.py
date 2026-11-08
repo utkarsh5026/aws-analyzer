@@ -7,7 +7,8 @@ READ_PREFIXES are the AWS operations the tools may call: reads only (FilterLogEv
 and HeadBucket read an object's or a bucket's headers). SEARCHES are the operations allowed by name that don't start
 with one of them: Bedrock's Retrieve searches a knowledge base's vector store and changes nothing (it embeds the
 question and returns passages), and RetrieveAndGenerate does the same search and has a model answer from the passages,
-which only generates text. The guard refuses every other one before its request is built.
+which only generates text. DynamoDB's Scan reads a table's items (the DynamoDB toolkit's table_shape samples them)
+and changes nothing. The guard refuses every other one before its request is built.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from collections import Counter
 from typing import Any
 
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")
-SEARCHES = frozenset({"bedrock-agent-runtime:Retrieve", "bedrock-agent-runtime:RetrieveAndGenerate"})
+SEARCHES = frozenset({"bedrock-agent-runtime:Retrieve", "bedrock-agent-runtime:RetrieveAndGenerate", "dynamodb:Scan"})
 
 
 class ReadOnlyError(PermissionError):

@@ -8,7 +8,8 @@ Check the analyzers against the hard constraints in CLAUDE.md that ruff and pyte
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzers it
-    builds on (COMPANIONS: the agent/ package on lambda_functions/, s3/ and bedrock_kb/, stepfunctions/ on
+    builds on (COMPANIONS: the agent/ package on lambda_functions/, s3/, bedrock_kb/, stepfunctions/, apigateway/,
+    sagemaker_env/, dynamodb/ and opensearch/, stepfunctions/ on
     lambda_functions/ for a Lambda step's logs, apigateway/ on lambda_functions/ for the run behind a call); an
     import of a module a few analyzers share by any other analyzer (SHARED: _bedrock/, for bedrock_kb.py, bedrock_chat.py and
     agent/); a shared module importing an analyzer;
@@ -57,8 +58,9 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on analyzers: it imports them (lazily, so it still imports alone), its UI class is a
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
-# S3Toolkit on S3Analyzer).
-COMPANIONS = {"agent": ("lambda_functions", "s3", "bedrock_kb"), "stepfunctions": ("lambda_functions",),
+# S3Toolkit on S3Analyzer, and one toolkit each on Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch).
+COMPANIONS = {"agent": ("lambda_functions", "s3", "bedrock_kb", "stepfunctions", "apigateway", "sagemaker_env",
+                        "dynamodb", "opensearch"), "stepfunctions": ("lambda_functions",),
               "apigateway": ("lambda_functions",)}
 ALIASES = {"s3_explorer": "s3"}
 # Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
@@ -551,15 +553,16 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
 
     # AWS operations: read-only, and each one's permission documented in README.md.
     services = _client_services(tree) | owner_services(owner)
-    for parent in parents:  # it calls AWS through the analyzers' clients
+    for parent in _parents_reached(tree, inside, parents):  # it calls AWS through the analyzers' clients
         services |= owner_services(parent)
     ops = _operations(services)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     defined |= owner_functions(owner)
-    # Strings that are keyword values or compared with something (engine="converse", kind == "scan") are labels,
-    # not operation names handed to a client.
+    # Strings that are keyword values, compared with something or a dict's keys (engine="converse", kind == "scan",
+    # {"search": ...}) are labels, not operation names handed to a client.
     labels = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.keyword)}
     labels |= {id(c) for n in ast.walk(tree) if isinstance(n, ast.Compare) for c in (n.left, *n.comparators)}
+    labels |= _dict_key_ids(tree)
     found: dict[str, int] = {}
     for node in ast.walk(tree):
         name = None
@@ -589,6 +592,37 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             report.error(where, f"{name} ({candidates[0]}) is not a read-only operation; nothing may write to AWS")
         if not documented:
             report.warn(where, f"{name} needs `{' or '.join(a for a in actions if a)}`, which README.md's IAM permissions don't list")
+
+
+def _parents_reached(tree: ast.AST, inside: tuple[str, ...], parents: tuple[str, ...]) -> tuple[str, ...]:
+    """
+    The analyzers a companion's module calls AWS through: a companion of one analyzer reaches it from every module,
+    and the agent, which builds on many, reaches from each module only the analyzers that module imports (its
+    Step Functions toolkit, stepfunctions/), so a View command's name in one module isn't read as another
+    service's operation.
+    """
+    if len(parents) <= 1:
+        return parents
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported |= set(_analyzers_imported(node, inside))
+    return tuple(parent for parent in parents if parent in imported)
+
+
+def _dict_key_ids(tree: ast.AST) -> set[int]:
+    """
+    The ids of every node in a dict's keys ({"search": ...}, {("bedrock_kb", "search"): ...}): labels a table is
+    keyed by, never an operation handed to a client.
+    """
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key in node.keys:
+            if key is not None:
+                found |= {id(part) for part in ast.walk(key)}
+    return found
 
 
 def _owner(path: Path) -> tuple[str, tuple[str, ...]]:

@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: follows a problem across services**
+  - Every agent now has tools for Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch, beside Lambda, S3 and knowledge bases.
+  - "Why did order-pipeline fail?" finds the failed state and reads the Lambda run behind it; "why does orders-api return 504s?" groups the failed calls and reads the run behind the newest.
+  - `toolkits=["lambda", "s3"]` keeps only the ones you need; DynamoDB's `table_shape` sends the model an item's shape, never its values.
+
 ## [0.53.0] - 2026-11-08
 
 ### Added

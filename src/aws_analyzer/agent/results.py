@@ -109,3 +109,23 @@ def _with_permissions(errors: dict[str, str], permissions: dict[str, str]) -> di
         permission = permissions.get(section.rsplit(":", 1)[-1], "")
         out[section] = _why(code, permission) if permission else code
     return out
+
+
+def model_findings(found: list[tuple[str, str]]) -> list[dict[str, str]]:
+    """
+    A report's findings as the model reads them: [{'level': 'warn', 'message': ...}], warnings first, each with
+    anything that looks like a secret hidden (findings quote error messages, paths and commands).
+    """
+    ordered = sorted(found, key=lambda pair: pair[0] != "warn")
+    return [{"level": level, "message": hide_secrets(text)} for level, text in ordered]
+
+
+def clamp_count(value: Any, default: int, most: int) -> int:
+    """
+    A count the model asked for, between 1 and `most` (`default` when it gave none or something that isn't one).
+    """
+    try:
+        wanted = int(value or default)
+    except (TypeError, ValueError):
+        wanted = default
+    return max(1, min(wanted, most))

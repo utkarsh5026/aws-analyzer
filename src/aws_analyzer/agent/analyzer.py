@@ -6,6 +6,7 @@ It never prints; AgentView shows what it returns.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import threading
@@ -84,7 +85,7 @@ from .llm import (
 from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
 from .runtime import as_tool
-from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
+from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
 from .toolkits.mcp_tools import McpToolkit, mcp_toolkit
 from .workspace import Workspace, workspace_of
 from .workspace.files import workspace_backend
@@ -167,6 +168,29 @@ def _is_python(spec: str | Toolkit | type[Toolkit]) -> bool:
     return isinstance(spec, PythonToolkit)
 
 
+def _toolkit_settings(cores: dict[str, Any] | None, *, lambda_core: Any, lambda_clients: dict[str, Any] | None,  # noqa: PLR0913
+                      prices: dict[str, float] | None, s3_core: Any, read_files: bool, kb_core: Any,
+                      workspace: Workspace | None) -> dict[str, dict[str, Any]]:
+    """
+    Each built-in toolkit's own settings, by its name: cores= ({'stepfunctions': StepFunctionsAnalyzer(...)}) gives
+    any toolkit the analyzer to read through, and lambda_core=, s3_core= and kb_core= are the same for those three.
+    A name cores= has that isn't a toolkit is a ValueError naming the ones there are.
+    """
+    given = dict(cores or {})
+    unknown = sorted(set(given) - set(TOOLKITS))
+    if unknown:
+        close = difflib.get_close_matches(unknown[0], TOOLKITS, n=1)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        raise ValueError(f"cores= has no toolkit {unknown[0]!r}.{hint} It takes {', '.join(sorted(TOOLKITS))}")
+    settings: dict[str, dict[str, Any]] = {name: {"analyzer": core} for name, core in given.items()
+                                           if name != PythonToolkit.name}
+    settings["lambda"] = {"analyzer": lambda_core or given.get("lambda"), "clients": lambda_clients, "prices": prices}
+    settings["s3"] = {"analyzer": s3_core or given.get("s3"), "read_files": read_files}
+    settings["bedrock_kb"] = {"analyzer": kb_core or given.get("bedrock_kb")}
+    settings["python"] = {"workspace": workspace}
+    return settings
+
+
 def _settings_of(value: dict[str, str] | str) -> dict[str, str]:
     """
     env= or headers= as a dict: given as one, or as 'NAME=value' / 'Header: value' lines.
@@ -215,13 +239,18 @@ class AgentAnalyzer(_BaseAnalyzer):
     use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
-    the default is DEFAULT_TOOLKITS: Lambda, S3 and Bedrock knowledge bases, with s3_triggers joining the first
-    two). The Lambda toolkit reads through LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
+    the default is DEFAULT_TOOLKITS: Lambda, S3, Bedrock knowledge bases, Step Functions, API Gateway, SageMaker,
+    DynamoDB and OpenSearch, with s3_triggers joining the first two). The Lambda toolkit reads through LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
     S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It never reads what's inside a
     file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
     looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it).
     The Bedrock knowledge base toolkit ('bedrock_kb') reads through BedrockKBAnalyzer in the session's region (kb_core= to pass your own): health, syncs, files, Retrieve searches and RetrieveAndGenerate
-    answers, whose passages and answers go to the model's provider (budget's kb_searches caps them). python= takes a
+    answers, whose passages and answers go to the model's provider (budget's kb_searches caps them). The Step
+    Functions ('stepfunctions'), API Gateway ('apigateway'), SageMaker ('sagemaker'), DynamoDB ('dynamodb') and
+    OpenSearch ('opensearch') toolkits read through those services' analyzers in the session's region; a failed
+    step's or call's Lambda run is read through the Lambda toolkit's LambdaAnalyzer, so the Lambda tools go on from
+    it. DynamoDB's table_shape scans a sample of items (budget's dynamodb_items caps it) and sends the model only
+    their shape. cores= passes your own analyzer to any toolkit by its name ({'stepfunctions': core}). python= takes a
     Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or network) and adds the Python toolkit:
     run_python runs code the model writes over files the other toolkits save there (Lambda's save_function_code),
     and what it prints goes to the model, secrets hidden (budget's python_runs, python_seconds and workspace_bytes
@@ -306,6 +335,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         s3_core: S3Analyzer | None = None,
         read_files: bool = False,
         kb_core: BedrockKBAnalyzer | None = None,
+        cores: dict[str, Any] | None = None,
         python: Workspace | None = None,
         plan: bool = True,
         runbooks: bool | str | Path | Iterable[str | Path] = True,
@@ -343,9 +373,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         workspace = workspace_of(python)
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
             _with_python(toolkits, workspace),
-            {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
-             "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
-             "python": {"workspace": workspace}})]
+            _toolkit_settings(cores, lambda_core=lambda_core, lambda_clients=lambda_clients, prices=prices,
+                              s3_core=s3_core, read_files=read_files, kb_core=kb_core, workspace=workspace))]
         mcp_kit = mcp_toolkit(mcp)
         if mcp_kit is not None:
             self.toolkits.append(mcp_kit.bind(self))
