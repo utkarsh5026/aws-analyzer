@@ -9,9 +9,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-11-08
+
 ### Added
 
-- 🤖 **Agent: follows a problem across services**
+- 🤖 **Agent: follows a problem across services** ([#220](https://github.com/utkarsh5026/aws-analyzer/pull/220))
   - Every agent now has tools for Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch, beside Lambda, S3 and knowledge bases.
   - "Why did order-pipeline fail?" finds the failed state and reads the Lambda run behind it; "why does orders-api return 504s?" groups the failed calls and reads the run behind the newest.
   - `toolkits=["lambda", "s3"]` keeps only the ones you need; DynamoDB's `table_shape` sends the model an item's shape, never its values.
@@ -1302,7 +1304,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.53.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.54.0...HEAD
+[0.54.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.50.0...v0.51.0
