@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🤖 **Agent: knows what normal looks like**
+- 🤖 **Agent: knows what normal looks like** ([#223](https://github.com/utkarsh5026/aws-analyzer/pull/223))
   - `compare_metric` holds a number against the same hour yesterday and last week, with the ratio and since when it's off.
   - It reads the alarms set on each number; `find_alarms` lists the region's, the firing ones first.
   - The tool works the comparison out and the model copies it: "1,840 ms against 410 ms last week (4.5×), since 02:10".
