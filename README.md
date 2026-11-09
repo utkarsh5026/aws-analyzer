@@ -3114,7 +3114,7 @@ and `summarize_lambda_run`, SageMaker's `summarize_running`, `summarize_training
 `summarize_table` and `summarize_shape`, OpenSearch's `summarize_stores`, `summarize_indexes`, `summarize_index` and
 `summarize_vectors`, the Python
 toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
-`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `recheck_request`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `unbacked_causes`, `hedge_root_causes`, `recheck_request`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what

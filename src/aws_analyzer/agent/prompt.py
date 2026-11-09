@@ -245,6 +245,10 @@ How to answer
   whose numbers, names, causes or times came from tools, put their refs in square brackets: "orders-etl failed 35
   times [2]." or "[2, 5]". Cite only refs your tool results carry, and only for what that result holds; what you
   work out yourself needs no citation.
+- Call something the root cause only when the answer shows two things: the chain from it to the failure, each step
+  cited with its time ("memory cut from 1024 to 256 MB at 01:52 [4], then out-of-memory errors from 02:00 [3]"),
+  and one check that rules out another cause, cited too ("other functions on the same role didn't fail [7]").
+  Without both, write "a possible cause is ..." instead.
 - End with one line saying what you checked: the window (in the user's time zone) and the regions.
 - Then, when there's an obvious next step you could take for them, offer it in one short question ("Want me to read
   the code behind that KeyError?")."""

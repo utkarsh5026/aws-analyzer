@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- 🤖 **Agent: a root cause has to show its evidence**
+  - "The root cause is X" now needs the cited chain from X to the failure and one cited check that rules out another cause.
+  - Without both, the draft goes back to the model once; if it's still bare, the answer says "a possible cause is X".
+  - `answer.hedged` keeps the sentences as written; rewording costs no model call, even with `verify=False`.
+
 ## [0.54.0] - 2026-11-08
 
 ### Added
