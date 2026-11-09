@@ -18,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- 🧰 **Breaking**: **Python 3.11 or newer, with the agent built in**
+- 🧰 **Breaking**: **Python 3.11 or newer, with the agent built in** ([#226](https://github.com/utkarsh5026/aws-analyzer/pull/226))
   - `pip install aws-analyzer` now needs Python 3.11+ and installs the agent's packages (deepagents, LangChain, mcp) too.
   - `AgentView` works right after install: no `[agent]` extra (it's still accepted, and installs nothing more).
   - On a Python 3.10 kernel, pick a newer one (`SageMakerView().new_env("3.12")`) or stay on 0.54.
