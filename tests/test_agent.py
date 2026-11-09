@@ -2074,7 +2074,7 @@ def test_a_root_cause_left_unbacked_is_reworded_as_a_possible_one():
 def test_a_root_cause_the_correction_still_doesnt_back_is_reworded(seeded):
     draft = "The root cause of **etl-nightly**'s failures is its memory setting [1]."
     model = scripted(calls(("function_health", {"since": "2h"})), says(draft), says(draft))
-    said = draft.replace("**", "")
+    said = "The root cause of etl-nightly's failures is its memory setting."
     answer = make(model).ask("Why did etl-nightly fail?")
     assert answer.model_calls == 3 and answer.recheck.causes == [said]
     assert "names a root cause but shows no" in model.prompts[2][-1].content

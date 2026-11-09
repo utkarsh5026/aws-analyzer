@@ -1072,9 +1072,10 @@ def _checked_causes(answer: AgentAnswer, earlier: Iterable[AgentAnswer]) -> list
 
 def _said(text: str, claim: _CauseClaim) -> str:
     """
-    A claim's sentence as it reads: without its bold marks or a list's dash.
+    A claim's sentence as it reads: without its citations, code and bold marks, or a list's dash.
     """
-    return text[claim.start:claim.end].replace("**", "").strip(_SENTENCE_EDGES)
+    sentence = _CODE_SPAN.sub(r"\1", _without_citations(text[claim.start:claim.end]))
+    return sentence.replace("**", "").strip(_SENTENCE_EDGES)
 
 
 def unbacked_causes(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> list[UnbackedCause]:
@@ -1248,7 +1249,7 @@ def _hedged_finding(answer: AgentAnswer) -> list[tuple[str, str]]:
         return []
     quoted = "; ".join(f"“{_clip(sentence, _SENTENCE_CHARACTERS)}”" for sentence in answer.hedged[:_NAMED])
     return [("info", f"It named a root cause it didn't back up, so the answer says “a possible cause” instead: "
-                     f"{quoted}. A root cause needs the chain of cited tool results from it to the failure and one "
+                     f"{quoted} A root cause needs the chain of cited tool results from it to the failure and one "
                      "cited check that rules out another cause. Ask for the timeline and what it ruled out to confirm "
                      "it.")]
 
