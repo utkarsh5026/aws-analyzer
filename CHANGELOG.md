@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-11-09
+
 ### Added
 
 - 🤖 **Agent: knows what normal looks like** ([#223](https://github.com/utkarsh5026/aws-analyzer/pull/223))
@@ -1321,7 +1323,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.51.0...v0.52.0
