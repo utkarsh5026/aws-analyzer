@@ -16,12 +16,12 @@ import importlib.util
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass
 from datetime import date, datetime, tzinfo
 from typing import TYPE_CHECKING, Any, Mapping
 
 from botocore.exceptions import BotoCoreError
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from .._bedrock.blocks import _Answer
 from .._bedrock.prices import _per_million, short_model
@@ -41,7 +41,6 @@ from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_ne
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import Rates, cache_saving, model_place, no_model_hint, provider_info
 from .model_setup import (
-    AGENT_MODULES,
     KernelState,
     blocker,
     ProviderSetup,
@@ -334,13 +333,6 @@ def _installed(module: str) -> bool:
         return False
 
 
-def _python_version() -> tuple[int, int]:
-    """
-    This kernel's Python as (major, minor).
-    """
-    return sys.version_info[:2]
-
-
 def _variable_rows(setup: ProviderSetup, environ: Mapping[str, str]) -> list[list[Any]]:
     """
     The Settings table: each variable the provider reads, what it is, and whether this kernel sets it (never its
@@ -488,10 +480,9 @@ class AgentView(_BaseView):
         calls _ask_drawer_, so it never imports the agent. The model is asked through LangChain's batch() of one
         question, the same as invoke(), which rules.py would read as Lambda's Invoke operation.
         """
-        messages = _require("langchain_core.messages", "Plain-English search", "aws-analyzer[agent]")
         asked = asked_at(_utcnow(), self.core.zone)
-        prompt = [messages.SystemMessage(query_prompt(fields, context=context)),
-                  messages.HumanMessage(f"{asked}\n\n{text}")]
+        prompt = [SystemMessage(query_prompt(fields, context=context)),
+                  HumanMessage(f"{asked}\n\n{text}")]
         model = self.core._chat()
         reply = model.batch([prompt])[0]
         return parse_query_reply(_message_text(reply))
@@ -832,7 +823,7 @@ class AgentView(_BaseView):
         tools = _every(state.usable_tools for state in ready)
         asking = _every(state.asking_tools for state in ready)
         where = str(kit.path) if kit.path is not None else "kept for this session only"
-        findings = mcp_findings(states, path=kit.path, problem=kit.problem, missing_package=kit.missing_package)
+        findings = mcp_findings(states, path=kit.path, problem=kit.problem)
         blocks: list[Any] = [
             _Title(title, f"{_plural(len(states), 'server')} · {where}"),
             _Cards([("Connected", f"{len(ready):,} of {len(states):,}", *(["warn"] if failed else [])),
@@ -1318,14 +1309,11 @@ class AgentView(_BaseView):
 
     def _kernel_state(self, setup: ProviderSetup) -> KernelState:
         """
-        What this kernel has for a provider: its Python, which of the packages it needs are missing, the environment
-        (read only for whether each variable is set) and the provider the agent answers with now.
+        What this kernel has for a provider: which of the packages it needs are missing, the environment (read only
+        for whether each variable is set) and the provider the agent answers with now.
         """
-        major, minor = _python_version()
-        modules = (*AGENT_MODULES, *setup.modules)
-        missing = tuple(module for module in modules if not _installed(module))
-        return KernelState(python_ok=(major, minor) >= (3, 11), python=f"{major}.{minor}",
-                           missing_modules=missing, environ=os.environ, current=self.core.provider)
+        missing = tuple(module for module in setup.modules if not _installed(module))
+        return KernelState(missing_modules=missing, environ=os.environ, current=self.core.provider)
 
     def _zone_key(self) -> str:
         """
@@ -1335,14 +1323,13 @@ class AgentView(_BaseView):
 
     def _setup_cards(self, setup: ProviderSetup, kernel: KernelState) -> _Cards:
         """
-        The setup report's cards: Python, packages, settings, and whether the agent can answer with it here.
+        The setup report's cards: packages, settings, and whether the agent can answer with it here.
         """
         unset = unset_variables(setup, kernel.environ)
         ready = is_ready(setup, kernel)
         packages = "installed" if not kernel.missing_modules else f"{len(kernel.missing_modules)} missing"
         settings = "all set" if not unset else f"{len(unset)} to set"
         return _Cards([
-            ("Python", kernel.python, *([] if kernel.python_ok else ["warn"])),
             ("Packages", packages, *([] if not kernel.missing_modules else ["warn"])),
             ("Settings", settings, *([] if not unset else ["warn"])),
             ("Ready here", "yes" if ready else "not yet", "ok" if ready else "warn"),

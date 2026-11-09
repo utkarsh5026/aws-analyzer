@@ -11,7 +11,7 @@ account, so one account's notes never reach a question about another's.
 _MemoryBackend is that StoreBackend with the project's rules on writes: only MEMORY_FILE is kept, anything that looks
 like a secret is hidden before it's stored, a note without a date gets today's, and the file stays under the budget's
 memory_bytes, since it goes into every conversation's prompt. The agent can't delete it: forget() and forget_all() are
-the user's. memory_backend() makes it once deepagents is loaded; the other helpers here are pure.
+the user's. memory_backend() makes it for an account; the other helpers here are pure.
 """
 
 from __future__ import annotations
@@ -25,7 +25,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from .._kit.deps import _require
+from deepagents.backends import CompositeBackend, StateBackend
+from deepagents.backends.protocol import DeleteResult, EditResult, FileUploadResponse, WriteResult
+from deepagents.backends.store import StoreBackend
+from deepagents.backends.utils import perform_string_replacement
+from deepagents.middleware.memory import MemoryMiddleware
+from langgraph.store.sqlite import SqliteStore
+
 from .._kit.errors import _Hint
 from .._kit.fmt import _plural, human_size
 from .budget import Budget
@@ -241,27 +247,25 @@ def open_store(path: Path) -> Any:
     The LangGraph SqliteStore in the file at `path` (made, with its folder, when it isn't there). One connection,
     shared by the threads the tools run on: the store holds a lock around every statement.
     """
-    stores = _require("langgraph.store.sqlite", "The agent's memory", package="langgraph-checkpoint-sqlite")
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-    store = stores.SqliteStore(connection)
+    store = SqliteStore(connection)
     store.setup()
     return store
 
 
-class _MemoryBackend:
+class _MemoryBackend(StoreBackend):
     """
-    The agent's notes on deepagents' StoreBackend (memory_backend() makes the class with StoreBackend as its base),
+    The agent's notes on deepagents' StoreBackend,
     with this project's rules on what may be written: only NOTES_KEY (MEMORY_FILE to the file tools, which route
     MEMORY_FOLDER here), secrets hidden, undated notes dated today(), at most budget().memory_bytes, and no deletes.
     """
 
     def __init__(self, *, store: Any, namespace: tuple[str, ...], budget: Callable[[], Budget],
-                 today: Callable[[], date], protocol: Any):
+                 today: Callable[[], date]):
         super().__init__(store=store, namespace=lambda runtime: namespace)
         self.budget = budget
         self.today = today
-        self.protocol = protocol
 
     def _refusal(self, path: str) -> str | None:
         """
@@ -307,31 +311,30 @@ class _MemoryBackend:
 
     def write(self, file_path: str, content: str) -> Any:
         refused = self._refusal(file_path) or self.keep(content)
-        return self.protocol.WriteResult(error=refused) if refused else self.protocol.WriteResult(path=file_path)
+        return WriteResult(error=refused) if refused else WriteResult(path=file_path)
 
     def edit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> Any:
         refused = self._refusal(file_path)
         if refused:
-            return self.protocol.EditResult(error=refused)
+            return EditResult(error=refused)
         kept = self.notes_text()
         if not kept:
-            return self.protocol.EditResult(error=f"Error: {MEMORY_FILE} isn't there yet: write_file it first")
-        utils = _require("deepagents.backends.utils", "The agent's memory", package="aws-analyzer[agent]")
-        replaced = utils.perform_string_replacement(kept, old_string, new_string, replace_all)
+            return EditResult(error=f"Error: {MEMORY_FILE} isn't there yet: write_file it first")
+        replaced = perform_string_replacement(kept, old_string, new_string, replace_all)
         if isinstance(replaced, str):
-            return self.protocol.EditResult(error=replaced)
+            return EditResult(error=replaced)
         content, occurrences = replaced
         refused = self.keep(content)
         if refused:
-            return self.protocol.EditResult(error=refused)
-        return self.protocol.EditResult(path=file_path, occurrences=int(occurrences))
+            return EditResult(error=refused)
+        return EditResult(path=file_path, occurrences=int(occurrences))
 
     def delete(self, file_path: str) -> Any:
-        return self.protocol.DeleteResult(error=f"Not deleted: the user clears {MEMORY_FILE} with forget(). Edit "
+        return DeleteResult(error=f"Not deleted: the user clears {MEMORY_FILE} with forget(). Edit "
                                                 "out a note that's wrong instead.")
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[Any]:
-        return [self.protocol.FileUploadResponse(path=path, error="permission_denied") for path, _ in files]
+        return [FileUploadResponse(path=path, error="permission_denied") for path, _ in files]
 
     async def awrite(self, file_path: str, content: str) -> Any:
         return await asyncio.to_thread(self.write, file_path, content)
@@ -351,11 +354,7 @@ def memory_backend(store: Any, account: str, budget: Callable[[], Budget], today
     The agent's notes about `account` as a deepagents backend (a StoreBackend on `store`, under the rules of
     _MemoryBackend). budget() is the agent's Budget and today() the user's date, read at each write.
     """
-    stores = _require("deepagents.backends.store", "The agent's memory", package="aws-analyzer[agent]")
-    protocol = _require("deepagents.backends.protocol", "The agent's memory", package="aws-analyzer[agent]")
-    backend_class = type("MemoryBackend", (_MemoryBackend, stores.StoreBackend), {})
-    return backend_class(store=store, namespace=account_namespace(account), budget=budget, today=today,
-                         protocol=protocol)
+    return _MemoryBackend(store=store, namespace=account_namespace(account), budget=budget, today=today)
 
 
 def memory_middleware(backend: Any) -> Any:
@@ -363,8 +362,7 @@ def memory_middleware(backend: Any) -> Any:
     deepagents' MemoryMiddleware loading the agent's notes (MEMORY_FILE, through `backend`, the file tools' own)
     into the prompt when a conversation starts, with MEMORY_PROMPT in place of its own instructions.
     """
-    middleware = _require("deepagents.middleware.memory", "The agent's memory", package="aws-analyzer[agent]")
-    return middleware.MemoryMiddleware(backend=backend, sources=[MEMORY_FILE], system_prompt=MEMORY_PROMPT)
+    return MemoryMiddleware(backend=backend, sources=[MEMORY_FILE], system_prompt=MEMORY_PROMPT)
 
 
 def with_memory(backend: Any, notes: Any) -> Any:
@@ -372,7 +370,6 @@ def with_memory(backend: Any, notes: Any) -> Any:
     The file tools' backend with MEMORY_FOLDER routed to the agent's notes: `backend` (the Python workspace's, or None
     for deepagents' in-memory files) for every other path.
     """
-    backends = _require("deepagents.backends", "The agent's memory", package="aws-analyzer[agent]")
-    default = backend if backend is not None else backends.StateBackend()
-    return backends.CompositeBackend(default=default, routes={MEMORY_FOLDER: notes})
+    default = backend if backend is not None else StateBackend()
+    return CompositeBackend(default=default, routes={MEMORY_FOLDER: notes})
 

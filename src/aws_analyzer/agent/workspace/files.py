@@ -8,15 +8,16 @@ What a read or a grep hands the model has anything that looks like a secret hidd
 edit works on the file as it is). A write that would take the workspace past the budget's workspace_bytes is refused.
 deepagents' summaries of a long conversation (_STATE_ROUTES) stay in its own in-memory files, out of the workspace.
 
-_WorkspaceBackend holds the backend's methods; workspace_backend() makes it a deepagents BackendProtocol once deepagents
-is loaded (it's loaded only when the agent first runs). The other helpers here are pure.
+_WorkspaceBackend is the backend (a deepagents BackendProtocol); the other helpers here are pure.
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..._kit.deps import _require
+from deepagents.backends import CompositeBackend, StateBackend, protocol, utils
+from deepagents.backends.protocol import BackendProtocol
+
 from ..._kit.fmt import human_size
 from ..budget import Budget
 from ..results import hide_secrets
@@ -82,18 +83,15 @@ def _decoded_text(data: bytes) -> str | None:
         return None
 
 
-class _WorkspaceBackend:
+class _WorkspaceBackend(BackendProtocol):
     """
-    deepagents' file tools on the agent's Python workspace: the methods of a deepagents BackendProtocol, written
-    against `protocol` and `utils` (deepagents.backends.protocol and .utils), which workspace_backend() passes in once
-    deepagents is loaded. budget() is the agent's Budget, read at each write.
+    deepagents' file tools on the agent's Python workspace, as a deepagents BackendProtocol. budget() is the agent's
+    Budget, read at each write.
     """
 
-    def __init__(self, workspace: Workspace, budget: Callable[[], Budget], protocol: Any, utils: Any):
+    def __init__(self, workspace: Workspace, budget: Callable[[], Budget]):
         self.workspace = workspace
         self.budget = budget
-        self.protocol = protocol
-        self.utils = utils
 
     def _text_of(self, path: str) -> str | None:
         return _decoded_text(self.workspace.read(workspace_path(path)))
@@ -133,73 +131,73 @@ class _WorkspaceBackend:
                 continue
             text = _decoded_text(self.workspace.read(entry.path))
             if text is not None:
-                found[tool_path(entry.path)] = self.utils.create_file_data(hide_secrets(text))
+                found[tool_path(entry.path)] = utils.create_file_data(hide_secrets(text))
         return found
 
     def ls(self, path: str) -> Any:
         try:
             entries = listing([(f.path, f.size) for f in self.workspace.files()], path)
         except ValueError as exc:
-            return self.protocol.LsResult(error=str(exc))
-        return self.protocol.LsResult(entries=entries)
+            return protocol.LsResult(error=str(exc))
+        return protocol.LsResult(entries=entries)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> Any:
         try:
             text = self._text_of(file_path)
         except (ValueError, FileNotFoundError):
-            return self.protocol.ReadResult(error=f"File '{file_path}' not found")
+            return protocol.ReadResult(error=f"File '{file_path}' not found")
         if text is None:
-            return self.protocol.ReadResult(error=f"'{file_path}' is a binary file: read it with run_python")
-        return self.utils.slice_read_response(self.utils.create_file_data(hide_secrets(text)), offset, limit)
+            return protocol.ReadResult(error=f"'{file_path}' is a binary file: read it with run_python")
+        return utils.slice_read_response(utils.create_file_data(hide_secrets(text)), offset, limit)
 
     def write(self, file_path: str, content: str) -> Any:
         refused = self._store(file_path, content.encode())
-        return self.protocol.WriteResult(error=refused) if refused else self.protocol.WriteResult(path=file_path)
+        return protocol.WriteResult(error=refused) if refused else protocol.WriteResult(path=file_path)
 
     def edit(self, file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> Any:
         try:
             text = self._text_of(file_path)
         except (ValueError, FileNotFoundError):
-            return self.protocol.EditResult(error=f"Error: File '{file_path}' not found")
+            return protocol.EditResult(error=f"Error: File '{file_path}' not found")
         if text is None:
-            return self.protocol.EditResult(error=f"Error: '{file_path}' is a binary file")
-        replaced = self.utils.perform_string_replacement(text, old_string, new_string, replace_all)
+            return protocol.EditResult(error=f"Error: '{file_path}' is a binary file")
+        replaced = utils.perform_string_replacement(text, old_string, new_string, replace_all)
         if isinstance(replaced, str):
-            return self.protocol.EditResult(error=replaced)
+            return protocol.EditResult(error=replaced)
         content, occurrences = replaced
         refused = self._store(file_path, content.encode())
         if refused:
-            return self.protocol.EditResult(error=refused)
-        return self.protocol.EditResult(path=file_path, occurrences=int(occurrences))
+            return protocol.EditResult(error=refused)
+        return protocol.EditResult(path=file_path, occurrences=int(occurrences))
 
     def glob(self, pattern: str, path: str | None = None) -> Any:
         try:
             prefix = _folder_prefix(path)
-            matches = self.utils.compile_grep_include_glob(pattern)
-        except (ValueError, self.utils.InvalidGlobPatternError) as exc:
-            return self.protocol.GlobResult(error=str(exc))
+            matches = utils.compile_grep_include_glob(pattern)
+        except (ValueError, utils.InvalidGlobPatternError) as exc:
+            return protocol.GlobResult(error=str(exc))
         under = [f for f in self.workspace.files() if f.path.startswith(prefix)]
         found = [{"path": tool_path(f.path), "is_dir": False, "size": f.size} for f in under
                  if matches(f.path[len(prefix):])]
-        return self.protocol.GlobResult(matches=found)
+        return protocol.GlobResult(matches=found)
 
     def grep(self, pattern: str, path: str | None = None, glob: str | None = None, *,
              max_count: int | None = None) -> Any:
         try:
             files = self._visible_files(path)
         except ValueError as exc:
-            return self.protocol.GrepResult(error=str(exc))
-        return self.utils.grep_matches_from_files(files, pattern, _ROOT, glob, max_count=max_count)
+            return protocol.GrepResult(error=str(exc))
+        return utils.grep_matches_from_files(files, pattern, _ROOT, glob, max_count=max_count)
 
     def delete(self, file_path: str) -> Any:
         try:
             self.workspace.delete(workspace_path(file_path))
         except (ValueError, FileNotFoundError):
-            return self.protocol.DeleteResult(error=f"File '{file_path}' not found")
-        return self.protocol.DeleteResult(path=file_path)
+            return protocol.DeleteResult(error=f"File '{file_path}' not found")
+        return protocol.DeleteResult(path=file_path)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[Any]:
-        return [self.protocol.FileUploadResponse(path=path, error=self._store(path, data)) for path, data in files]
+        return [protocol.FileUploadResponse(path=path, error=self._store(path, data)) for path, data in files]
 
     def download_files(self, paths: list[str]) -> list[Any]:
         return [self._download(path) for path in paths]
@@ -208,8 +206,8 @@ class _WorkspaceBackend:
         try:
             data = self.workspace.read(workspace_path(path))
         except (ValueError, FileNotFoundError):
-            return self.protocol.FileDownloadResponse(path=path, error="file_not_found")
-        return self.protocol.FileDownloadResponse(path=path, content=data)
+            return protocol.FileDownloadResponse(path=path, error="file_not_found")
+        return protocol.FileDownloadResponse(path=path, content=data)
 
 
 def workspace_backend(workspace: Workspace, budget: Callable[[], Budget]) -> Any:
@@ -217,9 +215,5 @@ def workspace_backend(workspace: Workspace, budget: Callable[[], Budget]) -> Any
     A deepagents backend (a CompositeBackend) whose files are `workspace`'s, with deepagents' conversation summaries
     kept apart in its in-memory StateBackend. budget() is the agent's Budget, read at each write.
     """
-    backends = _require("deepagents.backends", "The agent's file tools", package="aws-analyzer[agent]")
-    protocol = _require("deepagents.backends.protocol", "The agent's file tools", package="aws-analyzer[agent]")
-    utils = _require("deepagents.backends.utils", "The agent's file tools", package="aws-analyzer[agent]")
-    backend_class = type("WorkspaceBackend", (_WorkspaceBackend, protocol.BackendProtocol), {})
-    files = backend_class(workspace, budget, protocol, utils)
-    return backends.CompositeBackend(default=files, routes=dict.fromkeys(_STATE_ROUTES, backends.StateBackend()))
+    files = _WorkspaceBackend(workspace, budget)
+    return CompositeBackend(default=files, routes=dict.fromkeys(_STATE_ROUTES, StateBackend()))

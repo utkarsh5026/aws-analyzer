@@ -7,7 +7,7 @@ these and draws the report; everything here is pure, so the steps can be tested 
 SETUPS describes the providers llm.PROVIDERS names, and OTHER_SETUPS a few more LangChain providers whose package and
 key are well known; any other provider LangChain's init_chat_model knows gets a general guide (provider_setup()).
 The cells never hold a key: a secret is read with getpass, so it stays out of the notebook file, its outputs and its
-history. AGENT_INSTALL is the pip line for the agent itself, and AGENT_MODULES what it imports to run at all.
+history. AGENT_INSTALL is the pip line for the package with its notebook extras.
 """
 
 from __future__ import annotations
@@ -18,8 +18,7 @@ from typing import Mapping
 
 from .llm import _LANGCHAIN_PROVIDERS, MODEL_ENV, PROVIDERS, _named_provider, provider_info
 
-AGENT_INSTALL = '%pip install --quiet "aws-analyzer[agent,notebook]"'
-AGENT_MODULES = ("deepagents",)
+AGENT_INSTALL = '%pip install --quiet "aws-analyzer[notebook]"'
 _FIRST_QUESTION = "Which Lambda failed last night?"
 _CLOSE_PROVIDERS = 3
 
@@ -51,7 +50,7 @@ class ProviderSetup:
         provider   what provider= takes: 'azure'
         title      'Azure OpenAI'
         model      the model the call names ('' when the provider's default is used)
-        package    the pip package of its LangChain model ('' when the agent's extra brings it)
+        package    the pip package of its LangChain model ('' when aws-analyzer brings it)
         modules    what it imports, to check it's installed: ('langchain_openai',)
         variables  the environment variables it reads
         call       the AgentView(...) that starts the agent on it
@@ -78,7 +77,7 @@ def _key(name: str, title: str) -> SetupVar:
 
 
 _BEDROCK = ProviderSetup(
-    "bedrock", "Amazon Bedrock", model="haiku", modules=("langchain_aws",),
+    "bedrock", "Amazon Bedrock", model="haiku",
     variables=(SetupVar("AWS_DEFAULT_REGION", "us-east-1", "the region Bedrock is called in, when the notebook's "
                         "own isn't the one you want", needed=False),),
     call='AgentView(provider="bedrock")',
@@ -89,7 +88,7 @@ _BEDROCK = ProviderSetup(
     where="Amazon Bedrock in your own AWS account: nothing leaves AWS, and no key is needed",
 )
 _OPENAI = ProviderSetup(
-    "openai", "OpenAI", model="gpt-4.1", modules=("langchain_openai",),
+    "openai", "OpenAI", model="gpt-4.1",
     variables=(_key("OPENAI_API_KEY", "OpenAI"),
                SetupVar("OPENAI_BASE_URL", "http://localhost:4000", "a server that speaks OpenAI's API instead "
                         "(LiteLLM, vLLM, OpenRouter)", needed=False)),
@@ -98,7 +97,7 @@ _OPENAI = ProviderSetup(
     where="OpenAI, outside AWS",
 )
 _AZURE = ProviderSetup(
-    "azure", "Azure OpenAI", modules=("langchain_openai",),
+    "azure", "Azure OpenAI",
     variables=(SetupVar("AZURE_OPENAI_ENDPOINT", "https://<resource>.openai.azure.com", "your Azure OpenAI "
                         "resource's endpoint"),
                SetupVar("AZURE_OPENAI_DEPLOYMENT", "<deployment name>", "the deployment of a model that can call "
@@ -280,15 +279,11 @@ class KernelState:
     """
     What setup() found in this kernel, for setup_findings().
 
-        python_ok        the Python is new enough for the agent (3.11+)
-        python           its version, '3.10'
-        missing_modules  the agent's and the provider's packages that aren't installed, by import name
+        missing_modules  the provider's packages that aren't installed, by import name
         environ          the environment variables (only whether each is set is read)
         current          the provider the agent answers with now ('' when none)
     """
 
-    python_ok: bool
-    python: str
     missing_modules: tuple[str, ...] = ()
     environ: Mapping[str, str] = field(default_factory=dict)
     current: str = ""
@@ -298,8 +293,6 @@ def _package_of(module: str, setup: ProviderSetup) -> str:
     """
     The pip name of a module the agent imports: 'langchain_aws' -> 'langchain-aws'.
     """
-    if module in AGENT_MODULES:
-        return "aws-analyzer[agent]"
     return setup.package or module.replace("_", "-")
 
 
@@ -315,14 +308,10 @@ def _install_finding(setup: ProviderSetup, missing: tuple[str, ...]) -> tuple[st
 
 def setup_findings(setup: ProviderSetup, kernel: KernelState) -> list[tuple[str, str]]:
     """
-    What stands between this kernel and the agent answering with the provider: an old Python, packages to install,
+    What stands between this kernel and the agent answering with the provider: packages to install,
     variables to set. Each says the step that fixes it; none when it's ready.
     """
     findings: list[tuple[str, str]] = []
-    if not kernel.python_ok:
-        findings.append(("warn", f"This kernel runs Python {kernel.python}: the agent needs 3.11 or newer, since "
-                                 "deepagents does. Pick a kernel with a newer Python (in SageMaker, the "
-                                 "SageMaker Distribution image), then run the steps below there."))
     if kernel.missing_modules:
         findings.append(_install_finding(setup, kernel.missing_modules))
     missing = unset_variables(setup, kernel.environ)
@@ -361,11 +350,9 @@ def suggested_provider(current: str, ready: list[str]) -> str:
 
 def blocker(setup: ProviderSetup, kernel: KernelState) -> str:
     """
-    What stands first between this kernel and the provider, in a few words: 'Python 3.11+', 'packages',
+    What stands first between this kernel and the provider, in a few words: 'packages',
     'AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY'; '' when it's ready.
     """
-    if not kernel.python_ok:
-        return "Python 3.11+"
     missing = unset_variables(setup, kernel.environ)
     if missing:
         return ", ".join(variable.name for variable in missing)

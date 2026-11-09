@@ -25,7 +25,7 @@ def _modules() -> set[str]:
 
 
 def test_wheel_ships_the_package_and_exports_every_analyzer():
-    tomllib = pytest.importorskip("tomllib")  # stdlib from Python 3.11
+    import tomllib
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     wheel = config["tool"]["hatch"]["build"]["targets"]["wheel"]
     assert wheel["packages"] == ["src/aws_analyzer"] and "force-include" not in wheel

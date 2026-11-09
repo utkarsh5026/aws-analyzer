@@ -11,7 +11,7 @@ Each vector field in plain English, whether its graphs fit in the memory your no
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: reads and searches, never writes</li>
   <li>Domains and Serverless collections</li>
   <li>Plain text outside Jupyter</li>

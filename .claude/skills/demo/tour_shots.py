@@ -12,8 +12,7 @@ button, clicks it with a ring, types into search boxes a letter at a time, and s
 it. A frame is taken at every step of the way, and while the window is loading, so the tour shows what a user waits
 for. The frames become docs/images/<name>-{light,dark}.webp (lossless, looping), and the height= of both images is set
 in the window's guide, by shots.py's set_height. The S3 explorer's tour (explorer-tour) is made by explorer_shots.py.
-agent-chat-tour plays agent_chat_shots.py's scripted model, so like that script it needs Python 3.11 or newer with the
-agent's packages (agentenv/bin/python .claude/skills/demo/tour_shots.py agent-chat-tour).
+agent-chat-tour plays agent_chat_shots.py's scripted model, like that script.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
 Playwright installs (playwright install chromium). In a cloud session, point $FONTCONFIG_FILE at a fontconfig without

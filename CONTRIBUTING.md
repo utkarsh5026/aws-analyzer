@@ -26,10 +26,10 @@ For the guide site: `pip install -r requirements-docs.txt`, then `mkdocs serve`.
 The same commands, and a few more, are tasks in [`makefile.py`](makefile.py): `make <task>`, or
 `python makefile.py <task>` without make (Windows). `make help` lists them. Before a release, `make local` tries the
 package as pip would install it, without publishing it: it builds the wheel, installs it in a fresh environment in
-`.local-check/`, imports it with only boto3, and runs every service's reports on demo data against that copy
+`.local-check/`, imports it, and runs every service's reports on demo data against that copy
 (`make local ARGS="--live --profile dev"` also reads your own account, read-only; `make notebook` opens JupyterLab on
 it). `make local-agent` does the same for the AI agent in one step: it finds a Python 3.11 or newer, installs the wheel
-with every extra (the agent's LangChain packages and Deno for its sandbox), downloads the sandbox's Pyodide files and
+with every extra (Deno for the agent's sandbox, pandas, ...), downloads the sandbox's Pyodide files and
 asks the agent a question on demo data.
 
 On a machine that already has its Python environments, like a SageMaker notebook's conda ones, `make envs` lists
@@ -66,7 +66,7 @@ just as well for people. The rules that matter most:
   Reports show the command to run instead. A new AWS call needs its read-only IAM permission listed in README.md.
   On the notebook's disk, the only things deleted are what `clean_downloads()` removes from s3's downloads folder and
   what `aws_analyzer.clean_up()` removes: folders aws-analyzer made and marked, its cache, and charts when named.
-- **Python 3.10 and up**, with pandas 2 and 3 both supported.
+- **Python 3.11 and up**, with pandas 2 and 3 both supported.
 - **Reports help someone decide what to do.** The answer comes first, findings say what's wrong, what it costs and
   what to run next, and errors become a short note instead of a traceback. CLAUDE.md's "Product goal" section has
   the details, and the existing commands are the examples to follow.
@@ -100,7 +100,7 @@ just as well for people. The rules that matter most:
    section shows each report or window it touches as a user sees it (Before and After for a change; light mode
    only, no dark-mode pictures), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
    tick "No screenshots" when nothing a user sees changed. The release notes copy them.
-7. CI runs lint and the tests on Python 3.10 to 3.14, imports each module with only boto3,
+7. CI runs lint and the tests on Python 3.11 to 3.14, imports each analyzer with only boto3,
    builds the package, and builds the guide site with `--strict` when `docs/` changes.
 
 ## Releases

@@ -15,6 +15,7 @@ import boto3
 import pytest
 from botocore.exceptions import ClientError
 from botocore.stub import Stubber
+from langchain_core.messages import AIMessage
 from moto import mock_aws
 
 from aws_analyzer import set_timezone
@@ -247,7 +248,6 @@ def test_the_model_is_sent_temperature_0_unless_it_takes_only_its_own():
 
 
 def test_each_provider_s_model_gets_the_temperature():
-    pytest.importorskip("langchain_openai")
     made = AgentAnalyzer(region=REGION, provider="openai", model="gpt-4.1", api_key="not-a-key")._new_chat_model()
     assert made.temperature == 0.0
     assert AgentAnalyzer(region=REGION, model="openai:o3-mini", api_key="k")._new_chat_model().temperature is None
@@ -1579,7 +1579,6 @@ def scripted(*replies):
     threading.Event is waited for before the next reply, to hold the agent back), and remembers the tools it was
     given, the tool it was told to call (tool_choice) and the messages it was sent.
     """
-    pytest.importorskip("deepagents")
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.outputs import ChatGeneration, ChatResult
 
@@ -1624,10 +1623,9 @@ def system_text(model, prompt=0):
 
 def ai_message(**fields):
     """
-    An AIMessage, or a skip where the agent's packages aren't installed (Python 3.10).
+    An AIMessage with these fields.
     """
-    pytest.importorskip("deepagents")
-    return pytest.importorskip("langchain_core.messages").AIMessage(**fields)
+    return AIMessage(**fields)
 
 
 def calls(*steps, tokens=(100, 20)):
@@ -2158,7 +2156,6 @@ def test_a_failed_model_call_becomes_the_answers_error(seeded):
 
 
 def test_without_a_model_it_says_how_to_set_one_up(seeded, capsys):
-    pytest.importorskip("deepagents")
     view = AgentView(make(), mode="text")
     with pytest.raises(_Hint, match="The agent needs a model to answer with, and none is set up"):
         view.core.ask("What failed?")
@@ -2169,7 +2166,6 @@ def test_without_a_model_it_says_how_to_set_one_up(seeded, capsys):
 
 
 def test_with_part_of_an_azure_deployment_it_says_what_to_set(seeded, monkeypatch):
-    pytest.importorskip("deepagents")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://acme.openai.azure.com")
     core = make()
     assert core.provider == "azure"
@@ -2177,14 +2173,7 @@ def test_with_part_of_an_azure_deployment_it_says_what_to_set(seeded, monkeypatc
         core.ask("What failed?")
 
 
-def test_on_an_old_python_it_says_what_it_needs(seeded, monkeypatch, capsys):
-    monkeypatch.setattr(harness, "_MIN_PYTHON", (99, 0))
-    out = run(capsys, AgentView(make(), mode="text").ask, "What failed?")
-    assert "The agent needs Python 3.11 or newer" in out and "Traceback" not in out
-
-
 def test_the_azure_model_comes_from_the_environment(monkeypatch):
-    pytest.importorskip("langchain_openai")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://acme.openai.azure.com")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "not-a-real-key")
     monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "prod-gpt-4o")
@@ -2200,8 +2189,8 @@ def test_asking_through_azure_openai(seeded):
     """
     The whole path to Azure: AzureChatOpenAI, over a mock HTTP endpoint that answers as Azure does.
     """
-    httpx = pytest.importorskip("httpx")
-    openai = pytest.importorskip("langchain_openai")
+    import httpx
+    import langchain_openai as openai
     replies = [
         {"id": "1", "object": "chat.completion", "created": 1, "model": "gpt-4o-2024-11-20", "choices": [
             {"index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [
@@ -2256,8 +2245,6 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     The whole path to Bedrock: ChatBedrockConverse on clients from the agent's own session, the model found from its
     short name in the region's model list, and its tokens priced at Bedrock's list prices.
     """
-    pytest.importorskip("deepagents")
-    pytest.importorskip("langchain_aws")
     core = make(provider="bedrock", model="haiku")
     control, runtime, sent = bedrock_clients(core)
     control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
@@ -2294,7 +2281,6 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
 
 
 def test_a_bedrock_model_is_called_as_given_when_its_list_cant_be_read(seeded):
-    pytest.importorskip("langchain_aws")
     core = make(provider="bedrock", model="anthropic.claude-3-haiku-20240307-v1:0")
     control, _, _ = bedrock_clients(core)
     control.add_client_error("list_foundation_models", "AccessDeniedException")
@@ -2310,7 +2296,6 @@ def test_a_bedrock_model_is_called_as_given_when_its_list_cant_be_read(seeded):
 
 
 def test_openai_and_other_providers_are_made_from_their_settings(monkeypatch):
-    pytest.importorskip("langchain_openai")
     with pytest.raises(_Hint, match="OPENAI_API_KEY is not set"):
         AgentAnalyzer(region=REGION, provider="openai")._chat()
     monkeypatch.setenv("OPENAI_API_KEY", "not-a-real-key")
@@ -2953,7 +2938,6 @@ def test_new_chat_drops_the_queued_questions(seeded):
 
 
 def test_the_chat_window_without_a_model_opens_its_settings_on_bedrock(seeded):
-    pytest.importorskip("deepagents")
     core = make()
     control, _, _ = bedrock_clients(core)
     control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
@@ -2986,7 +2970,6 @@ def test_questions_asked_in_a_cell_join_the_chat_window(seeded, capsys):
 
 
 def test_the_chat_window_switches_the_model_from_its_settings(seeded, monkeypatch):
-    pytest.importorskip("langchain_openai")
     for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY",
                  "AZURE_OPENAI_DEPLOYMENT"):
         monkeypatch.delenv(name, raising=False)
@@ -3022,7 +3005,6 @@ def test_the_chat_window_switches_the_model_from_its_settings(seeded, monkeypatc
 
 
 def test_use_model_switches_the_model_and_keeps_the_last_one_when_it_cant(seeded, monkeypatch, capsys):
-    pytest.importorskip("langchain_openai")
     for name in ("OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
         monkeypatch.delenv(name, raising=False)
     given = types.SimpleNamespace(model_name="mine")
@@ -3745,7 +3727,6 @@ def test_the_file_tools_see_the_workspace_from_its_root():
 
 
 def test_the_workspace_backend_reads_hides_secrets_and_keeps_to_the_budget(tmp_path):
-    pytest.importorskip("deepagents")
     sandbox = LocalSandbox(cache=tmp_path)
     budget = Budget(workspace_bytes=200)
     composite = workspace_files.workspace_backend(sandbox, lambda: budget)
@@ -3827,7 +3808,6 @@ def test_file_tool_calls_count_against_the_budget(seeded, tmp_path):
 
 
 def test_a_script_written_with_the_file_tools_runs_in_the_local_sandbox(pyodide, core):
-    pytest.importorskip("deepagents")
     sandbox = LocalSandbox(cache=pyodide, packages=())
     agent = make(python=sandbox)
     backend = workspace_files.workspace_backend(sandbox, lambda: agent.budget).default
@@ -4130,8 +4110,6 @@ def test_memory_findings_name_old_notes_and_a_full_memory(tmp_path):
 
 
 def test_the_memory_backend_keeps_one_file_hides_secrets_and_keeps_to_its_size(tmp_path):
-    pytest.importorskip("deepagents")
-    pytest.importorskip("langgraph.store.sqlite")
     from datetime import date
 
     from aws_analyzer.agent import memory as memorymod
@@ -4161,7 +4139,6 @@ def test_the_memory_backend_keeps_one_file_hides_secrets_and_keeps_to_its_size(t
 
 
 def test_the_agent_keeps_a_note_and_the_next_conversation_starts_from_it(seeded, tmp_path, capsys):
-    pytest.importorskip("langgraph.store.sqlite")
     from datetime import date
 
     note = "- eu-fn runs in eu-west-1, not us-east-1\n"
@@ -4221,7 +4198,6 @@ def test_notes_from_a_file_are_read_again_for_a_new_conversation(seeded, tmp_pat
 
 
 def test_the_chat_window_shows_and_clears_the_agents_notes(seeded, tmp_path):
-    pytest.importorskip("langgraph.store.sqlite")
     from datetime import date
 
     from aws_analyzer.agent.memory import remove_note
@@ -4320,7 +4296,6 @@ def test_an_answer_is_kept_and_read_back_as_it_was():
 
 
 def test_a_saved_chat_is_listed_and_carried_on_by_a_new_agent(seeded, tmp_path, capsys):
-    pytest.importorskip("langgraph.checkpoint.sqlite")
     file = tmp_path / "chats.sqlite"
     first = make(scripted(says("**etl-nightly** failed."), says("Slow: none.")), chats=file,
                  model_prices={"gpt-test": (2.0, 8.0)})
@@ -4365,7 +4340,6 @@ def test_chats_are_off_unless_asked_and_say_how_to_turn_them_on(seeded, capsys):
 
 
 def test_the_chat_windows_chats_panel_opens_renames_and_deletes_chats(seeded, tmp_path):
-    pytest.importorskip("langgraph.checkpoint.sqlite")
     file = tmp_path / "chats.sqlite"
     earlier = make(scripted(says("etl-nightly failed.")), chats=file)
     earlier.ask("Which Lambda failed last night?", now=NOW)
@@ -4582,8 +4556,8 @@ def test_the_start_cell_and_the_lines_for_every_notebook():
     assert 'export OPENAI_API_KEY="<your key>"' in shell and "OPENAI_BASE_URL" not in shell
     assert shell.endswith('export AWS_ANALYZER_AGENT_MODEL="openai:gpt-4.1"')
     assert every_notebook_lines(provider_setup("azure")).endswith('AWS_ANALYZER_AGENT_MODEL="azure:<deployment name>"')
-    assert install_line(provider_setup("ollama")).endswith('"aws-analyzer[agent,notebook]" langchain-ollama')
-    assert install_line(openai) == '%pip install --quiet "aws-analyzer[agent,notebook]"'
+    assert install_line(provider_setup("ollama")).endswith('"aws-analyzer[notebook]" langchain-ollama')
+    assert install_line(openai) == '%pip install --quiet "aws-analyzer[notebook]"'
 
 
 def test_every_provider_has_steps_and_a_wrong_name_gets_the_close_ones():
@@ -4598,17 +4572,15 @@ def test_every_provider_has_steps_and_a_wrong_name_gets_the_close_ones():
 
 def test_setup_findings_name_the_step_that_fixes_each_gap():
     azure = provider_setup("azure")
-    old = KernelState(python_ok=False, python="3.10", missing_modules=("deepagents", "langchain_openai"),
-                      environ={}, current="bedrock")
+    old = KernelState(missing_modules=("langchain_openai",), environ={}, current="bedrock")
     findings = setup_findings(azure, old)
     text = " ".join(message for _, message in findings)
-    assert [level for level, _ in findings] == ["warn", "warn", "warn", "info"]
-    assert "Python 3.10: the agent needs 3.11 or newer" in text
-    assert "aws-analyzer[agent], langchain-openai are not installed" in text and "restart the kernel" in text
+    assert [level for level, _ in findings] == ["warn", "warn", "info"]
+    assert "langchain-openai is not installed" in text and "restart the kernel" in text
     assert "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY are not set" in text
     assert "use_model('azure')" in text
-    assert blocker(azure, old) == "Python 3.11+"
-    ready = KernelState(python_ok=True, python="3.12", environ=dict.fromkeys(AZURE_KEYS, "x"), current="azure")
+    assert blocker(azure, old) == "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY"
+    ready = KernelState(environ=dict.fromkeys(AZURE_KEYS, "x"), current="azure")
     assert setup_findings(azure, ready) == [] and blocker(azure, ready) == ""
     assert suggested_provider("azure", []) == "azure"
     assert suggested_provider("", ["openai"]) == "openai" and suggested_provider("", []) == "bedrock"
@@ -4618,12 +4590,7 @@ def test_setup_report_shows_the_cells_and_never_a_key(monkeypatch, capsys):
     for name in (*AZURE_KEYS, "OPENAI_API_KEY", "AWS_ANALYZER_AGENT_MODEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-shown")
-    monkeypatch.setattr(viewmod, "_python_version", lambda: (3, 10))
     view = AgentView(mode="text")
-    out = run(capsys, view.setup)
-    assert "0 of 12 providers ready here" in out and "needs Python 3.11+" in out
-
-    monkeypatch.setattr(viewmod, "_python_version", lambda: (3, 12))
     monkeypatch.setattr(viewmod, "_installed", lambda module: True)
     out = run(capsys, view.setup)
     assert "Set up the agent's model" in out and "providers ready here; the steps for Amazon Bedrock below" in out
@@ -4631,10 +4598,12 @@ def test_setup_report_shows_the_cells_and_never_a_key(monkeypatch, capsys):
     assert "needs OPENAI_API_KEY" in out and "setup('azure')" in out and "sk-ant-not-shown" not in out
 
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-secret-value")
-    monkeypatch.setattr(viewmod, "_installed", lambda module: module != "langchain_openai")
+    monkeypatch.setattr(viewmod, "_installed", lambda module: module != "langchain_ollama")
+    out = run(capsys, view.setup, "ollama")
+    assert "langchain-ollama is not installed" in out and "1. Install --" in out
     out = run(capsys, view.setup, "azure")
     assert "Set up Azure OpenAI for the agent" in out and "Ready here: not yet (!)" in out
-    assert "langchain-openai is not installed" in out and "1. Install --" in out
+    assert "1. Install (already installed here)" in out
     assert "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT are not set" in out
     assert 'getpass(' not in out
     assert "azure-secret-value" not in out and 'agent = AgentView(provider="azure")' in out

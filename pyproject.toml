@@ -22,7 +22,7 @@ build-backend = "hatchling.build"
 name = "aws-analyzer"
 dynamic = ["version", "readme"]
 description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions, from a Jupyter notebook: what's there, what it costs, and what to do next. And an agent that answers questions about them in plain English."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Utkarsh Priyadarshi" }]
@@ -35,7 +35,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -44,12 +43,19 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-# The only requirement, as for a single file. 1.35.72 is the first boto3 whose service models have every AWS call
-# the analyzers make (Bedrock's ListKnowledgeBaseDocuments); keep it low, so installing doesn't upgrade the boto3 a
-# SageMaker image ships with.
-dependencies = ["boto3>=1.35.72"]
+# boto3 for every analyzer: 1.35.72 is the first whose service models have every AWS call the analyzers make
+# (Bedrock's ListKnowledgeBaseDocuments); keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships
+# with. The rest is the agent (AgentView): the analyzers import none of it, and the agent imports it at the top.
+dependencies = [
+    "boto3>=1.35.72",
+    "deepagents>=0.7.26",  # the agent loop; brings LangChain's Anthropic and Google Gemini models too
+    "langchain-openai>=1.7",  # OpenAI, Azure OpenAI and OpenAI-compatible servers
+    "langchain-aws>=1.9",  # models on Amazon Bedrock
+    "langgraph-checkpoint-sqlite>=3.1",  # AgentView(memory=True, chats=True): its notes and saved chats, in SQLite
+    "mcp>=1.10",  # AgentView(mcp=...): the tools of the MCP servers you add
+]
 
-# Everything else is optional, as for the files: a command that needs a missing package says what to install.
+# Everything else is optional: a command that needs a missing package says what to install.
 [project.optional-dependencies]
 data = ["pandas>=2", "pyarrow"]  # DataFrames, table previews, Parquet / ORC / Feather / Arrow
 files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and snappy Avro
@@ -62,15 +68,9 @@ files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and sn
     "python-snappy",
 ]
 notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer and the chat window, progress bars
-agent = [  # AgentView: ask about your account in plain English (deepagents needs Python 3.11 or newer)
-    "deepagents>=0.7.26; python_version >= '3.11'",  # brings LangChain's Anthropic and Google Gemini models too
-    "langchain-openai>=1.7; python_version >= '3.11'",  # OpenAI, Azure OpenAI and OpenAI-compatible servers
-    "langchain-aws>=1.9; python_version >= '3.11'",  # models on Amazon Bedrock
-    "langgraph-checkpoint-sqlite>=3.1; python_version >= '3.11'",  # AgentView(memory=True): its notes, in SQLite
-    "mcp>=1.10; python_version >= '3.11'",  # AgentView(mcp=...): the tools of the MCP servers you add
-]
+agent = []  # kept so `pip install "aws-analyzer[agent]"` still works: the agent's packages are dependencies now
 sandbox = ["deno>=2.9"]  # AgentView(python="local"): the agent runs its Python in Pyodide on Deno, on this machine
-all = ["aws-analyzer[data,files,notebook,agent,sandbox]"]
+all = ["aws-analyzer[data,files,notebook,sandbox]"]
 
 [project.urls]
 Homepage = "https://github.com/utkarsh5026/aws-analyzer"

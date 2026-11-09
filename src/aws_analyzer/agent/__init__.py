@@ -1,8 +1,7 @@
 """
 aws_analyzer.agent - ask questions about your AWS account in plain English, from a SageMaker / Jupyter notebook.
 
-Part of aws-analyzer: ``pip install "aws-analyzer[agent]"`` (Python 3.11 or newer), then
-``from aws_analyzer import AgentView``.
+Part of aws-analyzer: ``pip install aws-analyzer`` (Python 3.11 or newer), then ``from aws_analyzer import AgentView``.
 
 A question like "Which Lambda failed last night?" goes to a model, which answers it by calling read-only tools built on
 the package's analyzers, and every answer says what it checked. The model is yours to pick: one on Amazon Bedrock
@@ -15,9 +14,9 @@ invoke which functions and whether the files that arrived ran them. Nothing it d
 tools only read, and a guard on every AWS client the tools use refuses any call that isn't a read, whatever asks for
 it.
 
-Requirements: boto3 (required). deepagents, langchain-openai and langchain-aws for the agent itself (the [agent]
-extra; deepagents brings Anthropic's and Google's LangChain packages too), which need Python 3.11 or newer; another
-provider's LangChain package (langchain-ollama, ...) for that provider; IPython only for rich HTML output.
+Requirements: boto3, deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp, all installed
+with aws-analyzer (deepagents brings Anthropic's and Google's LangChain packages too); another provider's LangChain
+package (langchain-ollama, ...) for that provider; IPython only for rich HTML output.
 
 What it sends to the model: your question, and what its tools return (function and bucket names, settings, counts, file
 names, error messages and log lines, with anything that looks like a key or password hidden). Environment variable

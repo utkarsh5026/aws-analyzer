@@ -25,10 +25,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, NamedTuple
 
 from botocore.exceptions import ClientError
+from langchain.chat_models import init_chat_model
+from langchain_aws import ChatBedrockConverse
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 
 from .._bedrock.models import ModelInfo
 from .._bedrock.prices import DEFAULT_MODEL, MODEL_PRICES, _MODEL_ALIASES, _family_match, model_price, short_model
-from .._kit.deps import _require
 from .._kit.errors import _error_code, _Hint
 
 AZURE_API_VERSION = "2024-10-21"
@@ -339,7 +341,6 @@ def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_versio
             "(os.environ['AZURE_OPENAI_ENDPOINT'] = 'https://<resource>.openai.azure.com', and the key and the "
             "deployment's name), or pass them: AgentView(endpoint=..., deployment=..., api_key=...)."
         )
-    openai = _require("langchain_openai", "The agent's Azure OpenAI model", package="langchain-openai")
     settings: dict[str, Any] = {"azure_endpoint": endpoint, "azure_deployment": deployment,
                                 "api_version": api_version, "max_retries": _RETRIES}
     if max_tokens:
@@ -348,7 +349,7 @@ def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_versio
         settings["api_key"] = api_key
     if token_provider:
         settings["azure_ad_token_provider"] = token_provider
-    return openai.AzureChatOpenAI(**_with_temperature(settings, temperature))
+    return AzureChatOpenAI(**_with_temperature(settings, temperature))
 
 
 def openai_chat_model(model: str, *, api_key: str | None = None, endpoint: str | None = None,
@@ -364,13 +365,12 @@ def openai_chat_model(model: str, *, api_key: str | None = None, endpoint: str |
         raise _Hint("The agent needs an OpenAI API key to answer with OpenAI, and OPENAI_API_KEY is not set. Set it "
                     "in the notebook's environment (os.environ['OPENAI_API_KEY'] = 'sk-...'), or pass it: "
                     "AgentView(provider='openai', api_key=...).")
-    openai = _require("langchain_openai", "The agent's OpenAI model", package="langchain-openai")
     settings: dict[str, Any] = {"model": model, "api_key": key or _NO_KEY, "max_retries": _RETRIES}
     if max_tokens:
         settings["max_tokens"] = max_tokens
     if base_url:
         settings["base_url"] = base_url
-    return openai.ChatOpenAI(**_with_temperature(settings, temperature))
+    return ChatOpenAI(**_with_temperature(settings, temperature))
 
 
 def bedrock_chat_model(model_id: str, *, runtime: Any, control: Any, max_tokens: int | None = None,
@@ -381,11 +381,10 @@ def bedrock_chat_model(model_id: str, *, runtime: Any, control: Any, max_tokens:
     credentials, region and retries; `control` (a bedrock client) is what it reads an application inference
     profile's model with. temperature goes in Converse's inferenceConfig when given.
     """
-    aws = _require("langchain_aws", "The agent's Amazon Bedrock model", package="langchain-aws")
     settings: dict[str, Any] = {"model": model_id, "client": runtime, "bedrock_client": control}
     if max_tokens:
         settings["max_tokens"] = max_tokens
-    return aws.ChatBedrockConverse(**_with_temperature(settings, temperature))
+    return ChatBedrockConverse(**_with_temperature(settings, temperature))
 
 
 def langchain_chat_model(provider: str, model: str, *, api_key: str | None = None,  # noqa: PLR0913
@@ -401,13 +400,12 @@ def langchain_chat_model(provider: str, model: str, *, api_key: str | None = Non
     if not model:
         raise _Hint(f"Name the {info.title} model the agent should answer with: "
                     f"AgentView(model='{provider}:{info.example or '<model>'}').")
-    chat_models = _require("langchain.chat_models", "The agent's model", package="langchain")
     settings: dict[str, Any] = {}
     if api_key:
         settings["api_key"] = api_key
     if endpoint:
         settings["base_url"] = endpoint
-    chat_model = chat_models.init_chat_model(model, model_provider=provider, **settings)
+    chat_model = init_chat_model(model, model_provider=provider, **settings)
     fields = getattr(type(chat_model), "model_fields", {})
     if max_tokens and "max_tokens" in fields:
         chat_model.max_tokens = max_tokens

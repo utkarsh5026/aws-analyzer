@@ -91,7 +91,6 @@ def test_summaries_and_compare_say_what_changed():
 
 
 def test_a_case_runs_end_to_end_on_the_demo_data(monkeypatch):
-    pytest.importorskip("deepagents")
     monkeypatch.setattr(urllib.request, "urlopen", urllib.request.urlopen)
     demo = evals._load_demo()
     model = evals.pick_model("demo")

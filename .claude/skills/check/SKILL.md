@@ -23,9 +23,8 @@ Arguments: `$ARGUMENTS`. If they include `matrix`, pass `--matrix`. Pass anythin
 
 The full run takes about a minute, mostly pytest. `--matrix` builds a throwaway uv environment for each Python in
 `.github/workflows/ci.yml` other than the local one. The first build of each takes about a minute, and later runs
-reuse it. The first line of the output names the local Python. On 3.10 the local run covers pandas 2 /
-IPython 8, and on 3.11+ it covers pandas 3 / IPython 9. The matrix covers the other versions. Use `--matrix`
-after touching anything that uses pandas, IPython or version-specific stdlib, or when asked for the full run.
+reuse it. The first line of the output names the local Python. The matrix covers the other versions (3.11 to
+3.14). Use `--matrix` after touching anything that uses version-specific stdlib, or when asked for the full run.
 
 ## Steps
 

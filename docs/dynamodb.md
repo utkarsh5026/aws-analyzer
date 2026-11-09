@@ -11,7 +11,7 @@ No more `{"S": ...}` and `{"N": ...}`. See items as rows, one item with every ne
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: never writes to a table</li>
   <li>Scans stop early by default</li>
   <li>Plain text outside Jupyter</li>

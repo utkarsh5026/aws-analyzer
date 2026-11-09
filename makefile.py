@@ -22,13 +22,13 @@ machines that have make, and this file runs them on machines that don't (Windows
     python makefile.py clean --all --dry-run # say what it would remove, and how much, without removing it
 
 `local` is the check before a release: it builds the wheel from this checkout, installs it in a fresh virtual
-environment in .local-check/ (only boto3 comes with it, as from PyPI), imports every module there, then installs the
+environment in .local-check/ (with its dependencies, as from PyPI), imports every module there, then installs the
 optional packages and runs every service's reports on demo data against that installed copy, not src/. Each
 service's reports are saved in .local-check/reports/ as text and as the notebook's HTML, to open in a browser.
 
 `local-agent` installs the AI agent (AgentView) the same way, in one step: it picks a Python 3.11 or newer (the
-agent's packages need one) when this one is older, installs the wheel with every extra (the agent's LangChain
-packages, Deno for its Python sandbox, and the data, file and notebook packages), downloads the sandbox's Pyodide
+package needs one) when this one is older, installs the wheel with every extra (Deno for the agent's Python sandbox,
+and the data, file and notebook packages), downloads the sandbox's Pyodide
 files, and asks the agent a question on demo data with a scripted model. `make notebook` then opens JupyterLab on it.
 
 `install-env` is for a machine that already has its Python environments, like a SageMaker notebook's conda ones: it
@@ -62,7 +62,6 @@ DEV_REQUIREMENTS = ROOT / "requirements-dev.txt"
 DOCS_REQUIREMENTS = ROOT / "requirements-docs.txt"
 
 DEFAULT_EXTRAS = "data,files,notebook"
-AGENT_EXTRAS = {"agent", "all"}
 AGENT_INSTALL_EXTRAS = "all"
 AGENT_MIN_PYTHON = (3, 11)
 AGENT_PYTHONS = ["python3.14", "python3.13", "python3.12", "python3.11"]
@@ -97,7 +96,7 @@ for module in aws_analyzer._MODULES:
 for name in aws_analyzer.__all__:
     getattr(aws_analyzer, name)
 print(f"aws-analyzer {aws_analyzer.__version__} from {location}: {len(aws_analyzer._MODULES)} modules and "
-      f"{len(aws_analyzer.__all__)} names import with only boto3")
+      f"{len(aws_analyzer.__all__)} names import")
 """
 
 PREPARE_SANDBOX = """
@@ -544,13 +543,6 @@ def demo_command(python: Path, tour: Tour, *, live: bool, args: argparse.Namespa
     return command
 
 
-def wants_agent(extras: str) -> bool:
-    """
-    Whether the extras asked for include the agent's packages.
-    """
-    return bool(AGENT_EXTRAS & set(extras.split(",")))
-
-
 def runs_agent(python: str | Path) -> bool:
     """
     Whether a Python is new enough for the agent's packages.
@@ -566,9 +558,6 @@ def tours_to_run(python: Path, extras: str) -> tuple[list[Tour], list[str]]:
     """
     The services `local` runs, and why any were left out.
     """
-    if not wants_agent(extras):
-        skipped = ["agent: needs --extras with agent (or all), or run python makefile.py local-agent"]
-        return [tour for tour in TOURS if not tour.needs_agent], skipped
     if not runs_agent(python):
         skipped = [f"agent: needs Python {'.'.join(map(str, AGENT_MIN_PYTHON))} or newer (--python)"]
         return [tour for tour in TOURS if not tour.needs_agent], skipped
@@ -577,14 +566,14 @@ def tours_to_run(python: Path, extras: str) -> tuple[list[Tour], list[str]]:
 
 def install_locally(args: argparse.Namespace) -> Path:
     """
-    The first half of `local`: a fresh environment, the wheel built and installed with only boto3, every module
+    The first half of `local`: a fresh environment, the wheel built and installed with its dependencies, every module
     imported there, then the optional packages and moto for the demo data. Returns the environment's Python.
     """
     started = step(f"Making a fresh virtual environment in {LOCAL_VENV.relative_to(ROOT)}")
     python = make_venv(args.python)
     step("Building the wheel from this checkout")
     wheel = build_wheel(python)
-    step(f"Installing {wheel.name} on its own (pip brings only boto3, as from PyPI)")
+    step(f"Installing {wheel.name} on its own (pip brings its dependencies, as from PyPI)")
     pip_install(python, wheel)
     imported = run_quietly([python, "-I", "-c", IMPORT_EVERYTHING], cwd=LOCAL)
     if imported.returncode:
@@ -966,14 +955,14 @@ class InstallPlan:
 
 def extras_note(plan: InstallPlan) -> str:
     """
-    A warning when the agent was asked for in an environment whose Python is too old for it, else ''.
+    A warning when an environment picked has a Python too old for the package, else ''.
     """
-    too_old = [env.name for env in plan.envs if wants_agent(plan.extras) and not env.runs_agent]
+    too_old = [env.name for env in plan.envs if not env.runs_agent]
     if not too_old:
         return ""
     minimum = ".".join(map(str, AGENT_MIN_PYTHON))
-    return (f"The agent's packages need Python {minimum}+, so they're left out in {', '.join(too_old)} (pip skips "
-            f"them there). For the agent, pick a newer environment, or make one with SageMakerView().new_env('3.12').")
+    return (f"aws-analyzer needs Python {minimum}+, so pip can't install it in {', '.join(too_old)}. Pick a newer "
+            f"environment, or make one with SageMakerView().new_env('3.12').")
 
 
 def plan_from_options(args: argparse.Namespace, kind: str, envs: list[FoundEnv]) -> InstallPlan:
@@ -995,7 +984,7 @@ def plan_by_asking(args: argparse.Namespace, kind: str, envs: list[FoundEnv]) ->
         raise SystemExit("Nothing installed.")
     picked = pick_environments(answer, envs)
     print("\nExtras: data (pandas, pyarrow), files (Excel, PDF, ... previews), notebook (HTML reports, the windows, "
-          "progress bars),\nagent (AgentView, Python 3.11+), sandbox (the agent's Python sandbox), all, or none.")
+          "progress bars),\nsandbox (the agent's Python sandbox), all, or none.")
     extras = args.extras or ask("Which extras", DEFAULT_EXTRAS)
     kernels_for = []
     for env in picked:
@@ -1148,9 +1137,9 @@ def add_local_options(parser: argparse.ArgumentParser) -> None:
     The options of `local`: which Python and extras to install with, and whether to read the user's account too.
     """
     parser.add_argument("--python", default=sys.executable,
-                        help="the Python to make the environment with, e.g. python3.10 (default: this one)")
+                        help="the Python to make the environment with, e.g. python3.12 (default: this one)")
     parser.add_argument("--extras", default=DEFAULT_EXTRAS,
-                        help=f"the optional packages to install (default: {DEFAULT_EXTRAS}; 'all' adds the agent)")
+                        help=f"the optional packages to install (default: {DEFAULT_EXTRAS}; 'all' adds the sandbox)")
     parser.add_argument("--live", action="store_true",
                         help="also run read-only commands against your AWS account (your usual credentials)")
     parser.add_argument("--profile", help="with --live: the AWS profile to use")
@@ -1178,7 +1167,7 @@ def add_install_env_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--env", action="append", default=[],
                         help="an environment to install into: its name or number from `envs`, or its path "
                              "(repeat for several, or 'all'); without it, it asks")
-    parser.add_argument("--extras", help=f"the optional packages: data, files, notebook, agent, sandbox or all "
+    parser.add_argument("--extras", help=f"the optional packages: data, files, notebook, sandbox or all "
                                          f"(default: {DEFAULT_EXTRAS}; 'none' for none)")
     parser.add_argument("--kernel", action="store_true",
                         help="add a Jupyter kernel for an environment that has none")

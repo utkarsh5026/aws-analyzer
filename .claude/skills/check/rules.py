@@ -55,6 +55,7 @@ PACKAGE = "aws_analyzer"
 ANALYZERS = ROOT / "src" / PACKAGE
 KIT = ANALYZERS / "_kit"  # the code the analyzers share: checked like them, but it has no sections or View
 ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
+AGENT_TOP_LEVEL = {"deepagents", "langchain", "langchain_core", "langchain_openai", "langchain_aws", "langgraph", "mcp"}
 # A companion builds on analyzers: it imports them (lazily, so it still imports alone), its UI class is a
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
@@ -474,7 +475,8 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     kit = kit_names() if kit is None else kit
     shared = shared_names() if shared is None else shared
 
-    # Imports: boto3 + stdlib at import time, optional packages lazily, never another analyzer.
+    # Imports: boto3 + stdlib (and agent/'s own dependencies) at import time, optional packages lazily, no analyzer.
+    allowed = ALLOWED_TOP_LEVEL | (AGENT_TOP_LEVEL if owner == "agent" else set())
     future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
                  and any(a.name == "annotations" for a in n.names) for n in tree.body)
     if not future:
@@ -503,11 +505,11 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         for name in _module_root(node):
             if name in siblings or name == PACKAGE:
                 continue  # reported above
-            if id(node) in top_level and not _is_stdlib(name) and name not in ALLOWED_TOP_LEVEL:
+            if id(node) in top_level and not _is_stdlib(name) and name not in allowed:
                 report.error(where, f"imports {name} at import time; only boto3 + stdlib may load there "
                                     f"(import it inside the function via _require({name!r}, ...))")
             elif (id(node) not in top_level and not _is_stdlib(name) and name not in parents
-                  and name not in ALLOWED_TOP_LEVEL | {"IPython"}):
+                  and name not in allowed | {"IPython"}):
                 report.warn(where, f"imports {name} directly; use _require({name!r}, purpose) so a missing "
                                    "package becomes a note that says what to pip install")
 

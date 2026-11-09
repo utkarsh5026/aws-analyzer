@@ -2183,14 +2183,9 @@ def seed_agent() -> dict:
 
 
 def _demo_model():
-    try:
-        from langchain_core.language_models.chat_models import BaseChatModel
-        from langchain_core.messages import AIMessage
-        from langchain_core.outputs import ChatGeneration, ChatResult
-    except ImportError:
-        print("(the agent demo needs the agent's packages: pip install 'aws-analyzer[agent]', Python 3.11+)",
-              file=sys.stderr)
-        return None
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
 
     def answer(health: dict, reports: list[dict]) -> str:
         failed = health.get("failed") or []

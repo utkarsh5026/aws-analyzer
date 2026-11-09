@@ -11,7 +11,7 @@ Find the state machines that fail, see where and why their executions stop, and 
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: never starts or redrives an execution</li>
   <li>The Lambda run's own lines, by request ID</li>
   <li>Plain text outside Jupyter</li>

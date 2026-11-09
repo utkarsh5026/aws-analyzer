@@ -34,7 +34,7 @@ Quick start
     from aws_analyzer import set_theme       # how reports look: "console" (the default), "soft", "editorial",
     set_theme("soft")                        # "brand" or "classic"; AWS_ANALYZER_THEME=soft does it for good
 
-    from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
+    from aws_analyzer import AgentView       # ask about your account in plain English (it comes with aws-analyzer)
     AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
     from aws_analyzer import set_assistant   # an ✦ Ask button in every explorer, asking the agent about what it shows
     set_assistant(AgentView(provider="bedrock"))

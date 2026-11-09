@@ -4,7 +4,6 @@ question streamed through it (stream_turn), counting the model's calls and token
 time. What changes how the agent works rather than what it can read (a subagent, a middleware, another memory)
 goes in build_graph(); everything about LangGraph's messages stays in this file.
 
-_MIN_PYTHON is deepagents' floor; the package's own is 3.10, and everything but the agent itself runs there.
 HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools). PLAN_TOOL is LangChain's write_todos (its
 TodoListMiddleware, which deepagents doesn't add by itself): the model writes a short plan before it reads anything
 (_plan_first makes the first model call of each question call it) and ticks it off as it goes, and _record_plan keeps
@@ -28,18 +27,24 @@ from __future__ import annotations
 
 import functools
 import inspect
-import sys
 import time
 from typing import Any, Callable, Iterable
 
-from .._kit.deps import _require
+from deepagents import create_deep_agent
+from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.structured_output import OutputToolBinding, ToolStrategy
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import StructuredTool
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command, interrupt
+
 from .._kit.text import _clip
 from .answers import REPLY_SCHEMA, REPLY_TOOL, AgentAnswer, AgentStep, ToolCall, parse_plan, parse_reply
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .llm import answer_cost, explain_model_error
 from .memory import memory_middleware, with_memory
 
-_MIN_PYTHON = (3, 11)
 HIDDEN_TOOLS = frozenset({"task", "execute"})
 PLAN_TOOL = "write_todos"
 _PLAN_PROMPT = """## Your plan (`write_todos`)
@@ -70,23 +75,11 @@ _HUMAN_MESSAGES = ("HumanMessage", "HumanMessageChunk")
 _AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
 
-def check_ready() -> None:
-    """
-    ImportError saying what's missing when this Python or its packages can't run the agent.
-    """
-    if sys.version_info < _MIN_PYTHON:
-        raise ImportError("The agent needs Python 3.11 or newer: it runs on deepagents, which does. This is "
-                          f"Python {sys.version_info.major}.{sys.version_info.minor}")
-    _require("deepagents", "The agent", package="aws-analyzer[agent]")
-    _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
-
-
 def new_checkpointer() -> Any:
     """
     Where the conversations are kept: LangGraph's InMemorySaver, for as long as the kernel runs.
     """
-    memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
-    return memory.InMemorySaver()
+    return InMemorySaver()
 
 
 def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
@@ -105,8 +98,6 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     which is kept on the run. With `reply`, it answers by
     calling final_answer (REPLY_SCHEMA: the answer and its findings) when it can.
     """
-    check_ready()
-    deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
     if notes is not None:
         backend = with_memory(backend, notes)
     middleware = [_hide_tools(set(hidden))]
@@ -123,7 +114,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     if reply:
         middleware.append(_reply_when_able())
         extra["response_format"] = _reply_format()
-    return deepagents.create_deep_agent(
+    return create_deep_agent(
         model=model,
         tools=_langchain_tools(tools),
         system_prompt=system_prompt,
@@ -149,14 +140,13 @@ def _langchain_tools(tools: list[Callable[..., Any]]) -> list[Any]:
     """
     if not any(hasattr(fn, "mcp_schema") for fn in tools):
         return tools
-    structured = _require("langchain_core.tools", "MCP tools", package="langchain-core").StructuredTool
     made: list[Any] = []
     for fn in tools:
         schema = getattr(fn, "mcp_schema", None)
         if schema is None:
             made.append(fn)
             continue
-        made.append(structured(name=fn.__name__, description=inspect.getdoc(fn) or fn.__name__,
+        made.append(StructuredTool(name=fn.__name__, description=inspect.getdoc(fn) or fn.__name__,
                                args_schema=_object_schema(schema), func=fn))
     return made
 
@@ -188,7 +178,7 @@ def resume_turn(graph: Any, choices: dict[str, str], *, thread: str, run: _Run, 
     Goes on with a paused question once the user has chosen: `choices` is each pause's ID (from pauses()) -> 'go',
     'smaller' or 'skip'. Streams the rest of the question like stream_turn(), and returns the answer's text.
     """
-    command = _require("langgraph.types", "The agent", package="aws-analyzer[agent]").Command(resume=choices)
+    command = Command(resume=choices)
     return _stream(graph, command, thread=thread, run=run, answer=answer, model_prices=model_prices,
                    progress=progress, provider=provider)
 
@@ -208,7 +198,7 @@ def pause_for(value: dict[str, Any]) -> Any:
     Pauses the question to ask the user (LangGraph's interrupt, with `value` kept with the conversation), from a tool
     while it runs; returns their choice once they've made it.
     """
-    return _require("langgraph.types", "The agent", package="aws-analyzer[agent]").interrupt(value)
+    return interrupt(value)
 
 
 def is_pause(exc: BaseException) -> bool:
@@ -415,8 +405,6 @@ def _hide_tools(names: set[str]) -> Any:
     would also take these tools from any other deepagents agent the user builds on that model in the same kernel.
     This middleware applies to this agent only.
     """
-    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
-    messages = _require("langchain_core.messages", "The agent", package="aws-analyzer[agent]")
 
     def visible(request: Any) -> Any:
         tools = [tool for tool in request.tools if _tool_name(tool) not in names]
@@ -426,10 +414,10 @@ def _hide_tools(names: set[str]) -> Any:
         name = request.tool_call.get("name")
         if name not in names:
             return None
-        return messages.ToolMessage(content=f"Error: {name} isn't available.",
+        return ToolMessage(content=f"Error: {name} isn't available.",
                                     tool_call_id=request.tool_call.get("id") or "", name=name, status="error")
 
-    class HideTools(types.AgentMiddleware):
+    class HideTools(AgentMiddleware):
         def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             return handler(visible(request))
 
@@ -495,14 +483,12 @@ def _record_file_tools(current: Callable[[], _Run]) -> Any:
     (`current()`), as the toolkits' tools are (runtime.as_tool): counted against its budget (a call past it isn't run:
     the model is told why), told to its listener (the chat window) and listed in its report.
     """
-    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
-    messages = _require("langchain_core.messages", "The agent", package="aws-analyzer[agent]")
 
     def refusal(request: Any, message: str) -> Any:
-        return messages.ToolMessage(content=f"Error: {message}", tool_call_id=request.tool_call.get("id") or "",
+        return ToolMessage(content=f"Error: {message}", tool_call_id=request.tool_call.get("id") or "",
                                     name=request.tool_call.get("name"), status="error")
 
-    class RecordFileTools(types.AgentMiddleware):
+    class RecordFileTools(AgentMiddleware):
         def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             if request.tool_call.get("name") not in FILE_TOOLS:
                 return handler(request)
@@ -535,8 +521,7 @@ def _planning() -> Any:
     LangChain's TodoListMiddleware, which gives the model write_todos, with instructions for this agent's questions
     (_PLAN_PROMPT, _PLAN_TOOL_TEXT). Its name replaces the one a deepagents model profile may add (OpenAI's Codex).
     """
-    middleware = _require("langchain.agents.middleware", "The agent's plan", package="aws-analyzer[agent]")
-    return middleware.TodoListMiddleware(system_prompt=_PLAN_PROMPT, tool_description=_PLAN_TOOL_TEXT)
+    return TodoListMiddleware(system_prompt=_PLAN_PROMPT, tool_description=_PLAN_TOOL_TEXT)
 
 
 def _keep_plan(run: _Run, tool_call: dict[str, Any]) -> None:
@@ -581,8 +566,6 @@ def _plan_first(current: Callable[[], _Run]) -> Any:
     replace the choice with "any", and its tool (final_answer) is offered as a plain tool in the place ToolStrategy
     puts it, so every call of the question sends the same tools (and Bedrock's prompt cache holds).
     """
-    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
-    structured = _require("langchain.agents.structured_output", "The agent's plan", package="aws-analyzer[agent]")
 
     def must_plan(request: Any) -> bool:
         run = current()
@@ -592,9 +575,9 @@ def _plan_first(current: Callable[[], _Run]) -> Any:
 
     def reply_tools(request: Any) -> list[Any]:
         reply_format = request.response_format
-        if not isinstance(reply_format, structured.ToolStrategy) or not _can_force_tools(request.model):
+        if not isinstance(reply_format, ToolStrategy) or not _can_force_tools(request.model):
             return []
-        return [structured.OutputToolBinding.from_schema_spec(spec).tool for spec in reply_format.schema_specs]
+        return [OutputToolBinding.from_schema_spec(spec).tool for spec in reply_format.schema_specs]
 
     def planned(request: Any) -> Any:
         if not must_plan(request):
@@ -602,7 +585,7 @@ def _plan_first(current: Callable[[], _Run]) -> Any:
         tools = [*request.tools, *reply_tools(request)]
         return request.override(tools=tools, tool_choice=PLAN_TOOL, response_format=None)
 
-    class PlanFirst(types.AgentMiddleware):
+    class PlanFirst(AgentMiddleware):
         def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             return handler(planned(request))
 
@@ -618,12 +601,11 @@ def _record_plan(current: Callable[[], _Run]) -> Any:
     (`current()`), once the tool has taken it. Writing a plan reads nothing from AWS, so it isn't a tool call of the
     question's: it isn't counted against the budget or listed with the tools.
     """
-    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
 
     def took(result: Any) -> bool:
         return getattr(result, "status", None) != "error"
 
-    class RecordPlan(types.AgentMiddleware):
+    class RecordPlan(AgentMiddleware):
         def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             result = handler(request)
             if request.tool_call.get("name") == PLAN_TOOL and took(result):
@@ -645,8 +627,7 @@ def _reply_format() -> Any:
     the answer and its findings. The tool's result tells the model its answer is with the user (_REPLIED), so a
     follow-up question sees no long echo of it.
     """
-    structured = _require("langchain.agents.structured_output", "The agent's findings", package="aws-analyzer[agent]")
-    return structured.ToolStrategy(schema=REPLY_SCHEMA, tool_message_content=_REPLIED)
+    return ToolStrategy(schema=REPLY_SCHEMA, tool_message_content=_REPLIED)
 
 
 def _can_force_tools(model: Any) -> bool:
@@ -663,14 +644,13 @@ def _reply_when_able() -> Any:
     A deepagents middleware that leaves out the reply's set shape (response_format) for a model that can't be made to
     call a tool (_can_force_tools), which then answers in a message, without findings, instead of failing.
     """
-    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
 
     def able(request: Any) -> Any:
         if request.response_format is None or _can_force_tools(request.model):
             return request
         return request.override(response_format=None)
 
-    class ReplyWhenAble(types.AgentMiddleware):
+    class ReplyWhenAble(AgentMiddleware):
         def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             return handler(able(request))
 

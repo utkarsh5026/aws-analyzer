@@ -11,7 +11,7 @@ What this notebook is costing you, whether it stops when you walk away, what's f
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: never stops or deletes anything</li>
   <li>Notebook instances and Studio</li>
   <li>Plain text outside Jupyter</li>
