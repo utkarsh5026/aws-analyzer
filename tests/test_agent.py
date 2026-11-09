@@ -83,6 +83,8 @@ from aws_analyzer.agent import (
     refs_in,
     recheck_request,
     grounding_findings,
+    hedge_root_causes,
+    unbacked_causes,
     image_kind,
     answer_next,
     asked_at,
@@ -1989,6 +1991,103 @@ def test_a_draft_citing_a_call_that_isnt_there_is_corrected(seeded):
     assert answer.recheck.refs == ["[4]"] and answer.recheck.fixed and answer.text.endswith("[1].")
     assert "- Citations no tool result carries: [4]." in model.prompts[2][-1].content
     assert "found a citation they didn't back up" in answer_findings(answer)[0][1]
+
+
+def _cause_calls():
+    """
+    What backs a root cause, as the model was handed it: the failures [3], the memory cut before them [4], and the
+    other functions on the role, which didn't fail [7].
+    """
+    return [ToolCall("function_errors", {"function": "orders-etl"}, ref=3,
+                     result={"causes": [{"cause": "Runtime.OutOfMemory", "first": "02:00"}]}),
+            ToolCall("function_details", {"function": "orders-etl"}, ref=4,
+                     result={"changes": [{"at": "01:52", "memory_mb": {"from": 1024, "to": 256}}]}),
+            ToolCall("function_health", {"role": "orders-role"}, ref=7,
+                     result={"functions": [{"name": "report-api", "errors": 0}]})]
+
+
+_BACKED = ("Root cause: memory cut from 1024 to 256 MB at 01:52 [4], then out-of-memory errors from 02:00 [3]. "
+           "Other functions on the same role didn't fail [7].")
+
+
+def test_a_root_cause_needs_its_chain_and_a_check_that_rules_out_another():
+    bare = AgentAnswer("Why?", text="The root cause is the memory setting.", calls=_cause_calls())
+    grounding = check_grounding(bare)
+    assert not grounding.ok and [(c.sentence, c.missing) for c in grounding.unbacked_causes] == [
+        ("The root cause is the memory setting.", ["chain", "check"])]
+    assert check_grounding(AgentAnswer("Why?", text=_BACKED, calls=_cause_calls())).ok
+    chain_last = ("Out-of-memory errors from 02:00 [3]. The root cause is the memory cut from 1024 to 256 MB at "
+                  "01:52 [4]. Nothing else changed: report-api didn't fail [7].")
+    assert check_grounding(AgentAnswer("Why?", text=chain_last, calls=_cause_calls())).ok, "the chain can lead up"
+    cases = {
+        "The memory cut [4] caused the out-of-memory errors [3].": ["check"],
+        "The root cause is the memory cut at 02:10 [4], then out-of-memory errors from 02:00 [3]. report-api "
+        "didn't fail [7].": ["chain"],
+        "Out-of-memory errors from 02:00 [3] were caused by the memory cut. report-api didn't fail [7].": ["chain"],
+        "The root cause is the memory cut at 01:52 [4], then out-of-memory errors from 02:00 [3]. report-api "
+        "didn't fail [9].": ["check"],
+    }
+    for text, missing in cases.items():
+        found = unbacked_causes(AgentAnswer("Why?", text=text, calls=_cause_calls()))
+        assert [cause.missing for cause in found] == [missing], text
+    for fine in ("A possible cause is the memory setting.", "The root cause may be the memory setting.",
+                 "It isn't caused by the deploy [7].", "The deploy is not the cause [7].", "I can't tell the root cause."):
+        assert unbacked_causes(AgentAnswer("Why?", text=fine, calls=_cause_calls())) == [], fine
+    incomplete = _cause_calls()
+    incomplete[2].coverage = {"cut_short": True}
+    assert unbacked_causes(AgentAnswer("Why?", text=_BACKED, calls=incomplete))[0].missing == ["check"]
+    assert "names a root cause but shows no chain of cited tool results" in recheck_request(grounding)
+
+
+def test_a_root_cause_left_unbacked_is_reworded_as_a_possible_one():
+    rewordings = {
+        "The root cause is the memory setting.": "A possible cause is the memory setting.",
+        "**Root cause:** the memory setting.": "**Possible cause:** the memory setting.",
+        "The memory setting is the root cause.": "The memory setting is a possible cause.",
+        "The cause was the memory cut.": "A possible cause was the memory cut.",
+        "The errors were caused by the memory cut.": "The errors may have been caused by the memory cut.",
+        "The memory cut caused the errors.": "The memory cut may have caused the errors.",
+        "The memory cut is to blame.": "The memory cut may be to blame.",
+    }
+    for text, reworded in rewordings.items():
+        answer = AgentAnswer("Why?", text=text, calls=_cause_calls())
+        assert hedge_root_causes(answer) == [text.replace("**", "")] and answer.text == reworded, text
+        assert check_grounding(answer).ok, "once reworded, nothing is left to flag"
+    backed = AgentAnswer("Why?", text=_BACKED, calls=_cause_calls(),
+                         findings=[AgentFinding("warn", "The root cause is the memory cut: orders run out of memory.")])
+    assert hedge_root_causes(backed) == [] and backed.text == _BACKED, "a finding leans on the text's chain"
+    alone = AgentAnswer("Why?", text="orders-etl failed.", calls=_cause_calls(),
+                        findings=[AgentFinding("warn", "The root cause is the memory cut.", evidence=[4])])
+    assert hedge_root_causes(alone) == ["The root cause is the memory cut."]
+    assert alone.findings[0].message == "A possible cause is the memory cut."
+    alone.hedged = ["The root cause is the memory cut."]
+    found = grounding_findings(alone)
+    assert found[0][0] == "info" and found[0][1].startswith("It named a root cause it didn't back up, so the answer "
+                                                            "says “a possible cause” instead: “The root cause is")
+    shown = grounding_findings(AgentAnswer("Why?", text="The root cause is the memory setting.", calls=_cause_calls()))
+    assert shown == [("warn", "The answer names a root cause without the evidence for it: “The root cause is the "
+                              "memory setting.” shows no chain of cited tool results from the cause to the failure "
+                              "and no cited check that rules out another cause. Treat it as a possible cause; ask "
+                              "the agent for the timeline from the cause to the failure and what it ruled out.")]
+
+
+def test_a_root_cause_the_correction_still_doesnt_back_is_reworded(seeded):
+    draft = "The root cause of **etl-nightly**'s failures is its memory setting [1]."
+    model = scripted(calls(("function_health", {"since": "2h"})), says(draft), says(draft))
+    said = "The root cause of etl-nightly's failures is its memory setting."
+    answer = make(model).ask("Why did etl-nightly fail?")
+    assert answer.model_calls == 3 and answer.recheck.causes == [said]
+    assert "names a root cause but shows no" in model.prompts[2][-1].content
+    assert answer.text == "A possible cause of **etl-nightly**'s failures is its memory setting [1]."
+    assert answer.hedged == [said] and answer.recheck.fixed
+    found = [m for _, m in answer_findings(answer)]
+    assert "a root cause without its evidence" in found[0] and "says “a possible cause” instead" in found[1]
+    assert answer_from_record(answer_record(answer)).hedged == [said]
+    assert "Call something the root cause only when the answer shows two things" in system_text(model)
+    model = scripted(calls(("function_health", {"since": "2h"})), says(draft))
+    answer = make(model, verify=False).ask("Why did etl-nightly fail?")
+    assert answer.model_calls == 2 and answer.hedged == [said], "rewording costs no model call"
+    assert answer.text.startswith("A possible cause")
 
 
 def test_findings_false_answers_in_plain_text(seeded):

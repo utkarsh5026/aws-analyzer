@@ -218,6 +218,7 @@ def answer_from_record(text: str) -> AgentAnswer:
         asked=_time(record.get("asked")),
         focus=_focus(record.get("focus")),
         recheck=_recheck(record.get("recheck")),
+        hedged=[str(sentence) for sentence in record.get("hedged") or []],
     )
 
 

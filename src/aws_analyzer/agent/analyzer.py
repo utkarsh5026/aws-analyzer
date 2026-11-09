@@ -27,7 +27,7 @@ from .._kit.focus import Focus
 from . import harness
 from .answers import AgentAnswer, AgentStep, ToolCall, check_findings, choice_of
 from .budget import Budget, _Run
-from .grounding import Recheck, check_grounding, recheck_request, recheck_said
+from .grounding import Recheck, check_grounding, hedge_root_causes, recheck_request, recheck_said
 from .chats import (
     ChatStore,
     ChatSummary,
@@ -273,11 +273,13 @@ has it answer in plain text, as does a model that can't be made to call a tool.
 
     Checked before it's shown (verify=True, the default): once the model has answered, its draft is compared with
     what the tools returned (check_grounding: names, IDs and numbers no tool gave, regions it didn't read, "no
-    errors" over a read that failed or was cut short). When part of it doesn't check out, the model gets one more
+    errors" over a read that failed or was cut short, a root cause named without the chain from it to the failure and
+    a check ruling out another cause). When part of it doesn't check out, the model gets one more
     turn, with its tools, to read what it needs, take the claim out or say it couldn't check it, and that answer is
     shown instead (answer.recheck says what was flagged, keeps the draft, and whether the answer now checks out).
     It costs a model call only when the draft didn't check out. verify=False shows the draft as it is, with the same
-    warnings.
+    warnings. Either way, a root cause the final answer still doesn't back is reworded as "a possible cause"
+    (answer.hedged keeps the sentences as written).
 
     Runbooks: step-by-step guides for common problems ("a Lambda is failing", "an S3 upload didn't start my
     function"), each a folder with a SKILL.md. The model sees only each one's name and one-line description, and reads
@@ -1172,6 +1174,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
                                   provider=self.provider, cache_read=answer.cache_read_tokens,
                                   cache_write=answer.cache_write_tokens)
         answer.seconds = run.elapsed
+        if answer.text and not answer.waiting and answer.error is None:
+            answer.hedged += hedge_root_causes(answer, self.earlier(answer))
         if answer.recheck is not None and not answer.recheck.failed and not answer.waiting:
             answer.recheck.fixed = check_grounding(answer, self.earlier(answer)).ok
         pauses = harness.pauses(graph, answer.thread) if answer.waiting and answer.error is None else {}

@@ -96,6 +96,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      regions it didn't read, and claims of none over an incomplete read (check_grounding), as
                      findings the report shows (grounding_findings), and the message that sends a draft that
                      doesn't check out back to the model once (recheck_request, verify=True; answer.recheck).
+                     A root cause must show the chain of cited rows from it to the failure and one cited check
+                     ruling out another cause, or it's reworded as a possible one (unbacked_causes,
+                     hedge_root_causes; answer.hedged).
                      Citations: each tool result starts with its ref (ToolCall.ref), the answer cites it ("[2]")
                      and a finding names its evidence; check_citations checks each against the call it names.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
@@ -145,13 +148,16 @@ from .budget import Budget
 from .grounding import (
     Grounding,
     Recheck,
+    UnbackedCause,
     UnbackedNone,
     calls_by_ref,
     check_citations,
     check_grounding,
     cited_refs,
     grounding_findings,
+    hedge_root_causes,
     recheck_request,
+    unbacked_causes,
 )
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
@@ -374,6 +380,9 @@ __all__ = [
     "grounding_findings",
     "Grounding",
     "UnbackedNone",
+    "UnbackedCause",
+    "unbacked_causes",
+    "hedge_root_causes",
     "Recheck",
     "recheck_request",
     "cited_refs",

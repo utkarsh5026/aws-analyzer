@@ -22,6 +22,12 @@ What it checks (Grounding):
     miscited           names, IDs and numbers a sentence states that some tool returned but not the calls it cites:
                        the fact may be right, so it's only noted, and `cited` is the share of sentences stating a
                        fact that cite a call.
+    unbacked_causes    sentences naming a root cause ("the root cause is X", "caused by X") that don't show both
+                       what backs it: the chain of timeline rows (cited tool results, cut at each citation) from X to
+                       the failure, in time order, and one cited check that rules out another cause ("other
+                       functions on the same role didn't fail [7]"), from a call that read everything. Hedged ones
+                       ("a possible cause") are fine. hedge_root_causes() rewords what's left of them as possible
+                       causes once the answer is final.
 
 `earlier` are the answers before this one in the same conversation: a follow-up may repeat their tools' results and
 cite their calls.
@@ -108,6 +114,50 @@ _HEDGE_MARKS = set("~≈")
 _SCALES = (1.0, 1e3, 1e-3, 60.0, 1 / 60, 3600.0, 1 / 3600, 86400.0, 1 / 86400, 1024.0, 1 / 1024, 1024.0 ** 2,
            1 / 1024 ** 2, 1024.0 ** 3, 1 / 1024 ** 3, 1e6, 1e-6, 1e9, 1e-9)
 
+_CAUSE_PHRASE = re.compile(
+    r"(?P<article>\b(?:the|its|their)\s+(?:root|main|real|underlying|actual)\s+cause\b)"
+    r"|(?P<root>\broot\s+cause\b)"
+    r"|(?P<is_the>\b(?:is|was)\s+the\s+cause\b)"
+    r"|(?P<the_is>\bthe\s+cause\s+(?:is|was)\b)"
+    r"|(?P<passive>\b(?:is|are|was|were)\s+caused\s+by\b)"
+    r"|(?P<by>\bcaused\s+by\b)"
+    r"|(?P<blame>\b(?:is|was)\s+to\s+blame\b)"
+    r"|(?P<active>\bcaused\s+(?=(?:the|these|this|those|it|them|all|every|each|\d)\b))",
+    re.I)
+_CAUSE_BEFORE = {"is_the", "blame", "active"}
+_OF_PART = re.compile(r"\s*of\b.*?(?:\b(?:is|was|are|were)\b|:)", re.S | re.I)
+_HEDGED = {"article": "a possible cause", "root": "possible cause", "is_the": "{verb} a possible cause",
+           "the_is": "a possible cause {verb}", "passive": "{may} caused by", "by": "possibly caused by",
+           "blame": "{may} to blame", "active": "may have caused "}
+_MAY = {"is": "may be", "are": "may be", "was": "may have been", "were": "may have been"}
+_WORD_RUN = re.compile(r"[a-z0-9'’]+")
+_HEDGE_WORD = re.compile(r"possibl[ey]|may|might|could|would|likely|probabl[ey]|perhaps|maybe|suspect\w*|seem\w*|"
+                         r"appear\w*|unclear|unlikely|unknown|unconfirmed|if|whether|not|never|no|\w+n['’]t|cannot|"
+                         r"guess\w*")
+_HEDGE_BEFORE = 4
+_HEDGE_AFTER = 3
+_PLAIN_WORDS = {"the", "and", "its", "their", "this", "that", "these", "those", "from", "with", "for", "into", "then",
+                "than", "after", "before", "when", "because", "which", "what", "was", "were", "are", "all", "each",
+                "every", "since", "until", "about", "there", "has", "had", "have", "been", "also", "both", "only",
+                "just", "not", "out", "one", "set", "new", "now"}
+_FAILURE = re.compile(r"fail|error|exception|tim(?:e|ed|es|ing)[- ]?outs?\b|throttl|crash|\boom\b|out[- ]of[- ]memory|"
+                      r"\b5\d\d\b|5xx|denied|killed|retr(?:y|ie)|dead[- ]letter|broke|stuck|backlog|alarm|latency|"
+                      r"slow|reject|dropped|\blost\b", re.I)
+_RULES_OUT = re.compile(
+    r"\brul(?:e|ed|es|ing)\b.{0,30}\bout\b|\bnot (?:the|a|what) (?:cause|reason|problem|culprit)\b"
+    r"|\b(?:isn't|wasn't|aren't|weren't|is not|was not|are not|were not)\s+(?:the\s+|a\s+)?(?:cause|reason|culprit|"
+    r"to blame|related|involved|it)\b"
+    r"|\b(?:didn't|did not|don't|do not|doesn't|does not|never|hadn't|had not)\s+(?:also\s+)?(?:fail|error|change|"
+    r"time out|throttle|explain|cause|happen|run out|hit|reach)"
+    r"|\bno (?:other|change|changes|new|deploys?|deployments?|errors?|failures?|sign|throttl\w*|timeouts?)\b"
+    r"|\b(?:unchanged|unaffected|stayed the same|same as before)\b"
+    r"|\b(?:still|kept)\s+(?:succeed\w*|work\w*|ran|running|pass\w*)\b"
+    r"|\b(?:rather than|instead of|excludes?|excluded)\b"
+    r"|\bonly\b.{0,60}\b(?:failed|fails|errors?)\b"
+    r"|\b(?:other|others|rest)\b.{0,60}\b(?:fine|healthy|succeeded|ok|normal)\b")
+_TIME_OF_DAY = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+_HALF_DAY_MINUTES = 12 * 60
+
 _NONE_SAID = re.compile(
     r"\b(?:no|zero|0)\s+(?:\w+\s+){0,2}?(?:errors?|failures?|failed|timeouts?|timed[- ]out|throttl\w*|issues?|"
     r"problems?|runs?|invocations?|calls?|files?|objects?|keys?|documents?|matches|results?|records?|lines?|"
@@ -142,7 +192,8 @@ class Grounding:
     """
     What in an answer didn't check out against its tool calls (see the module's docstring): names and IDs no tool
     returned, numbers no tool returned or implies, regions it says it checked that no tool read, claims of none
-    that rest on an incomplete read, and citations that name no tool call. Empty lists when everything checked out,
+    that rest on an incomplete read, citations that name no tool call, and root causes named without the chain
+    from them to the failure and a check ruling out another cause (unbacked_causes). Empty lists when everything checked out,
     or when nothing was checked (no tools ran, so answer_findings() says that instead). `ok` leaves out `miscited`
     (a fact citing a call that doesn't hold it, which another call returned: the fact may be right) and `cited`
     (the share of its sentences stating a fact that cite a call; None when none does), which say how well it cites.
@@ -155,11 +206,12 @@ class Grounding:
     unknown_refs: list[str] = field(default_factory=list)
     miscited: list[str] = field(default_factory=list)
     cited: float | None = None
+    unbacked_causes: list[UnbackedCause] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         flagged = (self.unknown_names, self.unknown_numbers, self.unchecked_regions, self.unbacked_nones,
-                   self.unknown_refs)
+                   self.unknown_refs, self.unbacked_causes)
         return not any(flagged)
 
 
@@ -806,10 +858,281 @@ def check_citations(answer: AgentAnswer, evidence: _Evidence, earlier: Iterable[
     return found
 
 
+@dataclass
+class UnbackedCause:
+    """
+    A sentence of the answer (or a finding's message) that names a root cause without what backs it: `missing` holds
+    'chain' (no chain of cited tool results from the cause to the failure, in time order) and 'check' (no cited check
+    that rules out another cause), either or both.
+    """
+
+    sentence: str
+    missing: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _Row:
+    """
+    One row of the answer's timeline: the text up to and including a citation (or a sentence's uncited end), where it
+    is in the answer, lowercased with its citations out, and the refs it cites.
+    """
+
+    start: int
+    end: int
+    text: str
+    refs: list[int]
+
+
+@dataclass
+class _CauseClaim:
+    """
+    A sentence that names a root cause with no hedge: where it is, and its root-cause phrases (each to reword).
+    """
+
+    start: int
+    end: int
+    phrases: list[re.Match[str]]
+
+
+def _prose_of(text: str) -> str:
+    """
+    The text with its fenced code blocks blanked out, the same length, so positions in it are positions in the text.
+    """
+    return _FENCE.sub(lambda block: re.sub(r"[^\n]", " ", block.group()), text)
+
+
+def _sentence_spans(prose: str) -> list[tuple[int, int]]:
+    """
+    Where each sentence (and list item and table row) of the prose starts and ends.
+    """
+    spans, start = [], 0
+    for brk in _SENTENCE_BREAK.finditer(prose):
+        spans.append((start, brk.start()))
+        start = brk.end()
+    spans.append((start, len(prose)))
+    return [(begin, end) for begin, end in spans if prose[begin:end].strip(_SENTENCE_EDGES)]
+
+
+def _row_text(piece: str) -> str:
+    return _without_citations(piece).strip(_SENTENCE_EDGES + _TRAILING).lower().replace("’", "'")
+
+
+def _rows_in(prose: str, begin: int, end: int, rows: list[_Row]) -> None:
+    """
+    Adds a sentence's rows: its text cut after each citation, a citation standing alone going with the row before.
+    """
+    position = begin
+    for citation in _CITATION.finditer(prose, begin, end):
+        text = _row_text(prose[position:citation.end()])
+        refs = _refs_of(citation.group(1))
+        if not text and rows:
+            rows[-1].refs.extend(refs)
+        else:
+            rows.append(_Row(position, citation.end(), text, refs))
+        position = citation.end()
+    tail = _row_text(prose[position:end])
+    if tail:
+        rows.append(_Row(position, end, tail, []))
+
+
+def _timeline_rows(prose: str) -> list[_Row]:
+    rows: list[_Row] = []
+    for begin, end in _sentence_spans(prose):
+        _rows_in(prose, begin, end, rows)
+    return rows
+
+
+def _is_hedged(prose: str, begin: int, phrase: re.Match[str]) -> bool:
+    """
+    Whether a root-cause phrase is hedged or denied by the words around it in its sentence: 'a possible root cause',
+    'the root cause may be', 'isn't caused by', 'if the root cause is'.
+    """
+    before = _WORD_RUN.findall(prose[begin:phrase.start()].lower())[-_HEDGE_BEFORE:]
+    after = _WORD_RUN.findall(prose[phrase.end():phrase.end() + _NAME_CHARACTERS].lower())[:_HEDGE_AFTER]
+    return any(_HEDGE_WORD.fullmatch(word) for word in [*before, *_WORD_RUN.findall(phrase.group().lower()), *after])
+
+
+def _cause_claims(prose: str) -> list[_CauseClaim]:
+    """
+    The sentences that name a root cause and don't hedge it, each with its root-cause phrases.
+    """
+    claims = []
+    for begin, end in _sentence_spans(prose):
+        phrases = [found for found in _CAUSE_PHRASE.finditer(prose, begin, end) if not _is_hedged(prose, begin, found)]
+        if phrases:
+            claims.append(_CauseClaim(begin, end, phrases))
+    return claims
+
+
+def _cause_text(prose: str, claim: _CauseClaim) -> str:
+    """
+    The part of a claim that names the cause, up to its first citation: what comes after 'the root cause (of the
+    errors) is' or 'caused by', or before 'is the cause' or 'caused the'.
+    """
+    phrase = claim.phrases[0]
+    if phrase.lastgroup in _CAUSE_BEFORE:
+        named = prose[claim.start:phrase.start()]
+    else:
+        named = prose[phrase.end():claim.end]
+        of_part = _OF_PART.match(named)
+        named = named[of_part.end():] if of_part else named
+    return _CITATION.split(named)[0]
+
+
+def _cause_words(named: str) -> set[str]:
+    """
+    The words a claim names its cause with, less the failure's words and the small ones.
+    """
+    words = set(_WORD_RUN.findall(named.lower()))
+    return {word for word in words if len(word) >= _MIN_NAME and word not in _PLAIN_WORDS and not _FAILURE.search(word)}
+
+
+def _minute_of(text: str) -> int | None:
+    found = _TIME_OF_DAY.search(text)
+    return int(found.group(1)) * 60 + int(found.group(2)) if found else None
+
+
+def _in_order(cause: _Row, failure: _Row) -> bool:
+    """
+    Whether a cause's row can have led to a failure's: true unless both give a time of day and the cause's is later,
+    by less than half a day (more is the night between them).
+    """
+    cause_minute, failure_minute = _minute_of(cause.text), _minute_of(failure.text)
+    if cause_minute is None or failure_minute is None:
+        return True
+    return not 0 < cause_minute - failure_minute < _HALF_DAY_MINUTES
+
+
+def _has_chain(rows: list[_Row], words: set[str]) -> bool:
+    """
+    Whether the rows hold a chain: a cited row about the cause (one of its words) and another cited row about the
+    failure, in time order.
+    """
+    causes = [row for row in rows if words & set(_WORD_RUN.findall(row.text))]
+    failures = [row for row in rows if _FAILURE.search(row.text)]
+    return any(cause is not failure and _in_order(cause, failure) for cause in causes for failure in failures)
+
+
+def _missing_backing(rows: list[_Row], named: str, by_ref: dict[int, ToolCall]) -> list[str]:
+    """
+    What a root-cause claim lacks among the rows it stands with: 'chain' and 'check' (see UnbackedCause).
+    """
+    cited = [row for row in rows if any(ref in by_ref for ref in row.refs)]
+    checks = [row for row in cited if _RULES_OUT.search(row.text)]
+    complete_checks = [row for row in checks if any(not _is_incomplete(by_ref[r]) for r in row.refs if r in by_ref)]
+    links = [row for row in cited if row not in checks]
+    missing = [] if _has_chain(links, _cause_words(named)) else ["chain"]
+    return missing if complete_checks else [*missing, "check"]
+
+
+def _passage(rows: list[_Row], claims: list[_CauseClaim], i: int) -> list[_Row]:
+    """
+    The rows a claim stands with: from the end of the claim before it to the start of the one after it.
+    """
+    low = claims[i - 1].end if i else 0
+    high = claims[i + 1].start if i + 1 < len(claims) else max((row.end for row in rows), default=0) + 1
+    return [row for row in rows if low <= row.start < high]
+
+
+@dataclass
+class _CauseCheck:
+    """
+    One piece of the answer checked for root causes: its text, the claims in it, and what each lacks.
+    """
+
+    text: str
+    claims: list[_CauseClaim]
+    missing: list[list[str]]
+
+    def unbacked(self) -> list[tuple[_CauseClaim, list[str]]]:
+        return [(claim, missing) for claim, missing in zip(self.claims, self.missing) if missing]
+
+
+def _checked_causes(answer: AgentAnswer, earlier: Iterable[AgentAnswer]) -> list[_CauseCheck]:
+    """
+    The answer's text, then each finding's message, with the root causes they name and what backs each: the text's
+    claims by the rows around them, a finding's by the whole text and its own message, cited or with its evidence.
+    """
+    by_ref = calls_by_ref(answer, earlier)
+    prose = _prose_of(answer.text)
+    rows = _timeline_rows(prose)
+    claims = _cause_claims(prose)
+    checks = [_CauseCheck(answer.text, claims, [
+        _missing_backing(_passage(rows, claims, i), _cause_text(prose, claim), by_ref)
+        for i, claim in enumerate(claims)])]
+    for finding in answer.findings:
+        own = _timeline_rows(finding.message)
+        if own and not own[-1].refs:
+            own[-1].refs = list(finding.evidence)
+        found = _cause_claims(finding.message)
+        checks.append(_CauseCheck(finding.message, found, [
+            _missing_backing([*rows, *own], _cause_text(finding.message, claim), by_ref) for claim in found]))
+    return checks
+
+
+def _said(text: str, claim: _CauseClaim) -> str:
+    """
+    A claim's sentence as it reads: without its citations, code and bold marks, or a list's dash.
+    """
+    sentence = _CODE_SPAN.sub(r"\1", _without_citations(text[claim.start:claim.end]))
+    return sentence.replace("**", "").strip(_SENTENCE_EDGES)
+
+
+def unbacked_causes(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> list[UnbackedCause]:
+    """
+    The sentences naming a root cause ("The root cause is the memory setting.") without the chain of cited tool
+    results from it to the failure, in time order, or without a cited check that rules out another cause ("Other
+    functions on the same role didn't fail [7]."), from a call that read everything. Hedged ones ("a possible cause")
+    are fine.
+    """
+    found = []
+    for check in _checked_causes(answer, list(earlier)):
+        for claim, missing in check.unbacked():
+            found.append(UnbackedCause(_said(check.text, claim), missing))
+    return found
+
+
+def _hedged_phrase(phrase: re.Match[str]) -> str:
+    """
+    A root-cause phrase as a possible cause: 'The root cause' -> 'A possible cause', 'were caused by' -> 'may have
+    been caused by', 'caused the' -> 'may have caused the'.
+    """
+    said = phrase.group()
+    verb = said.split()[0].lower() if phrase.lastgroup in ("is_the", "passive", "blame") else ""
+    if phrase.lastgroup == "the_is":
+        verb = said.split()[-1].lower()
+    hedged = _HEDGED[phrase.lastgroup or ""].format(verb=verb, may=_MAY.get(verb, ""))
+    return hedged[:1].upper() + hedged[1:] if said[:1].isupper() else hedged
+
+
+def _reworded(text: str, claims: list[_CauseClaim]) -> str:
+    phrases = sorted((phrase for claim in claims for phrase in claim.phrases), key=lambda found: found.start())
+    for phrase in reversed(phrases):
+        text = text[:phrase.start()] + _hedged_phrase(phrase) + text[phrase.end():]
+    return text
+
+
+def hedge_root_causes(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> list[str]:
+    """
+    Rewords each root cause the answer names without its chain and its ruling-out check (unbacked_causes) as a
+    possible one, in its text and findings ("The root cause is X" -> "A possible cause is X"), and returns the
+    sentences as they were first written. Pure but for the answer it changes; nothing for a sound answer.
+    """
+    checks = _checked_causes(answer, list(earlier))
+    first: list[str] = []
+    for check in checks:
+        first += [_said(check.text, claim) for claim, _ in check.unbacked()]
+    answer.text = _reworded(answer.text, [claim for claim, _ in checks[0].unbacked()])
+    for finding, check in zip(answer.findings, checks[1:]):
+        finding.message = _reworded(finding.message, [claim for claim, _ in check.unbacked()])
+    return first
+
+
 def check_grounding(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> Grounding:
     """
     What in an answer doesn't match what its tools returned: names and IDs, numbers, regions it says it checked,
-    claims of none over an incomplete read, and its citations (Grounding). `earlier` are the answers before it in
+    claims of none over an incomplete read, its citations, and root causes it names without their evidence
+    (Grounding). `earlier` are the answers before it in
     the same conversation, whose tool calls it may repeat and cite. Nothing is checked for an answer that failed, or
     when no tool has been called in the conversation.
     """
@@ -821,7 +1144,7 @@ def check_grounding(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) ->
     citations = check_citations(answer, evidence, earlier)
     return Grounding(unknown_names(answer, evidence), unknown_numbers(answer, evidence),
                      unchecked_regions(answer, evidence), unbacked_nones(answer), citations.unknown,
-                     citations.miscited, citations.share)
+                     citations.miscited, citations.share, unbacked_causes(answer, earlier))
 
 
 def _listed(items: list[str]) -> str:
@@ -903,15 +1226,45 @@ def _miscited_finding(miscited: list[str]) -> tuple[str, str]:
                     "may be right; find the source in What it checked below, where # is each call's ref.")
 
 
+_BACKING = {"chain": "chain of cited tool results from the cause to the failure",
+            "check": "cited check that rules out another cause"}
+
+
+def _backing_missing(missing: list[str]) -> str:
+    return " and no ".join(_BACKING[part] for part in missing)
+
+
+def _cause_finding(cause: UnbackedCause) -> tuple[str, str]:
+    sentence = _clip(cause.sentence, _SENTENCE_CHARACTERS)
+    return ("warn", f"The answer names a root cause without the evidence for it: “{sentence}” shows no "
+                    f"{_backing_missing(cause.missing)}. Treat it as a possible cause; ask the agent for the timeline "
+                    "from the cause to the failure and what it ruled out.")
+
+
+def _hedged_finding(answer: AgentAnswer) -> list[tuple[str, str]]:
+    """
+    What the reader should know when a root cause the answer named was reworded as a possible one.
+    """
+    if not answer.hedged:
+        return []
+    quoted = "; ".join(f"“{_clip(sentence, _SENTENCE_CHARACTERS)}”" for sentence in answer.hedged[:_NAMED])
+    return [("info", f"It named a root cause it didn't back up, so the answer says “a possible cause” instead: "
+                     f"{quoted} A root cause needs the chain of cited tool results from it to the failure and one "
+                     "cited check that rules out another cause. Ask for the timeline and what it ruled out to confirm "
+                     "it.")]
+
+
 def grounding_findings(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> list[tuple[str, str]]:
     """
     What check_grounding() found, as (level, message) pairs saying what to check: how its first draft was corrected
-    (answer.recheck) first, then claims of none over an incomplete read, names and IDs no tool returned, numbers no
+    (answer.recheck) and the root causes reworded as possible ones (answer.hedged) first, then root causes named
+    without their evidence, claims of none over an incomplete read, names and IDs no tool returned, numbers no
     tool returned, regions no tool read, citations that name no tool call, and facts citing a call that doesn't hold
     them. `earlier` are the answers before it in the conversation.
     """
     grounding = check_grounding(answer, earlier)
-    found = _recheck_findings(answer)
+    found = _recheck_findings(answer) + _hedged_finding(answer)
+    found += [_cause_finding(cause) for cause in grounding.unbacked_causes[:_NONES_SHOWN]]
     found += [_none_finding(none) for none in grounding.unbacked_nones[:_NONES_SHOWN]]
     if grounding.unknown_names:
         found.append(_names_finding(grounding.unknown_names))
@@ -935,6 +1288,7 @@ class Recheck:
         names, numbers, regions  what check_grounding() flagged in the draft (Grounding's lists)
         nones       the draft's sentences that claimed none over an incomplete read
         refs        the citations in the draft that named no tool call ('[9]')
+        causes      the draft's sentences that named a root cause without its chain and its ruling-out check
         first_text  the draft as the model first wrote it
         tool_calls  the tool calls the model made to correct it
         fixed       whether the answer it gave then checks out; None while unfinished, or when correcting failed
@@ -946,6 +1300,7 @@ class Recheck:
     regions: list[str] = field(default_factory=list)
     nones: list[str] = field(default_factory=list)
     refs: list[str] = field(default_factory=list)
+    causes: list[str] = field(default_factory=list)
     first_text: str = ""
     tool_calls: int = 0
     fixed: bool | None = None
@@ -955,7 +1310,7 @@ class Recheck:
     def of(cls, grounding: Grounding, first_text: str) -> Recheck:
         return cls(list(grounding.unknown_names), list(grounding.unknown_numbers), list(grounding.unchecked_regions),
                    [none.sentence for none in grounding.unbacked_nones], list(grounding.unknown_refs),
-                   first_text=first_text)
+                   [cause.sentence for cause in grounding.unbacked_causes], first_text=first_text)
 
 
 _RECHECK = """[Before the user sees your answer, check it: part of it isn't in what your tools returned.
@@ -971,6 +1326,13 @@ def _none_problem(none: UnbackedNone) -> str:
     return f"- “{_clip(none.sentence, _SENTENCE_CHARACTERS)}” says there was none, but {reasons}: it can't show that."
 
 
+def _cause_problem(cause: UnbackedCause) -> str:
+    return (f"- “{_clip(cause.sentence, _SENTENCE_CHARACTERS)}” names a root cause but shows no "
+            f"{_backing_missing(cause.missing)}. Show both, each step cited with its time (\"Root cause: memory cut "
+            "from 1024 to 256 MB at 01:52 [4], then out-of-memory errors from 02:00 [3]. Other functions on the same "
+            "role didn't fail [7].\"), reading what you need, or call it \"a possible cause\".")
+
+
 def recheck_request(grounding: Grounding, *, reply: bool = True) -> str:
     """
     What the model is sent when its draft doesn't check out: each problem check_grounding() found, a line each,
@@ -978,6 +1340,7 @@ def recheck_request(grounding: Grounding, *, reply: bool = True) -> str:
     final_answer when `reply`.
     """
     problems = [_none_problem(none) for none in grounding.unbacked_nones]
+    problems += [_cause_problem(cause) for cause in grounding.unbacked_causes]
     if grounding.unknown_names:
         problems.append(f"- Names and IDs no tool returned: {_listed(grounding.unknown_names)}.")
     if grounding.unknown_numbers:
@@ -1002,6 +1365,8 @@ def _flagged_parts(recheck: Recheck) -> str:
         parts.append(f"{_Words.of(recheck.regions, 'region').some.lower()} said to be checked")
     if recheck.nones:
         parts.append(f"{_Words.of(recheck.nones, 'claim').some.lower()} of none over an incomplete read")
+    if recheck.causes:
+        parts.append(f"{_Words.of(recheck.causes, 'root cause').some.lower()} without its evidence")
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + f" and {parts[-1]}"
 
 

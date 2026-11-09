@@ -494,6 +494,9 @@ class AgentAnswer:
         recheck       how its first draft was checked against what the tools returned and corrected before it was
                       shown (Recheck: what didn't check out, the draft, whether the answer now does), or None when
                       the draft checked out or wasn't checked (verify=False)
+        hedged        the sentences that named a root cause without the chain from it to the failure and a check
+                      ruling out another cause, as the model wrote them: the answer says "a possible cause" there
+                      instead (hedge_root_causes)
         exception     the error itself, to raise when debugging
     """
 
@@ -523,6 +526,7 @@ class AgentAnswer:
     asked: datetime | None = None
     focus: Focus | None = None
     recheck: Recheck | None = None
+    hedged: list[str] = field(default_factory=list)
     exception: BaseException | None = field(default=None, repr=False)
 
     @property
