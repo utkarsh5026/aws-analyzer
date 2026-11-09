@@ -68,7 +68,10 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      Lambda's and s3_tools.py S3's, with s3_triggers, which joins the two when the agent has both;
                      bedrock_kb_tools.py is Bedrock Knowledge Bases'; stepfunctions_tools.py, apigateway_tools.py
                      (both reading the Lambda run behind a failed step or call), sagemaker_tools.py, dynamodb_tools.py
-                     and opensearch_tools.py the other services'. TOOLKITS (toolkits/__init__.py) names them.
+                     and opensearch_tools.py the other services'. cloudwatch_tools.py is about every service's
+                     numbers: compare_metric holds one against the same hour yesterday and last week and reads the
+                     alarms on it (baselines.py works it out, pure; cloudwatch_reads.py reads CloudWatch). TOOLKITS
+                     (toolkits/__init__.py) names them.
     runtime.py       How any tool runs: the budget checked first, the call recorded, errors turned into its result,
                      and a pause to ask the user before a big read (ask_user; interrupt_on=).
     guard.py         The read-only guard every toolkit's AWS clients go through.
@@ -191,6 +194,12 @@ from .toolkits.apigateway_tools import (
     summarize_calls,
     summarize_lambda_run,
 )
+from .toolkits.cloudwatch_tools import (
+    CLOUDWATCH_TOOL_READS,
+    CloudWatchToolkit,
+    summarize_alarms,
+    summarize_comparisons,
+)
 from .toolkits.dynamodb_tools import DYNAMODB_TOOL_READS, DynamoDBToolkit, summarize_shape, summarize_table, summarize_tables
 from .toolkits.opensearch_tools import (
     OPENSEARCH_TOOL_READS,
@@ -308,6 +317,8 @@ __all__ = [
     "KB_TOOL_READS",
     "APIGATEWAY_TOOL_READS",
     "APIGatewayToolkit",
+    "CLOUDWATCH_TOOL_READS",
+    "CloudWatchToolkit",
     "DYNAMODB_TOOL_READS",
     "DynamoDBToolkit",
     "OPENSEARCH_TOOL_READS",
@@ -443,6 +454,8 @@ __all__ = [
     "summarize_pipeline_run",
     "summarize_pipelines",
     "summarize_running",
+    "summarize_alarms",
+    "summarize_comparisons",
     "summarize_shape",
     "summarize_state_machine",
     "summarize_state_machines",

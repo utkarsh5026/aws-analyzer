@@ -1002,7 +1002,13 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   attribute types, counts, number ranges, lengths and key shapes, never a value; the guard's `SEARCHES` let
   `dynamodb:Scan` through by name) and `OpenSearchToolkit` (`opensearch_tools.py`: `find_vector_stores`,
   `store_indexes`, `index_details`, `check_vectors`, over the analyzer's own read-only REST requests; no question is
-  embedded). Their `summarize_*` are pure, and `results.py`'s `model_findings` / `clamp_count` and the base's
+  embedded). `CloudWatchToolkit` (`cloudwatch_tools.py`: `compare_metric`, `find_alarms`) is about every service's
+  numbers, so it reads through its own `MetricReader` (`cloudwatch_reads.py`: GetMetricData for the window and the
+  same window a day and a week back, ListMetrics for a SageMaker endpoint's variants, a state machine's ARN or an HTTP
+  API's stage, DescribeAlarmsForMetric, DescribeAlarms), not an analyzer; `baselines.py` (pure) holds
+  `RESOURCE_KINDS`, the numbers worth comparing per kind (`MetricSpec`: statistic, unit, scale, which way is worse,
+  the floor), `judge` (off when over `OFF_RATIO` times both baselines by the floor), `off_since` (the run of 5-minute
+  points that were off) and `says`, the sentence the model copies. Their `summarize_*` are pure, and `results.py`'s `model_findings` / `clamp_count` and the base's
   `_region_text` / `_count_cloudwatch` are what they share. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
   agent gets (all eight services); `AgentAnalyzer(toolkits=[...])` takes names, `Toolkit` subclasses or objects (a user's own too), and
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one, and
