@@ -18,6 +18,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- 🤖 **Agent: always shows its plan**
+  - Every question starts with a plan checklist, even one a single tool call answers; it used to be only for longer questions.
+  - Costs one more model call per question; `AgentView(plan=False)` turns the plan off.
 - 🤖 **Agent: a root cause has to show its evidence** ([#222](https://github.com/utkarsh5026/aws-analyzer/pull/222))
   - "The root cause is X" now needs the cited chain from X to the failure and one cited check that rules out another cause.
   - Without both, the draft goes back to the model once; if it's still bare, the answer says "a possible cause is X".

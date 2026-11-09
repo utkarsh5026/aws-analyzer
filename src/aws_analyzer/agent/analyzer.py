@@ -263,8 +263,8 @@ class AgentAnalyzer(_BaseAnalyzer):
     (~/.cache/aws-analyzer/agent/memory.sqlite, or the path memory= gives), one set per AWS account: memories()
     shows them and forget() clears them. chats=True saves every conversation on this machine, titled from its first
     question (~/.cache/aws-analyzer/agent/chats.sqlite, or the path chats= gives): chats() lists them, open_chat()
-    carries one on, even after the kernel restarts, and rename_chat() gives one a title of your own. `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
-writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
+    carries one on, even after the kernel restarts, and rename_chat() gives one a title of your own. `budget` caps each question (Budget, or a dict of its fields). The agent writes a short plan
+first for every question and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
 plan=False leaves the plan out, which saves its instructions' tokens on every model call. It ends each question by
 filling in a set shape (findings=True, the default): the answer, and what it found that needs your attention
 (answer.findings: warn or info, what's wrong and what to do, and the View call that shows more, kept only when it's

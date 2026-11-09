@@ -6,9 +6,9 @@ goes in build_graph(); everything about LangGraph's messages stays in this file.
 
 _MIN_PYTHON is deepagents' floor; the package's own is 3.10, and everything but the agent itself runs there.
 HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools). PLAN_TOOL is LangChain's write_todos (its
-TodoListMiddleware, which deepagents doesn't add by itself): the model writes a short plan for a question of several
-steps and ticks it off as it goes, and _record_plan keeps each version on the question and tells its listener, so the
-chat window and the report show it. _PLAN_PROMPT and _PLAN_TOOL_TEXT replace the middleware's own instructions, which
+TodoListMiddleware, which deepagents doesn't add by itself): the model writes a short plan before it reads anything
+(_plan_first makes the first model call of each question call it) and ticks it off as it goes, and _record_plan keeps
+each version on the question and tells its listener, so the chat window and the report show it. _PLAN_PROMPT and _PLAN_TOOL_TEXT replace the middleware's own instructions, which
 are written for coding tasks and run to about a thousand tokens. FILE_TOOLS are deepagents' file tools (with
 the parameter a call's line names first): with a Python workspace they work on its files (workspace/files.py), and
 _record_file_tools counts each call against the question's budget and records it like the toolkits' tools.
@@ -44,15 +44,15 @@ HIDDEN_TOOLS = frozenset({"task", "execute"})
 PLAN_TOOL = "write_todos"
 _PLAN_PROMPT = """## Your plan (`write_todos`)
 
-For a question that needs three or more tool calls, first write a short plan with `write_todos`: two to six steps,
-each a few plain words saying what you'll check ("check every function's health", "read orders-etl's errors",
-"read the code where it fails"). The user sees it as a checklist that ticks off as you work. Mark a step in_progress
-when you start it and completed as soon as it's done, add or drop steps when what you find changes the plan, and
-never call `write_todos` twice in one turn. Skip the plan for a question one or two tool calls answer. The plan isn't
-the answer: give the answer after your last `write_todos` call."""
+Start every question by writing a short plan with `write_todos`, before any other tool: one to six steps, each a few
+plain words saying what you'll check ("check every function's health", "read orders-etl's errors", "read the code
+where it fails"); a question one tool call answers gets a one-step plan. The user sees it as a checklist that ticks
+off as you work. Mark a step in_progress when you start it and completed as soon as it's done, add or drop steps when
+what you find changes the plan, and never call `write_todos` twice in one turn. The plan isn't the answer: give the
+answer after your last `write_todos` call."""
 _PLAN_TOOL_TEXT = ("Writes your plan for the question as a checklist the user sees: the whole list each time, every "
-                   "step with its status (pending, in_progress or completed). Use it only for questions that need "
-                   "three or more tool calls.")
+                   "step with its status (pending, in_progress or completed). Call it first for every question, "
+                   "then again as steps finish.")
 FILE_TOOLS = {"ls": "path", "read_file": "file_path", "write_file": "file_path", "edit_file": "file_path",
               "glob": "pattern", "grep": "pattern", "delete": "file_path"}
 _FILE_SUMMARY_CHARACTERS = 80
@@ -65,6 +65,8 @@ _WRAP_UP = ("[The user pressed stop before you finished. Don't read anything mor
             "question now from what your tools already returned, and say what you didn't get to check.]")
 _REPLIED = "Your answer is with the user."
 _FORCED_CHOICE = "any"
+_NAMED_CHOICE = "tool"
+_HUMAN_MESSAGES = ("HumanMessage", "HumanMessageChunk")
 _AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
 
@@ -99,7 +101,8 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     conversations (memory.py's backend, or None): its file tools reach it at MEMORY_FOLDER, and its notes go in the
     prompt when a conversation starts. With a backend or notes and `current_run` (the question being answered),
     each file tool call is recorded on it and counted against its budget. With `plan`, the model has write_todos
-    (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one. With `reply`, it answers by
+    (PLAN_TOOL) to write its plan, and with `current_run` it writes one first for every question (_plan_first),
+    which is kept on the run. With `reply`, it answers by
     calling final_answer (REPLY_SCHEMA: the answer and its findings) when it can.
     """
     check_ready()
@@ -112,6 +115,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     if plan:
         middleware.append(_planning())
         if current_run is not None:
+            middleware.append(_plan_first(current_run))
             middleware.append(_record_plan(current_run))
     if current_run is not None and backend is not None:
         middleware.append(_record_file_tools(current_run))
@@ -543,6 +547,69 @@ def _keep_plan(run: _Run, tool_call: dict[str, Any]) -> None:
     with run.lock:
         run.plan = plan
     run.tell(AgentStep("plan", plan=list(plan)))
+
+
+def _can_name_tool(model: Any) -> bool:
+    """
+    Whether a chat model can be told which tool to call (tool_choice by name): only Amazon Bedrock's model class says
+    it can't (supports_tool_choice_values without "tool").
+    """
+    choices = getattr(model, "supports_tool_choice_values", None)
+    return choices is None or _NAMED_CHOICE in choices
+
+
+def _is_first_call(messages: list[Any]) -> bool:
+    """
+    Whether no model message follows the conversation's last question: this model call starts the question's turn.
+    """
+    for message in reversed(messages):
+        kind = type(message).__name__
+        if kind in _HUMAN_MESSAGES:
+            return True
+        if kind in _AI_MESSAGES:
+            return False
+    return True
+
+
+def _plan_first(current: Callable[[], _Run]) -> Any:
+    """
+    A deepagents middleware that makes the first model call of each question call write_todos (PLAN_TOOL), so every
+    answer has a plan the user sees, whichever model is asked. It leaves alone a question that has a plan already
+    (the recheck turn), one being wrapped up after stop (_WRAP_UP), a later call of the turn (so a plan the tool
+    refused isn't asked for again and again) and a model that can't be told which tool to call, which still has
+    _PLAN_PROMPT. For that one call the reply's set shape (response_format) is left out, since ToolStrategy would
+    replace the choice with "any", and its tool (final_answer) is offered as a plain tool in the place ToolStrategy
+    puts it, so every call of the question sends the same tools (and Bedrock's prompt cache holds).
+    """
+    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
+    structured = _require("langchain.agents.structured_output", "The agent's plan", package="aws-analyzer[agent]")
+
+    def must_plan(request: Any) -> bool:
+        run = current()
+        offers_plan = any(_tool_name(tool) == PLAN_TOOL for tool in request.tools)
+        is_fresh = not run.plan and not run.stop.is_set() and _is_first_call(request.messages)
+        return offers_plan and is_fresh and _can_name_tool(request.model)
+
+    def reply_tools(request: Any) -> list[Any]:
+        reply_format = request.response_format
+        if not isinstance(reply_format, structured.ToolStrategy) or not _can_force_tools(request.model):
+            return []
+        return [structured.OutputToolBinding.from_schema_spec(spec).tool for spec in reply_format.schema_specs]
+
+    def planned(request: Any) -> Any:
+        if not must_plan(request):
+            return request
+        tools = [*request.tools, *reply_tools(request)]
+        return request.override(tools=tools, tool_choice=PLAN_TOOL, response_format=None)
+
+    class PlanFirst(types.AgentMiddleware):
+        def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            return handler(planned(request))
+
+        async def awrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            return await handler(planned(request))
+
+    return PlanFirst()
 
 
 def _record_plan(current: Callable[[], _Run]) -> Any:

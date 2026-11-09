@@ -473,7 +473,7 @@ class AgentAnswer:
                       View call that shows more), as it filled them in its reply; empty when it found nothing, or
                       answered in plain text (findings=False, or a model that can't fill a set shape)
         plan          the steps the agent planned for it (write_todos), as it last left them; empty when it
-                      didn't plan (a question of a step or two)
+                      didn't plan (plan=False, or a model that can't be told to)
         charts        the charts it drew to show with the text (show_chart), in order: .title, .data, .mime
         aws_calls     the AWS reads it made: 'logs:FilterLogEvents' -> 12
         blocked       AWS calls the read-only guard refused

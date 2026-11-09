@@ -572,7 +572,7 @@ class AgentView(_BaseView):
     def chat(self, *, height: int | str | None = None) -> None:
         """
         A chat window to talk to the agent: type a question and watch it work, step by step, as it happens: its
-        plan for a question of several steps (a checklist that ticks off), what it means to do, each tool it calls with what that found, then the answer, with what it checked folded under
+        plan (a checklist that ticks off), what it means to do, each tool it calls with what that found, then the answer, with what it checked folded under
         it. Follow-ups continue the conversation, Stop ends a question with what it found so far, and New chat starts
         over. Questions asked with ask() in other cells join it. height= sets the conversation's height (800
         pixels, or CSS such as '70vh'); it fills the browser window otherwise.

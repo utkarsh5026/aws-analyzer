@@ -1577,7 +1577,7 @@ def scripted(*replies):
     """
     A LangChain chat model that answers with these AIMessages in turn (an exception is raised instead; a
     threading.Event is waited for before the next reply, to hold the agent back), and remembers the tools it was
-    given and the messages it was sent.
+    given, the tool it was told to call (tool_choice) and the messages it was sent.
     """
     pytest.importorskip("deepagents")
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -1586,6 +1586,7 @@ def scripted(*replies):
     class Scripted(BaseChatModel):
         replies: list
         bound: list
+        choices: list
         prompts: list
         model_name: str = "gpt-test"
 
@@ -1595,6 +1596,7 @@ def scripted(*replies):
 
         def bind_tools(self, tools, **kwargs):
             self.bound.append(sorted(getattr(t, "name", None) or t.get("name") for t in tools))
+            self.choices.append(kwargs.get("tool_choice"))
             return self
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
@@ -1607,7 +1609,7 @@ def scripted(*replies):
                 raise reply
             return ChatResult(generations=[ChatGeneration(message=reply)])
 
-    return Scripted(replies=list(replies), bound=[], prompts=[])
+    return Scripted(replies=list(replies), bound=[], choices=[], prompts=[])
 
 
 def system_text(model, prompt=0):
@@ -1806,7 +1808,7 @@ def test_the_answer_comes_with_the_findings_the_model_filled_in(seeded, capsys):
         ("warn", "LambdaView().errors('etl-nightly', since='2h')"), ("info", "")]
     assert [s.kind for s in steps if s.kind == "thinking"] == ["thinking"]
     assert [c.name for c in answer.calls] == ["function_health"] and answer.model_calls == 2
-    assert "final_answer" in model.bound[0]
+    assert "final_answer" in model.bound[0] and model.choices == ["write_todos", "any"]
     prompt = system_text(model)
     assert "Give the answer with final_answer" in prompt and "Calls a finding can name" in prompt
     assert "- LambdaView(): code(name, file=None, *, region=None, max_size='50MB')" in prompt
@@ -2276,7 +2278,8 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     assert sent[0]["inferenceConfig"]["maxTokens"] == 4096 and sent[0]["inferenceConfig"]["temperature"] == 0.0
     for request in sent:
         assert {"cachePoint": {"type": "default"}} == request["system"][-1] == request["toolConfig"]["tools"][-1]
-    assert sent[0]["system"] == sent[1]["system"] and sent[0]["toolConfig"] == sent[1]["toolConfig"]
+    assert sent[0]["system"] == sent[1]["system"] and sent[0]["toolConfig"]["tools"] == sent[1]["toolConfig"]["tools"]
+    assert sent[0]["toolConfig"]["toolChoice"] == {"tool": {"name": "write_todos"}}, "every question starts with a plan"
     assert answer.rates == pytest.approx(Rates(1.10, 5.50, "list", 0.11, 1.375))
     assert (answer.input_tokens, answer.cache_read_tokens, answer.cache_write_tokens) == (3700, 1000, 0)
     assert answer.cost == pytest.approx((2700 * 1.10 + 1000 * 0.11 + 50 * 5.50) / 1e6)
@@ -2486,7 +2489,7 @@ def test_the_ask_drawer_points_at_the_evidence(seeded):
     pytest.importorskip("ipywidgets")
     from aws_analyzer.lambda_functions import LambdaExplorer
 
-    model = scripted(replies("It fails on `customer_id`.",
+    model = scripted(calls(("write_todos", plan("in_progress"))), replies("It fails on `customer_id`.",
                              ("warn", "Rows without customer_id fail the run: skip them.",
                               f"LambdaView().logs('etl-nightly', request_id='{RID}')"),
                              ("info", "Its errors over the day.", "LambdaView().errors('etl-nightly', since='24h')")))
@@ -2511,7 +2514,7 @@ def test_the_s3_explorer_asks_about_the_folder_open(buckets):
     pytest.importorskip("ipywidgets")
     from aws_analyzer.s3 import S3Explorer
 
-    model = scripted(replies("Two of the three files ran etl-nightly; `orders-2.CSV` didn't match the `.csv` filter.",
+    model = scripted(calls(("write_todos", plan("in_progress"))), replies("Two of the three files ran etl-nightly; `orders-2.CSV` didn't match the `.csv` filter.",
                              ("warn", "orders-2.CSV wasn't processed: S3 compares endings case-sensitively.",
                               "S3View().head('s3://acme-raw/incoming/orders-2.CSV')")))
     agent = AgentView(make(model), mode="html", progress="off")
@@ -2789,6 +2792,31 @@ def test_the_agent_writes_a_plan_and_ticks_it_off(seeded, capsys):
     out = capsys.readouterr().out
     assert "Plan · 3 of 3 done" in out and "✓ read the code where it fails" in out
     assert "marked done" not in out
+
+
+def test_every_question_starts_with_a_plan(seeded):
+    model = scripted(
+        calls(("write_todos", plan("in_progress"))),
+        replies("**etl-nightly** failed."),
+        calls(("write_todos", plan("in_progress"))),
+        replies("Nothing else failed."),
+    )
+    core = make(model, verify=False)
+    first = core.ask("Which Lambda failed?")
+    assert model.choices[0] == "write_todos" and model.bound[0] == model.bound[1]
+    assert model.choices[1] == "any" and "final_answer" in model.bound[1]
+    assert first.plan and first.text == "**etl-nightly** failed."
+    core.ask("Anything else?")
+    assert model.choices[2] == "write_todos", "a follow-up gets its own plan"
+    assert "Start every question by writing a short plan" in system_text(model)
+
+
+def test_a_model_that_cant_be_told_which_tool_still_has_the_plan_tool(seeded):
+    model = scripted(says("**etl-nightly** failed."))
+    model.__dict__["supports_tool_choice_values"] = ("auto", "any")
+    answer = make(model, verify=False).ask("Which Lambda failed?")
+    assert model.choices[0] == "any" and "write_todos" in model.bound[0]
+    assert answer.plan == [] and answer.text == "**etl-nightly** failed."
 
 
 def test_plan_false_leaves_the_plan_out(seeded):

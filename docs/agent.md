@@ -870,7 +870,7 @@ core = AgentAnalyzer(
     toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb", "stepfunctions", "apigateway",
                                                      # "sagemaker", "dynamodb" and "opensearch"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
-    plan=False,                                      # no plan for questions of several steps; on by default
+    plan=False,                                      # no plan; on by default, written first for every question
     runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
     findings=False,                                  # answer in plain text, without findings; on by default
     verify=False,                                    # show the draft as it is; on by default: one more turn to
