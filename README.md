@@ -102,7 +102,7 @@ report still renders.
 | <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Athena explorer**                | • The queries, what they cost and why they fail, with a time range and workgroup to pick<br>• Click a query for its SQL, numbers and saved rows<br>• Every Glue table, with chips for what's wrong: empty or gone, no partitions loaded, read in full<br>• The crawlers, failed or stopped ones first | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html#explorer) |
 | <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **SQS, SNS and EventBridge**      | • Where a message went: a topic, queue or rule followed hop by hop to the function that reads it<br>• Queues backing up, and messages close to being deleted unread<br>• Dead-letter queues holding failed messages, with the command that moves them back<br>• Deliveries that fail, and the policy or key that keeps a sender out, with the command that lets it in | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html) |
 | <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **Messaging explorer**            | • Every queue, topic and rule, the failed messages first: click one to open it<br>• Its report, and where its messages go as a map whose hops you click<br>• The dead-letter queues, the fullest first<br>• Live: a queue's backlog every few seconds, and when it would be empty | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html#explorer) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Step Functions and API Gateway, joined to Lambda: which step or call failed, and the run behind it<br>• SageMaker jobs and endpoints, DynamoDB tables and OpenSearch vector indexes<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/`, `bedrock_kb/`, `stepfunctions/`, `apigateway/`, `sagemaker_env/`, `dynamodb/` and `opensearch/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Step Functions and API Gateway, joined to Lambda: which step or call failed, and the run behind it<br>• SageMaker jobs and endpoints, DynamoDB tables and OpenSearch vector indexes<br>• Is it normal? Each number against the same hour yesterday and last week, since when it's off, and the alarms on it<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/`, `bedrock_kb/`, `stepfunctions/`, `apigateway/`, `sagemaker_env/`, `dynamodb/` and `opensearch/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -2658,7 +2658,9 @@ arrived and the function's runs, and finds the files that never ran it (a suffix
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
 `S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases (whether one is up to date, why
-a sync failed, what a question finds in it), and Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch. A
+a sync failed, what a question finds in it), and Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch. It
+knows what normal looks like: ask "Is churn-endpoint slow?" and it holds the number against the same hour yesterday
+and last week, says since when it's been off and whether an alarm watches it. A
 problem can cross services: ask "Why did order-pipeline fail?" and it finds the state that failed, then reads the
 log lines of the Lambda run behind it by the request ID the execution's history records, and the line of code that
 raised; ask "Why does orders-api return 504s?" and it groups the failed calls in the stage's access log and reads the
@@ -2824,6 +2826,22 @@ nodes' memory), `index_details` (each vector field's engine, similarity and what
 `check_vectors` (a sample of the stored vectors measured: dimensions, zero and repeated ones; no document's fields
 or vectors reach the model). No question is embedded, so no Bedrock model is called. Nothing in these toolkits
 stops, deletes, writes or starts anything: the findings name the command that would.
+
+**What normal looks like.** A number alone doesn't say whether it's a problem: 1,840 ms may be slow for one endpoint and
+usual for another. The CloudWatch toolkit compares each number with the same hour yesterday and the same hour last
+week, says since when it has looked off and reads the alarms set on it. The tool works the comparison out, ratios and
+times included, and hands the model a sentence to copy, so the model never does the maths:
+
+> p95 latency of churn-endpoint is 1,840 ms against 410 ms last week (4.5×), since 02:10. No alarm is set on it.
+
+| Tool                                                   | What it returns                                                                                                                              |
+| :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compare_metric(resource, metric, at, minutes, region)` | Each of a resource's main numbers (or the one `metric=` names, like `'p99 latency'`) over the last hour against the same hour yesterday and last week: the ratios, whether that's usual, since when it has looked off (from 5-minute points), the alarms set on it, the hours before it, and the `aws cloudwatch put-metric-alarm` command that would catch it when nothing watches it. `resource` is `lambda:orders-etl`, `sagemaker:churn-endpoint`, `sqs:email-jobs`, `states:order-pipeline`, `dynamodb:orders`, `apigateway:orders-api`, `http:<api id>`, an ARN, or any metric as `'AWS/EC2:InstanceId=i-0abc'` |
+| `find_alarms(state, prefix, region)`                   | The region's alarms, the firing ones first: each one's rule in words (`p95 > 1,000 ms for 3 of 3 periods of 5 minutes`), since when it's in its state, what it watches and whether it tells anyone |
+
+A number is off when it's over 1.5× both the same time yesterday and last week (or under two thirds of both, for
+traffic), by a margin that matters for it: 3 more errors in the hour, 100 ms more run time. Nothing here sets or
+changes an alarm.
 
 ### Running Python (`python=`)
 
@@ -3164,7 +3182,10 @@ here that reads items; the guard lets it through by name). The OpenSearch tools 
 `es:DescribeDomains`, `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`,
 `aoss:GetSecurityPolicy`, `aoss:GetAccountSettings`, `cloudwatch:GetMetricData` and, to read indexes,
 `es:ESHttpGet` and `es:ESHttpPost` on a domain (POST to `_search` and `_count` only) or `aoss:APIAccessAll` with a
-data access policy on a collection. Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
+data access policy on a collection. The CloudWatch tools need `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics` (a
+SageMaker endpoint's variants, a state machine's ARN, an HTTP API's stage, and close names when one isn't found),
+`cloudwatch:DescribeAlarmsForMetric` (the alarms on a number) and `cloudwatch:DescribeAlarms` (for `find_alarms`).
+Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
 and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
 `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
 `"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the

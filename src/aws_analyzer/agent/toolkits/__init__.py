@@ -1,7 +1,7 @@
 """
 The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py, bedrock_kb_tools.py,
-stepfunctions_tools.py, apigateway_tools.py, sagemaker_tools.py, dynamodb_tools.py, opensearch_tools.py), each a
-Toolkit subclass (base.py) with the tools the agent can call about that service. TOOLKITS names the built-in ones;
+stepfunctions_tools.py, apigateway_tools.py, sagemaker_tools.py, dynamodb_tools.py, opensearch_tools.py,
+cloudwatch_tools.py), each a Toolkit subclass (base.py) with the tools the agent can call about that service. TOOLKITS names the built-in ones;
 AgentAnalyzer(toolkits=[...]) picks which the agent gets, by name or as Toolkit objects (yours too), and
 DEFAULT_TOOLKITS is what it gets without that.
 
@@ -13,7 +13,9 @@ agent has the other (Toolkit.peer()); Step Functions and API Gateway read the La
 call through the agent's Lambda toolkit's analyzer, when it has one, so the Lambda tools can go on from there. The Python toolkit (python_tools.py) isn't about a service: it runs the model's
 code in the agent's workspace (AgentAnalyzer(python=...)), and each service's toolkit offers a save_* tool that puts
 its data there when the agent has it (peer('python')). Nor is the Runbooks toolkit (runbook_tools.py): it reads the
-agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name.
+agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name. The CloudWatch
+toolkit (cloudwatch_tools.py) is about every service's numbers rather than one service, so it reads through its own
+MetricReader (cloudwatch_reads.py), not an analyzer of the package, with the maths in baselines.py.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Any, Iterable
 from .base import Toolkit
 from .apigateway_tools import APIGatewayToolkit
 from .bedrock_kb_tools import BedrockKBToolkit
+from .cloudwatch_tools import CloudWatchToolkit
 from .dynamodb_tools import DynamoDBToolkit
 from .lambda_tools import LambdaToolkit
 from .opensearch_tools import OpenSearchToolkit
@@ -36,9 +39,10 @@ from .stepfunctions_tools import StepFunctionsToolkit
 TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "bedrock_kb": BedrockKBToolkit,
                                       "stepfunctions": StepFunctionsToolkit, "apigateway": APIGatewayToolkit,
                                       "sagemaker": SageMakerToolkit, "dynamodb": DynamoDBToolkit,
-                                      "opensearch": OpenSearchToolkit, "python": PythonToolkit}
+                                      "opensearch": OpenSearchToolkit, "cloudwatch": CloudWatchToolkit,
+                                      "python": PythonToolkit}
 DEFAULT_TOOLKITS = ("lambda", "s3", "bedrock_kb", "stepfunctions", "apigateway", "sagemaker", "dynamodb",
-                    "opensearch")
+                    "opensearch", "cloudwatch")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
@@ -88,6 +92,7 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "APIGatewayToolkit", "BedrockKBToolkit", "DynamoDBToolkit", "LambdaToolkit",
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "APIGatewayToolkit", "BedrockKBToolkit", "CloudWatchToolkit",
+           "DynamoDBToolkit", "LambdaToolkit",
            "OpenSearchToolkit", "PythonToolkit", "RunbookToolkit", "S3Toolkit", "SageMakerToolkit",
            "StepFunctionsToolkit", "Toolkit", "default_toolkits", "make_toolkit", "make_toolkits"]

@@ -108,6 +108,7 @@ agent.ask("Show me one of those runs")                         # ...and again
 agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
 agent.ask("Which buckets are public, and what do they cost?", new=True)
 agent.ask("Which functions run close to their timeout this week?", new=True)   # a new conversation
+agent.ask("Is churn-endpoint slower than usual?", new=True)    # against the same hour yesterday and last week
 agent.tools()                                                  # what it can call, its model and its budget
 agent.transcript()                                             # every question and answer so far, with their cost
 agent.memory()                                                 # with memory=True: what it remembers between conversations
@@ -286,7 +287,7 @@ To ask about what an explorer window shows, pass the window as `focus=`: `agent.
 
 ## What it can call { #tools }
 
-Eighteen read-only tools over Lambda and S3, seven for [Bedrock knowledge bases](#knowledge-bases), and more for [Step Functions, API Gateway](#across-services), SageMaker, DynamoDB and OpenSearch. Each returns a compact summary with what it covered, never raw AWS data.
+Eighteen read-only tools over Lambda and S3, seven for [Bedrock knowledge bases](#knowledge-bases), and more for [Step Functions, API Gateway](#across-services), SageMaker, DynamoDB, OpenSearch and [what normal looks like](#normal) in CloudWatch. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -404,6 +405,34 @@ Step Functions records the request ID of the Lambda run behind each task, and an
 
 !!! tip "Worth knowing"
     Every agent has these toolkits, and their tools' descriptions go to the model with each question: about 20,000 tokens in all, cached on Amazon Bedrock after the first question. `toolkits=["lambda", "s3"]` keeps only what you need. Nothing here starts, redrives, stops or deletes anything: the findings give the command for you to run.
+
+### What normal looks like { #normal }
+
+A number alone doesn't say whether it's a problem, so the agent holds it against the same hour yesterday and last week.
+{ .gist }
+
+```python
+agent.ask("Is churn-endpoint slow?")
+agent.ask("Did orders-etl fail more than usual last night?")
+agent.ask("Is anything alarming right now?")
+```
+
+Before, the agent could only say *I can't tell whether that's slow for this endpoint.* Now `compare_metric` reads the number over the last hour, the same hour yesterday and the same hour last week, and answers:
+
+> p95 latency of churn-endpoint is 1,840 ms against 410 ms last week (4.5×), since 02:10. No alarm is set on it.
+
+The tool works all of that out (the ratios, whether it's usual, the moment it started from the 5-minute points, the alarms set on it) and hands the model a sentence to copy, so the model never does the maths. When nothing watches a number that's off, the finding gives the `aws cloudwatch put-metric-alarm` command that would have caught it, for you to run. `find_alarms` lists the region's alarms, the firing ones first, each with its rule in words and what it watches.
+
+??? more "What it compares, and when a number is off"
+
+    | Tool | What it returns |
+    | :--- | :--- |
+    | `compare_metric(resource, metric, at, minutes, region)` | Each of a resource's main numbers, or the one `metric=` names (`'p99 latency'`, `'errors'`, `'CPUUtilization'`), over the window against the same window yesterday and last week: the values, `vs_last_week_x` and `vs_yesterday_x`, how it looks, `off_since`, the alarms on it, the hours before it and a sentence to copy |
+    | `find_alarms(state, prefix, region)` | The region's alarms (`'ALARM'` by default, or `'OK'`, `'INSUFFICIENT_DATA'`, `''` for all): each one's state and since when, its rule in words, what it watches (as `compare_metric` takes it) and whether it tells anyone |
+
+    `resource` is `kind:name`: `lambda:orders-etl` (invocations, errors, p95 duration, throttles), `sagemaker:churn-endpoint` (invocations, p95 latency, 5xx and 4xx errors, per variant), `sqs:email-jobs` (messages waiting, age of the oldest, sent), `states:order-pipeline` (started, failed, timed out, p95 execution time), `dynamodb:orders` (read and write units, throttles), `apigateway:orders-api` (a REST API by name) or `http:a1b2c3d4e5` (an HTTP or WebSocket API by ID). An ARN works too, and so does any other metric, as its namespace and dimensions: `compare_metric('AWS/EC2:InstanceId=i-0abc', metric='CPUUtilization')`.
+
+    A number is off when it's over 1.5× both the same time yesterday and last week, by a margin that matters for it (3 more errors in the hour, 100 ms more run time); for traffic, under two thirds of both counts too. `off_since` is where the run of 5-minute points that were off starts, over the last six hours. `at=` moves the window to an earlier hour, and `minutes=` changes its length (15 to 360).
 
 ### Bedrock knowledge bases { #knowledge-bases }
 
@@ -894,7 +923,7 @@ On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's 
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. The Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch tools need their guides' read-only policies ([Step Functions](stepfunctions.md#permissions), [API Gateway](apigateway.md#permissions), [SageMaker](sagemaker_env.md#permissions), [DynamoDB](dynamodb.md#permissions), [OpenSearch](opensearch.md#permissions)), with `logs:FilterLogEvents` and `lambda:GetFunction` for the Lambda run behind a step or call, `logs:DescribeLogStreams` and `logs:GetLogEvents` for a training job's log, and `dynamodb:Scan` for `table_shape`. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. The Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch tools need their guides' read-only policies ([Step Functions](stepfunctions.md#permissions), [API Gateway](apigateway.md#permissions), [SageMaker](sagemaker_env.md#permissions), [DynamoDB](dynamodb.md#permissions), [OpenSearch](opensearch.md#permissions)), with `logs:FilterLogEvents` and `lambda:GetFunction` for the Lambda run behind a step or call, `logs:DescribeLogStreams` and `logs:GetLogEvents` for a training job's log, and `dynamodb:Scan` for `table_shape`. The CloudWatch tools need `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics`, `cloudwatch:DescribeAlarmsForMetric` and `cloudwatch:DescribeAlarms`. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands. With `memory=True`, the agent reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 
