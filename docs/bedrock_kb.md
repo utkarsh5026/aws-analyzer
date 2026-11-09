@@ -11,7 +11,7 @@ See which files your knowledge base failed to index, what a question really retr
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: never starts a sync</li>
   <li>Any Bedrock model</li>
   <li>An explorer window: click, don't type</li>

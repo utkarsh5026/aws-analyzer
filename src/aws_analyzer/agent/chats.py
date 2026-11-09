@@ -25,7 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .._kit.deps import _require
+from langgraph.checkpoint.sqlite import SqliteSaver
+
 from .._kit.errors import _Hint
 from .._kit.focus import Focus, FocusPart
 from .._kit.text import _clip
@@ -346,10 +347,9 @@ def open_checkpointer(path: Path) -> Any:
     restarted (made, with its folder, when it isn't there). One connection, shared by the threads the agent runs on:
     the saver holds a lock around every statement.
     """
-    savers = _require("langgraph.checkpoint.sqlite", "The agent's saved chats", package="langgraph-checkpoint-sqlite")
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(path), check_same_thread=False)
-    saver = savers.SqliteSaver(connection)
+    saver = SqliteSaver(connection)
     saver.setup()
     return saver
 

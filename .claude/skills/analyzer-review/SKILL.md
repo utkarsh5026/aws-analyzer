@@ -1,6 +1,6 @@
 ---
 name: analyzer-review
-description: Review analyzer changes against this project's product rules (say what it means, findings lead to an action, answer first, forgiving input, honest about limits and cost, no tracebacks, discoverable) and its hard constraints (no imports between analyzers, shared code in _kit, boto3 + stdlib at import, read-only, Python 3.10 floor, pandas 2 and 3). Use before committing or opening a PR, or to audit one existing command.
+description: Review analyzer changes against this project's product rules (say what it means, findings lead to an action, answer first, forgiving input, honest about limits and cost, no tracebacks, discoverable) and its hard constraints (no imports between analyzers, shared code in _kit, boto3 + stdlib at import (the agent's own packages in agent/), read-only, Python 3.11 floor, pandas 2 and 3). Use before committing or opening a PR, or to audit one existing command.
 argument-hint: "[base ref (default: uncommitted changes) | View command name, e.g. dynamodb.schema]"
 ---
 
@@ -67,8 +67,7 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
 
 ## 4. Constraints rules.py can't see
 
-- **Python 3.10.** Look for stdlib that is newer than 3.10: `datetime.UTC`, `tomllib`, `typing.Self`,
-  `enum.StrEnum`, `ExceptionGroup` / `except*` (3.11), `itertools.batched`, `Path.walk` (3.12), and
+- **Python 3.11.** Look for stdlib that is newer than 3.11: `itertools.batched`, `Path.walk` (3.12), and
   `compression.zstd` (3.14) unless it's guarded.
 - **pandas 2 and 3.** pandas 3 turns on copy-on-write (chained assignment silently does nothing) and makes `str`
   the default string dtype (so `dtype == object` checks and `.astype(object)` assumptions break). Look for
@@ -92,7 +91,7 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
 Group the findings:
 
 1. **Must fix.** Constraint violations, anything that writes, tracebacks a user can hit, wrong numbers, and
-   Python 3.10 or pandas-2/3 breakage.
+   Python 3.11 or pandas-2/3 breakage.
 2. **Should fix.** Gaps in the product rules: missing next steps, raw units, an unlabelled estimate, an unhelpful
    default.
 3. **Nits.** Wording and naming.

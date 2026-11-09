@@ -446,8 +446,7 @@ class _McpPanel:
         self.reconnect_button.layout.display = "" if states else "none"
         self.add_button.disabled = self.reconnect_button.disabled = bool(self.busy)
         self.add_server_button.disabled = bool(self.busy)
-        warnings = [text for level, text in mcp_findings([], path=kit.path, problem=kit.problem,
-                                                         missing_package=kit.missing_package) if level == "warn"]
+        warnings = [text for level, text in mcp_findings([], path=kit.path, problem=kit.problem) if level == "warn"]
         self.window._set(self.findings, "".join(f'<div class="ag-mh"><span class="warn">{_prose(text)}</span></div>'
                                                 for text in warnings))
         self._draw_imports()

@@ -18,6 +18,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- 🧰 **Breaking**: **Python 3.11 or newer, with the agent built in**
+  - `pip install aws-analyzer` now needs Python 3.11+ and installs the agent's packages (deepagents, LangChain, mcp) too.
+  - `AgentView` works right after install: no `[agent]` extra (it's still accepted, and installs nothing more).
+  - On a Python 3.10 kernel, pick a newer one (`SageMakerView().new_env("3.12")`) or stay on 0.54.
 - 🤖 **Agent: always shows its plan** ([#224](https://github.com/utkarsh5026/aws-analyzer/pull/224))
   - Every question starts with a plan checklist, even one a single tool call answers; it used to be only for longer questions.
   - Costs one more model call per question; `AgentView(plan=False)` turns the plan off.

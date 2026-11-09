@@ -43,9 +43,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every CPython release still supported upstream. On 3.10, requirements-dev.txt
-        # installs pandas 2 and IPython 8, so both major versions stay tested.
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Every CPython release from the package's floor (3.11) on.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,19 +54,24 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements-dev.txt
-      # Each module of the package (aws_analyzer.s3, ..., and the agent/ package) must import with boto3
-      # as its only hard dependency (pandas, pyarrow and IPython are optional), each in a fresh interpreter.
-      - name: Import each module with only boto3 installed
+      # Each analyzer module (aws_analyzer.s3, ...) must import with boto3 as its only dependency (pandas,
+      # pyarrow and IPython are optional), each in a fresh interpreter. The agent/ package imports its own
+      # dependencies (deepagents, LangChain, LangGraph, mcp) at the top, so it's imported once they're installed.
+      - name: Import each analyzer with only boto3 installed
         working-directory: src
         run: |
           python -m pip install "$(grep -E '^boto3==' ../requirements-dev.txt)"
           for file in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do
             module="${file%/__init__.py}"
+            [ "$(basename "$module" .py)" = agent ] && continue
             python -c "import aws_analyzer.$(basename "$module" .py)"
             echo "ok: $module"
           done
       - name: Install dev requirements
         run: python -m pip install -r requirements-dev.txt
+      - name: Import the agent with its dependencies
+        working-directory: src
+        run: python -c "import aws_analyzer.agent" && echo "ok: aws_analyzer/agent"
       # The local sandbox's tests need Pyodide's files (tens of MB). local.py pins their versions and
       # SHA-256s, so its hash is the key, and a cached file that doesn't match is downloaded again.
       - name: Restore Pyodide's files
@@ -82,7 +86,7 @@ jobs:
           AWS_ANALYZER_TEST_PYODIDE: ${{ runner.temp }}/pyodide
 
   # The PyPI package (pyproject.toml): build it the way the release workflow does, and check
-  # that `pip install aws-analyzer` gives a notebook every module with only boto3 installed.
+  # that `pip install aws-analyzer` gives a notebook every module, the agent included.
   package:
     name: Package
     runs-on: ubuntu-latest
@@ -104,7 +108,7 @@ jobs:
         run: python -m build
       - name: Check the metadata, and that the README renders on PyPI
         run: twine check --strict dist/*
-      - name: Install the wheel with only boto3 and import every module
+      - name: Install the wheel with its dependencies and import every module
         run: |
           python -m venv "$RUNNER_TEMP/wheel"
           "$RUNNER_TEMP/wheel/bin/pip" install "$(grep -E '^boto3==' requirements-dev.txt)" dist/*.whl
@@ -117,7 +121,7 @@ jobs:
                 getattr(aws_analyzer, name)
             assert s3.explorer.navigator._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
             assert s3_explorer.S3Explorer is s3.S3Explorer, "aws_analyzer.s3_explorer should re-export it"
-            print(f"aws-analyzer {aws_analyzer.__version__}: every module imports with only boto3")
+            print(f"aws-analyzer {aws_analyzer.__version__}: every module imports, the agent included")
 
   # One stable status to require in branch protection, so the rule doesn't need editing
   # when the Python matrix changes.

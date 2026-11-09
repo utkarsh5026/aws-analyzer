@@ -216,7 +216,6 @@ class McpToolkit(Toolkit):
         self.path = path
         self.problem = problem
         self.hub = hub or McpHub()
-        self.missing_package = ""
         self.hub.set_servers(self.servers)
 
     def make_analyzer(self, session: Any) -> None:
@@ -240,18 +239,11 @@ class McpToolkit(Toolkit):
 
     def connected(self) -> list[ServerState]:
         """
-        The enabled servers once each is connected or has failed (connecting the ones that are off), or none when
-        the mcp package isn't installed (missing_package says so).
+        The enabled servers once each is connected or has failed (connecting the ones that are off).
         """
         if not any(server.enabled for server in self.servers):
             return []
-        try:
-            states = self.hub.connect()
-        except ImportError as exc:
-            self.missing_package = str(exc)
-            return []
-        self.missing_package = ""
-        return states
+        return self.hub.connect()
 
     def _ready(self) -> list[ServerState]:
         return [state for state in self.connected() if state.is_ready and state.usable_tools]

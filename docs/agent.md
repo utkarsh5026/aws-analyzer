@@ -34,13 +34,13 @@ It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is
 
 <div class="steps" markdown>
 
-1. **Install it with the agent's extra** in a notebook cell. It needs Python 3.11 or newer.
+1. **Install it** in a notebook cell. It needs Python 3.11 or newer, and brings the agent's packages with it.
 
     ```bash
-    %pip install "aws-analyzer[agent]"
+    %pip install aws-analyzer
     ```
 
-    Add `sandbox`, `"aws-analyzer[agent,sandbox]"`, for its [Python sandbox](#run-python).
+    Add `sandbox`, `"aws-analyzer[sandbox]"`, for its [Python sandbox](#run-python).
 
 2. **Pick the model it answers with.** On SageMaker the simplest is a model on Amazon Bedrock: it uses the notebook's IAM role, needs no key, and nothing leaves AWS.
 
@@ -89,7 +89,7 @@ It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is
     agent = AgentView(timezone="kolkata")   # a tz database name, its city, or an offset like "+05:30"
     ```
 
-    The agent needs deepagents, langchain-openai and langchain-aws, which need Python 3.11; the rest of aws-analyzer still runs on 3.10 with boto3 alone.
+    The agent's packages (deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp) come with aws-analyzer.
 
 !!! tip "Worth knowing"
 
@@ -477,7 +477,7 @@ Give the agent a Python sandbox and it can write code for what no tool does: rea
 { .gist }
 
 ```python
-%pip install "aws-analyzer[agent,sandbox]"
+%pip install "aws-analyzer[sandbox]"
 
 agent = AgentView(provider="bedrock", python="local")
 agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
@@ -619,7 +619,7 @@ It's read for each new conversation, so editing it changes what the next one kno
 
 ??? more "Where the notes are kept, and what keeps them safe"
 
-    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package, in the `[agent]` extra). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves last only as long as the kernel unless you [save them](#chats).
+    The notes are one Markdown file the agent's file tools see at `/memories/AGENTS.md`, stored with deepagents' `StoreBackend` in a LangGraph SQLite store (the `langgraph-checkpoint-sqlite` package). Each AWS account gets its own set, found with STS `GetCallerIdentity`, so notes about one account never reach a question about another. Before a note is stored, anything that looks like a key, token or password is hidden, an undated line gets the day's date, and the whole file must stay under 8 KB (`budget={"memory_bytes": 16_000}` raises it), because it's sent with every conversation; past it, the write is refused and the agent keeps the notes that matter most. The agent can only write `/memories/AGENTS.md`, and can't delete it: only `forget()`, `forget_all()` and the window's ✕ do. Deleting the SQLite file forgets every account's notes at once. Memory is off by default; conversations themselves last only as long as the kernel unless you [save them](#chats).
 
 ## Saved chats { #chats }
 
@@ -646,7 +646,7 @@ In the chat window, **🗂 chats** opens a panel under the header with a line pe
 
 ??? more "What a chat keeps"
 
-    Each answer as you saw it: the question, the answer, its findings, plan, charts and tool calls (with what each handed the model), the tokens and the cost, as JSON. Beside them, the conversation the model reads to carry on, as LangGraph's checkpoints (its `SqliteSaver`, from the `langgraph-checkpoint-sqlite` package in the `[agent]` extra). It's what the agent showed you: tool results had anything that looks like a key or password hidden before the model saw them, and environment variable values are never read. Only `delete_chat()` and the window's ✕ remove a chat, and `clean_up()` leaves the file alone. Saving chats is off by default.
+    Each answer as you saw it: the question, the answer, its findings, plan, charts and tool calls (with what each handed the model), the tokens and the cost, as JSON. Beside them, the conversation the model reads to carry on, as LangGraph's checkpoints (its `SqliteSaver`, from the `langgraph-checkpoint-sqlite` package). It's what the agent showed you: tool results had anything that looks like a key or password hidden before the model saw them, and environment variable values are never read. Only `delete_chat()` and the window's ✕ remove a chat, and `clean_up()` leaves the file alone. Saving chats is off by default.
 
 ## Runbooks it follows { #runbooks }
 
@@ -929,9 +929,9 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 ## Troubleshooting { #troubleshooting }
 
-??? question "“The agent needs Python 3.11 or newer”"
+??? question "pip can't install aws-analyzer on this kernel"
 
-    deepagents needs Python 3.11. On SageMaker, pick a kernel with Python 3.11 or newer, or make one with the SageMaker guide's [`new_env("3.11")`](sagemaker_env.md#envs), then `%pip install "aws-analyzer[agent]"` in it.
+    aws-analyzer needs Python 3.11 or newer. On SageMaker, pick a kernel with Python 3.11 or newer, or make one with the SageMaker guide's [`new_env("3.11")`](sagemaker_env.md#envs), then `%pip install aws-analyzer` in it.
 
 ??? question "“The agent needs a model to answer with, and none is set up”"
 
@@ -975,7 +975,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 ??? question "“No module named 'langgraph.store.sqlite'”"
 
-    Memory keeps its notes with `langgraph-checkpoint-sqlite`, which comes with the agent's extra from this version on. Run `%pip install -U "aws-analyzer[agent]"` and restart the kernel.
+    Memory keeps its notes with `langgraph-checkpoint-sqlite`, which comes with aws-analyzer. Run `%pip install -U aws-analyzer` and restart the kernel.
 
 ??? question "The notes were gone after the notebook instance restarted"
 

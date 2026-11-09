@@ -2,15 +2,11 @@
 # (.github/dependabot.yml) proposes upgrades as pull requests, and CI tests them on
 # every supported Python before they land.
 
-# Runtime (preinstalled on SageMaker). pandas 3 and IPython 9 need Python 3.11+, so
-# Python 3.10 stays on the last pandas 2 / IPython 8 releases, which older SageMaker
-# images still ship. Dependabot leaves the python_version < "3.11" lines alone.
+# Runtime (preinstalled on SageMaker).
 boto3==1.43.97
-pandas==3.0.6; python_version >= "3.11"
-pandas==2.3.3; python_version < "3.11"
+pandas==3.0.6
 pyarrow==25.0.1
-ipython==9.17.1; python_version >= "3.11"
-ipython==8.39.0; python_version < "3.11"
+ipython==9.17.1
 
 # Tests
 moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs,sns,events]==5.2.5
@@ -30,13 +26,13 @@ tqdm==4.70.1
 # Optional for users (s3_explorer.py's clicks, bedrock_chat.py's window, tqdm's notebook bar); installed here so
 # both windows' widgets are tested.
 ipywidgets==8.1.9
-# Optional for users (agent/: the agent loop and its models: OpenAI and Azure OpenAI, Bedrock), which need Python 3.11 or newer;
-# installed there so the agent's harness is tested. On 3.10 its tests that need them are skipped.
-deepagents==0.7.26; python_version >= "3.11"
-langchain-openai==1.7.2; python_version >= "3.11"
-langchain-aws==1.9.0; python_version >= "3.11"
-langgraph-checkpoint-sqlite==3.1.2; python_version >= "3.11"
-mcp==1.30.0; python_version >= "3.11"
+# The agent's dependencies (agent/: the agent loop, its models on OpenAI, Azure OpenAI and Bedrock, its memory and
+# saved chats, and MCP servers), pinned here so every run tests the same versions.
+deepagents==0.7.26
+langchain-openai==1.7.2
+langchain-aws==1.9.0
+langgraph-checkpoint-sqlite==3.1.2
+mcp==1.30.0
 # Optional for users (agent/sandboxes/: the local sandbox runs Python in Pyodide on Deno); installed here so it's
 # tested for real. Its tests download Pyodide's files once a run (CI caches them), and skip without the internet.
 deno==2.9.8

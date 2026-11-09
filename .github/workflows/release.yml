@@ -40,7 +40,7 @@ jobs:
         run: python -m build
       - name: Check the metadata, and that the README renders on PyPI
         run: twine check --strict dist/*
-      - name: Install the wheel with only boto3, import every module, and match the version to the tag
+      - name: Install the wheel with its dependencies, import every module, and match the version to the tag
         run: |
           python -m venv "$RUNNER_TEMP/wheel"
           "$RUNNER_TEMP/wheel/bin/pip" install "$(grep -E '^boto3==' requirements-dev.txt)" dist/*.whl
@@ -57,7 +57,7 @@ jobs:
             assert s3_explorer.S3Explorer is s3.S3Explorer, "aws_analyzer.s3_explorer should re-export it"
             version, tag = aws_analyzer.__version__, os.environ["TAG"]
             assert tag == f"v{version}", f"release tag {tag} doesn't match __version__ {version}; tag it v{version}"
-            print(f"aws-analyzer {version}: every module imports with only boto3")
+            print(f"aws-analyzer {version}: every module imports, the agent included")
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist

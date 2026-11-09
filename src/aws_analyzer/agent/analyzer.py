@@ -758,11 +758,9 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         The deepagents agent: the model, the tools, the instructions and a memory of the conversation, with its file
         tools on the Python workspace when there is one, its notes between conversations with memory=, and its plan
         unless plan=False. Made once, and again when the file notes= names has changed; new_conversation() starts a
-        new thread in it, and every conversation is kept across a rebuild. Before anything else is made,
-        check_ready() says what's missing.
+        new thread in it, and every conversation is kept across a rebuild.
         """
         if self._graph is None:
-            harness.check_ready()
             self._prompt_notes = notes_text(self.notes)
             prompt = self.instructions()
             workspace = self.workspace

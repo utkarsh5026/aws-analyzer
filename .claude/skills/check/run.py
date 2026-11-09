@@ -2,22 +2,22 @@
 Run what CI runs, locally, plus the project-rule checks CI doesn't have. Prints one line per step and the
 output of any step that failed.
 
-    python .claude/skills/check/run.py                  # lint, imports with only boto3, package, rules, tests
+    python .claude/skills/check/run.py                  # lint, imports, package, rules, tests
     python .claude/skills/check/run.py --matrix         # also pytest on every other Python in CI's matrix (uv)
     python .claude/skills/check/run.py -- -k policy     # pass arguments through to pytest
 
 Steps:
   ruff        ruff check . (the rules in ruff.toml)
   imports     each module of the package (aws_analyzer.s3, ...) imported in a fresh interpreter with every package
-              except boto3 / botocore blocked, like CI's "only boto3 installed" job
-  package     the wheel pyproject.toml builds, twine-checked, then imported with only boto3 (like CI's
-              Package job); skipped when build isn't installed
+              except boto3 / botocore blocked, like CI's "only boto3 installed" job; the agent with its
+              dependencies (deepagents, LangChain, LangGraph, mcp), which the package requires
+  package     the wheel pyproject.toml builds, twine-checked, then imported with only boto3, the agent with its
+              dependencies (like CI's Package job); skipped when build isn't installed
   rules       .claude/skills/check/rules.py: read-only AWS calls, lazy optional imports, View conventions,
               IAM permissions listed in README.md
   pytest      python -m pytest -q (moto; no AWS account needed)
   matrix      with --matrix: pytest on each Python version in .github/workflows/ci.yml other than this one,
-              in throwaway environments built by uv from requirements-dev.txt (pandas 2 / IPython 8 on 3.10,
-              pandas 3 / IPython 9 on 3.11+)
+              in throwaway environments built by uv from requirements-dev.txt
 """
 
 from __future__ import annotations
@@ -33,9 +33,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
+WITH_DEPENDENCIES = {"agent"}
 
-# Run inside the temporary directory: block every import that isn't the standard library or boto3's own
-# dependencies, then import the analyzer. Mirrors CI, where only boto3 is installed.
+# Block every import that isn't the standard library or boto3's own dependencies, then import the analyzer. Mirrors
+# CI, where only boto3 is installed; WITH_DEPENDENCIES (the agent) are imported with the package's own dependencies.
 BOTO3_ONLY = """
 import sys
 ALLOWED = {"boto3", "botocore", "s3transfer", "jmespath", "dateutil", "urllib3", "six", "_distutils_hack"}
@@ -82,12 +83,17 @@ def package_step(python: str) -> tuple[str, bool, str, str]:
         if proc.returncode == 0:
             shutil.unpack_archive(wheels[0], site, "zip")
             code = (f"MODULE = 'aws_analyzer'\n{BOTO3_ONLY}\npackage = sys.modules['aws_analyzer']\n"
-                    "for name in package.__all__[1:]:\n    getattr(package, name)\n"
+                    "for name in package.__all__[1:]:\n"
+                    f"    if package._EXPORTS.get(name) not in {sorted(WITH_DEPENDENCIES)!r}:\n"
+                    "        getattr(package, name)\n"
                     "assert package.s3.explorer.navigator._s3_module() is package.s3\n")
             proc = subprocess.run([python, "-c", code], cwd=site, capture_output=True, text=True)
+        if proc.returncode == 0:
+            agent = "import aws_analyzer\nfrom aws_analyzer import AgentAnalyzer, AgentView\n"
+            proc = subprocess.run([python, "-c", agent], cwd=site, capture_output=True, text=True)
     output = (proc.stdout + proc.stderr).strip()
     ok = proc.returncode == 0
-    summary = f"{Path(wheels[0]).name} imports with only boto3" if ok else ""
+    summary = f"{Path(wheels[0]).name} imports with only boto3, the agent with its own" if ok else ""
     return f"{'PASS' if ok else 'FAIL'}  package  {time.monotonic() - started:5.1f}s  {summary}".rstrip(), ok, \
         "" if ok else "\n".join(output.splitlines()[-80:]), output
 
@@ -113,17 +119,18 @@ def main() -> int:
     else:
         results.append(step("ruff", [*ruff, "check", "."]))
 
-    # imports: each module of the package in a fresh interpreter, boto3 only.
+    # imports: each module of the package in a fresh interpreter, boto3 only (the agent with its dependencies).
     failures = []
     package = ROOT / "src" / "aws_analyzer"
     modules = [p for p in package.glob("*.py") if p.name != "__init__.py"]  # and a package's own: agent/
     modules += [p.parent for p in package.glob("*/__init__.py") if not p.parent.name.startswith("_")]
     for path in sorted(modules):
-        code = f"MODULE = 'aws_analyzer.{path.stem}'\n{BOTO3_ONLY}"
+        code = (f"import aws_analyzer.{path.stem}" if path.stem in WITH_DEPENDENCIES
+                else f"MODULE = 'aws_analyzer.{path.stem}'\n{BOTO3_ONLY}")
         proc = subprocess.run([python, "-c", code], cwd=ROOT / "src", capture_output=True, text=True)
         if proc.returncode:
             failures.append(f"{path.name}: {last_line(proc.stderr)}")
-    results.append((f"{'FAIL' if failures else 'PASS'}  imports  each module with only boto3",
+    results.append((f"{'FAIL' if failures else 'PASS'}  imports  each module with only boto3 (the agent with its own)",
                     not failures, "\n".join(failures), ""))
 
     # package: the wheel pyproject.toml builds, checked by twine, unpacked and imported with only boto3.

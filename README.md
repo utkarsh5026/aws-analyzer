@@ -17,8 +17,7 @@ checked.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
-[![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-3776ab?logo=python&logoColor=white)](.github/workflows/ci.yml)
-[![Needs only boto3](https://img.shields.io/badge/needs-boto3%20only-0f766e)](#get-started)
+[![Python 3.11 to 3.14](https://img.shields.io/badge/python-3.11%20%E2%80%93%203.14-3776ab?logo=python&logoColor=white)](.github/workflows/ci.yml)
 [![Read-only](https://img.shields.io/badge/AWS%20access-read--only-0f766e)](#why-aws-analyzer)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
@@ -62,9 +61,9 @@ show what they read or cost.
 </tr>
 <tr>
 <td width="33%" valign="top">
-<b>📦 One install, boto3 only</b><br>
-<code>%pip install aws-analyzer</code> in a notebook cell gives you every service. boto3 is the only requirement;
-pandas, pyarrow and the rest are optional.
+<b>📦 One install</b><br>
+<code>%pip install aws-analyzer</code> in a notebook cell gives you every service and the agent. The reports need
+only boto3; pandas, pyarrow and the rest are optional.
 </td>
 <td width="33%" valign="top">
 <b>🔒 Read-only</b><br>
@@ -112,10 +111,9 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 **1. Install it**, in a notebook cell:
 
 ```python
-%pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
-%pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
-%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite, mcp (Python 3.11+)
-%pip install "aws-analyzer[agent,sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
+%pip install aws-analyzer             # every service and the agent (Python 3.11+): boto3, deepagents, LangChain, mcp
+%pip install "aws-analyzer[all]"      # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
+%pip install "aws-analyzer[sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
 ```
 
 A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
@@ -2673,11 +2671,11 @@ nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. T
 
 ### Quick start
 
-The agent needs a few more packages (deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp), which need Python 3.11 or
-newer. Everything else in aws-analyzer still works on 3.10 with boto3 alone.
+The agent comes with aws-analyzer: its packages (deepagents, langchain-openai, langchain-aws,
+langgraph-checkpoint-sqlite and mcp) are installed with it.
 
 ```python
-%pip install "aws-analyzer[agent]"
+%pip install aws-analyzer
 
 from aws_analyzer import AgentView, set_timezone
 
@@ -2860,7 +2858,7 @@ deepagents' file tools, below):
 | `show_chart(file, title)`                    | Puts a chart the code saved in the answer, under its text, with its title: an Altair (Vega-Lite) chart, which the sandbox draws as SVG, or a PNG or SVG picture |
 
 ```python
-%pip install "aws-analyzer[agent,sandbox]"      # brings Deno
+%pip install "aws-analyzer[sandbox]"      # brings Deno
 
 agent = AgentView(provider="bedrock", python="local")
 agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
@@ -3269,9 +3267,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   both, see [CONTRIBUTING.md](CONTRIBUTING.md#releases)), and publishes a GitHub release tagged `v<version>`:
   [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to PyPI with trusted
   publishing (its comments have the one-time setup).
-- **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
-  `main`, and also imports each module with only boto3 installed, and builds the package and imports it the same
-  way. The versions in
+- **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.11 to 3.14 for every pull request and push to
+  `main`, and also imports each analyzer with only boto3 installed (the agent with its own packages), and builds the
+  package and imports it as pip installs it. The versions in
   `requirements-dev.txt` and `requirements-docs.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly
   pull requests to update them and the GitHub Actions the workflows use.
 

@@ -190,7 +190,7 @@ COMMENTS_LEFT = {
     "tests/test_kit.py": 28,
     "tests/test_lambda_functions.py": 112,
     "tests/test_opensearch.py": 20,
-    "tests/test_package.py": 10,
+    "tests/test_package.py": 9,
     "tests/test_s3.py": 187,
     "tests/test_s3_explorer.py": 117,
     "tests/test_sagemaker_env.py": 36,

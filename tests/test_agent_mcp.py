@@ -46,10 +46,6 @@ SERVER = shlex.join([sys.executable, str(FAKE_SERVER)])
 REGION = "us-east-1"
 
 
-def needs_mcp():
-    pytest.importorskip("mcp")
-
-
 @pytest.fixture
 def hub():
     made = McpHub(connect_seconds=30, call_seconds=30)
@@ -186,7 +182,6 @@ def test_editor_files_are_found_from_the_notebooks_folder_up(tmp_path):
 
 
 def test_the_hub_connects_lists_tools_and_calls_them(hub):
-    needs_mcp()
     hub.set_servers(parse_server_text(SERVER, name="desk"))
     [state] = hub.connect()
     assert state.status == READY and state.info.startswith("ticket-desk") and "acme team" in state.instructions
@@ -204,7 +199,6 @@ def test_the_hub_connects_lists_tools_and_calls_them(hub):
 
 
 def test_a_server_that_wont_start_says_why(hub):
-    needs_mcp()
     quits = parse_server_text(f"FAKE_MCP_SAY='no licence key' FAKE_MCP_QUIT=1 {SERVER}", name="quits")
     missing = parse_server_text("npx-that-isnt-here -y server", name="missing")
     hub.set_servers([*quits, *missing])
@@ -268,8 +262,6 @@ def test_a_tools_schema_becomes_its_signature():
 
 
 def test_mcp_tools_join_the_agents_own_with_their_schema_and_prompt():
-    needs_mcp()
-    pytest.importorskip("deepagents")
     core = agent()
     names = [fn.__name__ for fn in core.tools()]
     assert {"fake__find_tickets", "fake__close_ticket"} <= set(names) and "function_health" in names
@@ -285,7 +277,6 @@ def test_mcp_tools_join_the_agents_own_with_their_schema_and_prompt():
 
 
 def test_a_tool_that_only_reads_runs_and_one_that_may_change_something_asks_first():
-    needs_mcp()
     model = scripted(calls(("fake__find_tickets", {"text": "etl"})), calls(("fake__close_ticket", {"ticket": "T-1"})),
                      says("I closed T-1."), calls(("fake__close_ticket", {"ticket": "T-2"})), says("Left T-2 open."))
     core = agent(model)
@@ -305,7 +296,6 @@ def test_a_tool_that_only_reads_runs_and_one_that_may_change_something_asks_firs
 
 
 def test_asks_never_runs_without_asking_and_a_failing_tool_is_an_error():
-    needs_mcp()
     model = scripted(calls(("fake__close_ticket", {"ticket": "T-3"}), ("fake__broken", {})), says("done"))
     core = agent(model, mcp={"mcpServers": {"fake": {"command": sys.executable, "args": [str(FAKE_SERVER)],
                                                      "asks": "never"}}})
@@ -319,7 +309,6 @@ def test_asks_never_runs_without_asking_and_a_failing_tool_is_an_error():
 
 
 def test_add_switch_and_remove_servers_saved_in_the_file(tmp_path):
-    needs_mcp()
     path = tmp_path / "mcp.json"
     core = AgentAnalyzer(region=REGION, toolkits=["lambda"], mcp=path)
     [state] = core.add_mcp(SERVER, name="desk", env="EXTRA=1")
@@ -388,7 +377,6 @@ def test_findings_say_what_to_fix():
 
 
 def test_the_mcp_report_and_the_tools_report(capsys):
-    needs_mcp()
     view = AgentView(agent(mcp=[SERVER, "npx-that-isnt-here server"]), mode="text", progress="off")
     out = run(capsys, view.mcp)
     assert "MCP servers\n===========\n2 servers · kept for this session only" in out
@@ -402,7 +390,6 @@ def test_the_mcp_report_and_the_tools_report(capsys):
 
 
 def test_the_view_adds_and_removes(capsys, tmp_path):
-    needs_mcp()
     view = AgentView(region=REGION, toolkits=["lambda"], mcp=tmp_path / "mcp.json", mode="text", progress="off")
     out = run(capsys, view.add_mcp, SERVER, name="desk")
     assert "Added desk" in out and "Connected: 1 of 1" in out
@@ -428,7 +415,6 @@ def test_the_panel_lines_say_how_each_server_stands():
 
 
 def test_adding_a_server_in_the_window_and_running_its_tool():
-    needs_mcp()
     model = scripted(calls(("desk__close_ticket", {"ticket": "T-1"})), says("Closed it."))
     x = window(model, toolkits=["lambda"], findings=False, verify=False)
     assert x.mcp_button.description == "🔌 mcp"
@@ -457,7 +443,6 @@ def test_adding_a_server_in_the_window_and_running_its_tool():
 
 
 def test_a_server_that_doesnt_connect_stays_to_fix_and_try_again():
-    needs_mcp()
     x = window(scripted(says("ok")), toolkits=["lambda"])
     x.mcp_button.click()
     panel = x.mcp_panel
@@ -480,7 +465,6 @@ def test_a_server_that_doesnt_connect_stays_to_fix_and_try_again():
 
 
 def test_the_panel_connects_off_the_loop_in_a_notebook():
-    needs_mcp()
     x = window(scripted(says("ok")), toolkits=["lambda"], mcp=[SERVER])
     gate = threading.Event()
     hub = x.view.core.mcp_kit.hub
@@ -504,7 +488,6 @@ def test_the_panel_connects_off_the_loop_in_a_notebook():
 
 
 def test_switching_a_tool_off_in_the_panel():
-    needs_mcp()
     x = window(scripted(says("ok")), toolkits=["lambda"], mcp=[SERVER])
     x.mcp_button.click()
     row = x.mcp_panel.servers.children[0]

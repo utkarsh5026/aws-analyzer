@@ -10,8 +10,7 @@ given, not the kernel's AWS credentials, and its stderr goes to a temporary file
 
 ServerState is what the window and the reports show of each server, McpTool one of its tools, with its JSON schema and
 whether it says it only reads (its readOnlyHint). Whether a tool may run without asking is asks_first()'s to say; the
-MCP toolkit (toolkits/mcp_tools.py) asks. The mcp package (the [agent] extra) is imported only when a server is first
-connected.
+MCP toolkit (toolkits/mcp_tools.py) asks.
 """
 
 from __future__ import annotations
@@ -29,7 +28,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
-from ..._kit.deps import _require
+from mcp import ClientSession, StdioServerParameters
+from mcp.client import streamable_http
+from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
+from mcp.shared._httpx_utils import create_mcp_http_client
+from mcp.types import Implementation, PaginatedRequestParams
+
+from ... import __version__
 from ..._kit.text import _clip
 from .config import ASKS_EVERY, ASKS_NEVER, SSE, STDIO, McpServer, expand_references, tool_name
 
@@ -50,13 +56,6 @@ _EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 _POINTER = re.compile(r"(?i)complete log of this run|for more information|^\s*at\s")
 _MISSING = re.compile(r"(?i)not found|no such|no module|cannot find|could not|can't|denied|refused|missing|invalid|E404")
 _ERROR = re.compile(r"(?i)error|exception|fatal")
-
-
-def _mcp(module: str) -> Any:
-    """
-    The mcp package's module `mcp<module>` ('' for mcp itself, '.client.stdio'), or ImportError saying what to install.
-    """
-    return _require(f"mcp{module}", "Connecting to MCP servers", package="mcp")
 
 
 class McpCallFailed(Exception):
@@ -302,7 +301,6 @@ class McpHub:
         Connects the enabled servers (`names` picks some) that are off, or all of them again with again=True, side
         by side, and returns their states once each is connected or has failed (at most connect_seconds). One that
         failed stays failed until it's connected again, so a server that's down isn't waited for at every question.
-        ImportError when the mcp package isn't installed.
         """
         wanted = None if names is None else set(names)
         picked = [state for state in self.states.values()
@@ -310,7 +308,6 @@ class McpHub:
         todo = [state for state in picked if again or state.status == OFF]
         if not todo:
             return picked
-        _mcp("")
         for state in todo:
             if again:
                 self.disconnect(state.name)
@@ -390,15 +387,15 @@ class McpHub:
         environ = os.environ if self.environ is None else self.environ
         settings = {key: expand_references(value, environ)[0] for key, value in server.settings.items()}
         if server.transport == STDIO:
-            params = _mcp("").StdioServerParameters(command=server.command,
-                                                     args=[expand_references(arg, environ)[0] for arg in server.args],
-                                                     env=settings or None, cwd=server.cwd or None)
-            opened = _mcp(".client.stdio").stdio_client(params, errlog=connection.errlog)
+            params = StdioServerParameters(command=server.command,
+                                           args=[expand_references(arg, environ)[0] for arg in server.args],
+                                           env=settings or None, cwd=server.cwd or None)
+            opened = stdio_client(params, errlog=connection.errlog)
             streams = await stack.enter_async_context(opened)
             return streams[0], streams[1]
         url = expand_references(server.url, environ)[0]
         if server.transport == SSE:
-            streams = await stack.enter_async_context(_mcp(".client.sse").sse_client(url, headers=settings or None))
+            streams = await stack.enter_async_context(sse_client(url, headers=settings or None))
             return streams[0], streams[1]
         return await self._open_http(url, settings, stack)
 
@@ -408,10 +405,8 @@ class McpHub:
         A streamable HTTP session: streamable_http_client on an httpx client carrying the headers, or on an older
         mcp package, streamablehttp_client.
         """
-        streamable_http = _mcp(".client.streamable_http")
         if hasattr(streamable_http, "streamable_http_client"):
-            make_client = _mcp(".shared._httpx_utils").create_mcp_http_client
-            client = await stack.enter_async_context(make_client(headers=headers or None))
+            client = await stack.enter_async_context(create_mcp_http_client(headers=headers or None))
             streams = await stack.enter_async_context(streamable_http.streamable_http_client(url, http_client=client))
         else:
             streams = await stack.enter_async_context(streamable_http.streamablehttp_client(url, headers=headers or None))
@@ -419,21 +414,18 @@ class McpHub:
 
     @staticmethod
     def _session(read: Any, write: Any) -> Any:
-        from ... import __version__
-
-        about = _mcp(".types").Implementation(name="aws-analyzer", version=__version__)
-        return _mcp("").ClientSession(read, write, client_info=about)
+        about = Implementation(name="aws-analyzer", version=__version__)
+        return ClientSession(read, write, client_info=about)
 
     @staticmethod
     async def _list_tools(session: Any, server: str) -> list[McpTool]:
         """
         Every tool the server lists, page by page (at most _MAX_TOOL_PAGES).
         """
-        paging = _mcp(".types").PaginatedRequestParams
         tools: list[McpTool] = []
         cursor = None
         for _ in range(_MAX_TOOL_PAGES):
-            page = await (session.list_tools(params=paging(cursor=cursor)) if cursor else session.list_tools())
+            page = await (session.list_tools(params=PaginatedRequestParams(cursor=cursor)) if cursor else session.list_tools())
             tools.extend(tool_from(server, tool.model_dump(mode="json", by_alias=True, exclude_none=True))
                          for tool in page.tools)
             cursor = page.nextCursor

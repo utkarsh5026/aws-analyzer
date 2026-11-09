@@ -88,7 +88,7 @@ python .claude/skills/check/snapshot.py compare BASE NEW           # what a refa
 python .claude/skills/agent-eval/evals.py run --model M --repeat 3 --out A.json   # the agent graded on demo data
 python .claude/skills/agent-eval/evals.py compare A.json B.json   # what an agent change did to it (see /agent-eval)
 make <task>                                    # or python makefile.py <task>: setup, test, lint, check, build, docs, demo, ...
-make local                                     # the wheel in a fresh venv (.local-check/), imported with only boto3,
+make local                                     # the wheel in a fresh venv (.local-check/), installed as pip does,
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
 make local-agent                               # the same for the agent: a Python 3.11+, the wheel with [all], the
                                                # sandbox's Pyodide files, and the agent's demo question
@@ -99,13 +99,14 @@ make install-env                               # this checkout into ones you pic
                                                # --extras, --kernel, --yes): pip in each, a Jupyter kernel if asked
 ```
 
-CI (`.github/workflows/ci.yml`) also checks that each module of the package (and the `agent/` package) imports with
-only boto3 installed, each in a fresh interpreter, and its Package job builds the wheel, runs `twine check` and imports the installed package
-with only boto3 (`.claude/skills/check/run.py` does both, blocking every other package). To reproduce the first
-locally, in an environment with only boto3:
+CI (`.github/workflows/ci.yml`) also checks that each analyzer module imports with only boto3 installed, each in a
+fresh interpreter (the `agent/` package once its own dependencies are installed), and its Package job builds the wheel,
+runs `twine check`, installs it with its dependencies and imports every module (`.claude/skills/check/run.py` does
+both, blocking every package but boto3, except for the agent). To reproduce the first locally, in an environment with
+only boto3:
 
 ```bash
-cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="${f%/__init__.py}"; python -c "import aws_analyzer.$(basename "$m" .py)" && echo "ok: $m"; done
+cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="${f%/__init__.py}"; [ "$(basename "$m" .py)" = agent ] && continue; python -c "import aws_analyzer.$(basename "$m" .py)" && echo "ok: $m"; done
 ```
 
 ## Hard constraints
@@ -188,14 +189,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `_Answer` block its answers are drawn with. `rules.py` checks each of its modules like an analyzer file, reading
   relative imports from the module's own package (`from ..budget import` is the agent's, `from ...lambda_functions
   import` the analyzer). Nothing imports a companion.
-- **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
+- **boto3 + stdlib only at import time** (the agent is the exception: see below). pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image", ...,
   "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its notebook widget) is the
   exception that fails quietly: `_progress_bar_class` (`_kit/progress.py`) loads it with `importlib`, and without it the
   progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`. The agent's
-  packages (deepagents, langchain-openai, langgraph, langchain's middleware types) load with `_require` in
-  `AgentAnalyzer._harness()`, `_chat()` and `_hide_tools()`, the first time `ask()` runs.
+  packages (deepagents, langchain, langchain-core, langchain-openai, langchain-aws, langgraph, mcp) are the package's
+  own dependencies, so `agent/` imports them at the top of the module that uses them, never through `_require` or an
+  import check (`AGENT_TOP_LEVEL` in `rules.py`); no other analyzer imports them. Deno (the `sandbox` extra) and a
+  third provider's LangChain package (langchain-ollama, ...) stay optional.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
@@ -311,10 +314,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   the report read in the background (`_read_report`). `.claude/skills/demo/msg_explorer_shots.py` makes the guide's
   `msg-explorer*` figures in a real JupyterLab (its notebook drains `email-jobs` in moto from a thread, so Live has
   something to show), and `tour_shots.py`'s `play_messaging` the `msg-explorer-tour`.
-- **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
-  installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
-  packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
-  extra and the dev pins carry `python_version >= '3.11'`, and its tests that need them skip there.
+- **Python 3.11 floor.** CI runs 3.11–3.14; ruff `target-version = "py311"`; `requires-python = ">=3.11"`. Users
+  may still have pandas 2 (the `data` extra asks for `pandas>=2`), so code must work with pandas 2 and 3, though the
+  dev pins test pandas 3.
   Files use `from __future__ import annotations`.
 
 ## Code style
@@ -952,7 +954,7 @@ been split yet.
 A package, not one file: instead of five sections in one file, one concern per module (its `__init__.py` docstring
 maps them), so a new service's tools or a new capability of the agent goes in one place and touches nothing else.
 `aws_analyzer.agent` re-exports the public names (`AgentView`, `AgentAnalyzer`, `Budget`, `Toolkit`, the pure
-functions); a test patches a name in the module that looks it up (`harness._MIN_PYTHON`, `view._render_html`).
+functions); a test patches a name in the module that looks it up (`harness._hide_tools`, `view._render_html`).
 
 - **Toolkits** (`toolkits/`): what the agent can read, one `Toolkit` subclass per AWS service (`base.py` says what one
   gives). `LambdaToolkit` (`lambda_tools.py`) has ten tools (`find_functions`, `function_health`, `function_errors`,
@@ -1023,7 +1025,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `client.py`'s `McpHub` keeps one connection per server as a task on its own asyncio loop on its own thread (the MCP
   SDK's transports must open and close in one task), so tools on LangGraph's threads and the window on the kernel's
   loop call it blocking (`connect`, `call`, `disconnect`); a FAILED server stays failed until `connect(again=True)`, so
-  one that's down isn't waited for at every question; the `mcp` package loads through `_mcp()` (`_require`).
+  one that's down isn't waited for at every question; the `mcp` package is imported at the top of `client.py`.
   `McpToolkit` (`"mcp"`, added after the others, before runbooks) makes a function per usable tool named
   `<server>__<tool>`, with a `__signature__` from its schema and `mcp_schema`, which `harness._langchain_tools` hands
   LangChain as a `StructuredTool` with the JSON schema itself; its `reads` are `MCP_READ` (`mcp:CallTool`), drawn as the
@@ -1075,7 +1077,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   notes=)` routes `MEMORY_FOLDER` to `_MemoryBackend` (`with_memory`, a `CompositeBackend` over the workspace's backend
   or a `StateBackend`) and adds deepagents' `MemoryMiddleware` with `MEMORY_PROMPT` in place of its own (notes are
   facts, not instructions; a tool that disagrees wins; what to note and never note). `_MemoryBackend` is deepagents'
-  `StoreBackend` on a LangGraph `SqliteStore` (`open_store`, langgraph-checkpoint-sqlite, in the `[agent]` extra), under
+  `StoreBackend` on a LangGraph `SqliteStore` (`open_store`, langgraph-checkpoint-sqlite, a dependency), under
   `account_namespace(account)` (`AgentAnalyzer.account()`, STS GetCallerIdentity) so accounts never share notes, with
   the rules on writes: only `NOTES_KEY`, `hide_secrets` first, undated notes dated (`stamp_notes`), at most the
   budget's `memory_bytes`, no deletes (`forget()` / `forget_all()` are the user's). Memory writes are file tool calls,
@@ -1160,8 +1162,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   results, data isn't instructions, read-only), then each toolkit's `instructions()`, then how to answer, then the
   user's `notes`. It's fixed, so it caches; the time goes in each question through `asked_at()`, in
   `AgentAnalyzer.zone` (`timezone=` through `_kit`'s `_zone_from`, else `set_timezone()`'s `_display_zone()`).
-- **The harness** (`harness.py`): `build_graph()` is `deepagents.create_deep_agent` once (`AgentAnalyzer._harness()`,
-  after `check_ready()` says what's missing), with the model, the tools, the prompt, an `InMemorySaver` checkpointer
+- **The harness** (`harness.py`): `build_graph()` is `deepagents.create_deep_agent` once (`AgentAnalyzer._harness()`),
+  with the model, the tools, the prompt, an `InMemorySaver` checkpointer
   keyed by `AgentAnalyzer.thread` (follow-ups; `new_conversation()` makes a new thread) and `_hide_tools(HIDDEN_TOOLS)`,
   a middleware that keeps deepagents' general-purpose subagent and shell away from the model, and the plan
   (`plan=True`, `AgentAnalyzer(plan=False)` turns it off): LangChain's `TodoListMiddleware` (`_planning()`, with
@@ -1346,13 +1348,14 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   its module name in `__init__.py`'s `_MODULES` (`tests/test_package.py` checks every module is listed) and its
   classes in `__all__`, `_EXPORTS` and the `TYPE_CHECKING` imports.
 - Every analyzer imports `._kit` relatively, so it runs only as part of the package.
-- The one dependency is `boto3>=1.35.72`, the first release whose service models have every AWS operation the
-  analyzers call (Bedrock's `ListKnowledgeBaseDocuments`). A call to a newer operation means raising it; otherwise
-  keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's
+- The dependencies are `boto3>=1.35.72`, the first release whose service models have every AWS operation the
+  analyzers call (Bedrock's `ListKnowledgeBaseDocuments`; a call to a newer operation means raising it; otherwise
+  keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with), and the agent's packages:
+  deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp. Dependabot's
   `versioning-strategy: increase-if-necessary` bumps the `==` pins in requirements files but leaves `>=` floors alone.
 - Optional packages are extras: `data` (pandas, pyarrow), `files` (the S3 file readers), `notebook` (IPython,
-  ipywidgets, tqdm), `agent` (deepagents, langchain-openai; Python 3.11+), `sandbox` (deno, for the agent's
-  `LocalSandbox`), and `all`. A new optional package goes in one of them as well as in README's install lines.
+  ipywidgets, tqdm), `sandbox` (deno, for the agent's `LocalSandbox`), and `all`; `agent` is empty, kept so
+  `pip install "aws-analyzer[agent]"` still works. A new optional package goes in one of them as well as in README's install lines.
 - PyPI shows README.md, through `hatch-fancy-pypi-readme`, which points its relative links and pictures at GitHub
   and turns `> [!NOTE]` callouts into bold labels (PyPI renders neither). `twine check --strict` with
   `readme-renderer[md]` checks that it renders.
@@ -1360,7 +1363,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   entries under the new version and sets `__version__` to match (`tests/test_package.py` checks the changelog has
   an entry for `__version__`); that goes through a release pull request, and then a GitHub release tagged
   `v<version>` on its merge commit, with `release.py notes` as the notes. `.github/workflows/release.yml` builds,
-  checks, imports the wheel with only boto3, refuses a tag that doesn't match `__version__`, and uploads with PyPI
+  checks, installs the wheel and imports every module, refuses a tag that doesn't match `__version__`, and uploads with PyPI
   trusted publishing from the `pypi` environment (no token stored). A version can be uploaded only once.
 
 ## Tests
@@ -1459,7 +1462,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   sent; `Folder` is a workspace for the tests (a folder, each run a subprocess: no sandbox), and the `pyodide` fixture
   downloads Pyodide's files once for the tests that run `LocalSandbox` for real (into `AWS_ANALYZER_TEST_PYODIDE` when
   it's set, so a second run reuses them; skipped without Deno or the internet); `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as
-  Azure does. Tests that need deepagents or langchain-openai skip without them (Python 3.10). `tests/test_agent_evals.py` checks the eval set
+  Azure does. `tests/test_agent_evals.py` checks the eval set
   (`.claude/skills/agent-eval`: `cases.py`'s questions about demo.py's Lambda data, `evals.py`'s grading) and runs a
   case end to end with demo.py's scripted model; the evals themselves need a real model, so run `/agent-eval` before
   and after changing the agent's prompt, toolkits or grounding.
@@ -1547,10 +1550,10 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`, and so do the knowledge base
   explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
   (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
-  (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
+  (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which
   plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
   `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
-  `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model and Python 3.11+), at the top of its guide
+  `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model), at the top of its guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when
   a report's or window's look changes, and check their captions and alt text still match, in the guides and in README,
@@ -1565,8 +1568,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   meanwhile); `remotion.config.ts` keeps it H.264 level 4.0 with 4 reference frames, which every decoder plays; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
   shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`).
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
-  checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
-  `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and
+  checks) and `requirements-docs.txt` are pinned and updated by Dependabot; mkdocs is intentionally held back at 1.x (2.0 drops the plugins and
   themes Material needs). `ruff.toml` selects `E4`, `E7`, `E9`, `F` (real errors) and the "Code style" rules ruff
   can check (`B006`, `BLE001`, `ERA001`, `C901`, `PLR0912`, `PLR0913`, `PLR0915`), listed explicitly so ruff upgrades
   don't change them; there is no formatter, and lines run to about 120 characters.

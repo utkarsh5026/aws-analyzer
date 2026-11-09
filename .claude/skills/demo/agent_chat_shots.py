@@ -20,7 +20,7 @@ it has answered (agent-chat: the steps folded above the answer), and with the st
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/agent.md, by shots.py's
 set_height.
 
-Needs Python 3.11 or newer with the agent's packages (pip install "aws-analyzer[agent]"), jupyterlab, playwright and
+Needs aws-analyzer's requirements (pip install -r requirements-dev.txt), jupyterlab, playwright and
 Pillow, and Chromium: $CHROME, or the one Playwright installs (playwright install chromium).
 """
 

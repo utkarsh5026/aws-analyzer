@@ -53,17 +53,13 @@ def _server_findings(state: ServerState, path: Path | None) -> list[tuple[str, s
     return findings
 
 
-def mcp_findings(states: list[ServerState], *, path: Path | None, problem: str = "",
-                 missing_package: str = "") -> list[tuple[str, str]]:
+def mcp_findings(states: list[ServerState], *, path: Path | None, problem: str = "") -> list[tuple[str, str]]:
     """
-    The findings about every server, warnings first: the file that couldn't be read, the mcp package that isn't
-    installed, then each server's (_server_findings); and how to add one when there are none.
+    The findings about every server, warnings first: the file that couldn't be read, then each server's (_server_findings); and how to add one when there are none.
     """
     findings: list[tuple[str, str]] = []
     if problem:
         findings.append(("warn", f"The MCP servers' file can't be used: {problem}"))
-    if missing_package:
-        findings.append(("warn", f"{missing_package}: it comes with aws-analyzer[agent]."))
     for state in states:
         findings.extend(_server_findings(state, path))
     if not states and not problem:

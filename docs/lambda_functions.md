@@ -11,7 +11,7 @@ Every function, in one region or all of them: what's failing and why, read from 
 { .lede }
 
 <ul class="pills">
-  <li>One install, boto3 only</li>
+  <li>One install, nothing to set up</li>
   <li>Read-only: never invokes or changes a function</li>
   <li>Every region at once</li>
   <li>An explorer window: click, don't type</li>
