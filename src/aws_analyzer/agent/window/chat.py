@@ -1,6 +1,6 @@
 """
 The agent's chat window (AgentView.chat()): a conversation with the agent in a notebook, drawn like a terminal, where
-each question shows the agent's work as it happens. Under the `›` question come its plan, when it writes one (a
+each question shows the agent's work as it happens. Under the `›` question come its plan (a
 checklist that ticks off as it works, kept under the question), the model's words before it acts (`●`), and each
 tool call as the code it is, in colour, with a badge for every AWS service it reads, a comment saying
 what it does in plain English, and what it found under it (`⎿`); a click opens the AWS operations it used, what it
