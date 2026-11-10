@@ -575,8 +575,9 @@ def tours_text() -> str:
             f"window.AA_TOURS = {body};\n")
 
 
-FIGURE_CAPTION = re.compile(
-    r"images/([\w-]+)-light\.webp[^\n]*\n(?:[^\n]*\.webp[^\n]*\n)*[ \t]*/// caption\n(.*?)\n[ \t]*///", re.S)
+LIGHT_IMAGE = re.compile(r"images/([\w-]+)-light\.webp")
+CAPTION_OPENS = "/// caption"
+CAPTION_CLOSES = "///"
 MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*])")
 CAPTION_CHARS = 150
@@ -584,16 +585,44 @@ ANIMATION_FLAG = 0x02
 AFTER_CLICKS = "**Opens the window**, shown here a few clicks in."
 
 
+def caption_after(lines: list[str], start: int) -> str | None:
+    """
+    The caption under a figure whose light image is on the line before `start`: past its other image lines, the text
+    between "/// caption" and "///", on one line (a figure in a fold has its caption indented). None when there's none.
+    """
+    at = start
+    while at < len(lines) and ".webp" in lines[at]:
+        at += 1
+    if at >= len(lines) or lines[at].strip() != CAPTION_OPENS:
+        return None
+    end = at + 1
+    while end < len(lines) and lines[end].strip() != CAPTION_CLOSES:
+        end += 1
+    return " ".join(" ".join(lines[at + 1:end]).split())
+
+
+def page_captions(text: str) -> dict[str, str]:
+    """
+    One guide's figures and their captions, {figure: caption Markdown}, read a line at a time.
+    """
+    lines = text.split("\n")
+    found: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        image = LIGHT_IMAGE.search(line)
+        caption = caption_after(lines, index + 1) if image else None
+        if caption is not None:
+            found.setdefault(image.group(1), caption)
+    return found
+
+
 def guide_captions() -> dict[str, dict[str, str]]:
     """
-    Every figure's caption in each guide it's in: {figure: {guide file name: caption Markdown}}, on one line (a figure
-    in a fold has its caption indented).
+    Every figure's caption in each guide it's in: {figure: {guide file name: caption Markdown}}.
     """
     captions: dict[str, dict[str, str]] = {}
     for guide in sorted(DOCS.glob("*.md")):
-        for match in FIGURE_CAPTION.finditer(guide.read_text(encoding="utf-8")):
-            caption = " ".join(match.group(2).split())
-            captions.setdefault(match.group(1), {}).setdefault(guide.name, caption)
+        for name, caption in page_captions(guide.read_text(encoding="utf-8")).items():
+            captions.setdefault(name, {}).setdefault(guide.name, caption)
     return captions
 
 
