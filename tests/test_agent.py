@@ -2248,7 +2248,10 @@ def test_asking_through_amazon_bedrock(seeded, capsys):
     core = make(provider="bedrock", model="haiku")
     control, runtime, sent = bedrock_clients(core)
     control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
-    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES},
+                      {"typeEquals": "SYSTEM_DEFINED"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": []},
+                      {"typeEquals": "APPLICATION"})
     runtime.add_response("converse", converse_reply(
         [{"toolUse": {"toolUseId": "t1", "name": "function_health", "input": {"since": "2h"}}}], "tool_use",
         (1200, 40)), None)
@@ -2941,7 +2944,10 @@ def test_the_chat_window_without_a_model_opens_its_settings_on_bedrock(seeded):
     core = make()
     control, _, _ = bedrock_clients(core)
     control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
-    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES},
+                      {"typeEquals": "SYSTEM_DEFINED"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": []},
+                      {"typeEquals": "APPLICATION"})
     with control:
         x = window(core=core)
     panel = x.panel
@@ -3050,7 +3056,10 @@ def test_the_model_settings_list_bedrocks_models_off_the_loop(seeded):
     core = make()
     control, _, _ = bedrock_clients(core)
     control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
-    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES},
+                      {"typeEquals": "SYSTEM_DEFINED"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": []},
+                      {"typeEquals": "APPLICATION"})
 
     async def open_window():
         with control:

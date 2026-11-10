@@ -1265,7 +1265,10 @@ class Stubs:
     def models(self):
         self.bedrock.add_response("list_foundation_models", {"modelSummaries": MODEL_LIST},
                                   {"byOutputModality": "TEXT"})
-        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": PROFILES}, {})
+        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": PROFILES},
+                          {"typeEquals": "SYSTEM_DEFINED"})
+        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": []},
+                          {"typeEquals": "APPLICATION"})
 
     def done(self):
         for stub in self.stubs.values():

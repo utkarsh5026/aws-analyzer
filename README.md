@@ -1022,7 +1022,9 @@ With `engine="converse"`, the sources are sent as data, never as instructions, a
 
 `model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`,
 `"claude-opus-5"`, `"nova-pro"`. The default is Claude Haiku 4.5 (`bedrock_kb.DEFAULT_MODEL`), through the region's
-inference profile when it needs one; `BedrockKBAnalyzer(default_model="sonnet")` changes it.
+inference profile when it needs one; `BedrockKBAnalyzer(default_model="sonnet")` changes it. Your account's
+application inference profiles are in `models()` too, as "your inference profile", and `model=` takes one by its
+name, ID or ARN.
 
 ### One data source (`data_source=`)
 

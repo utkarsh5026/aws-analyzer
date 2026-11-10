@@ -994,6 +994,10 @@ def seed_bedrock_kb() -> dict:
                  "models": [{"modelArn": f"arn:aws:bedrock:{r}::foundation-model/{m}"}
                             for r in ("us-east-1", "us-east-2", "us-west-2")],
                  "status": "ACTIVE", "type": "SYSTEM_DEFINED"} for geo in ("us", "global") for m in profiled]
+    profiles.append({"inferenceProfileName": "support-chatbot", "inferenceProfileId": "k3x9q2m7v1ab",
+                     "inferenceProfileArn": f"arn:aws:bedrock:{REGION}:{ACCOUNT}:application-inference-profile/k3x9q2m7v1ab",
+                     "models": [{"modelArn": f"arn:aws:bedrock:{REGION}::foundation-model/{profiled[1]}"}],
+                     "status": "ACTIVE", "type": "APPLICATION"})
 
     agent = _FakeAWS("bedrock-agent", {
         "list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": [
@@ -1015,7 +1019,8 @@ def seed_bedrock_kb() -> dict:
     llm = _FakeAWS("bedrock-runtime", {"converse": converse}, latency={"converse": 2.1})
     bedrock = _FakeAWS("bedrock", {
         "list_foundation_models": lambda **_: {"modelSummaries": models},
-        "list_inference_profiles": lambda **_: {"inferenceProfileSummaries": profiles},
+        "list_inference_profiles": lambda typeEquals="SYSTEM_DEFINED", **_: {"inferenceProfileSummaries": [
+            profile for profile in profiles if profile.get("type", "SYSTEM_DEFINED") == typeEquals]},
     })
     return {"client": agent, "clients": {"bedrock-agent-runtime": runtime, "bedrock-runtime": llm,
                                          "bedrock": bedrock, "s3": s3}}

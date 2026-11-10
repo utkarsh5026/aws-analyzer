@@ -6,6 +6,7 @@ text, the profile to call each with, and its price.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from .prices import model_price
@@ -14,6 +15,42 @@ from .models import ModelInfo
 
 
 _GEOGRAPHY_PROFILES = {"us": "us.", "eu": "eu.", "ap": "apac.", "ca": "ca.", "sa": "sa."}
+
+PROFILE_TYPES = ("SYSTEM_DEFINED", "APPLICATION")
+
+
+def unique_profiles(summaries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    ListInferenceProfiles summaries, each profile once, in the order listed. The profiles are listed once per type
+    in PROFILE_TYPES, since a call without typeEquals returns only the system-defined (cross-region) ones and
+    leaves out the application inference profiles the account made.
+    """
+    profiles: dict[str, dict[str, Any]] = {}
+    for summary in summaries:
+        key = summary.get("inferenceProfileArn") or summary.get("inferenceProfileId", "")
+        profiles.setdefault(key, summary)
+    return list(profiles.values())
+
+
+def names_profile(wanted: str, profile: dict[str, Any]) -> bool:
+    """
+    Whether `wanted` is this inference profile's ID or ARN, or, for an application inference profile, its name.
+    """
+    names = [profile.get("inferenceProfileId"), profile.get("inferenceProfileArn")]
+    if profile.get("type") == "APPLICATION":
+        names.append(profile.get("inferenceProfileName"))
+    return wanted in names
+
+
+def profile_target(profile: dict[str, Any]) -> tuple[str, str]:
+    """
+    (ID to call, ARN) for an inference profile. An application inference profile is called by its ARN, the ID
+    Bedrock's runtime takes for one.
+    """
+    arn = profile["inferenceProfileArn"]
+    if profile.get("type") == "APPLICATION":
+        return arn, arn
+    return profile["inferenceProfileId"], arn
 
 
 def parse_models(
