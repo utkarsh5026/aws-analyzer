@@ -1536,15 +1536,17 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   language and an optional `title="IAM policy"`; callouts are `!!! note ""` / `!!! warning ""`, troubleshooting
   entries `??? question "..."`, card grids `<div class="grid cards" markdown>`, the set-up steps
   `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
-  styles them. The site's look is there too, in AWS's colours: near-black chrome (`--aa-chrome`) with an orange hairline,
-  black and orange in dark mode, white and orange in light; `--aa-accent` for links and the bar beside every
-  screenshot (`#ff9900` on dark, the darker `#c45500` on white, where `#ff9900` is too faint for text),
-  `--aa-orange` for fills, with `--aa-on-orange` (near-black) as the text on them, never white; highlighter amber
-  (`--aa-mark`, `<mark>`) only for what a report wants noticed, Bricolage Grotesque headings over IBM Plex Sans and
-  Mono (`theme.font`); no green, no blue or violet. The logo, the tour player's title cards and captions
+  styles them. The site's look is there too, and it's calm: warm paper (`--aa-page`, `--aa-paper`), soft ink
+  (`--aa-ink`) rather than black, and a light chrome (`--aa-chrome` is the page's own colour, a hairline under the
+  header, the footer on paper), a warm charcoal in dark mode, never near-black; `--aa-accent`, a muted AWS orange
+  close to terracotta (`#a85a26` on white, `#e3a56c` on dark), for links, the primary button and the bar beside every
+  screenshot, `--aa-orange` for the few fills; highlighter amber (`--aa-mark`, `<mark>`) only for what a report wants
+  noticed; Bricolage Grotesque headings at weight 600 over IBM Plex Sans (`.85rem`, line-height 1.78, paragraphs
+  under 40rem) and Mono (`theme.font`); room between everything, little shadow, no gradients on text and nothing
+  that jumps on hover; no green, no blue or violet. The logo, the tour player's title cards and captions
   (`tour.css`, `tour.html`) and the hero video (`hero-video/src/theme.ts`) use the same colours. Content sits on soft cards (`--aa-surface`, `--aa-shadow`, `--aa-lift`):
   screenshots are framed reports a click enlarges, questions and folds are cards that open, tables are rounded with
-  small capitals over the columns, `p.part` is a dark band, and the navigation carries each service's AWS icon
+  small capitals over the columns, `p.part` is a quiet tinted band, and the navigation carries each service's AWS icon
   (`a.md-nav__link[href=...]::before`; a new guide adds its line). Line-drawn icons are `--aa-i-*` masks. Each sidebar has a button that folds it to a thin rail (`docs/javascripts/sidebars.js`, the "Folding the
   sidebars" rules in `extra.css`): the navigation to its icons, the contents to a dot per section (the active one
   orange), each link's name its tooltip; the choice is kept in localStorage (`aa-nav`, `aa-toc`) and put back before
