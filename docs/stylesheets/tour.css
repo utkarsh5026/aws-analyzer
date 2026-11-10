@@ -2,18 +2,18 @@
 
    The stage is a fixed 1280x720 canvas scaled to fit its box, so sizes inside .tour-stage are in video pixels, not
    page pixels. The notebook in it looks like JupyterLab, light or dark with the page, and its colours are the
-   guides': the selected cell's blue, ink navy title cards, highlighter amber for what a caption wants noticed.
+   guides': AWS orange for the selected cell, near-black title cards, highlighter amber for what a caption wants noticed.
    The dark notebook's background is the dark screenshots' own (#111), so a report sits in it without a seam. */
 
 .aa-tour { margin: 1.2em 0 1.6em; }
 .aa-tour .tour-screen {
   position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; cursor: pointer;
-  border-radius: 10px; background: #172036; box-shadow: var(--aa-float, 0 16px 40px rgba(0, 0, 0, .2));
+  border-radius: 10px; background: #16191f; box-shadow: var(--aa-float, 0 16px 40px rgba(0, 0, 0, .2));
 }
 .aa-tour .tour-screen::after {
   content: "▶"; position: absolute; right: 6%; bottom: 9%; width: clamp(48px, 9%, 76px); aspect-ratio: 1;
   display: flex; align-items: center; justify-content: center; padding-left: 6px; box-sizing: border-box;
-  border-radius: 50%; background: rgba(255, 255, 255, .94); color: #172036; font-size: 28px;
+  border-radius: 50%; background: rgba(255, 255, 255, .94); color: #16191f; font-size: 28px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, .35); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
 }
 .aa-tour.tour-waiting .tour-screen::after { opacity: 1; }
@@ -22,23 +22,23 @@
 .aa-tour .tour-controls { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .aa-tour .tour-play {
   width: 36px; height: 36px; flex: none; border: 0; border-radius: 50%; cursor: pointer;
-  background: var(--aa-blue, #3949c6); color: #fff; font-size: 13px;
+  background: var(--aa-accent, #c45500); color: #fff; font-size: 13px;
 }
 .aa-tour .tour-timeline { flex: 1; display: flex; gap: 3px; height: 8px; cursor: pointer; }
-.aa-tour .tour-seg { position: relative; overflow: hidden; border-radius: 4px; background: var(--aa-line, #e1e4ee); }
-.aa-tour .tour-seg i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--aa-blue, #3949c6); }
-.aa-tour .tour-time { font: .72rem var(--md-code-font-family, monospace); color: var(--aa-muted, #5a6378); min-width: 7.5em; text-align: right; }
+.aa-tour .tour-seg { position: relative; overflow: hidden; border-radius: 4px; background: var(--aa-line, #e4e4e1); }
+.aa-tour .tour-seg i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--aa-accent, #c45500); }
+.aa-tour .tour-time { font: .72rem var(--md-code-font-family, monospace); color: var(--aa-muted, #5b5f66); min-width: 7.5em; text-align: right; }
 .aa-tour .tour-chapters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .aa-tour .tour-chapters button {
-  border: 1px solid var(--aa-line, #e1e4ee); border-radius: 999px; padding: 3px 11px; cursor: pointer;
-  background: var(--aa-surface, #fff); color: var(--aa-muted, #5a6378); font: .68rem var(--md-text-font-family, sans-serif);
+  border: 1px solid var(--aa-line, #e4e4e1); border-radius: 999px; padding: 3px 11px; cursor: pointer;
+  background: var(--aa-surface, #fff); color: var(--aa-muted, #5b5f66); font: .68rem var(--md-text-font-family, sans-serif);
 }
-.aa-tour .tour-chapters button.on { border-color: var(--aa-blue, #3949c6); color: var(--aa-blue, #3949c6); font-weight: 600; }
-.aa-tour .tour-links { margin: 8px 0 0; font-size: .72rem; color: var(--aa-muted, #5a6378); }
+.aa-tour .tour-chapters button.on { border-color: var(--aa-accent, #c45500); color: var(--aa-accent, #c45500); font-weight: 600; }
+.aa-tour .tour-links { margin: 8px 0 0; font-size: .72rem; color: var(--aa-muted, #5b5f66); }
 
 .tour-stage {
   position: absolute; left: 0; top: 0; width: 1280px; height: 720px; transform-origin: 0 0; overflow: hidden;
-  background: #172036; color: #1f2430; user-select: none;
+  background: #16191f; color: #1f2430; user-select: none;
   font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Arial, sans-serif;
 }
 .tour-stage > * { position: absolute; inset: 0; }
@@ -46,29 +46,29 @@
 .tour-stage .tour-window { background: #ffffff; }
 .tour-stage .tour-chrome {
   position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 14px;
-  padding: 0 18px; background: #eef0f6; border-bottom: 1px solid #d9dde8; font-size: 14px; color: #4b5468;
+  padding: 0 18px; background: #efefed; border-bottom: 1px solid #dcdcd8; font-size: 14px; color: #4f5359;
 }
-.tour-stage .tour-logo { width: 18px; height: 18px; border-radius: 4px; background: #f37726; box-shadow: inset 0 0 0 4px #eef0f6, inset 0 0 0 9px #f37726; }
-.tour-stage .tour-tab { background: #ffffff; padding: 6px 14px; border-radius: 8px 8px 0 0; border: 1px solid #d9dde8; border-bottom: 0; margin-top: 7px; font-weight: 500; }
-.tour-stage .tour-chip { margin-left: auto; display: flex; align-items: center; gap: 12px; font: 600 13px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #4b5468; }
+.tour-stage .tour-logo { width: 18px; height: 18px; border-radius: 4px; background: #f37726; box-shadow: inset 0 0 0 4px #efefed, inset 0 0 0 9px #f37726; }
+.tour-stage .tour-tab { background: #ffffff; padding: 6px 14px; border-radius: 8px 8px 0 0; border: 1px solid #dcdcd8; border-bottom: 0; margin-top: 7px; font-weight: 500; }
+.tour-stage .tour-chip { margin-left: auto; display: flex; align-items: center; gap: 12px; font: 600 13px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #4f5359; }
 .tour-stage .tour-dots { display: flex; gap: 5px; }
-.tour-stage .tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: #d3d8e6; }
-.tour-stage .tour-dots i.done { background: #9aa5e8; }
-.tour-stage .tour-dots i.on { background: #3949c6; box-shadow: 0 0 0 3px rgba(57, 73, 198, .18); }
-.tour-stage .tour-kernel { display: flex; align-items: center; gap: 7px; margin-left: 18px; font-size: 13px; color: #6b7489; }
+.tour-stage .tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: #d6d6d2; }
+.tour-stage .tour-dots i.done { background: #f5c27a; }
+.tour-stage .tour-dots i.on { background: #ec7211; box-shadow: 0 0 0 3px rgba(236, 114, 17, .18); }
+.tour-stage .tour-kernel { display: flex; align-items: center; gap: 7px; margin-left: 18px; font-size: 13px; color: #6c7077; }
 .tour-stage .tour-kernel i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #8a92a6; box-sizing: border-box; }
-.tour-stage .tour-kernel.busy i { background: #3949c6; border-color: #3949c6; }
+.tour-stage .tour-kernel.busy i { background: #ec7211; border-color: #ec7211; }
 
 .tour-stage .tour-body { position: absolute; inset: 0; z-index: 1; }
 .tour-stage .tour-chrome, .tour-stage .tour-caption { z-index: 2; }
 
 .tour-stage .tour-nb { position: absolute; top: 40px; left: 0; right: 0; padding: 24px 40px 0 0; }
 .tour-stage .tour-cell { position: relative; display: flex; }
-.tour-stage .tour-cell::before { content: ""; position: absolute; left: 8px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: #3949c6; }
+.tour-stage .tour-cell::before { content: ""; position: absolute; left: 8px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: #ec7211; }
 .tour-stage .tour-prompt { width: 90px; flex: none; padding: 12px 14px 0 0; text-align: right; font: 15px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #8a92a6; }
-.tour-stage .tour-running .tour-prompt { color: #3949c6; }
+.tour-stage .tour-running .tour-prompt { color: #ec7211; }
 .tour-stage .tour-code {
-  flex: 1; min-width: 0; padding: 10px 16px; border: 1px solid #dfe2ec; border-radius: 8px; background: #f5f6fa;
+  flex: 1; min-width: 0; padding: 10px 16px; border: 1px solid #e2e2de; border-radius: 8px; background: #f6f6f5;
   font: 17px/1.6 "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: #1f2430;
 }
 .tour-stage .kw { color: #7c3aed; font-weight: 600; }
@@ -78,14 +78,14 @@
 .tour-stage .fn { color: #26338f; }
 .tour-stage .tour-keys {
   position: absolute; right: 14px; bottom: 9px; display: flex; align-items: center; gap: 6px; opacity: 0; transform-origin: 100% 100%;
-  font: 600 13px "IBM Plex Sans", system-ui, sans-serif; color: #5a6378;
+  font: 600 13px "IBM Plex Sans", system-ui, sans-serif; color: #5b5f66;
 }
 .tour-stage .tour-keys kbd {
-  padding: 3px 9px; border-radius: 6px; border: 1px solid #c9cedc; border-bottom-width: 3px; background: #ffffff;
-  font: 600 13px "IBM Plex Mono", ui-monospace, monospace; color: #172036;
+  padding: 3px 9px; border-radius: 6px; border: 1px solid #cdcdc8; border-bottom-width: 3px; background: #ffffff;
+  font: 600 13px "IBM Plex Mono", ui-monospace, monospace; color: #16191f;
 }
-.tour-stage .tour-busy { position: absolute; left: 90px; right: 0; bottom: -7px; height: 3px; overflow: hidden; border-radius: 2px; opacity: 0; background: rgba(57, 73, 198, .12); }
-.tour-stage .tour-busy i { display: block; width: 32%; height: 100%; border-radius: 2px; background: #3949c6; }
+.tour-stage .tour-busy { position: absolute; left: 90px; right: 0; bottom: -7px; height: 3px; overflow: hidden; border-radius: 2px; opacity: 0; background: rgba(236, 114, 17, .12); }
+.tour-stage .tour-busy i { display: block; width: 32%; height: 100%; border-radius: 2px; background: #ec7211; }
 .tour-stage .tour-took { position: absolute; right: 12px; bottom: -24px; font: 13px "IBM Plex Mono", ui-monospace, monospace; color: #15803d; opacity: 0; }
 .tour-stage .tour-caret { display: inline-block; width: 2px; height: 1.15em; margin-left: 1px; vertical-align: text-bottom; background: #1f2430; }
 
@@ -93,23 +93,23 @@
 .tour-stage .tour-out > * { position: absolute; left: 0; top: 0; width: 100%; }
 .tour-stage .tour-out img { max-width: none; height: auto; }
 .tour-stage .tour-text { font: 16px/1.65 "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; padding: 8px 16px; color: #374151; }
-.tour-stage .tour-text .bar { color: #d6dae5; letter-spacing: -1px; }
-.tour-stage .tour-text .bar .full { color: #3949c6; }
+.tour-stage .tour-text .bar { color: #d9d9d5; letter-spacing: -1px; }
+.tour-stage .tour-text .bar .full { color: #ec7211; }
 .tour-stage .tour-text .ok { color: #15803d; font-weight: 700; }
 
 .tour-stage .tour-caption {
   position: absolute; left: 50%; top: auto; bottom: 22px; transform: translateX(-50%); width: max-content; max-width: 1080px;
-  padding: 12px 24px; border-radius: 8px; background: rgba(23, 32, 54, .94); color: #f3f5fb;
-  font-size: 23px; line-height: 1.4; font-weight: 500; text-align: center; box-shadow: 0 10px 30px rgba(23, 32, 54, .25);
+  padding: 12px 24px; border-radius: 8px; background: rgba(22, 25, 31, .94); color: #f3f5fb;
+  font-size: 23px; line-height: 1.4; font-weight: 500; text-align: center; box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
 }
 .tour-stage .tour-caption b { color: #fce7a2; font-weight: 600; }
-.tour-stage .tour-caption code { font: 600 .86em "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #c9cfff; background: none; padding: 0; }
+.tour-stage .tour-caption code { font: 600 .86em "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #ffb84d; background: none; padding: 0; }
 
 .tour-stage .tour-card {
   display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 0 110px; color: #f3f5fb;
-  background: radial-gradient(rgba(255, 255, 255, .07) 1.2px, transparent 1.4px) 0 0 / 22px 22px, #172036;
+  background: radial-gradient(rgba(255, 255, 255, .07) 1.2px, transparent 1.4px) 0 0 / 22px 22px, #16191f;
 }
-.tour-stage .tour-eyebrow { display: flex; align-items: center; gap: 16px; margin-bottom: 30px; font: 600 24px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #8f9bff; }
+.tour-stage .tour-eyebrow { display: flex; align-items: center; gap: 16px; margin-bottom: 30px; font: 600 24px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #ff9900; }
 .tour-stage .tour-eyebrow img { width: 44px; height: 44px; border-radius: 8px; }
 .tour-stage .tour-card h1 { font: 700 60px/1.08 "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif; letter-spacing: -.02em; margin: 0 0 22px; max-width: 1000px; color: #ffffff; }
 .tour-stage .tour-card h1 mark { background: none; color: #fce7a2; }
@@ -120,15 +120,15 @@
   display: flex; align-items: center; gap: 9px; padding: 7px 15px 7px 8px; border-radius: 999px;
   background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14); font-size: 19px; color: #e7eaf4;
 }
-.tour-stage .tour-ahead b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #3949c6; color: #fff; font: 600 14px "IBM Plex Mono", monospace; }
-.tour-stage .tour-card p { font-size: 27px; line-height: 1.45; color: #b6bdd0; margin: 0; max-width: 980px; }
+.tour-stage .tour-ahead b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #ff9900; color: #16191f; font: 600 14px "IBM Plex Mono", monospace; }
+.tour-stage .tour-card p { font-size: 27px; line-height: 1.45; color: #b9bbc0; margin: 0; max-width: 980px; }
 .tour-stage .tour-card .tour-calls { list-style: none; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 48px; font: 23px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #e7eaf4; }
 .tour-stage .tour-card .tour-calls .fn { color: #c9cfff; }
 .tour-stage .tour-card .tour-calls .st { color: #a6e3b4; }
 .tour-stage .tour-card .tour-calls .nu { color: #fcd38d; }
 .tour-stage .tour-card .tour-calls .kw { color: #d6c3ff; }
 .tour-stage .tour-card .tour-calls li { margin: 0; }
-.tour-stage .tour-small { font: 20px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; margin-top: 44px !important; color: #8a93ab !important; }
+.tour-stage .tour-small { font: 20px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; margin-top: 44px !important; color: #8b8d93 !important; }
 
 /* Dark: the same notebook in JupyterLab Dark's colours, around the -dark screenshots. */
 .tour-stage.dark .tour-window { background: #111111; }
@@ -137,20 +137,20 @@
 .tour-stage.dark .tour-tab { background: #111111; border-color: #2c2c2c; }
 .tour-stage.dark .tour-chip { color: #a3a3a3; }
 .tour-stage.dark .tour-dots i { background: #3a3a3a; }
-.tour-stage.dark .tour-dots i.done { background: #5b64a8; }
-.tour-stage.dark .tour-dots i.on { background: #8f9bff; box-shadow: 0 0 0 3px rgba(143, 155, 255, .2); }
+.tour-stage.dark .tour-dots i.done { background: #8a5a1c; }
+.tour-stage.dark .tour-dots i.on { background: #ff9900; box-shadow: 0 0 0 3px rgba(255, 153, 0, .2); }
 .tour-stage.dark .tour-kernel { color: #9a9a9a; }
 .tour-stage.dark .tour-kernel i { border-color: #8a8a8a; }
-.tour-stage.dark .tour-kernel.busy i { background: #8f9bff; border-color: #8f9bff; }
+.tour-stage.dark .tour-kernel.busy i { background: #ff9900; border-color: #ff9900; }
 .tour-stage.dark .tour-keys { color: #a3a3a3; }
 .tour-stage.dark .tour-keys kbd { background: #262626; border-color: #4a4a4a; color: #e6e6e6; }
-.tour-stage.dark .tour-busy { background: rgba(143, 155, 255, .15); }
-.tour-stage.dark .tour-busy i { background: #8f9bff; }
+.tour-stage.dark .tour-busy { background: rgba(255, 153, 0, .15); }
+.tour-stage.dark .tour-busy i { background: #ff9900; }
 .tour-stage.dark .tour-took { color: #7cc28a; }
 .tour-stage.dark .tour-text .bar { color: #333333; }
-.tour-stage.dark .tour-text .bar .full { color: #8f9bff; }
-.tour-stage.dark .tour-cell::before { background: #8f9bff; }
-.tour-stage.dark .tour-running .tour-prompt { color: #8f9bff; }
+.tour-stage.dark .tour-text .bar .full { color: #ff9900; }
+.tour-stage.dark .tour-cell::before { background: #ff9900; }
+.tour-stage.dark .tour-running .tour-prompt { color: #ff9900; }
 .tour-stage.dark .tour-code { background: #1c1c1c; border-color: #333333; color: #e6e6e6; }
 .tour-stage.dark .kw { color: #c4a5ff; }
 .tour-stage.dark .st { color: #7cc28a; }
@@ -161,6 +161,6 @@
 .tour-stage.dark .tour-prompt { color: #7a7a7a; }
 .tour-stage.dark .tour-text { color: #d4d4d4; }
 .tour-stage.dark .tour-text .ok { color: #7cc28a; }
-.tour-stage.dark .tour-caption { background: rgba(245, 246, 250, .95); color: #172036; }
-.tour-stage.dark .tour-caption b { color: #26338f; background: #fce7a2; padding: 0 4px; border-radius: 3px; }
-.tour-stage.dark .tour-caption code { color: #3949c6; }
+.tour-stage.dark .tour-caption { background: rgba(245, 246, 250, .95); color: #16191f; }
+.tour-stage.dark .tour-caption b { color: #16191f; background: #fce7a2; padding: 0 4px; border-radius: 3px; }
+.tour-stage.dark .tour-caption code { color: #b84f00; }

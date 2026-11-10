@@ -81,69 +81,25 @@ Eight questions to ask about the notebook you're in and what you launch from it.
 
 <div class="quick" markdown>
 
--   **What is this notebook costing me, and will it stop by itself?**
+This notebook
+{ .qgroup }
 
-    ```python
-    ui.instance()
-    ```
+-   [What is this notebook costing me, and will it stop by itself?](#instance) `ui.instance()`
+-   [Why is the disk full?](#disk) `ui.disk()`
+-   [I need another Python version.](#envs) `ui.new_env("3.11")`
 
-    [This notebook](#instance)
+Your account
+{ .qgroup }
 
--   **Why is the disk full?**
+-   [What did I leave running?](#running) `ui.running()`
+-   [Who has been getting into my notebooks?](#access) `ui.access()`
 
-    ```python
-    ui.disk()
-    ```
+What you launched
+{ .qgroup }
 
-    [What fills the disk](#disk)
-
--   **What did I leave running?**
-
-    ```python
-    ui.running()
-    ```
-
-    [Everything that's running](#running)
-
--   **Who has been getting into my notebooks?**
-
-    ```python
-    ui.access()
-    ```
-
-    [Who got in](#access)
-
--   **I need another Python version.**
-
-    ```python
-    ui.new_env("3.11")
-    ```
-
-    [Python environments](#envs)
-
--   **Why did my training job fail?**
-
-    ```python
-    ui.training_jobs()
-    ```
-
-    [Training jobs](#training)
-
--   **Which endpoints are idle and still costing me money?**
-
-    ```python
-    ui.endpoints()
-    ```
-
-    [Idle endpoints](#endpoints)
-
--   **Where did my pipeline break?**
-
-    ```python
-    ui.pipeline_run("churn-pipeline")
-    ```
-
-    [Pipelines](#pipelines)
+-   [Why did my training job fail?](#training) `ui.training_jobs()`
+-   [Which endpoints are idle and still costing me money?](#endpoints) `ui.endpoints()`
+-   [Where did my pipeline break?](#pipelines) `ui.pipeline_run("churn-pipeline")`{ .long }
 
 </div>
 

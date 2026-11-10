@@ -44,8 +44,8 @@ export const OutroScene: FC = () => (
           in your notebook
         </Slam>
         <Pop at={TITLE_AT + 14}>
-          <div style={{ fontFamily: fonts.mono, fontSize: 46, color: colors.ink, background: colors.surface, border: `2px solid ${colors.blue}`, borderRadius: 16, padding: "20px 38px", boxShadow: "0 0 70px rgba(163,173,255,.45)", minWidth: 780, textAlign: "left" }}>
-            <span style={{ color: colors.blue }}>$ </span>
+          <div style={{ fontFamily: fonts.mono, fontSize: 46, color: colors.ink, background: colors.surface, border: `2px solid ${colors.accent}`, borderRadius: 16, padding: "20px 38px", boxShadow: "0 0 70px rgba(255,153,0,.45)", minWidth: 780, textAlign: "left" }}>
+            <span style={{ color: colors.accent }}>$ </span>
             <Typed text="%pip install aws-analyzer" at={TITLE_AT + 18} framesPerChar={0.7} />
           </div>
         </Pop>
@@ -59,7 +59,7 @@ export const OutroScene: FC = () => (
       </AbsoluteFill>
     </Shake>
     <Flash at={TITLE_AT} peak={0.55} />
-    <Ring at={TITLE_AT} color={colors.blue} x={640} y={420} />
-    <Burst at={TITLE_AT} color={colors.blue} x={640} y={420} count={60} reach={760} />
+    <Ring at={TITLE_AT} color={colors.accent} x={640} y={420} />
+    <Burst at={TITLE_AT} color={colors.accent} x={640} y={420} count={60} reach={760} />
   </AbsoluteFill>
 );

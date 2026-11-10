@@ -86,53 +86,23 @@ Six questions people bring to a vector index, and the one line that answers each
 
 <div class="quick" markdown>
 
--   **What domains and collections do I have, and what do they cost?**
+Cost and capacity
+{ .qgroup }
 
-    ```python
-    ui.overview()
-    ```
+-   [What domains and collections do I have, and what do they cost?](#overview) `ui.overview()`
+-   [Do my vectors fit in the memory the nodes have?](#indexes) `ui.indexes("vectors-prod")`
 
-    [Domains and collections](#overview)
+Your vectors
+{ .qgroup }
 
--   **Do my vectors fit in the memory the nodes have?**
+-   [How is this index set up, in plain English?](#index-info) `ui.index_info("vectors-prod/support-docs")`{ .long }
+-   [Are my vectors healthy?](#sample) `ui.sample("vectors-prod/support-docs")`{ .long }
+-   [What comes back for this question?](#search) `ui.search("how do I get my money back?", index="vectors-prod/support-docs")`{ .long }
 
-    ```python
-    ui.indexes("vectors-prod")
-    ```
+Rather click?
+{ .qgroup }
 
-    [Indexes](#indexes)
-
--   **How is this index set up, in plain English?**
-
-    ```python
-    ui.index_info("vectors-prod/support-docs")
-    ```
-
-    [One vector index](#index-info)
-
--   **Are my vectors healthy?**
-
-    ```python
-    ui.sample("vectors-prod/support-docs")
-    ```
-
-    [Look at the vectors](#sample)
-
--   **What comes back for this question?**
-
-    ```python
-    ui.search("how do I get my money back?", index="vectors-prod/support-docs")
-    ```
-
-    [Search](#search)
-
--   **Can I just click through it?**
-
-    ```python
-    ui.explore()
-    ```
-
-    [Explore by clicking](#explorer)
+-   [Can I just click through it?](#explorer) `ui.explore()`
 
 </div>
 

@@ -87,69 +87,25 @@ Eight questions people bring to Lambda, and the one line that answers each. Noth
 
 <div class="quick" markdown>
 
--   **What do I have, and what's failing or costing money?**
+What's wrong
+{ .qgroup }
 
-    ```python
-    ui.functions(regions="all")
-    ```
+-   [What do I have, and what's failing or costing money?](#functions) `ui.functions(regions="all")`{ .long }
+-   [Why did this function fail?](#errors) `ui.errors("orders-etl")`
+-   [Which runs took 15 seconds or more today?](#runs) `ui.runs("orders-etl", since="today", where="duration > 15s")`{ .long }
+-   [What did it log?](#logs) `ui.logs("orders-etl", search="KeyError")`{ .long }
 
-    [Every function](#functions)
+Cost and code
+{ .qgroup }
 
--   **Why did this function fail?**
+-   [Is it paying for memory it never uses?](#performance) `ui.performance("orders-etl")`{ .long }
+-   [What does its code actually do?](#how-it-works) `ui.how_it_works("orders-etl")`{ .long }
+-   [It worked last week. What changed?](#diff) `ui.diff("orders-etl")`
 
-    ```python
-    ui.errors("orders-etl")
-    ```
+Rather click?
+{ .qgroup }
 
-    [When something goes wrong](#errors)
-
--   **Which runs took 15 seconds or more today?**
-
-    ```python
-    ui.runs("orders-etl", since="today", where="duration > 15s")
-    ```
-
-    [Every run, as rows](#runs)
-
--   **I'd rather click through it all.**
-
-    ```python
-    ui.explore()
-    ```
-
-    [The explorer window](#explorer)
-
--   **What did it log?**
-
-    ```python
-    ui.logs("orders-etl", search="KeyError")
-    ```
-
-    [Logs](#logs)
-
--   **Is it paying for memory it never uses?**
-
-    ```python
-    ui.performance("orders-etl")
-    ```
-
-    [Run times and memory](#performance)
-
--   **What does its code actually do?**
-
-    ```python
-    ui.how_it_works("orders-etl")
-    ```
-
-    [How the code works](#how-it-works)
-
--   **It worked last week. What changed?**
-
-    ```python
-    ui.diff("orders-etl")
-    ```
-
-    [What changed between versions](#diff)
+-   [I'd rather click through it all.](#explorer) `ui.explore()`
 
 </div>
 

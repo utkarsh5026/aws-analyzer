@@ -77,58 +77,24 @@ Five calls in a notebook, from every table to what the items really hold: each c
 
 ## Start here { #tour }
 
-Five questions people bring to a table, and the one line that answers each. None of them write anything.
+Six questions people bring to a table, and the one line that answers each. None of them write anything.
 { .gist }
 
 <div class="quick" markdown>
 
--   **Which tables do I have, and what do they cost?**
+Your tables
+{ .qgroup }
 
-    ```python
-    ui.tables()
-    ```
+-   [Which tables do I have, and what do they cost?](#tables) `ui.tables()`
+-   [What attributes do the items really have?](#schema) `ui.schema("acme-app")`
 
-    [Your tables](#tables)
+Find items
+{ .qgroup }
 
--   **What's in this table? Show me some items.**
-
-    ```python
-    ui.sample("acme-app", 20)
-    ```
-
-    [Look at items](#items)
-
--   **Everything for one customer.**
-
-    ```python
-    ui.query("acme-app", "CUSTOMER#1042")
-    ```
-
-    [One partition key](#query)
-
--   **What attributes do the items really have?**
-
-    ```python
-    ui.schema("acme-app")
-    ```
-
-    [What the items look like](#schema)
-
--   **Which items match a condition?**
-
-    ```python
-    ui.scan("acme-app", where={"status": "failed"})
-    ```
-
-    [Filter items](#filters)
-
--   **I want them in pandas.**
-
-    ```python
-    df = ui.core.scan("acme-app", n=5000).to_df()
-    ```
-
-    [Use the data in Python](#python)
+-   [What's in this table? Show me some items.](#items) `ui.sample("acme-app", 20)`
+-   [Everything for one customer.](#query) `ui.query("acme-app", "CUSTOMER#1042")`{ .long }
+-   [Which items match a condition?](#filters) `ui.scan("acme-app", where={"status": "failed"})`{ .long }
+-   [I want them in pandas.](#python) `df = ui.core.scan("acme-app", n=5000).to_df()`{ .long }
 
 </div>
 

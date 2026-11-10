@@ -1517,17 +1517,28 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   language and an optional `title="IAM policy"`; callouts are `!!! note ""` / `!!! warning ""`, troubleshooting
   entries `??? question "..."`, card grids `<div class="grid cards" markdown>`, the set-up steps
   `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
-  styles them. The site's look is there too: ink navy chrome, the blue of a selected Jupyter cell (`--aa-blue`) for
-  links and the bar beside every screenshot, highlighter amber (`--aa-mark`, `<mark>`) only for what a report wants
-  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. Content sits on soft cards (`--aa-surface`, `--aa-shadow`, `--aa-lift`):
+  styles them. The site's look is there too, in AWS's colours: near-black chrome (`--aa-chrome`) with an orange hairline,
+  black and orange in dark mode, white and orange in light; `--aa-accent` for links and the bar beside every
+  screenshot (`#ff9900` on dark, the darker `#c45500` on white, where `#ff9900` is too faint for text),
+  `--aa-orange` for fills, with `--aa-on-orange` (near-black) as the text on them, never white; highlighter amber
+  (`--aa-mark`, `<mark>`) only for what a report wants noticed, Bricolage Grotesque headings over IBM Plex Sans and
+  Mono (`theme.font`); no green, no blue or violet. The logo, the tour player's title cards and captions
+  (`tour.css`, `tour.html`) and the hero video (`hero-video/src/theme.ts`) use the same colours. Content sits on soft cards (`--aa-surface`, `--aa-shadow`, `--aa-lift`):
   screenshots are framed reports a click enlarges, questions and folds are cards that open, tables are rounded with
   small capitals over the columns, `p.part` is a dark band, and the navigation carries each service's AWS icon
-  (`a.md-nav__link[href=...]::before`; a new guide adds its line). Line-drawn icons are `--aa-i-*` masks. Its motion is in `docs/javascripts/motion.js` (`extra_javascript`) and the Motion section of `extra.css`: a guide's opening rises in, what's below the fold rises as it's scrolled to (`.aa-reveal` / `.aa-in`, a group's items one after another by `--aa-i`), the highlighter sweeps over each `<mark>`, the home page's notebook cell types and runs its call, a bar under the header shows how far through the page you are, and a click on a screenshot opens it full size. All of it is short and small, nothing is hidden unless the script has put `.aa-motion` on `<html>`, and `prefers-reduced-motion` turns it off. A guide opens with its
+  (`a.md-nav__link[href=...]::before`; a new guide adds its line). Line-drawn icons are `--aa-i-*` masks. Each sidebar has a button that folds it to a thin rail (`docs/javascripts/sidebars.js`, the "Folding the
+  sidebars" rules in `extra.css`): the navigation to its icons, the contents to a dot per section (the active one
+  orange), each link's name its tooltip; the choice is kept in localStorage (`aa-nav`, `aa-toc`) and put back before
+  the page is drawn by `overrides/main.html` (`theme.custom_dir`), and only where the sidebars sit beside the page.
+  Its motion is in `docs/javascripts/motion.js` (`extra_javascript`) and the Motion section of `extra.css`: a guide's opening rises in, what's below the fold rises as it's scrolled to (`.aa-reveal` / `.aa-in`, a group's items one after another by `--aa-i`), the highlighter sweeps over each `<mark>`, the home page's notebook cell types and runs its call, a bar under the header shows how far through the page you are, and a click on a screenshot opens it full size. All of it is short and small, nothing is hidden unless the script has put `.aa-motion` on `<html>`, and `prefers-reduced-motion` turns it off. A guide opens with its
   eyebrow (icon, service name, module as code), an H1 that says what the reader gets ("Find out which Lambda failed,
   and why, without the console"), a short `.lede` and the `pills` it promises. Write for a data scientist: the
   question they have first, then what the page lets them do, in plain words. A guide reads in layers, so a reader who
-  skims still gets the point: `## Start here { #tour }` is a `<div class="quick" markdown>` list of tiles (the
-  question in bold, the one call, a link to its section); each section opens with its takeaway in one sentence marked
+  skims still gets the point: `## Start here { #tour }` is a `<div class="quick" markdown>` of the reader's questions
+  in two or three small groups, each a label marked `{ .qgroup }` over a list, a line per question:
+  `-   [The question?](#section) `ui.call()``, the call on the right, or under the question when it's long (over 26
+  characters, `` `...`{ .long } ``), or `<span class="how">what to click</span>` for a window; a window's
+  `explore()` is a group of its own, "Rather click?"; each section opens with its takeaway in one sentence marked
   `{ .gist }`; detail most readers can skip (the offline install, options, how it works inside, every filter) goes in
   `??? more "what's inside"` folds; the one thing that costs money or loses data if missed is `!!! tip "Worth
   knowing"`; and `<p class="part">` marks where the guide ends and reference begins (the data in Python, cost,
@@ -1574,7 +1585,11 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on
   a click, only once the page has loaded and while it's on screen in a tab in front (the dots behind it stop drifting
   meanwhile); `remotion.config.ts` keeps it H.264 level 4.0 with 4 reference frames, which every decoder plays; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
-  shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`).
+  shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`). In a cloud session Remotion
+  starts Chrome with `--no-proxy-server`, so the Google fonts time out: pass `--browser-executable` a wrapper script
+  that drops the proxy flags and adds `--proxy-server="$HTTPS_PROXY"` (the browser's NSS store already trusts the
+  proxy). Check the result with `ffprobe` (`level=40`): if the config's ffmpeg override didn't apply, re-encode with
+  `-profile:v high -level:v 4.0 -x264-params ref=4:keyint=90:min-keyint=30 -movflags +faststart`.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; mkdocs is intentionally held back at 1.x (2.0 drops the plugins and
   themes Material needs). `ruff.toml` selects `E4`, `E7`, `E9`, `F` (real errors) and the "Code style" rules ruff

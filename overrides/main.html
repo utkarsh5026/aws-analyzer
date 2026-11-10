@@ -1,0 +1,14 @@
+{#- The guides' page template: Material's own, with the reader's folded sidebars put back before the page is
+    drawn, so a sidebar folded on one page doesn't open and fold again on the next (javascripts/sidebars.js). -#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <script>
+    try {
+      var folded = document.documentElement.classList;
+      if (localStorage.getItem("aa-nav") === "rail") folded.add("aa-nav-rail");
+      if (localStorage.getItem("aa-toc") === "rail") folded.add("aa-toc-rail");
+    } catch (error) {}
+  </script>
+{% endblock %}

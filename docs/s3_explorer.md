@@ -73,34 +73,22 @@ The examples use a bucket called `acme-ml-data`, and the screenshots are the rea
 
 ## Start here { #start }
 
-Three things to try in your first minute. Nothing you click changes anything in S3.
+Four things to try in your first minute. Nothing you click changes anything in S3.
 { .gist }
 
 <div class="quick" markdown>
 
--   **Look inside a file**
+Look around
+{ .qgroup }
 
-    Open a bucket, open its folders, click a file. Its first rows, pages or contents show on the right.
+-   [Look inside a file](#files) <span class="how">Open a folder, click a file</span>
+-   [Find every file of one type](#search) <span class="how">Type .parquet, tick Include subfolders</span>
 
-    [Look inside a file](#files)
+Take it with you
+{ .qgroup }
 
--   **Find every file of one type**
-
-    Type `.parquet` in the search box and turn on **Include subfolders**.
-
-    [Find files](#search)
-
--   **Take some files home**
-
-    Tick them, click **⬇ Download selected**, then download the zip from JupyterLab's file browser.
-
-    [Download some files](#select)
-
--   **Load a file in your code**
-
-    Click it, then **🐍 Use in Python**: the lines for a notebook cell, written for its format.
-
-    [Use it in Python](#use-in-python)
+-   [Take some files home](#select) <span class="how">Tick them, click ⬇ Download selected</span>
+-   [Load a file in your code](#use-in-python) <span class="how">Click it, then 🐍 Use in Python</span>
 
 </div>
 

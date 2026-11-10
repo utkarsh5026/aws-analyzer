@@ -52,7 +52,7 @@ export const ColdOpenScene: FC = () => (
     <Punch hits={[THIS_AT]} amount={0.09}>
       <Shake hits={[THIS_AT]} strength={30}>
         <Wall />
-        <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, rgba(16,21,42,.94) 26%, rgba(16,21,42,.32) 82%)" }} />
+        <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, rgba(13,14,16,.94) 26%, rgba(13,14,16,.32) 82%)" }} />
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", fontFamily: fonts.display, fontWeight: 800, letterSpacing: "-.04em", textAlign: "center" }}>
           <Slam at={4} from={2} style={{ fontSize: 112, color: colors.ink }}>
             AWS gives you

@@ -89,53 +89,23 @@ Six questions people bring to a knowledge base, and the one line that answers ea
 
 <div class="quick" markdown>
 
--   **Are my knowledge bases healthy?**
+Is it healthy?
+{ .qgroup }
 
-    ```python
-    ui.kbs()
-    ```
+-   [Are my knowledge bases healthy?](#kbs) `ui.kbs()`
+-   [Which files failed or aren't synced yet?](#files) `ui.files(status="failed")`
 
-    [Your knowledge bases](#kbs)
+Does it answer well?
+{ .qgroup }
 
--   **Which files failed or aren't synced yet?**
+-   [What does a question retrieve?](#search) `ui.search("How long do refunds take?")`{ .long }
+-   [What's the answer, and what backs it up?](#ask) `ui.ask("How long do refunds take?")`{ .long }
+-   [Does retrieval find the right file?](#decide) `ui.evaluate([("refund window?", "refund-policy.pdf")])`{ .long }
 
-    ```python
-    ui.files(status="failed")
-    ```
+Rather click?
+{ .qgroup }
 
-    [Every file](#files)
-
--   **I'd rather click through it all.**
-
-    ```python
-    ui.explore("support-docs")
-    ```
-
-    [The explorer window](#explorer)
-
--   **What does a question retrieve?**
-
-    ```python
-    ui.search("How long do refunds take?")
-    ```
-
-    [Search](#search)
-
--   **What's the answer, and what backs it up?**
-
-    ```python
-    ui.ask("How long do refunds take?")
-    ```
-
-    [Ask](#ask)
-
--   **Does retrieval find the right file?**
-
-    ```python
-    ui.evaluate([("refund window?", "refund-policy.pdf")])
-    ```
-
-    [Compare and evaluate](#decide)
+-   [I'd rather click through it all.](#explorer) `ui.explore("support-docs")`
 
 </div>
 

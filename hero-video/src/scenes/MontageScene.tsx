@@ -32,7 +32,7 @@ const Figure: FC<{ name: string; leansLeft: boolean }> = ({ name, leansLeft }) =
           width: "100%",
           borderRadius: 18,
           border: `1px solid ${colors.line2}`,
-          boxShadow: "0 40px 90px rgba(0,0,0,.75), 0 0 70px rgba(163,173,255,.25)",
+          boxShadow: "0 40px 90px rgba(0,0,0,.75), 0 0 70px rgba(255,153,0,.25)",
           transform: `translateX(${side * (1 - arrived) * 420}px) rotateY(${side * -(10 + (1 - arrived) * 22)}deg) rotateX(6deg) scale(${1 + frame * 0.002})`,
           transformOrigin: "top center",
         }}
@@ -44,7 +44,7 @@ const Figure: FC<{ name: string; leansLeft: boolean }> = ({ name, leansLeft }) =
 const Dots: FC<{ current: number }> = ({ current }) => (
   <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
     {SERVICES.map((service, i) => (
-      <div key={service.name} style={{ width: 16, height: 16, borderRadius: "50%", background: i <= current ? colors.blue : colors.line2 }} />
+      <div key={service.name} style={{ width: 16, height: 16, borderRadius: "50%", background: i <= current ? colors.accent : colors.line2 }} />
     ))}
   </div>
 );
@@ -52,7 +52,7 @@ const Dots: FC<{ current: number }> = ({ current }) => (
 const ServiceCut: FC<{ service: Service; index: number }> = ({ service, index }) => (
   <AbsoluteFill style={{ overflow: "hidden" }}>
     <Figure name={service.figure} leansLeft={index % 2 === 0} />
-    <AbsoluteFill style={{ background: "linear-gradient(rgba(16,21,42,.98) 24%, transparent 40%, transparent 72%, rgba(16,21,42,.95))" }} />
+    <AbsoluteFill style={{ background: "linear-gradient(rgba(13,14,16,.98) 24%, transparent 40%, transparent 72%, rgba(13,14,16,.95))" }} />
     <div style={{ position: "absolute", left: 48, right: 48, top: 34 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 14 }}>
         <Pop at={0}>

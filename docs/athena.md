@@ -72,50 +72,27 @@ Six calls in a notebook, from a week's bill to the code for a query: each call t
 
 ## Start here { #tour }
 
-Four questions people bring to Athena, and the one line that answers each. None of them run a query.
+Five questions people bring to Athena, and the one line that answers each. None of them run a query.
 { .gist }
 
 <div class="quick" markdown>
 
--   **What are my queries costing?**
+What it costs
+{ .qgroup }
 
-    ```python
-    athena.expensive()
-    ```
+-   [What are my queries costing?](#expensive) `athena.expensive()`
+-   [What would this new query cost?](#query-code) `athena.query_code("SELECT ...", database="sales")`{ .long }
 
-    [The costliest queries](#expensive)
+What's broken
+{ .qgroup }
 
--   **Why did my query fail?**
+-   [Why did my query fail?](#failures) `athena.failures()`
+-   [Which tables are broken or costly to read?](#catalog) `athena.catalog()`
 
-    ```python
-    athena.failures()
-    ```
+Rather click?
+{ .qgroup }
 
-    [Failures](#failures)
-
--   **Which tables are broken or costly to read?**
-
-    ```python
-    athena.catalog()
-    ```
-
-    [The Data Catalog](#catalog)
-
--   **Can I just click through it?**
-
-    ```python
-    athena.explore()
-    ```
-
-    [Explore by clicking](#explorer)
-
--   **What would this new query cost?**
-
-    ```python
-    athena.query_code("SELECT ...", database="sales")
-    ```
-
-    [Run a query yourself](#query-code)
+-   [Can I just click through it?](#explorer) `athena.explore()`
 
 </div>
 

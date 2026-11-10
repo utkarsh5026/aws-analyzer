@@ -18,7 +18,7 @@ const Bars: FC = () => {
           style={{
             flex: 1,
             height: height * 1.3 * progress(frame, 10 + i * 0.5, 20 + i * 0.5),
-            background: FAILED_BARS.has(i) ? "#d94a42" : "#3d6090",
+            background: FAILED_BARS.has(i) ? "#d94a42" : "#4a4d55",
           }}
         />
       ))}
@@ -46,7 +46,7 @@ const Traceback: FC = () => {
         <div>&nbsp;&nbsp;File "/var/task/etl.py", line 22, in handler</div>
         <div>&nbsp;&nbsp;&nbsp;&nbsp;table.put_item(Item=&#123;"pk": row["customer_id"],...</div>
       </div>
-      <div style={{ padding: "16px 28px", color: colors.blue, fontSize: 25 }}>Open etl.py, line 22, in the Code tab ›</div>
+      <div style={{ padding: "16px 28px", color: colors.accent, fontSize: 25 }}>Open etl.py, line 22, in the Code tab ›</div>
     </div>
   );
 };
@@ -56,14 +56,14 @@ const Terminal: FC = () => {
   const heat = interpolate(frame, [CLICK_AT, CLICK_AT + 8], [0, 0.65], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   return (
     <div style={{ ...windowBox(colors.terminal, colors.terminalLine, `rgba(255,107,99,${heat})`), fontFamily: fonts.mono }}>
-      <div style={{ padding: "16px 28px", fontSize: 28, color: colors.blue, borderBottom: `1px solid ${colors.terminalLine}`, background: "#14161e" }}>
+      <div style={{ padding: "16px 28px", fontSize: 28, color: colors.accent, borderBottom: `1px solid ${colors.terminalLine}`, background: "#14161e" }}>
         <Typed text="LambdaView().explore('orders-etl')" at={2} framesPerChar={0.4} />
       </div>
       <Rise at={10} style={{ display: "flex", alignItems: "baseline", gap: 18, padding: "18px 28px 14px" }}>
         <span style={{ color: colors.red, fontSize: 22 }}>●</span>
         <span style={{ color: colors.ink, fontSize: 32, fontWeight: 600 }}>orders-etl</span>
         <span style={{ color: colors.raw, fontSize: 25 }}>python3.9</span>
-        <span style={{ marginLeft: "auto", color: colors.blue, fontSize: 25, fontWeight: 600 }}>Logs · last 24 hours</span>
+        <span style={{ marginLeft: "auto", color: colors.accent, fontSize: 25, fontWeight: 600 }}>Logs · last 24 hours</span>
       </Rise>
       <Bars />
       <div style={{ height: 16 }} />
