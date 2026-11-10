@@ -50,7 +50,17 @@
 }
 .tour-stage .tour-logo { width: 18px; height: 18px; border-radius: 4px; background: #f37726; box-shadow: inset 0 0 0 4px #eef0f6, inset 0 0 0 9px #f37726; }
 .tour-stage .tour-tab { background: #ffffff; padding: 6px 14px; border-radius: 8px 8px 0 0; border: 1px solid #d9dde8; border-bottom: 0; margin-top: 7px; font-weight: 500; }
-.tour-stage .tour-chip { margin-left: auto; font: 600 13px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #4b5468; }
+.tour-stage .tour-chip { margin-left: auto; display: flex; align-items: center; gap: 12px; font: 600 13px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #4b5468; }
+.tour-stage .tour-dots { display: flex; gap: 5px; }
+.tour-stage .tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: #d3d8e6; }
+.tour-stage .tour-dots i.done { background: #9aa5e8; }
+.tour-stage .tour-dots i.on { background: #3949c6; box-shadow: 0 0 0 3px rgba(57, 73, 198, .18); }
+.tour-stage .tour-kernel { display: flex; align-items: center; gap: 7px; margin-left: 18px; font-size: 13px; color: #6b7489; }
+.tour-stage .tour-kernel i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #8a92a6; box-sizing: border-box; }
+.tour-stage .tour-kernel.busy i { background: #3949c6; border-color: #3949c6; }
+
+.tour-stage .tour-body { position: absolute; inset: 0; z-index: 1; }
+.tour-stage .tour-chrome, .tour-stage .tour-caption { z-index: 2; }
 
 .tour-stage .tour-nb { position: absolute; top: 40px; left: 0; right: 0; padding: 24px 40px 0 0; }
 .tour-stage .tour-cell { position: relative; display: flex; }
@@ -66,12 +76,25 @@
 .tour-stage .nu { color: #b45309; }
 .tour-stage .cm { color: #8a92a6; font-style: italic; }
 .tour-stage .fn { color: #26338f; }
+.tour-stage .tour-keys {
+  position: absolute; right: 14px; bottom: 9px; display: flex; align-items: center; gap: 6px; opacity: 0; transform-origin: 100% 100%;
+  font: 600 13px "IBM Plex Sans", system-ui, sans-serif; color: #5a6378;
+}
+.tour-stage .tour-keys kbd {
+  padding: 3px 9px; border-radius: 6px; border: 1px solid #c9cedc; border-bottom-width: 3px; background: #ffffff;
+  font: 600 13px "IBM Plex Mono", ui-monospace, monospace; color: #172036;
+}
+.tour-stage .tour-busy { position: absolute; left: 90px; right: 0; bottom: -7px; height: 3px; overflow: hidden; border-radius: 2px; opacity: 0; background: rgba(57, 73, 198, .12); }
+.tour-stage .tour-busy i { display: block; width: 32%; height: 100%; border-radius: 2px; background: #3949c6; }
+.tour-stage .tour-took { position: absolute; right: 12px; bottom: -24px; font: 13px "IBM Plex Mono", ui-monospace, monospace; color: #15803d; opacity: 0; }
 .tour-stage .tour-caret { display: inline-block; width: 2px; height: 1.15em; margin-left: 1px; vertical-align: text-bottom; background: #1f2430; }
 
 .tour-stage .tour-out { position: absolute; left: 90px; right: 40px; bottom: 0; top: 140px; overflow: hidden; }
 .tour-stage .tour-out > * { position: absolute; left: 0; top: 0; width: 100%; }
 .tour-stage .tour-out img { max-width: none; height: auto; }
-.tour-stage .tour-text { font: 17px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; padding: 4px 16px; color: #374151; }
+.tour-stage .tour-text { font: 16px/1.65 "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; padding: 8px 16px; color: #374151; }
+.tour-stage .tour-text .bar { color: #d6dae5; letter-spacing: -1px; }
+.tour-stage .tour-text .bar .full { color: #3949c6; }
 .tour-stage .tour-text .ok { color: #15803d; font-weight: 700; }
 
 .tour-stage .tour-caption {
@@ -90,12 +113,21 @@
 .tour-stage .tour-eyebrow img { width: 44px; height: 44px; border-radius: 8px; }
 .tour-stage .tour-card h1 { font: 700 60px/1.08 "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif; letter-spacing: -.02em; margin: 0 0 22px; max-width: 1000px; color: #ffffff; }
 .tour-stage .tour-card h1 mark { background: none; color: #fce7a2; }
+.tour-stage .tour-card h1 .w { display: inline-block; }
+.tour-stage .tour-card .tour-ahead { list-style: none; padding: 0; margin: 34px 0 0; display: flex; flex-wrap: wrap; gap: 10px; max-width: 1060px; }
+.tour-stage .tour-card .tour-ahead li {
+  margin: 0;
+  display: flex; align-items: center; gap: 9px; padding: 7px 15px 7px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14); font-size: 19px; color: #e7eaf4;
+}
+.tour-stage .tour-ahead b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #3949c6; color: #fff; font: 600 14px "IBM Plex Mono", monospace; }
 .tour-stage .tour-card p { font-size: 27px; line-height: 1.45; color: #b6bdd0; margin: 0; max-width: 980px; }
-.tour-stage .tour-calls { list-style: none; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 48px; font: 23px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #e7eaf4; }
-.tour-stage .tour-calls .fn { color: #c9cfff; }
-.tour-stage .tour-calls .st { color: #a6e3b4; }
-.tour-stage .tour-calls .nu { color: #fcd38d; }
-.tour-stage .tour-calls .kw { color: #d6c3ff; }
+.tour-stage .tour-card .tour-calls { list-style: none; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 48px; font: 23px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; color: #e7eaf4; }
+.tour-stage .tour-card .tour-calls .fn { color: #c9cfff; }
+.tour-stage .tour-card .tour-calls .st { color: #a6e3b4; }
+.tour-stage .tour-card .tour-calls .nu { color: #fcd38d; }
+.tour-stage .tour-card .tour-calls .kw { color: #d6c3ff; }
+.tour-stage .tour-card .tour-calls li { margin: 0; }
 .tour-stage .tour-small { font: 20px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; margin-top: 44px !important; color: #8a93ab !important; }
 
 /* Dark: the same notebook in JupyterLab Dark's colours, around the -dark screenshots. */
@@ -104,6 +136,19 @@
 .tour-stage.dark .tour-logo { box-shadow: inset 0 0 0 4px #1c1c1c, inset 0 0 0 9px #f37726; }
 .tour-stage.dark .tour-tab { background: #111111; border-color: #2c2c2c; }
 .tour-stage.dark .tour-chip { color: #a3a3a3; }
+.tour-stage.dark .tour-dots i { background: #3a3a3a; }
+.tour-stage.dark .tour-dots i.done { background: #5b64a8; }
+.tour-stage.dark .tour-dots i.on { background: #8f9bff; box-shadow: 0 0 0 3px rgba(143, 155, 255, .2); }
+.tour-stage.dark .tour-kernel { color: #9a9a9a; }
+.tour-stage.dark .tour-kernel i { border-color: #8a8a8a; }
+.tour-stage.dark .tour-kernel.busy i { background: #8f9bff; border-color: #8f9bff; }
+.tour-stage.dark .tour-keys { color: #a3a3a3; }
+.tour-stage.dark .tour-keys kbd { background: #262626; border-color: #4a4a4a; color: #e6e6e6; }
+.tour-stage.dark .tour-busy { background: rgba(143, 155, 255, .15); }
+.tour-stage.dark .tour-busy i { background: #8f9bff; }
+.tour-stage.dark .tour-took { color: #7cc28a; }
+.tour-stage.dark .tour-text .bar { color: #333333; }
+.tour-stage.dark .tour-text .bar .full { color: #8f9bff; }
 .tour-stage.dark .tour-cell::before { background: #8f9bff; }
 .tour-stage.dark .tour-running .tour-prompt { color: #8f9bff; }
 .tour-stage.dark .tour-code { background: #1c1c1c; border-color: #333333; color: #e6e6e6; }

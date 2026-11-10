@@ -76,8 +76,9 @@ STILL_AFTER_PAN = 1.4
 CAPTION_SECONDS = 3.6
 FIRST_CAPTION_AFTER_OUTPUT = 0.6
 
-TITLE_SECONDS = 4.5
-INSTALL_SECONDS = 5.5
+TITLE_SECONDS = 3.2
+INSTALL_RUNS = 1.2
+INSTALL_HOLD = 1.0
 END_SECONDS = 6.5
 VIDEO_WIDTH, VIDEO_HEIGHT = 1280, 720
 FPS = 24
@@ -431,12 +432,13 @@ def caption_html(text: str) -> str:
     return re.sub(r"`(.+?)`", r"<code>\1</code>", escaped)
 
 
-def output_appears(code: str) -> float:
+def output_appears(code: str, *, runs: float = RUNNING_FOR) -> float:
     """
-    Seconds into a cell when its output appears: typing, a pause, then the cell running (tour.js's timing()).
+    Seconds into a cell when its output is in: typing, a pause, then the cell running for `runs` seconds (tour.js's
+    timing()).
     """
     typing = min(LONGEST_TYPING, max(SHORTEST_TYPING, len(code) / TYPED_PER_SECOND))
-    return TYPING_STARTS + typing + RUN_PAUSE + RUNNING_FOR
+    return TYPING_STARTS + typing + RUN_PAUSE + runs
 
 
 def code_lines(code: str) -> int:
@@ -492,20 +494,34 @@ def cell_scene(tour: Tour, cell: Cell, *, number: int) -> dict:
     output = {"img": cell.figure, "w": picture[0], "h": picture[1]}
     if cell.pan_max is not None:
         output["panMax"] = cell.pan_max
-    return {"kind": "cell", "dur": seconds, "chapter": cell.chapter,
+    return {"kind": "cell", "dur": seconds, "chapter": cell.chapter, "step": number, "steps": len(tour.cells),
             "label": f"{number} of {len(tour.cells)} · {cell.chapter}", "code": code, "outputs": [output],
             "captions": caption_times(cell.captions, appears=output_appears(code), seconds=seconds)}
 
 
-def install_scene(tour: Tour) -> dict:
+def install_lines(version: str) -> list[dict]:
     """
-    The tour's first cell: installing the package, its output a line of pip's.
+    What pip prints while it installs, each line with the seconds after the cell starts running that it shows; the
+    line with a bar fills it until the next line comes.
     """
-    version = shots.ROOT.joinpath("src", "aws_analyzer", "__init__.py").read_text(encoding="utf-8")
-    number = re.search(r'__version__ = "([^"]+)"', version).group(1)
-    return {"kind": "cell", "dur": INSTALL_SECONDS, "chapter": "Install", "label": "Install",
-            "code": "%pip install aws-analyzer",
-            "outputs": [{"text": f'<span class="ok">✓</span> Successfully installed aws-analyzer-{number}'}],
+    wheel = f"aws_analyzer-{version}-py3-none-any.whl"
+    return [{"at": 0.05, "html": "Collecting aws-analyzer"},
+            {"at": 0.2, "html": f"&nbsp;&nbsp;Downloading {wheel}"},
+            {"at": 0.3, "html": '&nbsp;&nbsp;<span class="bar"></span>', "bar": True},
+            {"at": 0.8, "html": "Installing collected packages: aws-analyzer"},
+            {"at": 1.05, "html": f'<span class="ok">✓</span> Successfully installed aws-analyzer-{version}'}]
+
+
+def install_scene() -> dict:
+    """
+    The tour's first cell: installing the package, pip's lines streaming in under it.
+    """
+    source = shots.ROOT.joinpath("src", "aws_analyzer", "__init__.py").read_text(encoding="utf-8")
+    version = re.search(r'__version__ = "([^"]+)"', source).group(1)
+    code = "%pip install aws-analyzer"
+    seconds = round(output_appears(code, runs=INSTALL_RUNS) + INSTALL_HOLD, 1)
+    return {"kind": "cell", "dur": seconds, "chapter": "Install", "label": "Install", "runs": INSTALL_RUNS,
+            "code": code, "outputs": [{"lines": install_lines(version)}],
             "captions": [[0, caption_html("**Install it once**, in any SageMaker or Jupyter notebook. "
                                           "Read-only: it never changes anything in AWS.")]]}
 
@@ -534,12 +550,12 @@ def tour_data(tour: Tour) -> dict:
     """
     title = {"kind": "title", "dur": TITLE_SECONDS, "chapter": "Intro", "eyebrow": tour.eyebrow,
              "icon": f"images/aws/{tour.icon}.svg", "heading": html.escape(tour.heading, quote=False),
-             "text": html.escape(tour.text, quote=False)}
+             "text": html.escape(tour.text, quote=False), "ahead": [cell.chapter for cell in tour.cells]}
     cells = [cell_scene(tour, cell, number=number) for number, cell in enumerate(tour.cells, 1)]
     calls = [short_call(scene["code"], tour.variable) for scene in cells]
     return {"eyebrow": tour.eyebrow, "notebook": tour.notebook, "summary": tour.summary,
             "guide": f"{tour.service}.html", "video": f"videos/{tour.service}-tour-light.mp4",
-            "scenes": [title, install_scene(tour), *cells, end_scene(tour, calls)]}
+            "scenes": [title, install_scene(), *cells, end_scene(tour, calls)]}
 
 
 def tours_text() -> str:

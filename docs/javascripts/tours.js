@@ -9,22 +9,53 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon S3",
     "icon": "images/aws/s3.svg",
     "heading": "See what's in your buckets, and what it's costing you",
-    "text": "Every bucket, one bucket in plain English, what fills it, and a file read without downloading it."
+    "text": "Every bucket, one bucket in plain English, what fills it, and a file read without downloading it.",
+    "ahead": [
+     "Every bucket",
+     "One bucket",
+     "What fills it",
+     "Find files",
+     "Preview",
+     "What if"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -38,6 +69,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.2,
     "chapter": "Every bucket",
+    "step": 1,
+    "steps": 6,
     "label": "1 of 6 · Every bucket",
     "code": "from aws_analyzer import S3View\n\nui = S3View()\nui.overview()",
     "outputs": [
@@ -66,6 +99,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.6,
     "chapter": "One bucket",
+    "step": 2,
+    "steps": 6,
     "label": "2 of 6 · One bucket",
     "code": "ui.bucket_info(\"acme-ml-data\")",
     "outputs": [
@@ -95,6 +130,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.5,
     "chapter": "What fills it",
+    "step": 3,
+    "steps": 6,
     "label": "3 of 6 · What fills it",
     "code": "ui.summary(\"s3://acme-ml-data/\")",
     "outputs": [
@@ -123,6 +160,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.8,
     "chapter": "Find files",
+    "step": 4,
+    "steps": 6,
     "label": "4 of 6 · Find files",
     "code": "ui.find(\"s3://acme-ml-data/training/\", pattern=\"*.tar.gz\", min_size=\"4GB\", modified_after=\"90d\")",
     "outputs": [
@@ -151,6 +190,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.7,
     "chapter": "Preview",
+    "step": 5,
+    "steps": 6,
     "label": "5 of 6 · Preview",
     "code": "ui.preview(\"s3://acme-ml-data/curated/features/churn/train.parquet\", n=8)",
     "outputs": [
@@ -179,6 +220,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 13.3,
     "chapter": "What if",
+    "step": 6,
+    "steps": 6,
     "label": "6 of 6 · What if",
     "code": "ui.what_if(\"s3://acme-ml-data/training/\", move_after={30: \"STANDARD_IA\", 180: \"GLACIER\"})",
     "outputs": [
@@ -232,22 +275,52 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon DynamoDB",
     "icon": "images/aws/dynamodb.svg",
     "heading": "Read your DynamoDB tables as plain tables",
-    "text": "No more {\"S\": ...}: items as rows, the shape of a table, and what each read cost."
+    "text": "No more {\"S\": ...}: items as rows, the shape of a table, and what each read cost.",
+    "ahead": [
+     "Every table",
+     "One table",
+     "Query",
+     "Scan",
+     "Schema"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -261,6 +334,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.3,
     "chapter": "Every table",
+    "step": 1,
+    "steps": 5,
     "label": "1 of 5 · Every table",
     "code": "from aws_analyzer import DynamoDBView\n\nui = DynamoDBView()\nui.tables()",
     "outputs": [
@@ -290,6 +365,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.7,
     "chapter": "One table",
+    "step": 2,
+    "steps": 5,
     "label": "2 of 5 · One table",
     "code": "ui.table_info(\"acme-app\")",
     "outputs": [
@@ -318,6 +395,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.8,
     "chapter": "Query",
+    "step": 3,
+    "steps": 5,
     "label": "3 of 5 · Query",
     "code": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"), n=8,\n         attributes=[\"status\", \"created_at\", \"total\", \"currency\", \"coupon\"])",
     "outputs": [
@@ -346,6 +425,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.8,
     "chapter": "Scan",
+    "step": 4,
+    "steps": 5,
     "label": "4 of 5 · Scan",
     "code": "ui.scan(\"acme-app\", 10, where={\"status\": \"failed\", \"total\": (\">\", 300)},\n        attributes=[\"status\", \"created_at\", \"total\", \"failure_reason\"])",
     "outputs": [
@@ -374,6 +455,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.8,
     "chapter": "Schema",
+    "step": 5,
+    "steps": 5,
     "label": "5 of 5 · Schema",
     "code": "ui.schema(\"acme-app\")",
     "outputs": [
@@ -426,22 +509,53 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Bedrock Knowledge Bases",
     "icon": "images/aws/bedrock.svg",
     "heading": "Find out why your knowledge base answered that",
-    "text": "What failed to index, what a question really retrieves, and how well an answer is backed by its sources."
+    "text": "What failed to index, what a question really retrieves, and how well an answer is backed by its sources.",
+    "ahead": [
+     "Every KB",
+     "One KB",
+     "Syncs",
+     "Unsynced",
+     "Search",
+     "Ask"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -455,6 +569,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.4,
     "chapter": "Every KB",
+    "step": 1,
+    "steps": 6,
     "label": "1 of 6 · Every KB",
     "code": "from aws_analyzer import BedrockKBView\n\nui = BedrockKBView()\nui.kbs()",
     "outputs": [
@@ -484,6 +600,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.4,
     "chapter": "One KB",
+    "step": 2,
+    "steps": 6,
     "label": "2 of 6 · One KB",
     "code": "ui.kb_info(\"support-docs\")",
     "outputs": [
@@ -513,6 +631,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 10.2,
     "chapter": "Syncs",
+    "step": 3,
+    "steps": 6,
     "label": "3 of 6 · Syncs",
     "code": "ui.syncs(\"support-docs\")",
     "outputs": [
@@ -541,6 +661,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 10.2,
     "chapter": "Unsynced",
+    "step": 4,
+    "steps": 6,
     "label": "4 of 6 · Unsynced",
     "code": "ui.unsynced(\"support-docs\")",
     "outputs": [
@@ -569,6 +691,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.3,
     "chapter": "Search",
+    "step": 5,
+    "steps": 6,
     "label": "5 of 6 · Search",
     "code": "ui.use(\"support-docs\")\nui.search(\"How long do refunds take?\")",
     "outputs": [
@@ -597,6 +721,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.2,
     "chapter": "Ask",
+    "step": 6,
+    "steps": 6,
     "label": "6 of 6 · Ask",
     "code": "ui.use(\"support-docs\")\nui.ask(\"How long do refunds take?\")",
     "outputs": [
@@ -650,22 +776,53 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon SageMaker",
     "icon": "images/aws/sagemaker.svg",
     "heading": "Know what this notebook costs, and stop paying for idle",
-    "text": "This notebook, its disk, what else is still running, and why a training job or a pipeline broke."
+    "text": "This notebook, its disk, what else is still running, and why a training job or a pipeline broke.",
+    "ahead": [
+     "This notebook",
+     "Disk",
+     "Still running",
+     "Training job",
+     "Endpoints",
+     "Pipeline"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -679,6 +836,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 13.0,
     "chapter": "This notebook",
+    "step": 1,
+    "steps": 6,
     "label": "1 of 6 · This notebook",
     "code": "from aws_analyzer import SageMakerView\n\nui = SageMakerView()\nui.instance()",
     "outputs": [
@@ -708,6 +867,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.7,
     "chapter": "Disk",
+    "step": 2,
+    "steps": 6,
     "label": "2 of 6 · Disk",
     "code": "ui.disk()",
     "outputs": [
@@ -736,6 +897,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.7,
     "chapter": "Still running",
+    "step": 3,
+    "steps": 6,
     "label": "3 of 6 · Still running",
     "code": "ui.running()",
     "outputs": [
@@ -764,6 +927,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.1,
     "chapter": "Training job",
+    "step": 4,
+    "steps": 6,
     "label": "4 of 6 · Training job",
     "code": "ui.training_job(\"churn-xgb-0517\")",
     "outputs": [
@@ -792,6 +957,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 9.9,
     "chapter": "Endpoints",
+    "step": 5,
+    "steps": 6,
     "label": "5 of 6 · Endpoints",
     "code": "ui.endpoints()",
     "outputs": [
@@ -820,6 +987,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 15.2,
     "chapter": "Pipeline",
+    "step": 6,
+    "steps": 6,
     "label": "6 of 6 · Pipeline",
     "code": "ui.pipeline_run(\"churn-pipeline\")",
     "outputs": [
@@ -873,22 +1042,52 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon OpenSearch",
     "icon": "images/aws/opensearch.svg",
     "heading": "See what your vector indexes really hold",
-    "text": "Every domain and collection, whether the graphs fit in memory, and what a question finds."
+    "text": "Every domain and collection, whether the graphs fit in memory, and what a question finds.",
+    "ahead": [
+     "Everything",
+     "Indexes",
+     "One index",
+     "Sample",
+     "Search"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -902,6 +1101,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.8,
     "chapter": "Everything",
+    "step": 1,
+    "steps": 5,
     "label": "1 of 5 · Everything",
     "code": "from aws_analyzer import OpenSearchView\n\nui = OpenSearchView()\nui.overview()",
     "outputs": [
@@ -930,6 +1131,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.0,
     "chapter": "Indexes",
+    "step": 2,
+    "steps": 5,
     "label": "2 of 5 · Indexes",
     "code": "ui.indexes(\"vectors-prod\")",
     "outputs": [
@@ -958,6 +1161,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.3,
     "chapter": "One index",
+    "step": 3,
+    "steps": 5,
     "label": "3 of 5 · One index",
     "code": "ui.index_info(\"vectors-prod/support-docs\")",
     "outputs": [
@@ -986,6 +1191,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.0,
     "chapter": "Sample",
+    "step": 4,
+    "steps": 5,
     "label": "4 of 5 · Sample",
     "code": "ui.sample(\"vectors-prod/support-docs\", n=5)",
     "outputs": [
@@ -1014,6 +1221,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 16.6,
     "chapter": "Search",
+    "step": 5,
+    "steps": 5,
     "label": "5 of 5 · Search",
     "code": "ui.use(\"vectors-prod/support-docs\")\nui.search(\"how do I get my money back?\", k=8)",
     "outputs": [
@@ -1066,22 +1275,52 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "AWS Lambda",
     "icon": "images/aws/lambda.svg",
     "heading": "Find out which Lambda failed, and why, without the console",
-    "text": "Every function in every region, its errors read from its own logs, its runs and its code."
+    "text": "Every function in every region, its errors read from its own logs, its runs and its code.",
+    "ahead": [
+     "Every function",
+     "One function",
+     "Errors",
+     "Performance",
+     "Code"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -1095,6 +1334,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.8,
     "chapter": "Every function",
+    "step": 1,
+    "steps": 5,
     "label": "1 of 5 · Every function",
     "code": "from aws_analyzer import LambdaView\n\nui = LambdaView()\nui.functions(regions=\"all\")",
     "outputs": [
@@ -1124,6 +1365,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 15.1,
     "chapter": "One function",
+    "step": 2,
+    "steps": 5,
     "label": "2 of 5 · One function",
     "code": "ui.function_info(\"orders-etl\")",
     "outputs": [
@@ -1152,6 +1395,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.9,
     "chapter": "Errors",
+    "step": 3,
+    "steps": 5,
     "label": "3 of 5 · Errors",
     "code": "ui.errors(\"orders-etl\")",
     "outputs": [
@@ -1180,6 +1425,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 15.0,
     "chapter": "Performance",
+    "step": 4,
+    "steps": 5,
     "label": "4 of 5 · Performance",
     "code": "ui.performance(\"orders-etl\")",
     "outputs": [
@@ -1208,6 +1455,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.7,
     "chapter": "Code",
+    "step": 5,
+    "steps": 5,
     "label": "5 of 5 · Code",
     "code": "ui.code(\"orders-etl\")",
     "outputs": [
@@ -1260,22 +1509,49 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon API Gateway",
     "icon": "images/aws/apigateway.svg",
     "heading": "See which API calls fail and why",
-    "text": "Every API with its errors and open routes, then one API route by route."
+    "text": "Every API with its errors and open routes, then one API route by route.",
+    "ahead": [
+     "Every API",
+     "One API"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -1289,6 +1565,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.0,
     "chapter": "Every API",
+    "step": 1,
+    "steps": 2,
     "label": "1 of 2 · Every API",
     "code": "from aws_analyzer import APIGatewayView\n\napigw = APIGatewayView()\napigw.apis()",
     "outputs": [
@@ -1318,6 +1596,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 13.1,
     "chapter": "One API",
+    "step": 2,
+    "steps": 2,
     "label": "2 of 2 · One API",
     "code": "apigw.api_info(\"orders-api\")",
     "outputs": [
@@ -1367,22 +1647,50 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "SQS, SNS and EventBridge",
     "icon": "images/aws/messaging.svg",
     "heading": "Find out where your message went",
-    "text": "Every queue, topic and rule as one map, a message followed hop by hop, and one queue in full."
+    "text": "Every queue, topic and rule as one map, a message followed hop by hop, and one queue in full.",
+    "ahead": [
+     "Everything",
+     "Follow it",
+     "One queue"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -1396,6 +1704,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.8,
     "chapter": "Everything",
+    "step": 1,
+    "steps": 3,
     "label": "1 of 3 · Everything",
     "code": "from aws_analyzer import MessagingView\n\nmsg = MessagingView()\nmsg.overview()",
     "outputs": [
@@ -1425,6 +1735,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.5,
     "chapter": "Follow it",
+    "step": 2,
+    "steps": 3,
     "label": "2 of 3 · Follow it",
     "code": "msg.follow(\"orders-events\")",
     "outputs": [
@@ -1453,6 +1765,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.9,
     "chapter": "One queue",
+    "step": 3,
+    "steps": 3,
     "label": "3 of 3 · One queue",
     "code": "msg.queue_info(\"orders\")",
     "outputs": [
@@ -1503,22 +1817,52 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "AWS Step Functions",
     "icon": "images/aws/stepfunctions.svg",
     "heading": "See which step of a workflow failed, and read the Lambda run that broke it",
-    "text": "Every state machine, its failures by cause, one execution step by step, and its graph."
+    "text": "Every state machine, its failures by cause, one execution step by step, and its graph.",
+    "ahead": [
+     "Every workflow",
+     "Failures",
+     "One execution",
+     "Definition",
+     "Graph"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -1532,6 +1876,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.8,
     "chapter": "Every workflow",
+    "step": 1,
+    "steps": 5,
     "label": "1 of 5 · Every workflow",
     "code": "from aws_analyzer import StepFunctionsView\n\nsfn = StepFunctionsView()\nsfn.overview()",
     "outputs": [
@@ -1560,6 +1906,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.0,
     "chapter": "Failures",
+    "step": 2,
+    "steps": 5,
     "label": "2 of 5 · Failures",
     "code": "sfn.failures(\"order-pipeline\")",
     "outputs": [
@@ -1588,6 +1936,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.5,
     "chapter": "One execution",
+    "step": 3,
+    "steps": 5,
     "label": "3 of 5 · One execution",
     "code": "sfn.execution(\"order-pipeline/ord-7f3a\")",
     "outputs": [
@@ -1617,6 +1967,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 13.2,
     "chapter": "Definition",
+    "step": 4,
+    "steps": 5,
     "label": "4 of 5 · Definition",
     "code": "sfn.state_machine(\"order-pipeline\")",
     "outputs": [
@@ -1645,6 +1997,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 10.9,
     "chapter": "Graph",
+    "step": 5,
+    "steps": 5,
     "label": "5 of 5 · Graph",
     "code": "sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\")",
     "outputs": [
@@ -1697,22 +2051,53 @@ window.AA_TOURS = {
   "scenes": [
    {
     "kind": "title",
-    "dur": 4.5,
+    "dur": 3.2,
     "chapter": "Intro",
     "eyebrow": "Amazon Athena",
     "icon": "images/aws/athena.svg",
     "heading": "See what your SQL over S3 costs, why it fails, and which tables to fix",
-    "text": "What queries cost, why they failed, and which Glue tables point at nothing."
+    "text": "What queries cost, why they failed, and which Glue tables point at nothing.",
+    "ahead": [
+     "Overview",
+     "Expensive",
+     "Failures",
+     "Catalog",
+     "One table",
+     "Query code"
+    ]
    },
    {
     "kind": "cell",
-    "dur": 5.5,
+    "dur": 3.8,
     "chapter": "Install",
     "label": "Install",
+    "runs": 1.2,
     "code": "%pip install aws-analyzer",
     "outputs": [
      {
-      "text": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
      }
     ],
     "captions": [
@@ -1726,6 +2111,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.8,
     "chapter": "Overview",
+    "step": 1,
+    "steps": 6,
     "label": "1 of 6 · Overview",
     "code": "from aws_analyzer import AthenaView\n\nathena = AthenaView()\nathena.overview()",
     "outputs": [
@@ -1755,6 +2142,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 14.5,
     "chapter": "Expensive",
+    "step": 2,
+    "steps": 6,
     "label": "2 of 6 · Expensive",
     "code": "athena.expensive(top=5)",
     "outputs": [
@@ -1783,6 +2172,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 9.9,
     "chapter": "Failures",
+    "step": 3,
+    "steps": 6,
     "label": "3 of 6 · Failures",
     "code": "athena.failures()",
     "outputs": [
@@ -1811,6 +2202,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.9,
     "chapter": "Catalog",
+    "step": 4,
+    "steps": 6,
     "label": "4 of 6 · Catalog",
     "code": "athena.catalog()",
     "outputs": [
@@ -1840,6 +2233,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.5,
     "chapter": "One table",
+    "step": 5,
+    "steps": 6,
     "label": "5 of 6 · One table",
     "code": "athena.table_info(\"sales.events\")",
     "outputs": [
@@ -1868,6 +2263,8 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 11.9,
     "chapter": "Query code",
+    "step": 6,
+    "steps": 6,
     "label": "6 of 6 · Query code",
     "code": "athena.query_code(\"SELECT * FROM orders WHERE total > 100\", database=\"sales\")",
     "outputs": [
