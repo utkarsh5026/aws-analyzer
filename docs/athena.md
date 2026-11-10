@@ -26,6 +26,18 @@ The examples use acme's data lake: a dashboard runs `SELECT *` on `sales.events`
 **`athena.overview()`**: one dashboard query is 90% of the bill, two tables point at nothing, and two crawlers stopped.
 ///
 
+## Watch it run { #video }
+
+Six calls in a notebook, from a week's bill to the code for a query: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="athena">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=athena">Full screen</a> · <a href="videos/athena-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

@@ -148,6 +148,21 @@ DescribeTable counts around them. Bedrock's figures use `seed_bedrock_kb()`. Aft
 and check that its caption and `alt` text in the guide still say what it shows (counts in them come from the
 scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
 
+Each service's guide also has a video tour (its "Watch it run" section): `tour_video.py` types a few figures' calls
+into a notebook cell, runs them and shows their screenshots scrolling by under captions, between a title card and an
+end card. The tours (`TOURS`: a `Cell` per figure, with its chapter and captions) are written there and saved as the
+player's data, `docs/javascripts/tours.js`, which `docs/javascripts/tour.js` plays on the guides and full window in
+`docs/tour.html?service=<service>`. It also exports each tour as an MP4 (`docs/videos/<service>-tour-{light,dark}.mp4`,
+720p, a few MB each) by drawing it frame by frame in headless Chromium and piping the frames into ffmpeg. Run `--data`
+after remaking a figure a tour shows or editing a tour (`tests/test_tours.py` fails until you do), and remake that
+service's MP4s. It needs `pip install playwright`, ffmpeg and Chromium (`$CHROME`, or Playwright's).
+
+```bash
+.venv/bin/python .claude/skills/demo/tour_video.py --list                # every tour and its figures
+.venv/bin/python .claude/skills/demo/tour_video.py --data                # only tours.js
+.venv/bin/python .claude/skills/demo/tour_video.py lambda_functions      # its MP4s, light and dark (about 2 minutes each)
+```
+
 The S3 explorer (`s3_explorer.py`) is a live ipywidgets app, not a report, so `shots.py` can't draw it.
 `explorer_shots.py` starts JupyterLab in a temporary folder, runs the explorer on the acme scene, clicks its buttons
 when a figure needs that, and screenshots it the same size, light and dark, for `docs/s3_explorer.md`.

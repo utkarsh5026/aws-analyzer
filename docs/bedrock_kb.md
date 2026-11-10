@@ -27,6 +27,18 @@ The examples use `support-docs`, a knowledge base of support policies in the buc
 **`explore("support-docs")`**: find a file, ask whether it answers a question, search the whole knowledge base, then read its syncs.
 ///
 
+## Watch it run { #video }
+
+Six calls in a notebook, from every knowledge base to an answer and its sources: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="bedrock_kb">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=bedrock_kb">Full screen</a> · <a href="videos/bedrock_kb-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

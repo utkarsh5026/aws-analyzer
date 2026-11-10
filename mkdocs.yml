@@ -79,10 +79,16 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+  - stylesheets/tour.css
 
 # Motion and screenshot zoom: things rise into view, the highlighter sweeps, screenshots open full size.
+# The video tours: tours.js is their scenes (written by .claude/skills/demo/tour_video.py), tour.js the player.
 extra_javascript:
   - javascripts/motion.js
+  - path: javascripts/tours.js
+    defer: true
+  - path: javascripts/tour.js
+    defer: true
 
 extra:
   generator: false

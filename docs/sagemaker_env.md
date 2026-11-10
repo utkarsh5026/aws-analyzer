@@ -20,6 +20,18 @@ What this notebook is costing you, whether it stops when you walk away, what's f
 The examples run in a Studio JupyterLab space called `churn-analysis` on an `ml.g5.2xlarge`; the same commands work on a notebook instance. The screenshots are the tool's real output on a simulated SageMaker.
 { .muted }
 
+## Watch it run { #video }
+
+Six calls in a notebook, from what this notebook costs to where a pipeline broke: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="sagemaker_env">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=sagemaker_env">Full screen</a> · <a href="videos/sagemaker_env-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

@@ -27,6 +27,18 @@ The examples use acme's functions: `orders-etl` loads each day's orders from S3 
 **`explore()`**: pick a function, read its failed run, search its logs, then see its errors by cause and its code.
 ///
 
+## Watch it run { #video }
+
+Five calls in a notebook, from every function to the code it runs: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="lambda_functions">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=lambda_functions">Full screen</a> · <a href="videos/lambda_functions-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

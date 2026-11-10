@@ -33,6 +33,18 @@ The examples use acme's `orders-events` topic, which delivers to four queues and
 **`msg.explore()`**: from what failed, to where a topic's messages go, to a queue draining as you watch.
 ///
 
+## Watch it run { #video }
+
+Three calls in a notebook, from every queue, topic and rule to one queue's dead letters: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="messaging">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=messaging">Full screen</a> · <a href="videos/messaging-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
