@@ -263,6 +263,7 @@ _CONVERSATION_CSS = """\
 .agt .ag-say>.ag-bul{color:var(--ag-comment)}
 .agt .ag-say .ans{margin:0;font-size:13px;color:var(--ag-dim)}
 .agt .ag-step{margin:6px 0 2px}
+.agt .ag-step.ag-within{margin-left:14px;padding-left:10px;border-left:1px solid var(--ag-line)}
 .agt .ag-step>details>summary{list-style:none;cursor:pointer;display:block;margin:0 -8px;padding:1px 8px;border-radius:6px}
 .agt .ag-step>details>summary::-webkit-details-marker{display:none}
 .agt .ag-step>details>summary:hover{background:var(--ag-hover)}
@@ -520,9 +521,11 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
     """
     One tool call: the badges of the services it reads, the call as the model made it in colour, a comment saying
     what it does, its time, the code it ran (run_python's) and what it found under it. A finished call opens to its
-    details; one waiting for the user's choice on a big read says so.
+    details; one waiting for the user's choice on a big read says so. A call an investigator made is set in under
+    the investigate call it ran for.
     """
     state = "ask" if call.waiting is not None and not running else _tool_state(call, running=running)
+    within = " ag-within" if call.within else ""
     if state == "ask":
         timing = "✋ waiting for you"
     elif running:
@@ -537,10 +540,10 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
         line += _copyable(f'<div class="ag-code">{_python_html(call.code)}</div>', call.code, "the code it ran")
 
     if running or state == "ask":
-        return f'<div class="ag-step ag-{state}">{line}</div>'
+        return f'<div class="ag-step ag-{state}{within}">{line}</div>'
     found = (f'<div class="ag-res"><span class="ag-el">⎿</span><span>{_prose(call.summary or call.error or "done")}'
              "</span></div>")
-    return (f'<div class="ag-step ag-{state}"><details><summary>{line}{found}</summary>'
+    return (f'<div class="ag-step ag-{state}{within}"><details><summary>{line}{found}</summary>'
             f'<div class="ag-detail">{_tool_detail_html(call)}</div></details></div>')
 
 

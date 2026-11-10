@@ -115,6 +115,8 @@ class _Run:
         ask_more      a tool that runs out of a limit asks the user whether to raise it (AgentAnalyzer's ask_more)
         first_ref     the ref its first tool call gets (record()): refs go on across a conversation's questions, so
                       an answer can cite a call an earlier question made
+        count_model   told each model message an investigator's loop makes (the harness's counter for this question:
+                      model calls, tokens, cost), under counting, since investigations run side by side
 
     `budget` starts as the agent's and is replaced (never changed) when the user raises a limit, so a raise lasts
     for this question only.
@@ -134,6 +136,8 @@ class _Run:
     paused_at: float | None = None
     ask_more: bool = False
     first_ref: int = 1
+    count_model: Callable[[Any], None] | None = None
+    counting: threading.Lock = field(default_factory=threading.Lock)
 
     @property
     def elapsed(self) -> float:
@@ -160,6 +164,13 @@ class _Run:
         with self.lock:
             call.ref = self.first_ref + len(self.calls)
             self.calls.append(call)
+
+    def made_within(self, ref: int) -> list[ToolCall]:
+        """
+        The calls an investigator made for the investigate call with this ref, in the order it made them.
+        """
+        with self.lock:
+            return [call for call in self.calls if call.within == ref]
 
     def paused_call(self, name: str, args: dict[str, Any]) -> ToolCall | None:
         """

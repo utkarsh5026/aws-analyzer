@@ -37,7 +37,8 @@ from .analyzer import AgentAnalyzer
 from .harness import _message_text
 from .prompt import asked_at, parse_query_reply, query_prompt
 from .chats import ChatSummary
-from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
+from .answers import (INVESTIGATE_TOOL, AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next,
+                      reply_findings)
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import Rates, cache_saving, model_place, no_model_hint, provider_info
 from .model_setup import (
@@ -196,12 +197,23 @@ def _plan_lines(block: _Plan, report: _Report) -> list[str]:
     return ["", block.heading, *lines]
 
 
+_WITHIN_MARK = "↳"
+
+
 def _ref_of(call: ToolCall, place: int) -> int:
     """
     What the report's # column shows for a call: its ref, what the answer cites it by ('[3]'), or its place in the
     list for a call from before refs (a saved chat's).
     """
     return call.ref or place
+
+
+def _call_cell(call: ToolCall) -> str:
+    """
+    A call in the table of what it checked: as the model made it, after ↳ when an investigator made it for the
+    investigate call above it.
+    """
+    return f"{_WITHIN_MARK} {call.brief}" if call.within else call.brief
 
 
 def _coverage_text(call: ToolCall) -> str:
@@ -242,6 +254,8 @@ def _reads_text(reads: tuple[str, ...], tool: str) -> str:
     if reads == (MCP_READ,):
         server = tool.split(TOOL_SEPARATOR, 1)[0]
         return f"MCP server {server} (not an AWS read)"
+    if tool == INVESTIGATE_TOOL:
+        return "none itself: its investigator reads with that service's tools"
     return ", ".join(reads)
 
 
@@ -637,6 +651,13 @@ class AgentView(_BaseView):
             "follow-up" if is_follow_up else "",
         ]))
 
+    def _titles(self, toolkits: list[str]) -> list[str]:
+        """
+        Toolkits by how reports name them: ['lambda', 's3'] -> ['Lambda', 'S3'] (a name the agent hasn't got as it is).
+        """
+        titles = {t.name: t.title for t in self.core.toolkits}
+        return [titles.get(name, name) for name in toolkits]
+
     def _checked_blocks(self, answer: AgentAnswer) -> list[Any]:
         """
         What an answer's report shows under the answer: the cards, the findings (what the agent found in the account,
@@ -657,13 +678,14 @@ class AgentView(_BaseView):
             ("Model cost (est.)", cost),
             ("Time", _duration(answer.seconds)),
             *([("Runbook", ", ".join(answer.runbooks))] if answer.runbooks else []),
+            *([("Investigated", ", ".join(self._titles(answer.investigated)))] if answer.investigated else []),
         ]))
         earlier = core.earlier(answer)
         blocks.append(_Findings([*reply_findings(answer), *answer_findings(answer, core.budget, earlier=earlier)]))
         if answer.plan:
             blocks.append(_Plan(answer.plan))
         if answer.calls:
-            rows = [[str(_ref_of(call, i)), call.brief, _coverage_text(call), call.summary or "-",
+            rows = [[str(_ref_of(call, i)), _call_cell(call), _coverage_text(call), call.summary or "-",
                      f"{call.seconds:.1f}s"] for i, call in enumerate(answer.calls, 1)]
             blocks.append(_Table(["#", "Tool call", "Covered", "Found", "Time"], rows, title="What it checked",
                                  code_cols=(1,), prose_cols=(3,), sortable=False))
@@ -795,7 +817,7 @@ class AgentView(_BaseView):
         """
         The tools() report's subtitle: the toolkits, read-only, and the MCP servers whose tools it has besides.
         """
-        kits = [t.title for t in self.core.toolkits if t.name not in ("runbooks", "mcp")]
+        kits = [t.title for t in self.core.toolkits if t.name not in ("runbooks", "mcp", "investigators")]
         line = f"{', '.join(kits)}, read-only"
         mcp = self.core.mcp_kit
         ready = [state for state in mcp.states if state.is_ready] if mcp is not None else []

@@ -210,11 +210,12 @@ class Toolkit:
 
     def will_ask(self, tool: str) -> bool:
         """
-        Whether the tool asks the user before a big read now: the agent asks about it (interrupt_on=) and is
-        answering a question.
+        Whether the tool asks the user before a big read now: the agent asks about it (interrupt_on=), is answering
+        a question, and the main model made the call (an investigator's call never asks: it stops at the budget's limits).
         """
         agent = self.agent
-        return agent is not None and agent._run is not None and agent.interrupts(tool)
+        is_asking = agent is not None and agent._run is not None and agent.interrupts(tool)
+        return is_asking and not runtime.is_delegated()
 
     def ask_user(self, read: BigRead) -> str:
         """

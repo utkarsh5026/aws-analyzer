@@ -16,6 +16,11 @@ A question pauses when a tool asks the user about a big read (pause_for: LangGra
 conversation by the checkpointer): the stream ends, pauses() lists what's waiting, and resume_turn() goes on with the
 user's choices.
 
+An investigator (build_investigator, investigate) is a second, smaller loop the investigate tool runs for one task:
+LangChain's create_agent with one service's tools and instructions of its own, no plan, no file tools and no memory of
+the conversation (it keeps no checkpoints), so what it reads stays out of the main model's context and only its
+conclusion goes back. Its model messages are counted on the question like the main loop's (_Run.count_model).
+
 A question ends with the model's reply (reply=True): LangChain's ToolStrategy with REPLY_SCHEMA, which makes the model
 call final_answer (REPLY_TOOL) with the answer's markdown and its findings, read from the stream by _stream() into
 the answer. ToolStrategy makes the model call a tool on every turn (tool_choice "any"), which a few models can't
@@ -28,9 +33,11 @@ from __future__ import annotations
 import functools
 import inspect
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 from deepagents import create_deep_agent
+from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain.agents.structured_output import OutputToolBinding, ToolStrategy
@@ -71,6 +78,7 @@ _WRAP_UP = ("[The user pressed stop before you finished. Don't read anything mor
 _REPLIED = "Your answer is with the user."
 _FORCED_CHOICE = "any"
 _NAMED_CHOICE = "tool"
+_INVESTIGATION_STEPS = 40
 _HUMAN_MESSAGES = ("HumanMessage", "HumanMessageChunk")
 _AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
@@ -123,6 +131,69 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
         name="aws-analyzer",
         **extra,
     )
+
+
+@dataclass
+class Investigation:
+    """
+    How an investigator's loop ended: the conclusion it wrote ('' when it wrote none), why it stopped early
+    ('stopped', 'time' or 'steps'; '' when it finished) and what went wrong with the model, when something did.
+    """
+
+    text: str = ""
+    stopped: str = ""
+    error: str = ""
+
+
+def build_investigator(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *, name: str) -> Any:
+    """
+    An investigator's loop: the model with one service's tools and its own instructions (LangChain's create_agent, so
+    it has no plan, file tools or subagents of its own), keeping no checkpoints: each task starts from nothing.
+    """
+    return create_agent(model=model, tools=_langchain_tools(tools), system_prompt=system_prompt, checkpointer=False,
+                        name=f"aws-analyzer-{name}")
+
+
+def investigate(graph: Any, task: str, *, run: _Run, provider: str = "") -> Investigation:
+    """
+    Runs one task through an investigator's loop (build_investigator) for the question `run`, from inside the tool
+    call that handed it over, and returns how it ended. Each model message is counted on the question
+    (run.count_model), and the loop ends early when the question was stopped or is out of time, or after
+    _INVESTIGATION_STEPS steps. A model that fails gives its error (what it means with this `provider`) rather
+    than raising.
+    """
+    found = Investigation()
+    config = {"configurable": {"thread_id": f"investigation-{time.monotonic_ns()}"},
+              "recursion_limit": _INVESTIGATION_STEPS}
+    try:
+        for update in graph.stream({"messages": [{"role": "user", "content": task}]}, config=config,
+                                   stream_mode="updates"):
+            for msg in _model_messages(update):
+                _count_for(run, msg)
+                if not _calls_tools(msg):
+                    found.text = _message_text(msg) or found.text
+            found.stopped = _stop_reason(run)
+            if found.stopped:
+                break
+    except Exception as exc:  # noqa: BLE001
+        if is_pause(exc):
+            raise
+        if type(exc).__name__ == "GraphRecursionError":
+            found.stopped = "steps"
+        else:
+            found.error = explain_model_error(exc, provider)
+    return found
+
+
+def _count_for(run: _Run, message: Any) -> None:
+    """
+    Counts a model message an investigator's loop made on its question, one at a time: investigations run side by
+    side, each on its own thread.
+    """
+    if run.count_model is None:
+        return
+    with run.counting:
+        run.count_model(message)
 
 
 def _object_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +288,7 @@ def _stream(graph: Any, start: Any, *, thread: str, run: _Run, answer: AgentAnsw
     """
     cost_of = functools.partial(answer_cost, model_prices=model_prices, provider=provider)
     count = functools.partial(_count_usage, answer=answer, base=answer.model, run=run, cost_of=cost_of)
+    run.count_model = count
     steps = 0
     text = ""
     config = {"configurable": {"thread_id": thread}, "recursion_limit": run.budget.steps}

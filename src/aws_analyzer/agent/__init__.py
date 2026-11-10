@@ -90,6 +90,11 @@ One concern per module, so a new service's tools or a new agent capability goes 
     runbooks/        Step-by-step guides for common problems (runbooks=): each a folder with a SKILL.md, the
                      built-in ones beside its __init__.py (which reads them), offered to the model by name and
                      description and read whole through toolkits/runbook_tools.py's read_runbook.
+    toolkits/investigator_tools.py
+                     Subagents (subagents=True): investigate(service, task) hands a task to an investigator, a
+                     second loop of the model with one service toolkit's tools (harness.build_investigator,
+                     prompt.investigator_prompt), and only its conclusion goes back to the main conversation. Its
+                     calls are the question's own (ToolCall.within), budgeted, guarded and checked like the rest.
     answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
                      does, told as it happens), BigRead (what a tool asks before a big read) and AgentFinding (what
                      the model found, from its reply: REPLY_SCHEMA, parse_reply, checked_call), and the pure findings
@@ -181,7 +186,8 @@ from .llm import (
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
 from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
-from .prompt import asked_at, focus_of, looking_at, parse_query_reply, query_prompt, system_prompt
+from .prompt import (asked_at, focus_of, investigator_prompt, looking_at, parse_query_reply, query_prompt,
+                     system_prompt)
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
 from .toolkits.apigateway_tools import (
@@ -275,6 +281,7 @@ from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image
 from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
 from .toolkits.runbook_tools import RunbookToolkit, summarize_runbook
+from .toolkits.investigator_tools import InvestigatorToolkit, summarize_investigation
 from .toolkits.mcp_tools import McpToolkit, summarize_mcp_result
 from .mcp_servers import McpHub, McpServer, ServerState, parse_server_text
 from .runbooks import Runbook, RunbookProblem, RunbookShelf, load_runbooks, parse_front_matter, runbook_findings
@@ -330,6 +337,7 @@ __all__ = [
     "TriggerLink",
     "PythonToolkit",
     "RunbookToolkit",
+    "InvestigatorToolkit",
     "McpHub",
     "McpServer",
     "McpToolkit",
@@ -343,6 +351,7 @@ __all__ = [
     "parse_front_matter",
     "runbook_findings",
     "summarize_runbook",
+    "summarize_investigation",
     "LocalSandbox",
     "PYODIDE_VERSION",
     "Workspace",
@@ -385,6 +394,7 @@ __all__ = [
     "query_prompt",
     "parse_query_reply",
     "system_prompt",
+    "investigator_prompt",
     "answer_findings",
     "check_grounding",
     "grounding_findings",

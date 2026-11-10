@@ -13,7 +13,9 @@ agent has the other (Toolkit.peer()); Step Functions and API Gateway read the La
 call through the agent's Lambda toolkit's analyzer, when it has one, so the Lambda tools can go on from there. The Python toolkit (python_tools.py) isn't about a service: it runs the model's
 code in the agent's workspace (AgentAnalyzer(python=...)), and each service's toolkit offers a save_* tool that puts
 its data there when the agent has it (peer('python')). Nor is the Runbooks toolkit (runbook_tools.py): it reads the
-agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name. The CloudWatch
+agent's step-by-step guides (AgentAnalyzer(runbooks=...)), which the analyzer adds last, not by name; nor the
+Investigators toolkit (investigator_tools.py, AgentAnalyzer(subagents=True)): its one tool hands a task to a second
+loop of the model that has only one service toolkit's tools, and returns its conclusion. The CloudWatch
 toolkit (cloudwatch_tools.py) is about every service's numbers rather than one service, so it reads through its own
 MetricReader (cloudwatch_reads.py), not an analyzer of the package, with the maths in baselines.py.
 """
@@ -28,6 +30,7 @@ from .apigateway_tools import APIGatewayToolkit
 from .bedrock_kb_tools import BedrockKBToolkit
 from .cloudwatch_tools import CloudWatchToolkit
 from .dynamodb_tools import DynamoDBToolkit
+from .investigator_tools import InvestigatorToolkit
 from .lambda_tools import LambdaToolkit
 from .opensearch_tools import OpenSearchToolkit
 from .python_tools import PythonToolkit
@@ -93,6 +96,6 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
 
 
 __all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "APIGatewayToolkit", "BedrockKBToolkit", "CloudWatchToolkit",
-           "DynamoDBToolkit", "LambdaToolkit",
+           "DynamoDBToolkit", "InvestigatorToolkit", "LambdaToolkit",
            "OpenSearchToolkit", "PythonToolkit", "RunbookToolkit", "S3Toolkit", "SageMakerToolkit",
            "StepFunctionsToolkit", "Toolkit", "default_toolkits", "make_toolkit", "make_toolkits"]
