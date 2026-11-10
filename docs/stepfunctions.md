@@ -20,12 +20,6 @@ Find the state machines that fail, see where and why their executions stop, and 
 The examples use acme's `order-pipeline`, a Standard workflow that validates an order, charges the card, loads the order with the `orders-etl` Lambda function and resizes its pictures in a Map. Some of its executions fail at `LoadOrders`, where `orders-etl` raises `KeyError: 'customer_id'`.
 { .muted }
 
-![The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step's time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state's definition and tries beside it](images/sfn-explorer-tour-light.webp#only-light){ width="984" height="865" loading=lazy }
-![The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step's time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state's definition and tries beside it](images/sfn-explorer-tour-dark.webp#only-dark){ width="984" height="865" loading=lazy }
-/// caption
-**`explore()`**: open a failed execution to see which step broke, then find that step on the workflow's graph.
-///
-
 ## Watch it run { #video }
 
 Five calls in a notebook, from every state machine to the path an execution took: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
@@ -204,42 +198,9 @@ The findings read the definition: a Lambda task with no Retry for Lambda's own e
 ```python
 sfn.explore()                                       # the state machine failing most, or the first
 sfn.explore("order-pipeline", execution="ord-7f3a") # with one execution open
-sfn.explore("order-pipeline", tab="failures", since="30d")
 ```
 
-![The Step Functions explorer: the findings, then a search box, chips and four state machines with their executions, failures, average run, cost and logging under column headers that sort](images/sfn-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Step Functions explorer: the findings, then a search box, chips and four state machines with their executions, failures, average run, cost and logging under column headers that sort](images/sfn-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-`sfn.explore()`: every state machine, the failing ones first; search them, pick a chip (Failing, Express, Logging off, ...) or click a column to sort. The cards say how the one picked is doing.
-///
-
-The **Executions** tab lists them newest first. Pick a time range, filter by outcome or search by name, and click one. Its page opens with the findings and the waterfall as soon as its history is read, then the log once its Lambda runs are.
-
-![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="866" loading=lazy }
-![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with `KeyError`.
-///
-
-![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The execution's log in the explorer: Step Functions' events and the lines of validate-order, charge-card and orders-etl merged by time, each source in its own colour](images/sfn-explorer-log-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-Lower on the same page: Step Functions' events and each function's lines, one log in time order.
-///
-
-The **Graph** tab draws the state machine from its definition. It is coloured by the path the open execution took, or by where executions stopped in the time range. Pick a state beside the graph to see its tries, its Lambda run's lines, or the failures that stopped there.
-
-![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed.
-///
-
-The **Failures** tab is `failures()`, with a button per group that opens its newest execution. **Overview** is `state_machine()` and **Definition** is `graph()`. The window only reads, like the reports, and outside Jupyter `explore()` shows the reports instead.
-
-??? more "How the window reads"
-
-    AWS is read off the notebook's event loop, so a click returns at once: the state machines and their CloudWatch numbers first, then the one you pick, then its executions. An execution's history is one read and its log another, the Lambda runs read side by side (at most 12, the failed ones first). Pick another execution while one is still being read and the first one's result is dropped when it comes back.
+Its Graph tab draws the workflow with an execution's path on it, and its Failures tab groups the failures by the state they stopped at. The [Step Functions explorer guide](stepfunctions_explorer.md) covers every tab, with its own video tour.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 

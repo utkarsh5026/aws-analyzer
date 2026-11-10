@@ -1506,7 +1506,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so does each explorer window (`s3_explorer.md`, `lambda_explorer.md`, `stepfunctions_explorer.md`, `apigateway_explorer.md`, `opensearch_explorer.md`, `athena_explorer.md`, `messaging_explorer.md` and `bedrock_kb_explorer.md`, each after its service in `nav` and on the home page, with its service's icon, and its service guide's `#explorer` section a short pointer to it) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
@@ -1559,12 +1559,13 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`, and so do the knowledge base
-  explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
-  (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
+  explorer's (`kb-explorer*`, in `bedrock_kb_explorer.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
+  (`lambda-explorer*`, in `lambda_explorer.md`), from `lambda_explorer_shots.py`, and the other explorers' from their
+  `*_explorer_shots.py`, each in its `<service>_explorer.md`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which
   plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
   `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
-  `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model), at the top of its guide
+  `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model), at the top of its window's guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when
   a report's or window's look changes, and check their captions and alt text still match, in the guides and in README,
@@ -1577,6 +1578,9 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   scrolls through the figure's screenshot under captions, light or dark with the page, and `docs/tour.html?service=`
   shows it full window. The tours are written in `.claude/skills/demo/tour_video.py` (`TOURS`, a `Cell` per figure in
   `shots.py`, so the code typed is the figure's own call) and saved as the player's data, `docs/javascripts/tours.js`
+  (each explorer's guide has one too, `<service>_explorer` (`lambda_explorer`, ...): its cells show the window's
+  screenshots, so each says its `code`, the `explore()` call or the window's own command (`x.logs(...)`) that shows
+  that view, and `Tour.window` names the window's variable for the end card)
   (`--data`; `tests/test_tours.py` fails when it's stale); the same script exports each tour as an MP4,
   `docs/videos/<service>-tour-{light,dark}.mp4`, frame by frame through ffmpeg. After remaking a figure a tour shows,
   run `--data`, check its captions still say what it shows, and remake that service's MP4s.

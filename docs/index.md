@@ -159,6 +159,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>Why did my knowledge base answer that?</span><span>Which files failed to index, and why?</span><span>Does a search find the passage it should?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="bedrock_kb_explorer.html">
+<img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Knowledge base explorer</span><code>bedrock_kb/explorer/</code></span>
+<span class="asks"><span>Which files are searchable, and which failed or need a sync?</span><span>How was this file cut into chunks?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 <li><a href="bedrock_chat.html">
 <img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Bedrock chat</span><code>bedrock_chat.py</code></span>
@@ -177,10 +183,22 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>Do my vectors fit in the memory the nodes have?</span><span>Which documents have no vector?</span><span>What's nearest to this question?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="opensearch_explorer.html">
+<img class="aws-icon" src="images/aws/opensearch.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">OpenSearch explorer</span><code>opensearch/explorer/</code></span>
+<span class="asks"><span>Can I click through my indexes and their documents?</span><span>Which documents can search never find?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 <li><a href="lambda_functions.html">
 <img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">AWS Lambda</span><code>lambda_functions.py</code></span>
 <span class="asks"><span>Which function failed last night, and why?</span><span>Which runtimes lose support soon?</span><span>Is it paying for memory it never uses?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="lambda_explorer.html">
+<img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Lambda explorer</span><code>lambda_functions/explorer/</code></span>
+<span class="asks"><span>Can I just click through my functions and their logs?</span><span>What's running right now?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="stepfunctions.html">
@@ -189,10 +207,22 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>Which step of my workflow failed, and why?</span><span>What did that Lambda log in the run that broke it?</span><span>Can I redrive the failed ones?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="stepfunctions_explorer.html">
+<img class="aws-icon" src="images/aws/stepfunctions.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Step Functions explorer</span><code>stepfunctions/explorer/</code></span>
+<span class="asks"><span>Can I click from a failed execution to the step that broke it?</span><span>Where is that step on the graph?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 <li><a href="apigateway.html">
 <img class="aws-icon" src="images/aws/apigateway.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Amazon API Gateway</span><code>apigateway</code></span>
 <span class="asks"><span>Which calls to my API fail, and why?</span><span>Who can call this route without signing in?</span><span>Did the Lambda behind that 504 finish anyway?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="apigateway_explorer.html">
+<img class="aws-icon" src="images/aws/apigateway.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">API Gateway explorer</span><code>apigateway/explorer/</code></span>
+<span class="asks"><span>Can I click from a 504 to the Lambda run behind it?</span><span>Where does a request to this route go?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="athena.html">
@@ -201,10 +231,22 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>Which of my queries cost the most, and why?</span><span>Why did my query fail?</span><span>Which tables point at an empty folder?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="athena_explorer.html">
+<img class="aws-icon" src="images/aws/athena.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Athena explorer</span><code>athena/explorer/</code></span>
+<span class="asks"><span>Can I click through what my queries cost?</span><span>Which tables return nothing?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 <li><a href="messaging.html">
 <img class="aws-icon" src="images/aws/messaging.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">SQS, SNS and EventBridge</span><code>messaging</code></span>
 <span class="asks"><span>Where did my message go?</span><span>What's stuck in the dead-letter queue?</span><span>Why does this topic never reach my queue?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="messaging_explorer.html">
+<img class="aws-icon" src="images/aws/messaging.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Messaging explorer</span><code>messaging/explorer/</code></span>
+<span class="asks"><span>Can I click along the path a message takes?</span><span>Is this queue draining?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
 <li><a href="agent.html">

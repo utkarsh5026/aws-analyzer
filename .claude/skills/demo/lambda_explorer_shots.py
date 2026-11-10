@@ -14,7 +14,7 @@ Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError
 report-api in the function field for its JSON logs, a failed run and a good one open; then seeds what's running now
 (demo.seed_lambda_live), opens the Live tab and follows orders-etl. Each figure is the window, 984 CSS px wide at
 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is
-set in docs/lambda_functions.md, by shots.py's set_height.
+set in docs/lambda_explorer.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the
 one Playwright installs (playwright install chromium).
@@ -334,7 +334,7 @@ def main() -> int:
                         heights.setdefault(name, set()).add(round(image.height / SCALE))
                 browser.close()
             for name, sizes in heights.items():
-                shots.set_height(shots.GUIDES["lambda_functions"], name, max(sizes))
+                shots.set_height(shots.GUIDES["lambda_explorer"], name, max(sizes))
                 print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()

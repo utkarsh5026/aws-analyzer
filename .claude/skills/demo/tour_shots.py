@@ -382,15 +382,15 @@ class Window:
 
 
 TOURS = [
-    Window("lambda-explorer-tour", "lambda_functions", lambda_explorer_shots.NOTEBOOK_CODE, ".lmx-app",
+    Window("lambda-explorer-tour", "lambda_explorer", lambda_explorer_shots.NOTEBOOK_CODE, ".lmx-app",
            busy_in(".lmx-app", ".lmx-status"), play_lambda),
-    Window("kb-explorer-tour", "bedrock_kb", kb_explorer_shots.NOTEBOOK_CODE, ".kbx-app",
+    Window("kb-explorer-tour", "bedrock_kb_explorer", kb_explorer_shots.NOTEBOOK_CODE, ".kbx-app",
            busy_in(".kbx-app", ".kbx-status"), play_kb),
-    Window("sfn-explorer-tour", "stepfunctions", sfn_explorer_shots.NOTEBOOK_CODE, ".sfx-app",
+    Window("sfn-explorer-tour", "stepfunctions_explorer", sfn_explorer_shots.NOTEBOOK_CODE, ".sfx-app",
            busy_in(".sfx-app", ".sfx-status"), play_stepfunctions),
-    Window("apigw-explorer-tour", "apigateway", apigw_explorer_shots.NOTEBOOK_CODE, ".agx-app",
+    Window("apigw-explorer-tour", "apigateway_explorer", apigw_explorer_shots.NOTEBOOK_CODE, ".agx-app",
            busy_in(".agx-app", ".agx-status"), play_apigateway),
-    Window("msg-explorer-tour", "messaging", msg_explorer_shots.NOTEBOOK_CODE, ".mgx-app",
+    Window("msg-explorer-tour", "messaging_explorer", msg_explorer_shots.NOTEBOOK_CODE, ".mgx-app",
            busy_in(".mgx-app", ".mgx-status"), play_messaging),
     Window("chat-tour", "bedrock_chat", chat_shots.NOTEBOOK_CODE, ".kbc-app", chat_busy(), play_chat),
     Window("agent-chat-tour", "agent", agent_chat_shots.NOTEBOOK_CODE, ".agc-app", agent_busy(), play_agent,

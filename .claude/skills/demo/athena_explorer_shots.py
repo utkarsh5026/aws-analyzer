@@ -10,7 +10,7 @@ notebook that opens the window on demo.py's Athena (tests/fake_athena.py's acme:
 workgroups, the Glue tables and crawlers, the tables' folders in moto's S3), then uses it the way a person would:
 opens the Costs tab (the dashboard's SELECT * is picked first), then the Catalog tab with the "To fix" chip and
 sales.clicks, the table whose partitions were never loaded. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
-docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/athena.md, by shots.py's
+docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/athena_explorer.md, by shots.py's
 set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
@@ -188,7 +188,7 @@ def shoot(lab: Lab, themes: tuple[str, ...], names: list[str], folder: str, out:
             keep(taken, out, heights)
         browser.close()
     for name, sizes in heights.items():
-        shots.set_height(shots.GUIDES["athena"], name, max(sizes))
+        shots.set_height(shots.GUIDES["athena_explorer"], name, max(sizes))
         print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
 
 

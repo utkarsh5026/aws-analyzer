@@ -265,14 +265,14 @@
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="agent.html"]::before { -webkit-mask-image: var(--aa-i-chat); mask-image: var(--aa-i-chat); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="s3.html"], [href="s3_explorer.html"])::before { background-image: url("../images/aws/s3.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="dynamodb.html"]::before { background-image: url("../images/aws/dynamodb.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="bedrock_kb.html"], [href="bedrock_chat.html"])::before { background-image: url("../images/aws/bedrock.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="bedrock_kb.html"], [href="bedrock_kb_explorer.html"], [href="bedrock_chat.html"])::before { background-image: url("../images/aws/bedrock.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="sagemaker_env.html"]::before { background-image: url("../images/aws/sagemaker.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="opensearch.html"]::before { background-image: url("../images/aws/opensearch.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="lambda_functions.html"]::before { background-image: url("../images/aws/lambda.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="stepfunctions.html"]::before { background-image: url("../images/aws/stepfunctions.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="apigateway.html"]::before { background-image: url("../images/aws/apigateway.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="athena.html"]::before { background-image: url("../images/aws/athena.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="messaging.html"]::before { background-image: url("../images/aws/messaging.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="opensearch.html"], [href="opensearch_explorer.html"])::before { background-image: url("../images/aws/opensearch.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="lambda_functions.html"], [href="lambda_explorer.html"])::before { background-image: url("../images/aws/lambda.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="stepfunctions.html"], [href="stepfunctions_explorer.html"])::before { background-image: url("../images/aws/stepfunctions.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="apigateway.html"], [href="apigateway_explorer.html"])::before { background-image: url("../images/aws/apigateway.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="athena.html"], [href="athena_explorer.html"])::before { background-image: url("../images/aws/athena.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="messaging.html"], [href="messaging_explorer.html"])::before { background-image: url("../images/aws/messaging.svg"); }
 }
 
 /* Contents: a track down the side, the section you're reading marked on it */
