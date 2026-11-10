@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Fixed
 
-- 💬 **Bedrock: application inference profiles show up** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pulls))
+- 💬 **Bedrock: application inference profiles show up** ([#229](https://github.com/utkarsh5026/aws-analyzer/pull/229))
   - `models()`, the chat window's model list and the agent now list the inference profiles your account made.
   - `ask(model="team-chatbot")` takes one by its name, ID or ARN, and calls it by its ARN.
 
