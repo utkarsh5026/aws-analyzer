@@ -14,6 +14,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 💬 **Bedrock: application inference profiles show up** ([#229](https://github.com/utkarsh5026/aws-analyzer/pull/229))
   - `models()`, the chat window's model list and the agent now list the inference profiles your account made.
   - `ask(model="team-chatbot")` takes one by its name, ID or ARN, and calls it by its ARN.
+- 🔀 **Step Functions: the time range menu is readable in a dark theme**
+  - The Executions tab's "Last 90 days" list no longer opens as light text on white.
+  - The same fix applies to every window's menus (Lambda, API Gateway, Athena, OpenSearch, knowledge bases, chats).
 
 ## [0.56.0] - 2026-11-09
 
