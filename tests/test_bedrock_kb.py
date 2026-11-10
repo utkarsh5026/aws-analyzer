@@ -21,6 +21,7 @@ from moto import mock_aws
 from aws_analyzer import bedrock_kb as kbmod
 from aws_analyzer._bedrock import blocks as bedrock_blocks
 from aws_analyzer._bedrock import files as bedrock_files
+from aws_analyzer._bedrock.foundation_models import unique_profiles
 from aws_analyzer._kit import blocks as kitblocks
 from aws_analyzer._kit import deps as depsmod
 from aws_analyzer._kit import view as viewmod
@@ -1667,9 +1668,10 @@ class Stubs:
             {"modelSummaries": MODEL_LIST},
             {"byOutputModality": "TEXT"},
         )
-        self.bedrock.add_response(
-            "list_inference_profiles", {"inferenceProfileSummaries": PROFILES}, {}
-        )
+        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": PROFILES},
+                          {"typeEquals": "SYSTEM_DEFINED"})
+        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": []},
+                          {"typeEquals": "APPLICATION"})
 
 
 @pytest.fixture
@@ -1974,6 +1976,42 @@ def test_resolve_model_short_names(aws, core):
     assert [m.id for m in core.models("nova")] == [
         "amazon.nova-pro-v1:0"
     ]  # cached: no second listing
+
+
+APP_PROFILE_ARN = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:application-inference-profile/a1b2c3d4e5f6"
+APP_PROFILE = {
+    "inferenceProfileName": "team-chatbot",
+    "inferenceProfileId": "a1b2c3d4e5f6",
+    "inferenceProfileArn": APP_PROFILE_ARN,
+    "models": [{"modelArn": f"arn:aws:bedrock:us-east-1::foundation-model/{HAIKU}"}],
+    "status": "ACTIVE",
+    "type": "APPLICATION",
+}
+
+
+def test_application_inference_profiles_are_listed_and_called_by_arn(aws, core):
+    """
+    ListInferenceProfiles without typeEquals lists only the system-defined profiles, so the analyzer asks for each
+    type: the account's application inference profiles show in models() and resolve by name, ID or ARN to the ARN.
+    """
+    aws.bedrock.add_response("list_foundation_models", {"modelSummaries": MODEL_LIST}, {"byOutputModality": "TEXT"})
+    aws.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": PROFILES},
+                             {"typeEquals": "SYSTEM_DEFINED"})
+    aws.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": [APP_PROFILE]},
+                             {"typeEquals": "APPLICATION"})
+
+    [listed] = core.models("team-chatbot")
+
+    assert (listed.name, listed.provider, listed.invoke_id) == ("team-chatbot", "your inference profile",
+                                                                 APP_PROFILE_ARN)
+    priced_as_haiku = (listed.price_in, listed.price_out) == model_price(HAIKU)
+    assert priced_as_haiku
+    for name in ("team-chatbot", "a1b2c3d4e5f6", APP_PROFILE_ARN):
+        assert core.resolve_model(name) == (APP_PROFILE_ARN, APP_PROFILE_ARN)
+
+
+def test_inference_profiles_listed_twice_count_once():
+    assert unique_profiles(PROFILES + PROFILES[:1] + [APP_PROFILE]) == PROFILES + [APP_PROFILE]
 
 
 def test_resolve_model_uses_the_name_when_models_cant_be_listed(aws):

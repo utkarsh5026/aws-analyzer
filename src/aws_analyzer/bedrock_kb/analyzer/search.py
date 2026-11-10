@@ -12,7 +12,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._bedrock.estimates import estimate_tokens
 from ..._bedrock.filters import build_filter, with_data_sources
-from ..._bedrock.foundation_models import parse_models
+from ..._bedrock.foundation_models import PROFILE_TYPES, names_profile, parse_models, profile_target, unique_profiles
 from ..._bedrock.helpers import _model_id
 from ..._bedrock.models import ModelInfo, Passage
 from ..._bedrock.parsing import parse_retrieve
@@ -178,6 +178,18 @@ class _SearchReads:
             ),
         )
 
+    def _inference_profiles(self, bedrock: Any) -> list[dict[str, Any]]:
+        """
+        Every inference profile in the region, system-defined and the account's application ones
+        (ListInferenceProfiles once per type: without typeEquals it lists only the system-defined ones).
+        """
+        summaries: list[dict[str, Any]] = []
+        for profile_type in PROFILE_TYPES:
+            pages = bedrock.get_paginator("list_inference_profiles").paginate(typeEquals=profile_type)
+            for page in pages:
+                summaries.extend(page.get("inferenceProfileSummaries", []))
+        return unique_profiles(summaries)
+
     def models(
         self, match: str | None = None, *, refresh: bool = False
     ) -> list[ModelInfo]:
@@ -192,13 +204,7 @@ class _SearchReads:
             )
             profiles: list[dict[str, Any]] | None
             try:
-                profiles = [
-                    profile
-                    for page in bedrock.get_paginator(
-                        "list_inference_profiles"
-                    ).paginate()
-                    for profile in page.get("inferenceProfileSummaries", [])
-                ]
+                profiles = self._inference_profiles(bedrock)
                 self.model_errors.pop("profiles", None)
             except (ClientError, BotoCoreError) as exc:
                 profiles = None  # models that need a profile say which one when called
@@ -236,11 +242,8 @@ class _SearchReads:
             if wanted in (m.id, m.invoke_id):
                 return m.invoke_id, m.arn
         for profile in self._profiles:
-            if wanted in (
-                profile.get("inferenceProfileId"),
-                profile.get("inferenceProfileArn"),
-            ):
-                return profile["inferenceProfileId"], profile["inferenceProfileArn"]
+            if names_profile(wanted, profile):
+                return profile_target(profile)
         matches = [
             m
             for m in models

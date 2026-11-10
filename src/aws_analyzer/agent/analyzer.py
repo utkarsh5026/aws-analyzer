@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .._bedrock.foundation_models import parse_models
+from .._bedrock.foundation_models import PROFILE_TYPES, parse_models, unique_profiles
 from .._bedrock.models import ModelInfo
 from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
@@ -705,15 +705,19 @@ has it answer in plain text, as does a model that can't be made to call a tool.
 
     def _inference_profiles(self) -> list[dict[str, Any]] | None:
         """
-        The inference profiles in the agent's region (ListInferenceProfiles); None when they can't be listed.
+        The inference profiles in the agent's region, system-defined and the account's application ones
+        (ListInferenceProfiles once per type); None when they can't be listed.
         """
         profiles: list[dict[str, Any]] = []
         try:
-            for page in self._bedrock_control().get_paginator("list_inference_profiles").paginate():
-                profiles.extend(page.get("inferenceProfileSummaries", []))
+            for profile_type in PROFILE_TYPES:
+                pages = self._bedrock_control().get_paginator("list_inference_profiles").paginate(
+                    typeEquals=profile_type)
+                for page in pages:
+                    profiles.extend(page.get("inferenceProfileSummaries", []))
         except (ClientError, BotoCoreError):
             return None
-        return profiles
+        return unique_profiles(profiles)
 
     def _bedrock_models(self) -> list[ModelInfo]:
         """
