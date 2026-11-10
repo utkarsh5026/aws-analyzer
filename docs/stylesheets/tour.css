@@ -165,9 +165,9 @@
 .tour-stage.dark .tour-caption b { color: #16191f; background: #fce7a2; padding: 0 4px; border-radius: 3px; }
 .tour-stage.dark .tour-caption code { color: #b84f00; }
 
-/* Clips: a report screenshot's own short video (tour.js's initClips). An orange ▶ Watch it run pill starts the
-   caption under the screenshot, so it covers nothing in the report; a click puts the player in the picture's place,
-   framed like the screenshot with the selected cell's bar, a ✕ on its top right, and fades back at the end. */
+/* Clips: a screenshot's own short video (tour.js's initClips), shown in the picture's place and framed like it, with
+   the selected cell's bar. With "reduce motion" the picture stays, an orange ▶ Watch it run pill starts its caption,
+   and a click plays the clip there with a ✕ on its top right, fading back to the picture at the end. */
 .md-typeset .aa-clip-play {
   display: inline-flex; align-items: center; gap: .35rem; margin: 0 .55rem .2rem 0; padding: .3rem .75rem .3rem .55rem;
   border: none; border-radius: 999px; cursor: pointer; vertical-align: .05rem;

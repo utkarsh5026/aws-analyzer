@@ -22,7 +22,7 @@ The examples use `vectors-prod`, a domain holding `support-docs` (the help-cente
 
 ## Watch it run { #video }
 
-Five calls in a notebook, from every domain and collection to a vector search: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Five calls in a notebook, from every domain and collection to a vector search: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="opensearch">

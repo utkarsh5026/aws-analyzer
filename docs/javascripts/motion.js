@@ -4,7 +4,7 @@
    - The amber highlighter sweeps across a <mark> the first time it's seen, as if someone marked it while you watched.
    - A thin bar under the header shows how far through the guide you are.
    - A click on a screenshot opens it full size over the page; Esc, a click or the close button puts it back.
-   - The home page's video plays by itself on a first visit, and on a click after that.
+   - The home page's video plays by itself once it's on screen, and again on a click.
 
    Everything here is extra: without this script, or with "reduce motion" set in the system, every element is
    simply there (extra.css hides nothing unless this script has put .aa-motion on <html>). Elements already on
@@ -15,7 +15,6 @@
 
   var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var canObserve = "IntersectionObserver" in window;
-  var HERO_SEEN = "aa-hero-seen";
 
   /* What rises into view, and the groups whose items come in one after another (by their place in the group) */
   var REVEAL = [
@@ -176,15 +175,16 @@
     highlight(root);
   }
 
-  /* The hero's video plays only while it's on screen and the tab is in front, so it never decodes for nobody, and
-     not before the page has loaded, so its download doesn't hold up the rest. While it plays, the dots behind it
-     stop drifting: the browser then repaints only the video. */
+  /* The hero's video plays by itself on every visit, but only while it's on screen and the tab is in front, so it
+     never decodes for nobody, and not before the page has loaded, so its download doesn't hold up the rest. Once it
+     has ended it stays on its last frame until it's clicked. While it plays, the dots behind it stop drifting: the
+     browser then repaints only the video. */
   function heroVideo(root) {
     var video = root.querySelector(".hero-video");
     if (!video || video.offsetParent === null) return;
     var hero = video.closest(".hero");
     var visible = false;
-    var wanted = !localStorage.getItem(HERO_SEEN);
+    var wanted = true;
 
     function play() {
       if (!wanted || !visible || document.hidden) return;
@@ -202,10 +202,7 @@
     });
     video.addEventListener("play", function () { if (hero) hero.classList.add("aa-playing"); });
     video.addEventListener("pause", function () { if (hero) hero.classList.remove("aa-playing"); });
-    video.addEventListener("ended", function () {
-      wanted = false;
-      localStorage.setItem(HERO_SEEN, "1");
-    });
+    video.addEventListener("ended", function () { wanted = false; });
     document.addEventListener("visibilitychange", update);
 
     function watch() {

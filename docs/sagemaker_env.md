@@ -22,7 +22,7 @@ The examples run in a Studio JupyterLab space called `churn-analysis` on an `ml.
 
 ## Watch it run { #video }
 
-Six calls in a notebook, from what this notebook costs to where a pipeline broke: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Six calls in a notebook, from what this notebook costs to where a pipeline broke: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="sagemaker_env">

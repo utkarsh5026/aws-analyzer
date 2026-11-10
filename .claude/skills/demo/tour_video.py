@@ -19,7 +19,8 @@ section, and docs/tour.html shows it full window (tour.html?service=lambda_funct
 
 Every report screenshot in the guides also gets a short clip, docs/javascripts/clips.js: the same player, one cell
 long, typing that figure's call and scrolling its report under the rest of its guide caption (the call it starts with
-left out, since the cell shows it). A ▶ Watch it run button on the screenshot plays it in the picture's place. Clips
+left out, since the cell shows it). The guides show the clip in the screenshot's place, playing while it's on screen
+(with "reduce motion", a ▶ Watch it run button on the screenshot plays it instead). Clips
 need nothing written for them: a new figure in shots.py that a guide shows gets one at the next --data.
 
 The MP4s, docs/videos/<service>-tour-{light,dark}.mp4, are for Slack, email and slides. The tour is a pure function of
