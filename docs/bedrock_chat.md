@@ -81,33 +81,17 @@ Four things the window is for. Nothing in it changes your knowledge base.
 
 <div class="quick" markdown>
 
--   **Ask, and see what backs each answer**
+Ask
+{ .qgroup }
 
-    ```python
-    chat("support-docs")
-    ```
+-   [Ask, and see what backs each answer](#window) `chat("support-docs")`
+-   [Was it the search or the model?](#retrieve) <span class="how">Switch Answer to Retrieve only</span>
 
-    [The chat window](#window)
+Tune it and take it with you
+{ .qgroup }
 
--   **Was it the search or the model?**
-
-    Switch **Answer** to **Retrieve only** and ask again.
-
-    [Retrieve only](#retrieve)
-
--   **Which settings answer best?**
-
-    ```python
-    ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])
-    ```
-
-    [Test a list of questions](#test)
-
--   **Put the setup in my own code**
-
-    The **Code** tab: a Python script, JSON or an AWS CLI command.
-
-    [Use the setup in your code](#code)
+-   [Which settings answer best?](#test) `ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])`{ .long }
+-   [Put the setup in my own code](#code) <span class="how">The Code tab: Python, JSON or the AWS CLI</span>
 
 </div>
 

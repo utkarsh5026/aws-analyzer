@@ -72,50 +72,27 @@ Five calls in a notebook, from every state machine to the path an execution took
 
 ## Start here { #tour }
 
-Four questions people bring to a workflow, and the one line that answers each. None of them change anything.
+Five questions people bring to a workflow, and the one line that answers each. None of them change anything.
 { .gist }
 
 <div class="quick" markdown>
 
--   **Which workflows fail, and what do they cost?**
+Health
+{ .qgroup }
 
-    ```python
-    sfn.overview()
-    ```
+-   [Which workflows fail, and what do they cost?](#overview) `sfn.overview()`
+-   [Why does this one fail?](#failures) `sfn.failures("order-pipeline")`{ .long }
 
-    [Your state machines](#overview)
+One workflow
+{ .qgroup }
 
--   **Why does this one fail?**
+-   [What happened in this execution?](#execution) `sfn.execution("order-pipeline/ord-7f3a")`{ .long }
+-   [What does this workflow do, and what could go wrong?](#state-machine) `sfn.state_machine("order-pipeline")`{ .long }
 
-    ```python
-    sfn.failures("order-pipeline")
-    ```
+Rather click?
+{ .qgroup }
 
-    [Why it fails](#failures)
-
--   **What happened in this execution?**
-
-    ```python
-    sfn.execution("order-pipeline/ord-7f3a")
-    ```
-
-    [One execution, step by step](#execution)
-
--   **What does this workflow do, and what could go wrong?**
-
-    ```python
-    sfn.state_machine("order-pipeline")
-    ```
-
-    [One state machine](#state-machine)
-
--   **I'd rather click than type.**
-
-    ```python
-    sfn.explore()
-    ```
-
-    [Explore by clicking](#explorer)
+-   [I'd rather click than type.](#explorer) `sfn.explore()`
 
 </div>
 

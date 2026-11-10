@@ -33,9 +33,9 @@ const Stage: FC = () => {
       style={{
         backgroundColor: colors.stage,
         backgroundImage: [
-          `radial-gradient(760px 560px at ${blueX}px 170px, rgba(163,173,255,.2), transparent 70%)`,
-          `radial-gradient(700px 520px at 160px ${violetY}px, rgba(192,176,255,.14), transparent 70%)`,
-          "radial-gradient(rgba(230,233,244,.09) 1px, transparent 1.4px)",
+          `radial-gradient(760px 560px at ${blueX}px 170px, rgba(255,153,0,.2), transparent 70%)`,
+          `radial-gradient(700px 520px at 160px ${violetY}px, rgba(255,184,77,.14), transparent 70%)`,
+          "radial-gradient(rgba(238,238,236,.09) 1px, transparent 1.4px)",
         ].join(", "),
         backgroundSize: "auto, auto, 22px 22px",
         backgroundPosition: `0 0, 0 0, 0 ${-frame * DOT_DRIFT_PIXELS_PER_FRAME}px`,

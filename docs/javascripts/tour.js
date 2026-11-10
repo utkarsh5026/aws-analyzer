@@ -260,6 +260,7 @@
         self.renderAt(self.t);
         if (self.t >= self.duration) {
           self.pause();
+          if (self.onEnd) self.onEnd();
           return;
         }
         requestAnimationFrame(tick);
@@ -570,7 +571,86 @@
     seen.observe(box.querySelector(".tour-screen"));
   }
 
+  /* ---- Clips: a screenshot's own short video. A ▶ Watch it run button under each screenshot that has a clip
+     (window.AA_CLIPS, from clips.js) plays it in the picture's place: one cell typing the call (a report's, or the one
+     that opens a window) and showing the screenshot under its caption, with the controls under it. When it ends, or
+     on ✕ or Esc, the picture comes back. */
+  var CLIP_FIGURE = /images\/([\w-]+)-light\.webp/;
+  var CLIP_FADE_MS = 250;
+
+  function figureName(figure) {
+    var image = figure.querySelector('img[src*="-light.webp"]');
+    var match = image && CLIP_FIGURE.exec(image.getAttribute("src"));
+    return match ? match[1] : "";
+  }
+
+  function closeClip(figure, fade) {
+    var box = figure.querySelector(".aa-clip");
+    if (!box || box.dataset.closing) return;
+    box.dataset.closing = "yes";
+    box.player.pause();
+    var picture = figure.querySelector(".aa-clip-picture");
+    function putBack() {
+      box.remove();
+      picture.hidden = false;
+      figure.classList.remove("aa-clip-open");
+      var button = figure.querySelector(".aa-clip-play");
+      if (button && !fade) button.focus({ preventScroll: true });
+    }
+    if (!fade) return putBack();
+    box.classList.add("aa-clip-leaving");
+    setTimeout(putBack, CLIP_FADE_MS);
+  }
+
+  function openClip(figure, clip) {
+    document.querySelectorAll("figure.aa-clip-open").forEach(function (open) { closeClip(open, false); });
+    var picture = figure.querySelector(".aa-clip-picture");
+    var box = document.createElement("div");
+    box.className = "aa-tour aa-clip";
+    box.innerHTML = '<div class="tour-screen"></div><div class="tour-controls"></div>' +
+      '<button type="button" class="aa-clip-close" aria-label="Back to the screenshot" title="Back to the screenshot">✕</button>';
+    figure.insertBefore(box, picture);
+    picture.hidden = true;
+    figure.classList.add("aa-clip-open");
+    box.player = new Player(box, clip);
+    box.player.onEnd = function () { closeClip(figure, true); };
+    box.querySelector(".aa-clip-close").addEventListener("click", function () { closeClip(figure, false); });
+    box.player.play();
+    box.querySelector(".aa-clip-close").focus({ preventScroll: true });
+  }
+
+  /* The button goes at the start of the caption, under the picture, so it covers nothing in the report. */
+  function addClipButton(figure, clip) {
+    var picture = figure.querySelector(":scope > p");
+    if (!picture || figure.querySelector(".aa-clip-play")) return;
+    picture.classList.add("aa-clip-picture");
+    var seconds = Math.round(clip.scenes[0].dur);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "aa-clip-play";
+    button.innerHTML = '<span aria-hidden="true">▶</span> Watch it run <i>' + seconds + "s</i>";
+    button.setAttribute("aria-label", "Watch it run: a " + seconds + "-second video of " +
+      clip.scenes[0].code.split("\n").pop());
+    button.addEventListener("click", function () { openClip(figure, clip); });
+    var caption = figure.querySelector(":scope > figcaption");
+    if (caption) caption.insertBefore(button, caption.firstChild);
+    else figure.appendChild(button);
+  }
+
+  function initClips() {
+    var clips = window.AA_CLIPS || {};
+    document.querySelectorAll(".md-typeset figure").forEach(function (figure) {
+      var clip = tourNamed(clips, figureName(figure));
+      if (clip) addClipButton(figure, clip);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll("figure.aa-clip-open").forEach(function (open) { closeClip(open, false); });
+    });
+  }
+
   function init() {
+    initClips();
     var tours = window.AA_TOURS || {};
     document.querySelectorAll(".aa-tour").forEach(function (box) {
       var name = box.getAttribute("data-tour") || params.get("service");

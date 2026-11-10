@@ -61,7 +61,7 @@ export const Typed: FC<{ text: string; at: number; framesPerChar?: number }> = (
   return (
     <span>
       {text.slice(0, count)}
-      {isTyping && isCaretOn ? <span style={{ color: colors.blue }}>▌</span> : null}
+      {isTyping && isCaretOn ? <span style={{ color: colors.accent }}>▌</span> : null}
     </span>
   );
 };
@@ -100,7 +100,7 @@ export const Punch: FC<{ hits: number[]; amount?: number; children: ReactNode }>
   return <AbsoluteFill style={{ scale: 1 + amount * Math.max(0, ...decays) ** 2 }}>{children}</AbsoluteFill>;
 };
 
-export const Flash: FC<{ at: number; color?: string; peak?: number }> = ({ at, color = colors.blue, peak = 0.7 }) => {
+export const Flash: FC<{ at: number; color?: string; peak?: number }> = ({ at, color = colors.accent, peak = 0.7 }) => {
   const frame = useCurrentFrame();
   const opacity = interpolate(frame, [at, at + FLASH_FRAMES], [peak, 0], CLAMP);
   if (frame < at || opacity <= 0) {
@@ -182,13 +182,13 @@ export const Pointer: FC<{ from: [number, number]; to: [number, number]; at: num
       viewBox="0 0 22 26"
       style={{ position: "absolute", left, top, scale: pressed, opacity: frame >= at ? 1 : 0, zIndex: 5 }}
     >
-      <path d="M2 2 L2 20 L7 15.5 L10.5 23 L14 21.5 L10.5 14 L17 14 Z" fill="#fff" stroke="#10152a" strokeWidth="1.6" />
+      <path d="M2 2 L2 20 L7 15.5 L10.5 23 L14 21.5 L10.5 14 L17 14 Z" fill="#fff" stroke="#0d0e10" strokeWidth="1.6" />
     </svg>
   );
 };
 
 export const gradientText: CSSProperties = {
-  backgroundImage: `linear-gradient(95deg, ${colors.blue}, ${colors.violet})`,
+  backgroundImage: `linear-gradient(95deg, ${colors.accent}, ${colors.accent2})`,
   WebkitBackgroundClip: "text",
   backgroundClip: "text",
   color: "transparent",

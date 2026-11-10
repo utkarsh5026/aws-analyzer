@@ -18,8 +18,8 @@ const Scanner: FC = () => {
         right: 0,
         top: `${scanned * 100}%`,
         height: 6,
-        background: colors.blue,
-        boxShadow: `0 0 32px 10px ${colors.blue}`,
+        background: colors.accent,
+        boxShadow: `0 0 32px 10px ${colors.accent}`,
       }}
     />
   ) : null;
@@ -35,11 +35,11 @@ export const TranslateScene: FC = () => (
       <div>table/orders</div>
       <Scanner />
     </Rise>
-    <Pop at={SAID_AT - 4} style={{ textAlign: "center", fontSize: 72, color: colors.blue, lineHeight: 1.2 }}>
+    <Pop at={SAID_AT - 4} style={{ textAlign: "center", fontSize: 72, color: colors.accent, lineHeight: 1.2 }}>
       ↓
     </Pop>
-    <Slam at={SAID_AT} from={1.35} style={{ background: colors.surface, border: `2px solid ${colors.blue}`, borderRadius: 22, padding: "30px 36px", boxShadow: "0 0 70px rgba(163,173,255,.35)" }}>
-      <div style={{ fontFamily: fonts.mono, fontSize: 27, color: colors.blue, marginBottom: 14 }}>aws-analyzer says</div>
+    <Slam at={SAID_AT} from={1.35} style={{ background: colors.surface, border: `2px solid ${colors.accent}`, borderRadius: 22, padding: "30px 36px", boxShadow: "0 0 70px rgba(255,153,0,.35)" }}>
+      <div style={{ fontFamily: fonts.mono, fontSize: 27, color: colors.accent, marginBottom: 14 }}>aws-analyzer says</div>
       <div style={{ fontSize: 50, lineHeight: 1.26, color: colors.ink }}>
         Its role acme-lambda-role{" "}
         <Sweep at={SAID_AT + 10} frames={18}>
@@ -48,6 +48,6 @@ export const TranslateScene: FC = () => (
         on table orders. <b>Add the permission to the role's policy in IAM.</b>
       </div>
     </Slam>
-    <Burst at={SAID_AT} color={colors.blue} x={590} y={480} count={30} reach={520} />
+    <Burst at={SAID_AT} color={colors.accent} x={590} y={480} count={30} reach={520} />
   </Scene>
 );

@@ -141,7 +141,9 @@
     picture.src = image.currentSrc || image.src;
     picture.alt = image.alt;
     var caption = image.closest("figure").querySelector("figcaption");
-    zoom.querySelector("figcaption").innerHTML = caption ? caption.innerHTML : "";
+    var words = caption ? caption.cloneNode(true) : null;
+    if (words) words.querySelectorAll(".aa-clip-play").forEach(function (button) { button.remove(); });
+    zoom.querySelector("figcaption").innerHTML = words ? words.innerHTML : "";
     document.documentElement.classList.add("aa-zoomed");
     zoom.classList.add("aa-open");
     zoom.querySelector(".aa-zoom-x").focus({ preventScroll: true });

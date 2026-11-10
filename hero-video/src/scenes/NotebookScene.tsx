@@ -41,7 +41,7 @@ const Card: FC<{ label: string; value: string; isWarning: boolean }> = ({ label,
 
 const Curtain: FC = () => {
   const frame = useCurrentFrame();
-  return <AbsoluteFill style={{ background: "rgba(8,11,24,.9)", opacity: progress(frame, SLAM_AT, SLAM_AT + 8) }} />;
+  return <AbsoluteFill style={{ background: "rgba(6,6,7,.9)", opacity: progress(frame, SLAM_AT, SLAM_AT + 8) }} />;
 };
 
 const BigMoney: FC = () => (
@@ -73,7 +73,7 @@ export const NotebookScene: FC = () => (
           <span style={{ marginLeft: "auto" }}>Python 3</span>
         </div>
         <div style={{ display: "flex", gap: 22, padding: "18px 28px", background: colors.paper, borderBottom: `1px solid ${colors.line}`, fontFamily: fonts.mono, fontSize: 32 }}>
-          <span style={{ color: colors.blue }}>[1]:</span>
+          <span style={{ color: colors.accent }}>[1]:</span>
           <span style={{ color: colors.ink }}>
             <Typed text="ui.instance()" at={2} framesPerChar={0.7} />
           </span>

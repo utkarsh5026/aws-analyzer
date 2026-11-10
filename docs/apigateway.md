@@ -77,37 +77,17 @@ Four questions people bring to an API, and the one line that answers each. None 
 
 <div class="quick" markdown>
 
--   **Which APIs fail, and what do they cost?**
+Health and cost
+{ .qgroup }
 
-    ```python
-    apigw.apis()
-    ```
+-   [Which APIs fail, and what do they cost?](#apis) `apigw.apis()`
+-   [Which calls fail, and why?](#errors) `apigw.errors("orders-api")`
 
-    [Your APIs](#apis)
+How an API works
+{ .qgroup }
 
--   **Which calls fail, and why?**
-
-    ```python
-    apigw.errors("orders-api")
-    ```
-
-    [What's failing](#errors)
-
--   **Who can call each route?**
-
-    ```python
-    apigw.routes("partner-api")
-    ```
-
-    [Routes](#routes)
-
--   **Where does the time go?**
-
-    ```python
-    apigw.explore("orders-api", tab="calls")
-    ```
-
-    [Explore by clicking](#explorer)
+-   [Who can call each route?](#routes) `apigw.routes("partner-api")`{ .long }
+-   [Where does the time go?](#explorer) `apigw.explore("orders-api", tab="calls")`{ .long }
 
 </div>
 

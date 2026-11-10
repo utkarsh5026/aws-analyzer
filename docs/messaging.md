@@ -79,50 +79,27 @@ Three calls in a notebook, from every queue, topic and rule to one queue's dead 
 
 ## Start here { #tour }
 
-Four questions people bring to a queue or a topic, and the one line that answers each. None of them touch a message.
+Five questions people bring to a queue or a topic, and the one line that answers each. None of them touch a message.
 { .gist }
 
 <div class="quick" markdown>
 
--   **What's backing up or failing?**
+Health
+{ .qgroup }
 
-    ```python
-    msg.overview()
-    ```
+-   [What's backing up or failing?](#overview) `msg.overview()`
+-   [What's wrong with this queue?](#one) `msg.queue_info("orders")`
 
-    [Everything at once](#overview)
+Where messages go
+{ .qgroup }
 
--   **Where does a message go from here?**
+-   [Where does a message go from here?](#follow) `msg.follow("orders-events")`{ .long }
+-   [Which messages failed for good?](#dead-letters) `msg.dead_letters()`
 
-    ```python
-    msg.follow("orders-events")
-    ```
+Rather click?
+{ .qgroup }
 
-    [Follow a message](#follow)
-
--   **Which messages failed for good?**
-
-    ```python
-    msg.dead_letters()
-    ```
-
-    [Dead-letter queues](#dead-letters)
-
--   **What's wrong with this queue?**
-
-    ```python
-    msg.queue_info("orders")
-    ```
-
-    [One queue, topic or rule](#one)
-
--   **Can I click through it instead?**
-
-    ```python
-    msg.explore()
-    ```
-
-    [Explore by clicking](#explorer)
+-   [Can I click through it instead?](#explorer) `msg.explore()`
 
 </div>
 

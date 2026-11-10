@@ -42,6 +42,7 @@ nav:
 
 theme:
   name: material
+  custom_dir: overrides   # main.html: folded sidebars restored before the page is drawn
   logo: images/logo.svg
   favicon: images/logo.svg
   icon:
@@ -82,10 +83,15 @@ extra_css:
   - stylesheets/tour.css
 
 # Motion and screenshot zoom: things rise into view, the highlighter sweeps, screenshots open full size.
-# The video tours: tours.js is their scenes (written by .claude/skills/demo/tour_video.py), tour.js the player.
+# sidebars.js: a button on each sidebar folds it to a thin rail (icons, or a dot per section), remembered.
+# The video tours: tours.js is their scenes and clips.js each report screenshot's short clip (both written by
+# .claude/skills/demo/tour_video.py), tour.js the player.
 extra_javascript:
   - javascripts/motion.js
+  - javascripts/sidebars.js
   - path: javascripts/tours.js
+    defer: true
+  - path: javascripts/clips.js
     defer: true
   - path: javascripts/tour.js
     defer: true

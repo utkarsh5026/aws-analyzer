@@ -3,7 +3,7 @@ Make each service's video tour: its calls typed into a notebook cell and run, an
 
     .venv/bin/python .claude/skills/demo/tour_video.py                      # tours.js, then every MP4, light and dark
     .venv/bin/python .claude/skills/demo/tour_video.py lambda_functions     # just these services' MP4s
-    .venv/bin/python .claude/skills/demo/tour_video.py --data               # only docs/javascripts/tours.js
+    .venv/bin/python .claude/skills/demo/tour_video.py --data               # only tours.js and clips.js
     .venv/bin/python .claude/skills/demo/tour_video.py athena --theme dark --fps 24
     .venv/bin/python .claude/skills/demo/tour_video.py --list
 
@@ -16,6 +16,11 @@ What the player shows is written here and saved as data, docs/javascripts/tours.
 each scene's length and when each caption comes in. Run --data after changing a tour or remaking a figure
 (tests/test_tours.py fails when tours.js is out of date). The guides embed the player in their "Watch it run"
 section, and docs/tour.html shows it full window (tour.html?service=lambda_functions).
+
+Every report screenshot in the guides also gets a short clip, docs/javascripts/clips.js: the same player, one cell
+long, typing that figure's call and scrolling its report under the rest of its guide caption (the call it starts with
+left out, since the cell shows it). A ▶ Watch it run button on the screenshot plays it in the picture's place. Clips
+need nothing written for them: a new figure in shots.py that a guide shows gets one at the next --data.
 
 The MP4s, docs/videos/<service>-tour-{light,dark}.mp4, are for Slack, email and slides. The tour is a pure function of
 time, so instead of recording in real time (which drops frames) this opens tour.html?record in headless Chromium at
@@ -49,6 +54,7 @@ import shots  # noqa: E402
 ROOT = HERE.parents[2]
 DOCS = ROOT / "docs"
 DATA = DOCS / "javascripts" / "tours.js"
+CLIPS = DOCS / "javascripts" / "clips.js"
 PAGE = DOCS / "tour.html"
 VIDEOS = DOCS / "videos"
 SITE = "utkarsh5026.github.io/aws-analyzer"
@@ -569,16 +575,278 @@ def tours_text() -> str:
             f"window.AA_TOURS = {body};\n")
 
 
+LIGHT_IMAGE = re.compile(r"images/([\w-]+)-light\.webp")
+CAPTION_OPENS = "/// caption"
+CAPTION_CLOSES = "///"
+MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*])")
+CAPTION_CHARS = 150
+ANIMATION_FLAG = 0x02
+AFTER_CLICKS = "**Opens the window**, shown here a few clicks in."
+
+
+def caption_after(lines: list[str], start: int) -> str | None:
+    """
+    The caption under a figure whose light image is on the line before `start`: past its other image lines, the text
+    between "/// caption" and "///", on one line (a figure in a fold has its caption indented). None when there's none.
+    """
+    at = start
+    while at < len(lines) and ".webp" in lines[at]:
+        at += 1
+    if at >= len(lines) or lines[at].strip() != CAPTION_OPENS:
+        return None
+    end = at + 1
+    while end < len(lines) and lines[end].strip() != CAPTION_CLOSES:
+        end += 1
+    return " ".join(" ".join(lines[at + 1:end]).split())
+
+
+def page_captions(text: str) -> dict[str, str]:
+    """
+    One guide's figures and their captions, {figure: caption Markdown}, read a line at a time.
+    """
+    lines = text.split("\n")
+    found: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        image = LIGHT_IMAGE.search(line)
+        caption = caption_after(lines, index + 1) if image else None
+        if caption is not None:
+            found.setdefault(image.group(1), caption)
+    return found
+
+
+def guide_captions() -> dict[str, dict[str, str]]:
+    """
+    Every figure's caption in each guide it's in: {figure: {guide file name: caption Markdown}}.
+    """
+    captions: dict[str, dict[str, str]] = {}
+    for guide in sorted(DOCS.glob("*.md")):
+        for name, caption in page_captions(guide.read_text(encoding="utf-8")).items():
+            captions.setdefault(name, {}).setdefault(guide.name, caption)
+    return captions
+
+
+def without_leading_call(caption: str) -> str:
+    """
+    A caption without the call it opens with, since the clip's cell already shows it, and what follows the call kept:
+    "`ui.disk()`: 3.8 GB is ..." -> "3.8 GB is ...", "`athena.explore()`, the Costs tab: ..." -> "The Costs tab: ...".
+    A caption that is only the call leaves nothing, and one that doesn't open with a call stays as it is ("`.tar`
+    with ..." is what was typed in a search box).
+    """
+    opening = re.match(r"`[^`]*\([^`]*`[\s,:]*", caption)
+    if not opening:
+        return caption
+    rest = caption[opening.end():]
+    return rest[:1].upper() + rest[1:]
+
+
+def caption_parts(caption: str) -> list[str]:
+    """
+    A caption cut into what fits on the stage at once: its sentences, short ones kept together up to CAPTION_CHARS.
+    """
+    parts: list[str] = []
+    if not caption:
+        return parts
+    for sentence in SENTENCE_END.split(MARKDOWN_LINK.sub(r"\1", caption)):
+        joined = f"{parts[-1]} {sentence}" if parts else sentence
+        if parts and len(joined) <= CAPTION_CHARS:
+            parts[-1] = joined
+        else:
+            parts.append(sentence)
+    return parts
+
+
+def plain_text(markdown: str) -> str:
+    """
+    A caption as a screen reader says it: without backticks, stars or links.
+    """
+    return MARKDOWN_LINK.sub(r"\1", markdown).replace("`", "").replace("**", "")
+
+
+def clip_captions(parts: list[str], *, appears: float) -> list[list]:
+    """
+    When each part of the caption comes in: the first just after the report appears, the rest a reading time apart.
+    """
+    start = appears + FIRST_CAPTION_AFTER_OUTPUT
+    return [[round(start + index * CAPTION_SECONDS, 2), caption_html(part)] for index, part in enumerate(parts)]
+
+
+@dataclass
+class ClipSource:
+    """
+    What one screenshot's clip is made of: the screenshot, the call its cell types, its guide caption, and the
+    notebook tab and toolbar label it shows. `clicked` is a window screenshot taken after some clicks, not as the call
+    opens it.
+    """
+
+    name: str
+    code: str
+    caption: str
+    eyebrow: str
+    notebook: str
+    clicked: bool = False
+
+
+@dataclass
+class Window:
+    """
+    A notebook window whose screenshots get clips: the start of their names, the call its guide opens it with, its
+    service's tour (for the notebook tab, the toolbar label and the variable) or its own eyebrow and notebook, and the
+    screenshots that show it as the call opens it.
+    """
+
+    prefix: str
+    code: str
+    service: str = ""
+    eyebrow: str = ""
+    notebook: str = ""
+    as_opened: tuple[str, ...] = ()
+
+
+WINDOWS = [
+    Window("lambda-explorer", "ui.explore()", "lambda_functions", as_opened=("lambda-explorer",)),
+    Window("kb-explorer", 'ui.explore("support-docs")', "bedrock_kb", as_opened=("kb-explorer",)),
+    Window("sfn-explorer", "sfn.explore()", "stepfunctions", as_opened=("sfn-explorer",)),
+    Window("apigw-explorer", "apigw.explore()", "apigateway", as_opened=("apigw-explorer",)),
+    Window("os-explorer", "ui.explore()", "opensearch", as_opened=("os-explorer",)),
+    Window("athena-explorer", "athena.explore()", "athena"),
+    Window("msg-explorer", "msg.explore()", "messaging", as_opened=("msg-explorer",)),
+    Window("explorer", 'x = S3Explorer("s3://acme-ml-data/")', "s3", eyebrow="S3 file explorer"),
+    Window("chat", 'chat("support-docs")', eyebrow="Bedrock chat", notebook="support-docs.ipynb"),
+    Window("agent", "agent.chat()", eyebrow="Ask in plain English", notebook="agent.ipynb",
+           as_opened=("agent-chat-start",)),
+]
+
+
+def clip_data(source: ClipSource) -> dict:
+    """
+    One screenshot's clip as the player reads it: a single cell typing its call and showing the screenshot under
+    its caption. A window screenshot taken after some clicks says so while its call is typed (AFTER_CLICKS), so the
+    call isn't taken to show that view by itself.
+    """
+    parts = caption_parts(without_leading_call(source.caption))
+    picture = picture_size(source.name)
+    travel = scroll_distance(source.code, picture, None)
+    seconds = cell_seconds(source.code, travel, len(parts))
+    captions = clip_captions(parts, appears=output_appears(source.code))
+    if source.clicked:
+        captions.insert(0, [0, caption_html(AFTER_CLICKS)])
+    scene = {"kind": "cell", "dur": seconds, "chapter": source.eyebrow, "label": source.eyebrow, "code": source.code,
+             "outputs": [{"img": source.name, "w": picture[0], "h": picture[1]}], "captions": captions}
+    summary = f"{plain_text(source.code)}: {plain_text(source.caption)}"
+    return {"notebook": source.notebook, "summary": summary, "video": "", "scenes": [scene]}
+
+
+def clip_caption(captions: dict[str, str], *guides: str) -> str:
+    """
+    The caption a clip reads: the one in the first of these guides that shows the screenshot, else the first there is.
+    """
+    for guide in guides:
+        if guide in captions:
+            return captions[guide]
+    return next(iter(captions.values()))
+
+
+def report_clips(captions: dict[str, dict[str, str]]) -> dict[str, dict]:
+    """
+    A clip for every report screenshot a guide shows and captions: each figure of a service with a tour, in the look a
+    user gets (a figure drawn in another theme shows that theme, not a call to run).
+    """
+    tours = {tour.service: tour for tour in TOURS}
+    made = {}
+    for figure in shots.FIGURES:
+        is_shown = figure.name in captions and figure.service in tours
+        if not is_shown or figure.theme:
+            continue
+        tour = tours[figure.service]
+        code = with_variable("\n".join(part for part in (figure.setup, figure.code) if part), tour.variable)
+        caption = clip_caption(captions[figure.name], figure.guide, f"{figure.service}.md")
+        made[figure.name] = clip_data(ClipSource(figure.name, code, caption, tour.eyebrow, tour.notebook))
+    return made
+
+
+def is_animated(name: str) -> bool:
+    """
+    Whether a screenshot is an animated WebP (a window's tour, which moves already), from its VP8X header's flags.
+    """
+    data = (shots.IMAGES / f"{name}-light.webp").read_bytes()[:21]
+    return data[12:16] == b"VP8X" and bool(data[20] & ANIMATION_FLAG)
+
+
+def window_of(name: str) -> Window | None:
+    """
+    The window a screenshot's name says it shows ("kb-explorer-file" is kb-explorer's), or None.
+    """
+    for window in WINDOWS:
+        if name == window.prefix or name.startswith(f"{window.prefix}-"):
+            return window
+    return None
+
+
+def window_source(window: Window, name: str, captions: dict[str, str]) -> ClipSource:
+    """
+    A window screenshot's clip: its window's call, in its service's tour's notebook when it has one.
+    """
+    tour = next((tour for tour in TOURS if tour.service == window.service), None)
+    eyebrow = window.eyebrow or tour.eyebrow
+    notebook = window.notebook or tour.notebook
+    caption = clip_caption(captions, f"{window.service}.md")
+    return ClipSource(name, window.code, caption, eyebrow, notebook, clicked=name not in window.as_opened)
+
+
+def window_clips(captions: dict[str, dict[str, str]], reports: set[str]) -> dict[str, dict]:
+    """
+    A clip for every other screenshot a guide shows and captions: the notebook windows, typing the call that opens
+    the window, and none for the animated tours.
+    """
+    made = {}
+    for name in sorted(set(captions) - reports):
+        window = window_of(name)
+        if window is None or is_animated(name):
+            continue
+        made[name] = clip_data(window_source(window, name, captions[name]))
+    return made
+
+
+def clips() -> dict[str, dict]:
+    """
+    Every screenshot's clip, by its name: the reports', then the windows'.
+    """
+    captions = guide_captions()
+    reports = {figure.name for figure in shots.FIGURES}
+    return {**report_clips(captions), **window_clips(captions, reports)}
+
+
+def clips_text() -> str:
+    """
+    docs/javascripts/clips.js as it should be: every screenshot's clip for the player.
+    """
+    body = json.dumps(clips(), indent=1, ensure_ascii=False)
+    return ("/* The screenshots' short clips, for tour.js. Written by .claude/skills/demo/tour_video.py --data "
+            "from shots.py's figures and the guides' captions: change those, not this. */\n"
+            f"window.AA_CLIPS = {body};\n")
+
+
+def write_file(path: Path, text: str, about: str) -> None:
+    """
+    Write one of the player's data files, saying whether it changed.
+    """
+    changed = not path.exists() or path.read_text(encoding="utf-8") != text
+    path.write_text(text, encoding="utf-8")
+    print(f"{'Wrote' if changed else 'Unchanged:'} {path.relative_to(ROOT)} ({about})")
+
+
 def write_data() -> None:
     """
-    Write docs/javascripts/tours.js, saying whether it changed.
+    Write docs/javascripts/tours.js and clips.js, saying whether each changed.
     """
-    text = tours_text()
-    changed = not DATA.exists() or DATA.read_text(encoding="utf-8") != text
-    DATA.write_text(text, encoding="utf-8")
     seconds = {tour.service: sum(scene["dur"] for scene in tour_data(tour)["scenes"]) for tour in TOURS}
     lengths = ", ".join(f"{service} {value:.0f}s" for service, value in seconds.items())
-    print(f"{'Wrote' if changed else 'Unchanged:'} {DATA.relative_to(ROOT)} ({lengths})")
+    write_file(DATA, tours_text(), lengths)
+    made = clips()
+    shortest = min(clip["scenes"][0]["dur"] for clip in made.values())
+    longest = max(clip["scenes"][0]["dur"] for clip in made.values())
+    write_file(CLIPS, clips_text(), f"{len(made)} clips, {shortest:.0f} to {longest:.0f}s")
 
 
 def ffmpeg_command(fps: int, out: Path) -> list[str]:
