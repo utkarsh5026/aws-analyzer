@@ -12,8 +12,8 @@ functions that need them (the window itself loads ipywidgets with `_require`), s
                      the event loop (_later), the window shown once per cell, and the ✦ Ask drawer an assistant fills
     set_assistant    the assistant (an AgentView) every explorer opened from then on gets a drawer for
     _Picker          a field that opens a list to search and pick from
-    _terminal_theme  the chat windows' look: a monospace font and a code editor's colours, light and dark, and the
-                     marks beside a question (_HUMAN) and an answer (_MACHINE)
+    _terminal_theme  the chat windows' look: a monospace font and a code editor's colours, light and dark (a
+                     dropdown's open list included), and the marks beside a question (_HUMAN) and an answer (_MACHINE)
 """
 
 from __future__ import annotations
@@ -96,13 +96,18 @@ def _terminal_theme(roots: tuple[str, ...], prefix: str, *, dark_roots: tuple[st
     -bad, -warn, -comment, and the code colours (-k keywords, -f calls, -a arguments, -s text, -n numbers, -l
     literals). Dark when JupyterLab or VS Code is, or the browser is and neither says; dark_roots are more selectors
     that are always dark.
+
+    A dropdown's open list gets the editor's background too: the windows draw their selects on a transparent
+    background, which the browser's list would otherwise show as white under the window's light text in a dark theme.
     """
     dark_selectors = [f"{page} {root}" for page in _DARK_PAGES for root in roots] + list(dark_roots)
     unset = ",".join(f"{_UNSET_PAGE} {root}" for root in roots)
     dark = _theme_tokens(prefix, _TERMINAL_DARK)
+    options = ",".join(f"{root}{root} select option" for root in roots)
     return "\n".join([f"{','.join(roots)}{{{_theme_tokens(prefix, _TERMINAL_LIGHT)}}}",
                       f"{','.join(dark_selectors)}{{{dark}}}",
-                      f"@media (prefers-color-scheme:dark){{{unset}{{{dark}}}}}"])
+                      f"@media (prefers-color-scheme:dark){{{unset}{{{dark}}}}}",
+                      f"{options}{{background-color:var(--{prefix}-bg);color:inherit}}"])
 
 
 _ICON_SVG = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
