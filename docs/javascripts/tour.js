@@ -14,8 +14,8 @@
    instant and tour_video.py steps through it frame by frame to export the MP4s in docs/videos/.
 
    Usage: <div class="aa-tour" data-tour="lambda_functions"><div class="tour-screen"></div>
-   <div class="tour-controls"></div><div class="tour-chapters"></div></div>. On a guide it plays by itself the first
-   time it's mostly on screen (not with "reduce motion"). docs/tour.html is the same player full window:
+   <div class="tour-controls"></div><div class="tour-chapters"></div></div>. On a guide it plays by itself while it's
+   mostly on screen and pauses when it's scrolled away (not with "reduce motion"). docs/tour.html is the same player full window:
    tour.html?service=lambda_functions, with &record to hide the controls and &theme=light|dark. */
 
 (function () {
@@ -32,6 +32,8 @@
   var POSTER_AT = 2.6;
   var HANDOVER = 0.35;
   var BAR_CELLS = 32;
+  var ON_SCREEN = 0.5;
+  var CLIP_NEARBY = "600px 0px";
   var params = new URLSearchParams(location.search);
   var FORCED_THEME = themeNamed(params.get("theme"));
   var RECORDING = params.has("record");
@@ -240,13 +242,20 @@
     }
   };
 
+  /* A click on the picture or the play button. A pause asked for this way is `held`: scrolling away and back doesn't
+     start it again. */
   Player.prototype.toggle = function () {
-    if (this.playing) this.pause();
-    else this.play();
+    if (this.playing) {
+      this.pause();
+      this.held = true;
+    } else {
+      this.play();
+    }
   };
 
   Player.prototype.play = function () {
     var self = this;
+    this.held = false;
     if (this.t >= this.duration - 0.05) this.t = 0;
     this.playing = true;
     this.updateButton();
@@ -560,21 +569,35 @@
     this.updateButton();
   };
 
-  /* Play a guide's tour the first time it's mostly on screen, so it never sits there looking like a picture. */
-  function playWhenSeen(box, player) {
+  /* Play while at least half of it is on screen in a tab in front, and pause when it isn't, so a guide's videos never
+     sit there looking like pictures, and never play for nobody. A pause the reader asked for sticks, and a video
+     that has ended stays on its last frame until it's played again. */
+  function playOnScreen(box, player) {
     if (RECORDING || REDUCE_MOTION.matches || !("IntersectionObserver" in window)) return;
-    var seen = new IntersectionObserver(function (entries) {
-      if (!entries.some(function (entry) { return entry.isIntersecting; })) return;
-      seen.disconnect();
-      if (player.t < 0.05 && !player.playing) player.play();
-    }, { threshold: 0.6 });
-    seen.observe(box.querySelector(".tour-screen"));
+    var visible = false;
+    function update() {
+      var ended = player.t >= player.duration - 0.05;
+      var wanted = visible && !document.hidden;
+      if (wanted && !player.playing && !player.held && !ended) player.play();
+      if (!wanted && player.playing) player.pause();
+    }
+    new IntersectionObserver(function (entries) {
+      visible = entries[entries.length - 1].isIntersecting;
+      update();
+    }, { threshold: ON_SCREEN }).observe(box.querySelector(".tour-screen"));
+    document.addEventListener("visibilitychange", update);
   }
 
-  /* ---- Clips: a screenshot's own short video. A ▶ Watch it run button under each screenshot that has a clip
-     (window.AA_CLIPS, from clips.js) plays it in the picture's place: one cell typing the call (a report's, or the one
-     that opens a window) and showing the screenshot under its caption, with the controls under it. When it ends, or
-     on ✕ or Esc, the picture comes back. */
+  /* ---- Clips: a screenshot's own short video (window.AA_CLIPS, from clips.js): one cell typing the call (a
+     report's, or the one that opens a window) and showing the screenshot under its caption.
+
+     A screenshot that has a clip is shown as its clip: the player takes the picture's place, framed like a
+     screenshot with the selected cell's bar and the controls under it, and plays while it's on screen. Its player
+     is made only when it comes near the screen, so a guide doesn't load every report at once. The picture stays in
+     the page, hidden, for readers without this script.
+
+     With "reduce motion" nothing moves by itself: the screenshot stays, and a ▶ Watch it run button at the start of
+     its caption plays the clip in the picture's place; when it ends, or on ✕ or Esc, the picture comes back. */
   var CLIP_FIGURE = /images\/([\w-]+)-light\.webp/;
   var CLIP_FADE_MS = 250;
 
@@ -584,6 +607,47 @@
     return match ? match[1] : "";
   }
 
+  function clipBox(figure, closable) {
+    var picture = figure.querySelector(":scope > p");
+    var box = document.createElement("div");
+    box.className = "aa-tour aa-clip";
+    box.innerHTML = '<div class="tour-screen"></div><div class="tour-controls"></div>' + (closable
+      ? '<button type="button" class="aa-clip-close" aria-label="Back to the screenshot" title="Back to the screenshot">✕</button>'
+      : "");
+    figure.insertBefore(box, picture);
+    picture.classList.add("aa-clip-picture");
+    picture.hidden = true;
+    return box;
+  }
+
+  /* ---- Clips in the picture's place, playing by themselves */
+  function startClip(box) {
+    if (box.player) return;
+    box.player = new Player(box, box.clip);
+    playOnScreen(box, box.player);
+  }
+
+  function showClips(figures) {
+    var boxes = figures.map(function (item) {
+      var box = clipBox(item.figure, false);
+      box.clip = item.clip;
+      return box;
+    });
+    if (!("IntersectionObserver" in window)) {
+      boxes.forEach(startClip);
+      return;
+    }
+    var nearby = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        nearby.unobserve(entry.target);
+        startClip(entry.target);
+      });
+    }, { rootMargin: CLIP_NEARBY });
+    boxes.forEach(function (box) { nearby.observe(box); });
+  }
+
+  /* ---- Clips behind a button, with "reduce motion" */
   function closeClip(figure, fade) {
     var box = figure.querySelector(".aa-clip");
     if (!box || box.dataset.closing) return;
@@ -604,13 +668,7 @@
 
   function openClip(figure, clip) {
     document.querySelectorAll("figure.aa-clip-open").forEach(function (open) { closeClip(open, false); });
-    var picture = figure.querySelector(".aa-clip-picture");
-    var box = document.createElement("div");
-    box.className = "aa-tour aa-clip";
-    box.innerHTML = '<div class="tour-screen"></div><div class="tour-controls"></div>' +
-      '<button type="button" class="aa-clip-close" aria-label="Back to the screenshot" title="Back to the screenshot">✕</button>';
-    figure.insertBefore(box, picture);
-    picture.hidden = true;
+    var box = clipBox(figure, true);
     figure.classList.add("aa-clip-open");
     box.player = new Player(box, clip);
     box.player.onEnd = function () { closeClip(figure, true); };
@@ -621,9 +679,7 @@
 
   /* The button goes at the start of the caption, under the picture, so it covers nothing in the report. */
   function addClipButton(figure, clip) {
-    var picture = figure.querySelector(":scope > p");
-    if (!picture || figure.querySelector(".aa-clip-play")) return;
-    picture.classList.add("aa-clip-picture");
+    if (figure.querySelector(".aa-clip-play")) return;
     var seconds = Math.round(clip.scenes[0].dur);
     var button = document.createElement("button");
     button.type = "button";
@@ -637,28 +693,36 @@
     else figure.appendChild(button);
   }
 
-  function initClips() {
-    var clips = window.AA_CLIPS || {};
-    document.querySelectorAll(".md-typeset figure").forEach(function (figure) {
-      var clip = tourNamed(clips, figureName(figure));
-      if (clip) addClipButton(figure, clip);
-    });
+  function clipButtons(figures) {
+    figures.forEach(function (item) { addClipButton(item.figure, item.clip); });
     document.addEventListener("keydown", function (event) {
       if (event.key !== "Escape") return;
       document.querySelectorAll("figure.aa-clip-open").forEach(function (open) { closeClip(open, false); });
     });
   }
 
+  function initClips() {
+    var clips = window.AA_CLIPS || {};
+    var figures = [];
+    document.querySelectorAll(".md-typeset figure").forEach(function (figure) {
+      var clip = tourNamed(clips, figureName(figure));
+      var picture = figure.querySelector(":scope > p");
+      if (clip && picture && !figure.querySelector(".aa-clip")) figures.push({ figure: figure, clip: clip });
+    });
+    if (REDUCE_MOTION.matches) clipButtons(figures);
+    else showClips(figures);
+  }
+
   function init() {
     initClips();
     var tours = window.AA_TOURS || {};
-    document.querySelectorAll(".aa-tour").forEach(function (box) {
+    document.querySelectorAll(".aa-tour:not(.aa-clip)").forEach(function (box) {
       var name = box.getAttribute("data-tour") || params.get("service");
       var tour = tourNamed(tours, name);
       if (!tour || box.dataset.tourReady) return;
       box.dataset.tourReady = "yes";
       var player = new Player(box, tour);
-      playWhenSeen(box, player);
+      playOnScreen(box, player);
       if (!window.aaTour) {
         window.aaTour = {
           duration: player.duration,

@@ -28,7 +28,7 @@ The examples use acme's `order-pipeline`, a Standard workflow that validates an 
 
 ## Watch it run { #video }
 
-Five calls in a notebook, from every state machine to the path an execution took: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Five calls in a notebook, from every state machine to the path an execution took: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="stepfunctions">

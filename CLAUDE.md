@@ -1587,13 +1587,17 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   variable and notebook; a window's (`window_clips`) types the call that opens its window, from `WINDOWS` (a name
   prefix each: a new window adds a line), and one not in its `as_opened` begins with `AFTER_CLICKS` ("Opens the
   window, shown here a few clicks in") while the call is typed. Figures drawn in another theme (`Figure.theme`) and
-  the animated tours (`is_animated`) get none. `tour.js`'s `initClips` puts a ▶ Watch it run pill, with the clip's length, at the start of the
-  figure's caption; a click plays it in the picture's place (`openClip`, with the controls and a ✕), and the picture
-  comes back when it ends, on ✕ or on Esc (`closeClip`). A new figure or a changed caption only needs `--data`
+  the animated tours (`is_animated`) get none. `tour.js`'s `initClips` shows each clip in its picture's place
+  (`showClips`: the picture stays in the page, hidden, for readers without the script; a clip's `Player` is made when
+  it comes within `CLIP_NEARBY` of the screen), and it plays while half of it is on screen (`playOnScreen`, which the
+  guide's tour uses too: it pauses when scrolled away or the tab is hidden, a pause the reader clicked is `held`, and
+  an ended video keeps its last frame). With "reduce motion" nothing plays by itself: the picture stays and a
+  ▶ Watch it run pill at the start of its caption plays the clip in its place (`clipButtons`, `openClip`, with a ✕),
+  the picture coming back when it ends, on ✕ or on Esc (`closeClip`). A new figure or a changed caption only needs `--data`
   (`tests/test_tours.py` fails when clips.js is stale or a screenshot has no clip).
 - The home page's hero is a video (`docs/images/hero-demo.mp4`, its last frame `hero-poster.webp`), made with Remotion in
   `hero-video/` (scenes in `src/scenes/`; `npm run render` writes both, `npm run figures` copies the guide's pictures
-  into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on
+  into its ignored `public/`). `motion.js`'s `heroVideo` plays it once on every visit and again on
   a click, only once the page has loaded and while it's on screen in a tab in front (the dots behind it stop drifting
   meanwhile); `remotion.config.ts` keeps it H.264 level 4.0 with 4 reference frames, which every decoder plays; the `.nb` cell beside it shows instead on a narrow screen or with reduced motion. Remake it when a report it
   shows changes. Remotion's agent skills stay out of git (`npx remotion skills add`). In a cloud session Remotion

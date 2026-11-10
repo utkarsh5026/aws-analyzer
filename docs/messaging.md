@@ -35,7 +35,7 @@ The examples use acme's `orders-events` topic, which delivers to four queues and
 
 ## Watch it run { #video }
 
-Three calls in a notebook, from every queue, topic and rule to one queue's dead letters: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Three calls in a notebook, from every queue, topic and rule to one queue's dead letters: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="messaging">

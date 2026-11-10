@@ -28,7 +28,7 @@ The examples use acme's `orders-api`, a REST API whose `POST /orders` route call
 
 ## Watch it run { #video }
 
-Two calls in a notebook, from every API to the route that runs out of time: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Two calls in a notebook, from every API to the route that runs out of time: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="apigateway">

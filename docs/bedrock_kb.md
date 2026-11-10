@@ -29,7 +29,7 @@ The examples use `support-docs`, a knowledge base of support policies in the buc
 
 ## Watch it run { #video }
 
-Six calls in a notebook, from every knowledge base to an answer and its sources: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+Six calls in a notebook, from every knowledge base to an answer and its sources: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="bedrock_kb">
