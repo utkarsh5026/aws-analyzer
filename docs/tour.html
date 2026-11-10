@@ -38,9 +38,10 @@
   /* Point the links at this tour's guide and video before the player starts (it swaps -light for -dark). */
   (function () {
     var service = new URLSearchParams(location.search).get("service");
-    var tour = (window.AA_TOURS || {})[service];
+    var tours = window.AA_TOURS || {};
+    var tour = Object.prototype.hasOwnProperty.call(tours, service) ? tours[service] : null;
     if (!tour) {
-      var names = Object.keys(window.AA_TOURS || {}).map(function (name) {
+      var names = Object.keys(tours).map(function (name) {
         return '<a href="?service=' + name + '">' + name + "</a>";
       });
       document.querySelector(".aa-tour").outerHTML = '<p class="missing">Pick a tour: ' + names.join(", ") + ".</p>";

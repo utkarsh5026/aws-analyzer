@@ -22,9 +22,22 @@
   var OUT_LEFT = 90;
   var OUT_RIGHT = 40;
   var CAPTION_ROOM = 96;
+  var IMAGES = "images/";
   var params = new URLSearchParams(location.search);
-  var FORCED_THEME = /^(light|dark)$/.test(params.get("theme") || "") ? params.get("theme") : "";
+  var FORCED_THEME = themeNamed(params.get("theme"));
   var DARK_QUERY = window.matchMedia("(prefers-color-scheme: dark)");
+
+  /* "light" or "dark" for those words and "" for anything else, so what reaches a URL is always one of two strings. */
+  function themeNamed(word) {
+    if (word === "dark") return "dark";
+    if (word === "light") return "light";
+    return "";
+  }
+
+  /* The tour with this name, looked up among the tours' own keys only (so "__proto__" finds nothing). */
+  function tourNamed(tours, name) {
+    return Object.prototype.hasOwnProperty.call(tours, name) ? tours[name] : null;
+  }
 
   /* Light or dark: the theme picked with ?theme=, else Material's (its slate scheme is dark), else the system's. */
   function currentTheme() {
@@ -64,10 +77,9 @@
     return { typeStart: typeStart, typeDuration: typeDuration, runAt: runAt, outAt: runAt + 0.75 };
   }
 
-  function Player(box, tour, images) {
+  function Player(box, tour) {
     this.box = box;
     this.tour = tour;
-    this.images = images;
     this.scenes = tour.scenes;
     var start = 0;
     this.scenes.forEach(function (scene) {
@@ -106,16 +118,15 @@
   };
 
   Player.prototype.picture = function (figure) {
-    return this.images + figure + "-" + this.theme + ".webp";
+    return IMAGES + figure + "-" + this.theme + ".webp";
   };
 
   /* Switch the notebook between light and dark, keeping the place in the tour, and point Download at that MP4. */
   Player.prototype.setTheme = function (theme) {
-    this.theme = theme;
-    this.box.querySelectorAll("a[data-tour-mp4]").forEach(function (link) {
-      link.href = link.getAttribute("href").replace(/-(light|dark)\.mp4$/, "-" + theme + ".mp4");
-    });
-    this.stage.classList.toggle("dark", theme === "dark");
+    this.theme = themeNamed(theme) || "light";
+    var video = this.tour.video.replace(/-light\.mp4$/, "-" + this.theme + ".mp4");
+    this.box.querySelectorAll("a[data-tour-mp4]").forEach(function (link) { link.href = video; });
+    this.stage.classList.toggle("dark", this.theme === "dark");
     this.ready = this.preload();
     this.sceneIndex = -1;
     this.renderAt(this.t);
@@ -375,10 +386,10 @@
     var tours = window.AA_TOURS || {};
     document.querySelectorAll(".aa-tour").forEach(function (box) {
       var name = box.getAttribute("data-tour") || params.get("service");
-      var tour = tours[name];
+      var tour = tourNamed(tours, name);
       if (!tour || box.dataset.tourReady) return;
       box.dataset.tourReady = "yes";
-      var player = new Player(box, tour, box.getAttribute("data-images") || "images/");
+      var player = new Player(box, tour);
       if (!window.aaTour) {
         window.aaTour = {
           duration: player.duration,
