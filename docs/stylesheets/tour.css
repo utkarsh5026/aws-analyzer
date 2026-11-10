@@ -164,3 +164,31 @@
 .tour-stage.dark .tour-caption { background: rgba(245, 246, 250, .95); color: #16191f; }
 .tour-stage.dark .tour-caption b { color: #16191f; background: #fce7a2; padding: 0 4px; border-radius: 3px; }
 .tour-stage.dark .tour-caption code { color: #b84f00; }
+
+/* Clips: a report screenshot's own short video (tour.js's initClips). An orange ▶ Watch it run pill starts the
+   caption under the screenshot, so it covers nothing in the report; a click puts the player in the picture's place,
+   framed like the screenshot with the selected cell's bar, a ✕ on its top right, and fades back at the end. */
+.md-typeset .aa-clip-play {
+  display: inline-flex; align-items: center; gap: .35rem; margin: 0 .55rem .2rem 0; padding: .3rem .75rem .3rem .55rem;
+  border: none; border-radius: 999px; cursor: pointer; vertical-align: .05rem;
+  font: 600 .64rem/1 var(--md-text-font-family, sans-serif); color: var(--aa-on-orange, #16191f);
+  background: var(--aa-orange, #ff9900); box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+  transition: transform .2s var(--aa-ease, ease), box-shadow .2s;
+}
+.md-typeset .aa-clip-play span { font-size: .55rem; }
+.md-typeset .aa-clip-play i { font-style: normal; font-weight: 500; opacity: .7; }
+.md-typeset .aa-clip-play:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0, 0, 0, .24); }
+.md-typeset figure.aa-clip-open .aa-clip-play { visibility: hidden; }
+.md-typeset .aa-clip-play:focus-visible { outline: 2px solid var(--aa-accent, #c45500); outline-offset: 3px; }
+.md-typeset figure > p.aa-clip-picture[hidden] { display: none; }
+.md-typeset .aa-tour.aa-clip { position: relative; margin: 0; transition: opacity .25s; }
+.md-typeset .aa-clip .tour-screen { border-left: 4px solid var(--aa-accent, #c45500); border-radius: 6px 14px 14px 6px; }
+.md-typeset .aa-clip.aa-clip-leaving { opacity: 0; }
+.md-typeset .aa-clip-close {
+  position: absolute; top: .6rem; right: .6rem; z-index: 2; display: grid; place-items: center; width: 1.7rem;
+  height: 1.7rem; margin: 0; padding: 0; border: none; border-radius: 50%; cursor: pointer; font-size: .75rem;
+  color: #fff; background: rgba(0, 0, 0, .55); transition: background-color .15s, transform .2s;
+}
+.md-typeset .aa-clip-close:hover { background: rgba(0, 0, 0, .75); transform: rotate(90deg); }
+.md-typeset .aa-clip-close:focus-visible { outline: 2px solid var(--aa-orange, #ff9900); outline-offset: 2px; }
+@media print { .md-typeset .aa-clip-play { display: none; } }

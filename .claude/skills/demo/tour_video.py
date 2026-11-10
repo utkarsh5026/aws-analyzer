@@ -3,7 +3,7 @@ Make each service's video tour: its calls typed into a notebook cell and run, an
 
     .venv/bin/python .claude/skills/demo/tour_video.py                      # tours.js, then every MP4, light and dark
     .venv/bin/python .claude/skills/demo/tour_video.py lambda_functions     # just these services' MP4s
-    .venv/bin/python .claude/skills/demo/tour_video.py --data               # only docs/javascripts/tours.js
+    .venv/bin/python .claude/skills/demo/tour_video.py --data               # only tours.js and clips.js
     .venv/bin/python .claude/skills/demo/tour_video.py athena --theme dark --fps 24
     .venv/bin/python .claude/skills/demo/tour_video.py --list
 
@@ -16,6 +16,11 @@ What the player shows is written here and saved as data, docs/javascripts/tours.
 each scene's length and when each caption comes in. Run --data after changing a tour or remaking a figure
 (tests/test_tours.py fails when tours.js is out of date). The guides embed the player in their "Watch it run"
 section, and docs/tour.html shows it full window (tour.html?service=lambda_functions).
+
+Every report screenshot in the guides also gets a short clip, docs/javascripts/clips.js: the same player, one cell
+long, typing that figure's call and scrolling its report under the rest of its guide caption (the call it starts with
+left out, since the cell shows it). A ▶ Watch it run button on the screenshot plays it in the picture's place. Clips
+need nothing written for them: a new figure in shots.py that a guide shows gets one at the next --data.
 
 The MP4s, docs/videos/<service>-tour-{light,dark}.mp4, are for Slack, email and slides. The tour is a pure function of
 time, so instead of recording in real time (which drops frames) this opens tour.html?record in headless Chromium at
@@ -49,6 +54,7 @@ import shots  # noqa: E402
 ROOT = HERE.parents[2]
 DOCS = ROOT / "docs"
 DATA = DOCS / "javascripts" / "tours.js"
+CLIPS = DOCS / "javascripts" / "clips.js"
 PAGE = DOCS / "tour.html"
 VIDEOS = DOCS / "videos"
 SITE = "utkarsh5026.github.io/aws-analyzer"
@@ -569,16 +575,144 @@ def tours_text() -> str:
             f"window.AA_TOURS = {body};\n")
 
 
+FIGURE_CAPTION = re.compile(
+    r"images/([\w-]+)-light\.webp[^\n]*\n(?:[^\n]*\.webp[^\n]*\n)*[ \t]*/// caption\n(.*?)\n[ \t]*///", re.S)
+MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z`*])")
+CAPTION_CHARS = 150
+
+
+def guide_captions() -> dict[str, dict[str, str]]:
+    """
+    Every figure's caption in each guide it's in: {figure: {guide file name: caption Markdown}}, on one line (a figure
+    in a fold has its caption indented).
+    """
+    captions: dict[str, dict[str, str]] = {}
+    for guide in sorted(DOCS.glob("*.md")):
+        for match in FIGURE_CAPTION.finditer(guide.read_text(encoding="utf-8")):
+            caption = " ".join(match.group(2).split())
+            captions.setdefault(match.group(1), {}).setdefault(guide.name, caption)
+    return captions
+
+
+def without_leading_call(caption: str) -> str:
+    """
+    A caption without the call it opens with ("`ui.disk()`: 3.8 GB of it is ..." -> "3.8 GB of it is ..."), since the
+    clip's cell already shows the call; a caption that doesn't open with code stays as it is.
+    """
+    if not caption.startswith("`"):
+        return caption
+    plain = re.sub(r"`[^`]*`", lambda code: "x" * len(code.group(0)), caption)
+    colon = plain.find(": ")
+    if colon < 0:
+        return caption
+    rest = caption[colon + 2:].strip()
+    return rest[:1].upper() + rest[1:]
+
+
+def caption_parts(caption: str) -> list[str]:
+    """
+    A caption cut into what fits on the stage at once: its sentences, short ones kept together up to CAPTION_CHARS.
+    """
+    parts: list[str] = []
+    for sentence in SENTENCE_END.split(MARKDOWN_LINK.sub(r"\1", caption)):
+        joined = f"{parts[-1]} {sentence}" if parts else sentence
+        if parts and len(joined) <= CAPTION_CHARS:
+            parts[-1] = joined
+        else:
+            parts.append(sentence)
+    return parts
+
+
+def plain_text(markdown: str) -> str:
+    """
+    A caption as a screen reader says it: without backticks, stars or links.
+    """
+    return MARKDOWN_LINK.sub(r"\1", markdown).replace("`", "").replace("**", "")
+
+
+def clip_captions(parts: list[str], *, appears: float) -> list[list]:
+    """
+    When each part of the caption comes in: the first just after the report appears, the rest a reading time apart.
+    """
+    start = appears + FIRST_CAPTION_AFTER_OUTPUT
+    return [[round(start + index * CAPTION_SECONDS, 2), caption_html(part)] for index, part in enumerate(parts)]
+
+
+def clip_data(tour: Tour, figure: shots.Figure, caption: str) -> dict:
+    """
+    One figure's clip as the player reads it: a single cell typing the figure's call and showing its report under
+    the caption, in the notebook of its service's tour.
+    """
+    code = with_variable("\n".join(part for part in (figure.setup, figure.code) if part), tour.variable)
+    parts = caption_parts(without_leading_call(caption))
+    picture = picture_size(figure.name)
+    travel = scroll_distance(code, picture, None)
+    seconds = cell_seconds(code, travel, len(parts))
+    scene = {"kind": "cell", "dur": seconds, "chapter": tour.eyebrow, "label": tour.eyebrow, "code": code,
+             "outputs": [{"img": figure.name, "w": picture[0], "h": picture[1]}],
+             "captions": clip_captions(parts, appears=output_appears(code))}
+    return {"notebook": tour.notebook, "summary": f"{plain_text(code)}: {plain_text(caption)}", "video": "",
+            "scenes": [scene]}
+
+
+def clip_caption(figure: shots.Figure, captions: dict[str, str], service: str) -> str:
+    """
+    The caption a figure's clip reads: the one in the figure's own guide, else its service's, else the first.
+    """
+    for guide in (figure.guide, f"{service}.md"):
+        if guide in captions:
+            return captions[guide]
+    return next(iter(captions.values()))
+
+
+def clips() -> dict[str, dict]:
+    """
+    A clip for every report screenshot a guide shows and captions: each figure of a service with a tour, in the look a
+    user gets (a figure drawn in another theme shows that theme, not a call to run).
+    """
+    tours = {tour.service: tour for tour in TOURS}
+    captions = guide_captions()
+    made = {}
+    for figure in shots.FIGURES:
+        is_shown = figure.name in captions and figure.service in tours
+        if not is_shown or figure.theme:
+            continue
+        caption = clip_caption(figure, captions[figure.name], figure.service)
+        made[figure.name] = clip_data(tours[figure.service], figure, caption)
+    return made
+
+
+def clips_text() -> str:
+    """
+    docs/javascripts/clips.js as it should be: every report screenshot's clip for the player.
+    """
+    body = json.dumps(clips(), indent=1, ensure_ascii=False)
+    return ("/* The report screenshots' short clips, for tour.js. Written by .claude/skills/demo/tour_video.py --data "
+            "from shots.py's figures and the guides' captions: change those, not this. */\n"
+            f"window.AA_CLIPS = {body};\n")
+
+
+def write_file(path: Path, text: str, about: str) -> None:
+    """
+    Write one of the player's data files, saying whether it changed.
+    """
+    changed = not path.exists() or path.read_text(encoding="utf-8") != text
+    path.write_text(text, encoding="utf-8")
+    print(f"{'Wrote' if changed else 'Unchanged:'} {path.relative_to(ROOT)} ({about})")
+
+
 def write_data() -> None:
     """
-    Write docs/javascripts/tours.js, saying whether it changed.
+    Write docs/javascripts/tours.js and clips.js, saying whether each changed.
     """
-    text = tours_text()
-    changed = not DATA.exists() or DATA.read_text(encoding="utf-8") != text
-    DATA.write_text(text, encoding="utf-8")
     seconds = {tour.service: sum(scene["dur"] for scene in tour_data(tour)["scenes"]) for tour in TOURS}
     lengths = ", ".join(f"{service} {value:.0f}s" for service, value in seconds.items())
-    print(f"{'Wrote' if changed else 'Unchanged:'} {DATA.relative_to(ROOT)} ({lengths})")
+    write_file(DATA, tours_text(), lengths)
+    made = clips()
+    shortest = min(clip["scenes"][0]["dur"] for clip in made.values())
+    longest = max(clip["scenes"][0]["dur"] for clip in made.values())
+    write_file(CLIPS, clips_text(), f"{len(made)} clips, {shortest:.0f} to {longest:.0f}s")
 
 
 def ffmpeg_command(fps: int, out: Path) -> list[str]:

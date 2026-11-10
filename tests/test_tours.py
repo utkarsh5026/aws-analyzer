@@ -88,3 +88,50 @@ def test_end_card_lists_the_calls_made() -> None:
 
 def test_captions_escape_text_and_mark_stress_and_code() -> None:
     assert tours.caption_html("**Read** `x < 1` & go") == "<b>Read</b> <code>x &lt; 1</code> &amp; go"
+
+
+def written_clips() -> dict:
+    """
+    The clips in docs/javascripts/clips.js, as the player reads them.
+    """
+    text = tours.CLIPS.read_text(encoding="utf-8")
+    return json.loads(text[text.index("{"):text.rindex("}") + 1])
+
+
+def test_clips_js_is_up_to_date() -> None:
+    assert tours.CLIPS.read_text(encoding="utf-8") == tours.clips_text(), (
+        "docs/javascripts/clips.js is out of date: run .claude/skills/demo/tour_video.py --data")
+
+
+def test_every_report_screenshot_a_guide_shows_has_a_clip() -> None:
+    captions = tours.guide_captions()
+    services = {tour.service for tour in tours.TOURS}
+    shown = {figure.name for figure in tours.shots.FIGURES
+             if figure.name in captions and figure.service in services and not figure.theme}
+    clips = written_clips()
+    assert set(clips) == shown
+    for name in clips:
+        for theme in tours.THEMES:
+            assert (tours.shots.IMAGES / f"{name}-{theme}.webp").exists()
+
+
+def test_a_clip_types_the_figures_call_and_reads_its_caption_after_it() -> None:
+    clip = written_clips()["athena-failures"]
+    scene = clip["scenes"][0]
+    assert scene["code"] == "athena.failures()"
+    assert scene["outputs"][0]["img"] == "athena-failures"
+    assert scene["captions"][0][1].startswith("A typo'd table name")
+    assert scene["captions"][0][0] >= tours.output_appears(scene["code"])
+    assert 5 <= scene["dur"] <= 20
+
+
+def test_a_caption_loses_the_call_it_opens_with_and_is_cut_into_readable_parts() -> None:
+    assert tours.without_leading_call("`ui.disk()`: 3.8 GB is a file deleted weeks ago.") == (
+        "3.8 GB is a file deleted weeks ago.")
+    assert tours.without_leading_call("`ui.instance()` in the `x` space: the GPU is idle.") == "The GPU is idle."
+    assert tours.without_leading_call("A filter runs after the read: you pay for it.") == (
+        "A filter runs after the read: you pay for it.")
+    long = "First sentence here is fairly long and says one thing. " * 3 + "Short one."
+    parts = tours.caption_parts(long.strip())
+    assert all(len(part) <= tours.CAPTION_CHARS for part in parts) and len(parts) >= 2
+    assert tours.caption_parts("See [the guide](x.html) now.") == ["See the guide now."]
