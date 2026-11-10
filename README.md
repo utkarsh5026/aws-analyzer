@@ -104,7 +104,10 @@ report still renders.
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Step Functions and API Gateway, joined to Lambda: which step or call failed, and the run behind it<br>• SageMaker jobs and endpoints, DynamoDB tables and OpenSearch vector indexes<br>• Is it normal? Each number against the same hour yesterday and last week, since when it's off, and the alarms on it<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/`, `bedrock_kb/`, `stepfunctions/`, `apigateway/`, `sagemaker_env/`, `dynamodb/` and `opensearch/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
-SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
+SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/). Each service's guide
+opens with a short video tour, its calls typed and run in a notebook cell with the reports they draw (for example
+[Lambda's](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#video)), which you can also download as an
+MP4 from [`docs/videos/`](docs/videos/) for Slack or a slide.
 
 ## Get started
 

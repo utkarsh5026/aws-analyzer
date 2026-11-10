@@ -20,6 +20,18 @@ Each vector field in plain English, whether its graphs fit in the memory your no
 The examples use `vectors-prod`, a domain holding `support-docs` (the help-center articles a support assistant retrieves from), and `kb-support`, the Serverless collection behind a Bedrock knowledge base. The screenshots are the tool's real output on a simulated OpenSearch.
 { .muted }
 
+## Watch it run { #video }
+
+Five calls in a notebook, from every domain and collection to a vector search: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="opensearch">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=opensearch">Full screen</a> · <a href="videos/opensearch-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aws-analyzer · video tour</title>
+<meta name="description" content="A short video tour of an aws-analyzer service: calls typed into a notebook cell, run, and the reports they draw.">
+<link rel="icon" href="images/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="stylesheets/tour.css">
+<style>
+  /* The tour full window, for presenting or sharing a screen: tour.html?service=lambda_functions.
+     With &record the controls are hidden, so tour_video.py captures clean frames (&theme=light|dark picks one). */
+  :root { --aa-blue: #3949c6; --aa-line: #2a3552; --aa-surface: #172036; --aa-muted: #9aa3ba; }
+  html, body { margin: 0; }
+  body { background: #0f1626; color: #e7eaf4; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+  .aa-tour { width: min(100vw - 32px, (100vh - 160px) * 16 / 9); margin: 0; }
+  .aa-tour .tour-links a { color: #a9b4ff; }
+  .missing { max-width: 34em; padding: 0 16px; line-height: 1.6; }
+  .missing a { color: #a9b4ff; }
+  html.record body { display: block; }
+  html.record .aa-tour { width: 100vw; max-width: none; }
+  html.record .tour-screen { border-radius: 0; box-shadow: none; cursor: default; }
+  html.record .tour-screen::after, html.record .tour-controls, html.record .tour-chapters, html.record .tour-links { display: none; }
+</style>
+<script>if (/[?&]record\b/.test(location.search)) document.documentElement.classList.add("record");</script>
+</head>
+<body>
+  <div class="aa-tour">
+    <div class="tour-screen"></div>
+    <div class="tour-controls"></div>
+    <div class="tour-chapters"></div>
+    <p class="tour-links"><a class="back" href="index.html">&larr; Back to the guide</a> · <a class="mp4" data-tour-mp4 download href="#">Download as MP4</a></p>
+  </div>
+<script src="javascripts/tours.js"></script>
+<script>
+  /* Point the links at this tour's guide and video before the player starts (it swaps -light for -dark). */
+  (function () {
+    var service = new URLSearchParams(location.search).get("service");
+    var tours = window.AA_TOURS || {};
+    var tour = Object.prototype.hasOwnProperty.call(tours, service) ? tours[service] : null;
+    if (!tour) {
+      var names = Object.keys(tours).map(function (name) {
+        return '<a href="?service=' + name + '">' + name + "</a>";
+      });
+      document.querySelector(".aa-tour").outerHTML = '<p class="missing">Pick a tour: ' + names.join(", ") + ".</p>";
+      return;
+    }
+    document.title = tour.eyebrow + " · aws-analyzer video tour";
+    document.querySelector(".aa-tour").setAttribute("data-tour", service);
+    document.querySelector(".tour-links .back").href = tour.guide;
+    document.querySelector(".tour-links .mp4").href = tour.video;
+  })();
+</script>
+<script src="javascripts/tour.js"></script>
+</body>
+</html>

@@ -26,6 +26,18 @@ The examples use acme's `order-pipeline`, a Standard workflow that validates an 
 **`explore()`**: open a failed execution to see which step broke, then find that step on the workflow's graph.
 ///
 
+## Watch it run { #video }
+
+Five calls in a notebook, from every state machine to the path an execution took: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="stepfunctions">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=stepfunctions">Full screen</a> · <a href="videos/stepfunctions-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

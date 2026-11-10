@@ -20,6 +20,18 @@ No more `{"S": ...}` and `{"N": ...}`. See items as rows, one item with every ne
 The examples use `acme-app`, a single-table design: customers (`sk = "PROFILE"`), their orders (`sk = "ORDER#<date>#<id>"`) and support tickets under one partition key, `CUSTOMER#<id>`. The screenshots are the tool's real output on demo tables.
 { .muted }
 
+## Watch it run { #video }
+
+Five calls in a notebook, from every table to what the items really hold: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="dynamodb">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=dynamodb">Full screen</a> · <a href="videos/dynamodb-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>

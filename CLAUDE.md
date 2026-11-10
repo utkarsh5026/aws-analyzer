@@ -1561,6 +1561,14 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `dynamodb-scan-filter`, `bedrock-ask`, `kb-explorer-tour`, `chat-tour`, `sagemaker-instance`, `opensearch-index-info`,
   `lambda-functions`, `lambda-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `agent-chat-tour`) as
   `<picture>`s that switch to the `-dark` file in dark mode.
+- Each service's guide has a video tour in its "Watch it run" section (`{ #video }`, before Set up): the player,
+  `docs/javascripts/tour.js` (with `docs/stylesheets/tour.css`), types each call into a notebook cell, runs it and
+  scrolls through the figure's screenshot under captions, light or dark with the page, and `docs/tour.html?service=`
+  shows it full window. The tours are written in `.claude/skills/demo/tour_video.py` (`TOURS`, a `Cell` per figure in
+  `shots.py`, so the code typed is the figure's own call) and saved as the player's data, `docs/javascripts/tours.js`
+  (`--data`; `tests/test_tours.py` fails when it's stale); the same script exports each tour as an MP4,
+  `docs/videos/<service>-tour-{light,dark}.mp4`, frame by frame through ffmpeg. After remaking a figure a tour shows,
+  run `--data`, check its captions still say what it shows, and remake that service's MP4s.
 - The home page's hero is a video (`docs/images/hero-demo.mp4`, its last frame `hero-poster.webp`), made with Remotion in
   `hero-video/` (scenes in `src/scenes/`; `npm run render` writes both, `npm run figures` copies the guide's pictures
   into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on

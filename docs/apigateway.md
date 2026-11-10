@@ -26,6 +26,18 @@ The examples use acme's `orders-api`, a REST API whose `POST /orders` route call
 **`explore()`**: from an API to its routes, then to a failed call, where its time went and the Lambda run that timed out.
 ///
 
+## Watch it run { #video }
+
+Two calls in a notebook, from every API to the route that runs out of time: each call typed and run, and the report it draws, with what to notice. Click to play; the chapters jump to a call.
+{ .gist }
+
+<div class="aa-tour" data-tour="apigateway">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=apigateway">Full screen</a> · <a href="videos/apigateway-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
