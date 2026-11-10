@@ -1580,14 +1580,17 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   (`--data`; `tests/test_tours.py` fails when it's stale); the same script exports each tour as an MP4,
   `docs/videos/<service>-tour-{light,dark}.mp4`, frame by frame through ffmpeg. After remaking a figure a tour shows,
   run `--data`, check its captions still say what it shows, and remake that service's MP4s.
-  Every report screenshot a guide shows also has a short clip (`docs/javascripts/clips.js`, `window.AA_CLIPS`, written by
-  the same `--data` with `clips()`): the player one cell long, typing that figure's call (with its service's tour's
-  variable and notebook) and scrolling its report under the guide's own caption, the call it opens with left out
-  (`without_leading_call`) and cut into `caption_parts`. Figures drawn in another theme (`Figure.theme`) and window
-  screenshots get none. `tour.js`'s `initClips` puts a ▶ Watch it run pill, with the clip's length, at the start of the
+  Every screenshot a guide shows also has a short clip (`docs/javascripts/clips.js`, `window.AA_CLIPS`, written by the
+  same `--data` with `clips()`): the player one cell long, typing a call and scrolling the screenshot under the guide's
+  own caption, a call it opens with left out (`without_leading_call`; a caption that's only the call leaves none) and
+  cut into `caption_parts`. A report's clip (`report_clips`) types its figure's call, with its service's tour's
+  variable and notebook; a window's (`window_clips`) types the call that opens its window, from `WINDOWS` (a name
+  prefix each: a new window adds a line), and one not in its `as_opened` begins with `AFTER_CLICKS` ("Opens the
+  window, shown here a few clicks in") while the call is typed. Figures drawn in another theme (`Figure.theme`) and
+  the animated tours (`is_animated`) get none. `tour.js`'s `initClips` puts a ▶ Watch it run pill, with the clip's length, at the start of the
   figure's caption; a click plays it in the picture's place (`openClip`, with the controls and a ✕), and the picture
   comes back when it ends, on ✕ or on Esc (`closeClip`). A new figure or a changed caption only needs `--data`
-  (`tests/test_tours.py` fails when clips.js is stale or a report screenshot has no clip).
+  (`tests/test_tours.py` fails when clips.js is stale or a screenshot has no clip).
 - The home page's hero is a video (`docs/images/hero-demo.mp4`, its last frame `hero-poster.webp`), made with Remotion in
   `hero-video/` (scenes in `src/scenes/`; `npm run render` writes both, `npm run figures` copies the guide's pictures
   into its ignored `public/`). `motion.js`'s `heroVideo` plays it on a first visit (`aa-hero-seen` in localStorage) and on

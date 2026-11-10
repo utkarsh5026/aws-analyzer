@@ -1,4 +1,4 @@
-/* The report screenshots' short clips, for tour.js. Written by .claude/skills/demo/tour_video.py --data from shots.py's figures and the guides' captions: change those, not this. */
+/* The screenshots' short clips, for tour.js. Written by .claude/skills/demo/tour_video.py --data from shots.py's figures and the guides' captions: change those, not this. */
 window.AA_CLIPS = {
  "overview": {
   "notebook": "acme-ml-data.ipynb",
@@ -45,12 +45,7 @@ window.AA_CLIPS = {
       "h": 2432
      }
     ],
-    "captions": [
-     [
-      3.14,
-      "<code>ui.bucket_info(\"acme-ml-data\")</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -72,12 +67,7 @@ window.AA_CLIPS = {
       "h": 1153
      }
     ],
-    "captions": [
-     [
-      2.98,
-      "<code>ui.policy(\"acme-ml-data\")</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -99,12 +89,7 @@ window.AA_CLIPS = {
       "h": 1371
      }
     ],
-    "captions": [
-     [
-      3.64,
-      "<code>ui.tree(\"s3://acme-ml-data/curated/\", depth=3)</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -345,7 +330,7 @@ window.AA_CLIPS = {
     "captions": [
      [
       4.17,
-      "Its text laid out to read, the lines of each paragraph joined back up, without the header and page numbers on every page."
+      "On a two-page PDF: its text laid out to read, the lines of each paragraph joined back up, without the header and page numbers on every page."
      ]
     ]
    }
@@ -450,12 +435,7 @@ window.AA_CLIPS = {
       "h": 922
      }
     ],
-    "captions": [
-     [
-      3.2,
-      "<code>ui.deleted(\"s3://acme-ml-data/\")</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -531,12 +511,7 @@ window.AA_CLIPS = {
       "h": 841
      }
     ],
-    "captions": [
-     [
-      4.6,
-      "<code>ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"), n=8, attributes=[\"status\", \"created_at\", \"total\", \"currency\", \"coupon\"])</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -558,12 +533,7 @@ window.AA_CLIPS = {
       "h": 1548
      }
     ],
-    "captions": [
-     [
-      4.08,
-      "<code>ui.get(\"acme-app\", \"CUSTOMER#1042\", \"ORDER#2026-08-14#7731\")</code>"
-     ]
-    ]
+    "captions": []
    }
   ]
  },
@@ -970,7 +940,7 @@ window.AA_CLIPS = {
     "captions": [
      [
       2.7,
-      "The GPU has done nothing for this session, and nothing will stop the app tonight."
+      "In the <code>churn-analysis</code> space: the GPU has done nothing for this session, and nothing will stop the app tonight."
      ]
     ]
    }
@@ -1889,6 +1859,2346 @@ window.AA_CLIPS = {
      [
       4.6,
       "It doesn't filter on <code>dt</code>, so it reads every partition."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): The answer first, with its plan as it left it and the steps folded above it into one line that names the services they read.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.5,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat",
+      "w": 1476,
+      "h": 1140
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>The answer first</b>, with its plan as it left it and the steps folded above it into one line that names the services they read."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-details": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): Check its work: each call opens to the operations it used, what it covered and the exact data the model read.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.5,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-details",
+      "w": 1476,
+      "h": 1140
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Check its work</b>: each call opens to the operations it used, what it covered and the exact data the model read."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-memory": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): agent.chat() with 🧠 memory open: a ✕ forgets one note; forget all asks for a second click.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.0,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-memory",
+      "w": 1476,
+      "h": 1058
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "With 🧠 memory open: a ✕ forgets one note; <b>forget all</b> asks for a second click."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-model": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): ⚙ model: pick the provider and model; the panel asks only for what that provider takes, and says where your questions go.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.9,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-model",
+      "w": 1476,
+      "h": 1341
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>⚙ model</b>: pick the provider and model; the panel asks only for what that provider takes, and says where your questions go."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-plan": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): Its plan: two steps ticked off, the third under way, and the calls that did the first two under it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.5,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-plan",
+      "w": 1476,
+      "h": 1140
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Its plan</b>: two steps ticked off, the third under way, and the calls that did the first two under it."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-start": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): Start here: the badges show which AWS services the agent reads; every question to start from shows the ones it needs.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.5,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-start",
+      "w": 1476,
+      "h": 1140
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "<b>Start here</b>: the badges show which AWS services the agent reads; every question to start from shows the ones it needs."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-chat-working": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): While it works: its plan, ticking off, what the model says before it acts (●), each call with its services and what it found, a question you typed meanwhile waiting its turn, and stop to end it with what it found so far.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.5,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-chat-working",
+      "w": 1476,
+      "h": 1140
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>While it works</b>: its plan, ticking off, what the model says before it acts (<code>●</code>), each call with its services and what it found, a question you typed meanwhile waiting its turn, and <b>stop</b> to end it with what it found so far."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-mcp": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): 🔌 mcp: a line per server, its dot saying how it stands, and why one failed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-mcp",
+      "w": 1476,
+      "h": 1313
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>🔌 mcp</b>: a line per server, its dot saying how it stands, and why one failed."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-mcp-add": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): + add a server: a command, a URL or a pasted mcp.json; it guesses the name and connects before it saves.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-mcp-add",
+      "w": 1476,
+      "h": 1680
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>+ add a server</b>: a command, a URL or a pasted mcp.json; it guesses the name and connects before it saves."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-mcp-answer": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): Once it ran: the calls, each with the 🔌 badge, and the answer citing them.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.7,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-mcp-answer",
+      "w": 1476,
+      "h": 1020
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Once it ran: the calls, each with the 🔌 badge, and the answer citing them."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-mcp-ask": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): A tool that may change something asks run or skip first; one that only reads runs at once.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.7,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-mcp-ask",
+      "w": 1476,
+      "h": 1020
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "A tool that may change something asks <b>run</b> or <b>skip</b> first; one that only reads runs at once."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-mcp-tools": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): tools ▸: when it asks first, and a box per tool to turn one off.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 11.3,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-mcp-tools",
+      "w": 1476,
+      "h": 1541
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>tools ▸</b>: when it asks first, and a box per tool to turn one off."
+     ]
+    ]
+   }
+  ]
+ },
+ "agent-memory": {
+  "notebook": "agent.ipynb",
+  "summary": "agent.chat(): agent.memory(): each note and when it learned it, the ones old enough to check, and how full it is.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.3,
+    "chapter": "Ask in plain English",
+    "label": "Ask in plain English",
+    "code": "agent.chat()",
+    "outputs": [
+     {
+      "img": "agent-memory",
+      "w": 1476,
+      "h": 1100
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Each note and when it learned it, the ones old enough to check, and how full it is."
+     ]
+    ]
+   }
+  ]
+ },
+ "apigw-explorer": {
+  "notebook": "apis.ipynb",
+  "summary": "apigw.explore(): apigw.explore(): every API, the failing ones first; search them, pick a chip (Failing, Open routes, Unused, ...) or click a column to sort.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon API Gateway",
+    "label": "Amazon API Gateway",
+    "code": "apigw.explore()",
+    "outputs": [
+     {
+      "img": "apigw-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "Every API, the failing ones first; search them, pick a chip (Failing, Open routes, Unused, ...) or click a column to sort."
+     ]
+    ]
+   }
+  ]
+ },
+ "apigw-explorer-call": {
+  "notebook": "apis.ipynb",
+  "summary": "apigw.explore(): A call that timed out: API Gateway gave up at 29 seconds, and the orders-etl run behind it finished at 41.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon API Gateway",
+    "label": "Amazon API Gateway",
+    "code": "apigw.explore()",
+    "outputs": [
+     {
+      "img": "apigw-explorer-call",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "A call that timed out: API Gateway gave up at 29 seconds, and the <code>orders-etl</code> run behind it finished at 41."
+     ]
+    ]
+   }
+  ]
+ },
+ "apigw-explorer-routes": {
+  "notebook": "apis.ipynb",
+  "summary": "apigw.explore(): POST /orders in the Routes tab: the integration is where it fails.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon API Gateway",
+    "label": "Amazon API Gateway",
+    "code": "apigw.explore()",
+    "outputs": [
+     {
+      "img": "apigw-explorer-routes",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<code>POST /orders</code> in the Routes tab: the integration is where it fails."
+     ]
+    ]
+   }
+  ]
+ },
+ "athena-explorer-catalog": {
+  "notebook": "athena.ipynb",
+  "summary": "athena.explore(): The Catalog tab, To fix: sales.clicks has files in S3 but no partitions in the catalog.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon Athena",
+    "label": "Amazon Athena",
+    "code": "athena.explore()",
+    "outputs": [
+     {
+      "img": "athena-explorer-catalog",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Catalog tab, To fix: <code>sales.clicks</code> has files in S3 but no partitions in the catalog."
+     ]
+    ]
+   }
+  ]
+ },
+ "athena-explorer-costs": {
+  "notebook": "athena.ipynb",
+  "summary": "athena.explore(): athena.explore(), the Costs tab: a click on a kind of query shows its newest run.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon Athena",
+    "label": "Amazon Athena",
+    "code": "athena.explore()",
+    "outputs": [
+     {
+      "img": "athena-explorer-costs",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Costs tab: a click on a kind of query shows its newest run."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-add": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Searching the settings: every field whose name, path or description mentions \"rerank\", with a button to add each.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-add",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Searching the settings: every field whose name, path or description mentions \"rerank\", with a button to add each."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-code": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Python: a script that asks the test questions with this setup, using only boto3.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.2,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-code",
+      "w": 1476,
+      "h": 1223
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "<b>Python</b>: a script that asks the test questions with this setup, using only boto3."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-edit": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): A field Bedrock doesn't take is refused before anything is sent, with the fields that are allowed there and where model-specific ones go.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-edit",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "A field Bedrock doesn't take is refused before anything is sent, with the fields that are allowed there and where model-specific ones go."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-files": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Two files ticked: the next answers come only from them, and the conversation goes on.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-files",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Two files ticked: the next answers come only from them, and the conversation goes on."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-pick": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): The knowledge base list, open. Type part of a name or an ID to narrow it; Enter picks the first.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.0,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-pick",
+      "w": 1476,
+      "h": 1197
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "The knowledge base list, open. Type part of a name or an ID to narrow it; Enter picks the first."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-python": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Python: the same request as a boto3 call, highlighted, to paste into your own code.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.0,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-python",
+      "w": 1476,
+      "h": 1197
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "<b>Python</b>: the same request as a boto3 call, highlighted, to paste into your own code."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-request": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): The next request, continuing the conversation. Highlighted keys are your settings.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-request",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "The next request, continuing the conversation. Highlighted keys are your settings."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-retrieve": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): The same question asked both ways: the search found five passages, and the answer used the top two.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.0,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-retrieve",
+      "w": 1476,
+      "h": 1197
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "The same question asked both ways: the search found five passages, and the answer used the top two."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-runs": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Every test run so far, the test run and the sweep's four setups, each ranked against the others of the same questions.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-runs",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Every test run so far, the test run and the sweep's four setups, each ranked against the others of the same questions."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-settings": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): A filter, a reranker and a temperature added with one click each, every value explained in a sentence.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-settings",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "A filter, a reranker and a temperature added with one click each, every value explained in a sentence."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-sweep": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Try variations with n = 3, 8 and reranker = none, cohere: the four setups ranked, how the best compares with the setup in use, and what each setting changed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-sweep",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Try variations with <code>n = 3, 8</code> and <code>reranker = none, cohere</code>: the four setups ranked, how the best compares with the setup in use, and what each setting changed."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-test": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Six test questions asked with the window's settings: four answered, two Bedrock couldn't help with, and what to try next.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.5,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-test",
+      "w": 1476,
+      "h": 1262
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Six test questions asked with the window's settings: four answered, two Bedrock couldn't help with, and what to try next."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-wide": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Settings at the top right hides the side tabs, and the conversation takes the whole width. Chat does the same the other way.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.9,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-wide",
+      "w": 1476,
+      "h": 1172
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "<b>Settings</b> at the top right hides the side tabs, and the conversation takes the whole width. <b>Chat</b> does the same the other way."
+     ]
+    ]
+   }
+  ]
+ },
+ "chat-window": {
+  "notebook": "support-docs.ipynb",
+  "summary": "chat(\"support-docs\"): Two questions about refunds, in the same Bedrock session. The second asks for a list, and the answer's markdown is laid out: bullets, bold, and a citation after each cited span.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.0,
+    "chapter": "Bedrock chat",
+    "label": "Bedrock chat",
+    "code": "chat(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "chat-window",
+      "w": 1476,
+      "h": 1197
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.83,
+      "Two questions about refunds, in the same Bedrock session."
+     ],
+     [
+      6.43,
+      "The second asks for a list, and the answer's markdown is laid out: bullets, bold, and a citation after each cited span."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-buckets": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): S3Explorer() starts from your buckets; 🪣 Every bucket compares their size, cost and security settings.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-buckets",
+      "w": 1476,
+      "h": 869
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "Starts from your buckets; <b>🪣 Every bucket</b> compares their size, cost and security settings."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-changes": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): A folder you were in two days ago: one file replaced, one added.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-changes",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "A folder you were in two days ago: one file replaced, one added."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-docx": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): A Word file's first paragraphs; 📖 Read all shows the whole document, pictures in place.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-docx",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "A Word file's first paragraphs; <b>📖 Read all</b> shows the whole document, pictures in place."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-more": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): More ▾ → 🐘 Largest files: where a bucket's space goes, without leaving the explorer.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-more",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "<b>More ▾</b> → <b>🐘 Largest files</b>: where a bucket's space goes, without leaving the explorer."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-pdf-text": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): 📄 Text on a two-page PDF: the words to read, without the header and page numbers repeated on every page.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-pdf-text",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "<b>📄 Text</b> on a two-page PDF: the words to read, without the header and page numbers repeated on every page."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-python": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): 🐍 Use in Python on a Parquet file: copy the lines, run them, and the table is a DataFrame.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-python",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "<b>🐍 Use in Python</b> on a Parquet file: copy the lines, run them, and the table is a DataFrame."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-recent": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): S3Explorer(): the folder you were in last, then the ones you open most. Point at a chip for its whole path.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-recent",
+      "w": 1476,
+      "h": 869
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "The folder you were in last, then the ones you open most. Point at a chip for its whole path."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-search": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): .tar with Include subfolders: every model artifact below training/, each under the run it came from.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-search",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "<code>.tar</code> with <b>Include subfolders</b>: every model artifact below <code>training/</code>, each under the run it came from."
+     ]
+    ]
+   }
+  ]
+ },
+ "explorer-zip": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): Five files ticked, one .zip with a name that says what's in it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 7.3,
+    "chapter": "S3 file explorer",
+    "label": "S3 file explorer",
+    "code": "x = S3Explorer(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "explorer-zip",
+      "w": 1476,
+      "h": 872
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.33,
+      "Five files ticked, one <code>.zip</code> with a name that says what's in it."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): Overview: a sentence on the files, then what to do about them, a card for each fix: a sync per data source (with its command), the files to fix, and the files to convert. Below, out of the picture: how each data source becomes vectors, with each problem pinned under the step where it happens, and the recent syncs.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      3.01,
+      "<b>Overview</b>: a sentence on the files, then what to do about them, a card for each fix: a sync per data source (with its command), the files to fix, and the files to convert."
+     ],
+     [
+      6.61,
+      "Below, out of the picture: how each data source becomes vectors, with each problem pinned under the step where it happens, and the recent syncs."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-ask": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): The file holds the answer, but five passages of other files rank above it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-ask",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "The file holds the answer, but five passages of other files rank above it."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-chunks": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): Its chunks in document order, one of them open: the green start is the text it shares with the chunk before it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-chunks",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "Its chunks in document order, one of them open: the green start is the text it shares with the chunk before it."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-compare": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): Compare: where each passage ranks with each search type and number of passages.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-compare",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "<b>Compare</b>: where each passage ranks with each search type and number of passages."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-failed": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): A failed file: Bedrock's reason, what usually fixes it, and the step that failed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-failed",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "A failed file: Bedrock's reason, what usually fixes it, and the step that failed."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-file": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): A file's page: each step from S3 into the vector store, here all of them green.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-file",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "A file's page: each step from S3 into the vector store, here all of them green."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-filter": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): A metadata filter under the options: only the files whose .metadata.json matches.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-filter",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "A <b>metadata filter</b> under the options: only the files whose <code>.metadata.json</code> matches."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-search": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): Search: each passage's How … was indexed › opens its file's page.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-search",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "<b>Search</b>: each passage's <b>How … was indexed ›</b> opens its file's page."
+     ]
+    ]
+   }
+  ]
+ },
+ "kb-explorer-syncs": {
+  "notebook": "support-docs.ipynb",
+  "summary": "ui.explore(\"support-docs\"): Syncs: the history as a timeline, with why a sync failed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.7,
+    "chapter": "Bedrock Knowledge Bases",
+    "label": "Bedrock Knowledge Bases",
+    "code": "ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-syncs",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      3.01,
+      "<b>Syncs</b>: the history as a timeline, with why a sync failed."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Functions: every function with its last 14 days, what's wrong with it, its calls, error rate, run time and cost, the ones that need attention first.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer",
+      "w": 1476,
+      "h": 1295
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "<b>Functions</b>: every function with its last 14 days, what's wrong with it, its calls, error rate, run time and cost, the ones that need attention first."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-changed": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Changed: the functions that are different from when you last looked.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-changed",
+      "w": 1476,
+      "h": 1295
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Changed</b>: the functions that are different from when you last looked."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-changes": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): What changed in orders-etl since three days ago, among its findings.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-changes",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "What changed in orders-etl since three days ago, among its findings."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-code": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Code: the package as a tree of folders, the handler's source to copy, and a .env file that shouldn't be in the package.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-code",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Code</b>: the package as a tree of folders, the handler's source to copy, and a <code>.env</code> file that shouldn't be in the package."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-errors": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Errors: three causes, each a click from the runs it failed in, then what to do about each.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-errors",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Errors</b>: three causes, each a click from the runs it failed in, then what to do about each."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-failed-line": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Code › on a cause, or the button under a failed run: the line its traceback names, in the package's own code.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-failed-line",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Code ›</b> on a cause, or the button under a failed run: the line its traceback names, in the package's own code."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-json": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): report-api logs JSON: each line's message, its level, and its other fields a click away.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-json",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "report-api logs JSON: each line's message, its level, and its other fields a click away."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-live": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): explore(tab=\"live\"): three functions ran in the last 10 minutes, two of them running now.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.2,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-live",
+      "w": 1476,
+      "h": 1242
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Three functions ran in the last 10 minutes, two of them running now."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-live-follow": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Following orders-etl: its run going, near its timeout, its lines as they come.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-live-follow",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Following orders-etl: its run going, near its timeout, its lines as they come."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-logs": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Logs: orders-etl's last 24 hours, run by run, with a failed run open: its traceback, and its REPORT line summed up.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-logs",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Logs</b>: orders-etl's last 24 hours, run by run, with a failed run open: its traceback, and its REPORT line summed up."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-overview": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Overview, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-overview",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Overview</b>, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-recent": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): Recent: the functions you've opened, in this session or an earlier one.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-recent",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>Recent</b>: the functions you've opened, in this session or an earlier one."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-explorer-search": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): AccessDenied, searched in CloudWatch: two runs in the last 24 hours, each brought back whole, the matching line marked.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-search",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>AccessDenied</b>, searched in CloudWatch: two runs in the last 24 hours, each brought back whole, the matching line marked."
+     ]
+    ]
+   }
+  ]
+ },
+ "msg-explorer": {
+  "notebook": "messaging.ipynb",
+  "summary": "msg.explore(): msg.explore(): every queue, topic and rule, the ones that need attention first; search them, pick a chip or click a column to sort.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "SQS, SNS and EventBridge",
+    "label": "SQS, SNS and EventBridge",
+    "code": "msg.explore()",
+    "outputs": [
+     {
+      "img": "msg-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "Every queue, topic and rule, the ones that need attention first; search them, pick a chip or click a column to sort."
+     ]
+    ]
+   }
+  ]
+ },
+ "msg-explorer-dead": {
+  "notebook": "messaging.ipynb",
+  "summary": "msg.explore(): The Dead letters tab: orders-dlq holds 42 failed orders, and the command that moves them back once the cause is fixed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "SQS, SNS and EventBridge",
+    "label": "SQS, SNS and EventBridge",
+    "code": "msg.explore()",
+    "outputs": [
+     {
+      "img": "msg-explorer-dead",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Dead letters tab: orders-dlq holds 42 failed orders, and the command that moves them back once the cause is fixed."
+     ]
+    ]
+   }
+  ]
+ },
+ "msg-explorer-live": {
+  "notebook": "messaging.ipynb",
+  "summary": "msg.explore(): Live: email-jobs draining after its reader was turned back on.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "SQS, SNS and EventBridge",
+    "label": "SQS, SNS and EventBridge",
+    "code": "msg.explore()",
+    "outputs": [
+     {
+      "img": "msg-explorer-live",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Live: email-jobs draining after its reader was turned back on."
+     ]
+    ]
+   }
+  ]
+ },
+ "msg-explorer-map": {
+  "notebook": "messaging.ipynb",
+  "summary": "msg.explore(): The Map tab: where orders-events' messages go, and the two queues that keep them out.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "SQS, SNS and EventBridge",
+    "label": "SQS, SNS and EventBridge",
+    "code": "msg.explore()",
+    "outputs": [
+     {
+      "img": "msg-explorer-map",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Map tab: where orders-events' messages go, and the two queues that keep them out."
+     ]
+    ]
+   }
+  ]
+ },
+ "os-explorer": {
+  "notebook": "vectors.ipynb",
+  "summary": "ui.explore(): ui.explore(): every domain and collection, the ones with warnings first; search them, pick a chip (With warnings, Domains, Vector collections, ...) or click a column to sort.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon OpenSearch",
+    "label": "Amazon OpenSearch",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "os-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "Every domain and collection, the ones with warnings first; search them, pick a chip (With warnings, Domains, Vector collections, ...) or click a column to sort."
+     ]
+    ]
+   }
+  ]
+ },
+ "os-explorer-documents": {
+  "notebook": "vectors.ipynb",
+  "summary": "ui.explore(): A document the search can never find: it has no embedding.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon OpenSearch",
+    "label": "Amazon OpenSearch",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "os-explorer-documents",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "A document the search can never find: it has no <code>embedding</code>."
+     ]
+    ]
+   }
+  ]
+ },
+ "os-explorer-index": {
+  "notebook": "vectors.ipynb",
+  "summary": "ui.explore(): support-docs in the Indexes tab: 27,000 documents have no vector, and the graphs don't fit in the k-NN memory.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon OpenSearch",
+    "label": "Amazon OpenSearch",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "os-explorer-index",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<code>support-docs</code> in the Indexes tab: 27,000 documents have no vector, and the graphs don't fit in the k-NN memory."
+     ]
+    ]
+   }
+  ]
+ },
+ "os-explorer-search": {
+  "notebook": "vectors.ipynb",
+  "summary": "ui.explore(): \"how do I get a refund?\" in the Search tab: the nearest articles, and two of them indexed twice.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Amazon OpenSearch",
+    "label": "Amazon OpenSearch",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "os-explorer-search",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "\"how do I get a refund?\" in the Search tab: the nearest articles, and two of them indexed twice."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): sfn.explore(): every state machine, the failing ones first; search them, pick a chip (Failing, Express, Logging off, ...) or click a column to sort. The cards say how the one picked is doing.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      2.7,
+      "Every state machine, the failing ones first; search them, pick a chip (Failing, Express, Logging off, ...) or click a column to sort."
+     ],
+     [
+      6.3,
+      "The cards say how the one picked is doing."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-graph": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-graph",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-log": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): Lower on the same page: Step Functions' events and each function's lines, one log in time order.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-log",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "Lower on the same page: Step Functions' events and each function's lines, one log in time order."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-run": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with KeyError.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-run",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with <code>KeyError</code>."
      ]
     ]
    }

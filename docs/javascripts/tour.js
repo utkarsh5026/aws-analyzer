@@ -571,9 +571,10 @@
     seen.observe(box.querySelector(".tour-screen"));
   }
 
-  /* ---- Clips: a report screenshot's own short video. A ▶ Watch it run button under each screenshot that has a clip
-     (window.AA_CLIPS, from clips.js) plays it in the picture's place: one cell typing that figure's call and showing
-     its report under its caption, with the controls under it. When it ends, or on ✕ or Esc, the picture comes back. */
+  /* ---- Clips: a screenshot's own short video. A ▶ Watch it run button under each screenshot that has a clip
+     (window.AA_CLIPS, from clips.js) plays it in the picture's place: one cell typing the call (a report's, or the one
+     that opens a window) and showing the screenshot under its caption, with the controls under it. When it ends, or
+     on ✕ or Esc, the picture comes back. */
   var CLIP_FIGURE = /images\/([\w-]+)-light\.webp/;
   var CLIP_FADE_MS = 250;
 
