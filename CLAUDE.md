@@ -1045,6 +1045,25 @@ functions); a test patches a name in the module that looks it up (`harness._hide
   `AgentAnswer.runbooks` names the ones read, the answer's Runbook card shows them, and `AgentView.runbooks()` lists
   the shelf with `runbook_findings`. deepagents' `SkillsMiddleware` isn't used: it reads through a backend, needs
   YAML and can't say why a runbook didn't load.
+- **Investigators** (`toolkits/investigator_tools.py`, `subagents=True`, off by default): subagents for context
+  isolation. `InvestigatorToolkit` (`"investigators"`, not in `TOOLKITS`: the analyzer adds it after the service
+  toolkits) has one tool, `investigate(service, task)`, which runs the task through a second loop of the agent's model
+  (`harness.build_investigator`: LangChain's `create_agent`, `checkpointer=False`, no plan, file tools or reply
+  shape; built once per service, dropped by `AgentAnalyzer._model_changed()`) with only that toolkit's tools, each
+  wrapped by `as_tool` on the same `_Run`, without its `save_*` ones, under `prompt.investigator_prompt`. The main
+  model gets `summarize_investigation` (pure): the conclusion, each call's ref and one line, and `cut_short` /
+  `stopped_at` when the loop stopped early or a call of its own wasn't complete. deepagents' own `task` tool stays in
+  `HIDDEN_TOOLS`: its subagents get file tools and a coding prompt, and their calls would go unrecorded. A call an
+  investigator makes is the question's own: `as_tool` reads `_CURRENT` (LangGraph copies the context into its tool
+  threads) and records it `within` the investigate call's ref, so it's counted against the budget, told to the
+  listener, guarded and listed (`↳` in the report's table, `.ag-within` in the window, the Investigated card).
+  `runtime.is_delegated()` keeps it from pausing: `Toolkit.will_ask` and `_more_budget` are off inside one, so a
+  nested interrupt never has to resume through two graphs. `harness.investigate` counts its model messages through
+  `_Run.count_model` (the question's counter, under `_Run.counting`, since a turn's investigations run side by
+  side) and stops on `_stop_reason`. Grounding never takes a conclusion as evidence (`ToolCall.is_investigation`:
+  `_evidence_of` skips it, `_cited_calls` reads a citation of it as its nested calls). `tests/test_agent_investigators.py`
+  scripts both loops with one `scripted(...)` model, whose replies the loops take in turn, and `ByPrompt` for
+  investigations side by side.
 - **The runtime** (`runtime.py`, `as_tool`) wraps every toolkit's tools alike: it records a `ToolCall` on the
   question's `_Run`, checks the `Budget` first (`budget.py`'s `check_budget`: tool calls, time, cost; a toolkit that
   reads logs checks `log_days` itself, as `LambdaToolkit._log_window` does), turns `_Refused` into a refusal the model

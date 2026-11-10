@@ -8,6 +8,10 @@ leaves the agent loop, the call is kept as paused, and once the user has chosen,
 start, as the same call (_Run.paused_call), its asks answered in the order it made them. _CURRENT is the call a tool is
 running for, on the thread it runs on.
 
+A tool an investigator calls (toolkits/investigator_tools.py) runs inside the main model's investigate call: _CURRENT
+is that call when it starts, so its own call is recorded as `within` it, and it never pauses to ask (is_delegated): a
+big read stops at the budget's own limits, as with interrupt_on=False, and a limit it runs out of is a refusal.
+
 A tool that runs out of a limit of the budget asks the same way whether to raise it (_more_budget, when the question's
 ask_more is on): Go raises it for the question and tells the model to call the tool again, so the ask is always the
 last thing the tool does and it asks the same questions when it runs again.
@@ -56,6 +60,22 @@ class _Current:
 _CURRENT: ContextVar[_Current | None] = ContextVar("aws_analyzer_agent_call", default=None)
 
 
+def current_call() -> ToolCall | None:
+    """
+    The call the tool on this thread is running for, or None outside one.
+    """
+    current = _CURRENT.get()
+    return current.call if current is not None else None
+
+
+def is_delegated() -> bool:
+    """
+    Whether the tool on this thread runs for an investigator (inside an investigate call), which never asks the user.
+    """
+    call = current_call()
+    return call is not None and bool(call.within)
+
+
 def ask_user(read: BigRead) -> str:
     """
     Pauses the question to ask the user about a big read, and returns their choice ('go', 'smaller' or 'skip') once
@@ -101,7 +121,8 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
     def tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
         run = current()
         arguments = _asked_for(fn, args, kwargs)
-        call = run.paused_call(fn.__name__, arguments) or _new_call(run, fn, toolkit, arguments)
+        outer = current_call()
+        call = run.paused_call(fn.__name__, arguments) or _new_call(run, fn, toolkit, arguments, outer)
         with run.lock:
             used = sum(1 for c in run.calls if c.refused is None and c is not call)
         started = time.monotonic()
@@ -150,7 +171,7 @@ def _more_budget(run: _Run, call: ToolCall, refused: _Refused) -> dict[str, Any]
     What a tool that ran out of a limit hands the model: when the question asks (ask_more) and the user picks Go, the
     limit is raised for the question and the model is told to call the tool again; otherwise the refusal stands.
     """
-    if not run.ask_more:
+    if not run.ask_more or call.within:
         raise refused
     read = limit_read(call.name, refused.reason, run.budget, needed=refused.needed)
     if read is None:
@@ -169,11 +190,14 @@ def _more_budget(run: _Run, call: ToolCall, refused: _Refused) -> dict[str, Any]
                                               "arguments to go on."}
 
 
-def _new_call(run: _Run, fn: Callable[..., Any], toolkit: Toolkit, arguments: dict[str, Any]) -> ToolCall:
+def _new_call(run: _Run, fn: Callable[..., Any], toolkit: Toolkit, arguments: dict[str, Any],
+              outer: ToolCall | None = None) -> ToolCall:
     """
-    A tool call recorded on the question, and told to its listener.
+    A tool call recorded on the question, and told to its listener. `outer` is the call it was made inside (an
+    investigate call, when an investigator made it), which it's recorded as `within`.
     """
-    call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn), reads=tuple(toolkit.reads.get(fn.__name__, ())))
+    call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn), reads=tuple(toolkit.reads.get(fn.__name__, ())),
+                    within=outer.ref if outer is not None else 0)
     run.record(call)
     run.tell(AgentStep("tool", call=call))
     return call

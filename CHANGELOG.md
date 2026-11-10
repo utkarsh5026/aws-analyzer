@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: investigators keep long searches out of the chat** ([#234](https://github.com/utkarsh5026/aws-analyzer/pull/234))
+  - `AgentView(subagents=True)`: the model hands a long search to an investigator with one service's read-only tools.
+  - Only its conclusion fills the conversation; every call it made still shows under its task (`↳`) and is checked.
+  - Off by default: each investigation costs model calls of its own.
+
 ### Fixed
 
 - 💬 **Bedrock: application inference profiles show up** ([#229](https://github.com/utkarsh5026/aws-analyzer/pull/229))

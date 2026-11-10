@@ -684,6 +684,41 @@ Write the steps in terms of the agent's tools (`agent.tools()` lists them). File
 !!! tip "Worth knowing"
     A runbook is followed like your own instructions, so keep the folder to guides your team wrote. It can't widen what the agent does: it still only reads, and a step that would change something becomes a command for you to run. A guide is read from its file each time, so an edit counts at once; a new runbook needs a new `AgentView`.
 
+## Investigators for long searches { #subagents }
+
+With `subagents=True`, a long search runs in a side conversation, and only its conclusion comes back to the one you're in.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", subagents=True)
+agent.ask("Why did last night's load fail, and did the files even arrive in acme-raw?")
+```
+
+Every tool result the model reads stays in the conversation, and is sent again with each later step. A question that reads five functions' logs carries all five for the rest of the chat, which costs tokens and crowds out what matters. An investigator fixes that: the model hands it one task (`investigate('lambda', task=...)`), it reads what the task needs with that service's tools, and it reports back in a few lines. The model keeps the report and the reference number of each call behind it, not the calls' results.
+
+The model uses one when a part of the question needs many reads in one service, and one per service for a question that spans several; those run side by side. For a question one or two calls answer, it calls the tool itself.
+
+Nothing is hidden from you. In the report's "What it checked" table and in the chat window, each call an investigator made sits under its task, marked `↳`, with its own number, the window it covered and what it found. The answer cites those numbers, and the **Investigated** card names the services.
+
+!!! tip "Worth knowing"
+    An investigation costs model calls of its own: at least two, on top of the question's. It pays off on long searches and in long chats, not on short questions, which is why it's off by default. The answer's tokens and cost count every investigator's too.
+
+??? more "What an investigator can and can't do"
+
+    It's the same model, with instructions of its own and the tools of one service: an agent with the default toolkits has one for each of Lambda, S3, Bedrock knowledge bases, Step Functions, API Gateway, SageMaker, DynamoDB, OpenSearch and CloudWatch, and one for each toolkit of your own. It starts from nothing but the task, so the model writes the task whole: what to find, the exact names, the window in UTC, the regions.
+
+    - **The same budget.** Its calls are the question's tool calls: they count against `tool_calls`, the time and the cost, and a call past the budget is refused. One task ends after 40 steps.
+    - **The same guard.** Its tools read through the same analyzers, so anything but a read is refused before its request is built.
+    - **No questions for you.** A [big read](#big-reads) inside an investigation doesn't stop to ask: it stops at the budget's limits (`s3_keys`, `log_days`), as with `interrupt_on=False`, and the report says it was cut short.
+    - **No files, no other service, no investigators of its own.** It has no `save_*` tools, no Python, no MCP tools and no runbooks.
+    - **Stop works.** The stop button ends an investigation at its next step, and the agent answers with what was read.
+
+??? more "How its report is checked"
+
+    An investigator's conclusion is a model's words, so it never counts as evidence. The [check before you see the answer](#how-it-works) compares the answer with what the investigator's own tool calls returned: a number that's in the conclusion but in no tool result is flagged like any other. Citing the task's number counts as citing the calls made for it. When an investigator stopped early, or one of its calls failed or was cut short, the task's result says `complete: false` and which calls, and the agent is told to say so.
+
+    In Python, `answer.calls` holds every call: `call.within` is the number of the `investigate` call it ran for (0 for a call the model made itself), and `answer.investigated` names the services.
+
 ## Tools from your MCP servers { #mcp }
 
 Add any MCP server (a ticket tracker, a docs search, GitHub) and its tools sit beside the agent's AWS tools, so one question can use both.
@@ -872,6 +907,7 @@ core = AgentAnalyzer(
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan; on by default, written first for every question
     runbooks="~/team-runbooks",                      # your runbooks beside the built-in ones; False for none
+    subagents=True,                                  # an investigator per service for long searches; off by default
     findings=False,                                  # answer in plain text, without findings; on by default
     verify=False,                                    # show the draft as it is; on by default: one more turn to
                                                      # correct what no tool returned
@@ -882,7 +918,7 @@ core = AgentAnalyzer(
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`), and `cores=` any toolkit's analyzer by its name: `cores={"stepfunctions": StepFunctionsAnalyzer(region="eu-west-1")}`. The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `unbacked_causes`, `hedge_root_causes` and `recheck_request` (what in an answer its tools didn't return, how it cites them, the root causes it names without their evidence, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`), and `cores=` any toolkit's analyzer by its name: `cores={"stepfunctions": StepFunctionsAnalyzer(region="eu-west-1")}`. The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `investigator_prompt`, `summarize_investigation`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings` (on any notes text), the runbooks' `load_runbooks`, `parse_front_matter` and `runbook_findings`, `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `unbacked_causes`, `hedge_root_causes` and `recheck_request` (what in an answer its tools didn't return, how it cites them, the root causes it names without their evidence, and what the model is sent to correct it), `parse_reply` and `checked_call` (the model's reply and the calls in it), `reply_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 

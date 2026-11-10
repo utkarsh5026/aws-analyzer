@@ -2703,6 +2703,8 @@ agent = AgentView(provider="bedrock", chats=True)       # every chat saved on th
 agent.chats()                                           # your saved chats; open_chat(1) carries on the newest
 agent = AgentView(runbooks="~/team-runbooks")           # your team's step-by-step guides, beside the built-in ones
 agent.runbooks()                                        # the runbooks it follows when a question matches one
+agent = AgentView(provider="bedrock", subagents=True)   # long searches go to an investigator per service: only its
+                                                        # conclusion fills the conversation, every call still shows
 ```
 
 <picture>
@@ -3043,6 +3045,12 @@ environment variables or headers, and connects before it saves. The editor's mcp
   **skip**. The chat window shows three buttons; after `ask()`, run `go()`, `smaller()` or `skip()`.
   It's about time and cost: the agent only reads either way. `interrupt_on=` picks the tools that ask (`False`: none,
   and long reads stop at the budget as before).
+- **Investigators are held to the same rules.** With `subagents=True`, the model can hand a part of a question to an
+  investigator (`investigate(service, task)`): the same model with only that service's read-only tools, whose
+  conclusion goes back in place of everything it read. Its calls are the question's own: they count against the same
+  budget, go through the same read-only guard, show in the report under the task (`↳`), and are what the answer is
+  checked against. An investigator never asks before a big read (it stops at the budget's limits) and never saves
+  files. Each one costs model calls of its own, so it's off by default.
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never

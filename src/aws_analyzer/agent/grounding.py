@@ -342,12 +342,15 @@ def _call_regions(call: ToolCall) -> set[str]:
 def _evidence_of(calls: Iterable[ToolCall], asked: Iterable[str] = ()) -> _Evidence:
     """
     What these tool calls handed the model (results, arguments and coverage), with `asked`: the questions and what
-    the user had open, which the model may repeat too.
+    the user had open, which the model may repeat too. A task handed to an investigator isn't evidence: its
+    conclusion and its task are a model's words, and the calls the investigator made hold what AWS returned.
     """
     found = _Evidence()
     for text in asked:
         found.add_text(text)
     for call in calls:
+        if call.is_investigation:
+            continue
         _gather(call.args, found)
         _gather(call.result, found)
         _gather(call.coverage, found)
@@ -672,8 +675,11 @@ def _is_incomplete(call: ToolCall) -> bool:
 def _names_of(call: ToolCall) -> list[str]:
     """
     What a call was about, as the answer would name it: its text arguments ('orders-etl', 's3://acme-raw/'), but not
-    its times ('24h', '2026-11-02T18:00Z') or regions.
+    its times ('24h', '2026-11-02T18:00Z') or regions. A task handed to an investigator names nothing: the calls made
+    for it do.
     """
+    if call.is_investigation:
+        return []
     names = []
     for value in call.args.values():
         is_name = isinstance(value, str) and len(value) >= _MIN_NAME and not value[:1].isdigit()
@@ -810,6 +816,22 @@ def calls_by_ref(answer: AgentAnswer, earlier: Iterable[AgentAnswer] = ()) -> di
     return by_ref
 
 
+def _cited_calls(refs: list[int], by_ref: dict[int, ToolCall]) -> list[ToolCall]:
+    """
+    The calls these refs cite. Citing a task handed to an investigator cites the calls the investigator made for it,
+    which hold what its conclusion says.
+    """
+    cited: list[ToolCall] = []
+    for ref in refs:
+        call = by_ref.get(ref)
+        if call is None:
+            continue
+        cited.append(call)
+        if call.is_investigation:
+            cited.extend(made for made in by_ref.values() if made.within == ref)
+    return cited
+
+
 def _miscited(claims: _Claims, refs: list[int], cited: _Evidence, evidence: _Evidence) -> list[str]:
     """
     The claims a piece states that some tool returned but not the calls it cites, as "'35 failures' [2]".
@@ -847,7 +869,7 @@ def check_citations(answer: AgentAnswer, evidence: _Evidence, earlier: Iterable[
     for text, refs in _cited_pieces(answer):
         found.unknown += [f"[{ref}]" for ref in refs if ref not in by_ref]
         claims = _Claims.in_text(text)
-        calls = [by_ref[ref] for ref in refs if ref in by_ref]
+        calls = _cited_calls(refs, by_ref)
         if claims and calls:
             found.miscited += _miscited(claims, refs, _evidence_of(calls, asked), evidence)
         stating += bool(claims)

@@ -22,6 +22,7 @@ class _ToolWords:
 
 
 _TOOL_WORDS = {
+    "investigate": _ToolWords("handing {t} to an investigator", "an investigator looked into {t}", "a service"),
     "find_functions": _ToolWords("finding functions", "found functions"),
     "function_health": _ToolWords("checking every function's health", "checked every function's health"),
     "function_errors": _ToolWords("reading {t}'s errors", "read {t}'s errors", "the function"),

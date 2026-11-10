@@ -85,7 +85,8 @@ from .llm import (
 from .prompt import asked_at, focus_of, looking_at, system_prompt
 from .runbooks import runbook_sources
 from .runtime import as_tool
-from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, PythonToolkit, RunbookToolkit, Toolkit, make_toolkits
+from .toolkits import (DEFAULT_TOOLKITS, TOOLKITS, InvestigatorToolkit, PythonToolkit, RunbookToolkit, Toolkit,
+                       make_toolkits)
 from .toolkits.mcp_tools import McpToolkit, mcp_toolkit
 from .workspace import Workspace, workspace_of
 from .workspace.files import workspace_backend
@@ -287,6 +288,15 @@ has it answer in plain text, as does a model that can't be made to call a tool.
     folder of your own, or a list of them, adds yours (a runbook of yours with a built-in one's name replaces it), and
     False gives it none. runbooks() lists what it found.
 
+    Investigators (subagents=True, off by default): the model gets investigate(service, task), which hands a part of
+    the question to a second loop of the same model with only that service's tools. What that loop reads stays out
+    of the conversation: the model gets its conclusion and the ref of each call it made, so a question that needs
+    many reads (or spans services, each investigated side by side) keeps a short context. Every call an investigator
+    makes is still one of the question's tool calls (ToolCall.within is the investigate call it ran for): it counts
+    against the same budget, goes through the same read-only guard, shows in the report, and is what the answer is
+    checked against. An investigator never asks before a big read (it stops at the budget's limits) and never saves
+    into the workspace. Each investigation costs model calls of its own, which is why it's a choice.
+
     Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
     log read longer than log_days, a save into the workspace past ask_bytes, or a save that finds more files than
     the model asked for) the agent pauses and asks: ask() returns the answer with .waiting set (each call's .waiting
@@ -346,6 +356,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         verify: bool = True,
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
+        subagents: bool = False,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -377,6 +388,8 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             _with_python(toolkits, workspace),
             _toolkit_settings(cores, lambda_core=lambda_core, lambda_clients=lambda_clients, prices=prices,
                               s3_core=s3_core, read_files=read_files, kb_core=kb_core, workspace=workspace))]
+        if subagents:
+            self.toolkits.append(InvestigatorToolkit().bind(self))
         mcp_kit = mcp_toolkit(mcp)
         if mcp_kit is not None:
             self.toolkits.append(mcp_kit.bind(self))
@@ -447,7 +460,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             for name, value in before.items():
                 setattr(self, name, value)
             raise
-        self._graph = None
+        self._model_changed()
         return self.new_conversation()
 
     def toolkit(self, name: str) -> Toolkit:
@@ -508,6 +521,23 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             raise _Hint("MCP servers are off for this agent (mcp=False): AgentView(mcp=True) keeps the ones you add in "
                         "~/.cache/aws-analyzer/agent/mcp.json, and AgentView(mcp='.vscode/mcp.json') uses an editor's.")
         return kit
+
+    @property
+    def investigator_kit(self) -> InvestigatorToolkit | None:
+        """
+        The agent's investigators (the Investigators toolkit: .offered is the services it has one for), or None
+        without subagents=True.
+        """
+        return next((t for t in self.toolkits if isinstance(t, InvestigatorToolkit)), None)
+
+    def _model_changed(self) -> None:
+        """
+        The model the agent answers with changed: its loop, and its investigators' loops, are made again on it.
+        """
+        self._graph = None
+        investigators = self.investigator_kit
+        if investigators is not None:
+            investigators.reset()
 
     def _tools_changed(self) -> None:
         """

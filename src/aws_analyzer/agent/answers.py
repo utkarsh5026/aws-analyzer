@@ -44,6 +44,7 @@ CHOICES = ("go", "smaller", "skip")
 _CHOICE_WORDS = {"go": "go", "yes": "go", "y": "go", "ok": "go", "all": "go", "smaller": "smaller", "small": "smaller",
                  "less": "smaller", "skip": "skip", "no": "skip", "n": "skip"}
 _CALL_KEY_LENGTH = 10
+INVESTIGATE_TOOL = "investigate"
 
 
 def _short(value: Any) -> Any:
@@ -157,6 +158,8 @@ class ToolCall:
         paused    it's paused, waiting for the user's choice on its last ask (or was, and runs again when resumed)
         key       what ties a pause to this call
         ref       what the answer cites it by ('[3]'): its number in the conversation, from 1; the report's # column
+        within    the ref of the investigate call it ran inside (an investigator's call, which the main model never
+                  saw the result of), or 0 for a call the main model made
     """
 
     name: str
@@ -174,6 +177,15 @@ class ToolCall:
     paused: bool = False
     key: str = field(default_factory=_call_key, repr=False)
     ref: int = 0
+    within: int = 0
+
+    @property
+    def is_investigation(self) -> bool:
+        """
+        Whether it handed a task to an investigator (INVESTIGATE_TOOL): its result is that investigator's conclusion,
+        a model's words, and the calls made for it (`within` its ref) hold what AWS returned.
+        """
+        return self.name == INVESTIGATE_TOOL
 
     @property
     def waiting(self) -> BigRead | None:
@@ -488,6 +500,7 @@ class AgentAnswer:
         stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
         waiting       the calls paused for the user's choice on a big read (resume() goes on); empty once answered
         runbooks      the runbooks it read to answer (read_runbook), by name, in the order it read them
+        investigated  the services it handed a task to an investigator for (investigate), each once, in order
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
         focus         what the user had open in an explorer when they asked (ask(focus=)), or None
@@ -547,6 +560,14 @@ class AgentAnswer:
             if name and name not in names:
                 names.append(name)
         return names
+
+    @property
+    def investigated(self) -> list[str]:
+        """
+        The services it handed a task to an investigator for (investigate calls that ran), each once, in order.
+        """
+        services = [str((call.result or {}).get("service") or "") for call in self.calls if call.is_investigation]
+        return list(dict.fromkeys(service for service in services if service))
 
 
 def _choice_findings(call: ToolCall) -> list[tuple[str, str]]:
