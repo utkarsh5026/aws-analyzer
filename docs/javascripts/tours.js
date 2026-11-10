@@ -2308,5 +2308,1437 @@ window.AA_TOURS = {
     "url": "utkarsh5026.github.io/aws-analyzer/athena.html"
    }
   ]
+ },
+ "lambda_explorer": {
+  "eyebrow": "Lambda explorer",
+  "notebook": "lambda.ipynb",
+  "summary": "A notebook tour of aws-analyzer's Lambda explorer window: every function with its last 14 days, orders-etl opened on how it's wired, its logs run by run with a failed run open, a search of them for AccessDenied, its errors by cause, its code, and the Live tab following it while it runs.",
+  "guide": "lambda_explorer.html",
+  "video": "videos/lambda_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Lambda explorer",
+    "icon": "images/aws/lambda.svg",
+    "heading": "Click through your Lambda functions: what failed, what's running, and why",
+    "text": "Every function, problems first; one function's logs run by run, its errors, its code, and what runs now.",
+    "ahead": [
+     "Every function",
+     "One function",
+     "Logs",
+     "Search",
+     "Errors",
+     "Code",
+     "Live"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.0,
+    "chapter": "Every function",
+    "step": 1,
+    "steps": 7,
+    "label": "1 of 7 · Every function",
+    "code": "from aws_analyzer import LambdaView\n\nui = LambdaView()\nx = ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer",
+      "w": 1476,
+      "h": 1295
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>: every function in the region, problems first."
+     ],
+     [
+      4.42,
+      "Each line has its <b>last 14 days of calls</b>, the failed part in red,"
+     ],
+     [
+      8.4,
+      "and <b>orders-etl</b> says what's wrong: 224 of 35,130 calls failed."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.0,
+    "chapter": "One function",
+    "step": 2,
+    "steps": 7,
+    "label": "2 of 7 · One function",
+    "code": "x.open(\"orders-etl\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-overview",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Open a function</b>: a click, or <code>x.open()</code> from code."
+     ],
+     [
+      2.83,
+      "<b>How it's wired</b>: an SQS queue and a bucket call it, and failed events go <b>nowhere</b>,"
+     ],
+     [
+      6.4,
+      "its calls a day over 30 days, and a dashed line where it <b>was last changed</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.0,
+    "chapter": "Logs",
+    "step": 3,
+    "steps": 7,
+    "label": "3 of 7 · Logs",
+    "code": "x.logs(since=\"24h\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-logs",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Its logs, run by run</b>: a line per run, ✓ or ✕, newest first."
+     ],
+     [
+      2.79,
+      "70 runs in 24 hours, <b>13 failed</b>, the timeline red where they did,"
+     ],
+     [
+      6.4,
+      "and a failed run open: <b><code>KeyError: 'customer_id'</code></b>, with a button to that line of code."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.7,
+    "chapter": "Search",
+    "step": 4,
+    "steps": 7,
+    "label": "4 of 7 · Search",
+    "code": "x.logs(search=\"AccessDenied\", since=\"24h\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-search",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Search the logs</b> for a word, an order ID or a request ID."
+     ],
+     [
+      3.51,
+      "CloudWatch finds <b>AccessDenied</b> in two runs,"
+     ],
+     [
+      7.1,
+      "each brought back <b>whole</b>, the matching line marked."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.5,
+    "chapter": "Errors",
+    "step": 5,
+    "steps": 7,
+    "label": "5 of 7 · Errors",
+    "code": "x.open(\"orders-etl\", tab=\"errors\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-errors",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Its errors, grouped by cause</b>: the Errors tab."
+     ],
+     [
+      3.26,
+      "<code>KeyError</code> 8 times, a <b>timeout</b> 3 times, <code>ClientError</code> twice,"
+     ],
+     [
+      6.9,
+      "each a click from the runs it failed in, with <b>what to do</b> about it."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.4,
+    "chapter": "Code",
+    "step": 6,
+    "steps": 7,
+    "label": "6 of 7 · Code",
+    "code": "x.open(\"orders-etl\", tab=\"code\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-code",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>The code in its package</b>, as a tree you click through."
+     ],
+     [
+      3.2,
+      "The handler's source in colour, ready to copy,"
+     ],
+     [
+      6.8,
+      "and a <b><code>.env</code> file</b> that shouldn't be in the package."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.0,
+    "chapter": "Live",
+    "step": 7,
+    "steps": 7,
+    "label": "7 of 7 · Live",
+    "code": "x.live(\"orders-etl\")",
+    "outputs": [
+     {
+      "img": "lambda-explorer-live-follow",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>What's running now</b>, looked at every few seconds."
+     ],
+     [
+      2.83,
+      "orders-etl's run is <b>48 s into its 60 s timeout</b>,"
+     ],
+     [
+      6.4,
+      "its lines <b>added as they come</b>, with the command that gives it longer."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Lambda explorer",
+    "icon": "images/aws/lambda.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.explore()",
+     "x.open(…)",
+     "x.logs(…)",
+     "x.live(…)",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/lambda_explorer.html"
+   }
+  ]
+ },
+ "stepfunctions_explorer": {
+  "eyebrow": "Step Functions explorer",
+  "notebook": "workflows.ipynb",
+  "summary": "A notebook tour of aws-analyzer's Step Functions explorer window: every state machine with its failures, the failed execution ord-7f3a as a waterfall, one log of its events and its Lambda runs' lines, and the graph of order-pipeline with that execution's path drawn on it.",
+  "guide": "stepfunctions_explorer.html",
+  "video": "videos/stepfunctions_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Step Functions explorer",
+    "icon": "images/aws/stepfunctions.svg",
+    "heading": "Click from a failing workflow to the step that broke it",
+    "text": "Every state machine, failing ones first; an execution's waterfall and log, and the path it took on the graph.",
+    "ahead": [
+     "Every workflow",
+     "One execution",
+     "One log",
+     "Graph"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Every workflow",
+    "step": 1,
+    "steps": 4,
+    "label": "1 of 4 · Every workflow",
+    "code": "from aws_analyzer import StepFunctionsView\n\nsfn = StepFunctionsView()\nx = sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>: every state machine, the failing ones first."
+     ],
+     [
+      4.6,
+      "Each with its executions, <b>failures</b>, average run, cost and logging,"
+     ],
+     [
+      8.6,
+      "and chips for the failing ones, Express ones, or the ones <b>without logging</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.1,
+    "chapter": "One execution",
+    "step": 2,
+    "steps": 4,
+    "label": "2 of 4 · One execution",
+    "code": "x.execution(\"ord-7f3a\")",
+    "outputs": [
+     {
+      "img": "sfn-explorer-run",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Open an execution</b>: a click in the Executions tab, or <code>x.execution()</code>."
+     ],
+     [
+      2.92,
+      "Its waterfall: <b>two throttled tries</b> on ChargeCard and their back-off,"
+     ],
+     [
+      6.5,
+      "then <b>LoadOrders fails</b> with <code>KeyError</code>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.1,
+    "chapter": "One log",
+    "step": 3,
+    "steps": 4,
+    "label": "3 of 4 · One log",
+    "code": "x.execution(\"ord-7f3a\")",
+    "outputs": [
+     {
+      "img": "sfn-explorer-log",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Lower on its page, one log</b> of what happened."
+     ],
+     [
+      2.92,
+      "Step Functions' events and <b>each Lambda run's lines</b>,"
+     ],
+     [
+      6.5,
+      "merged by time, <b>each source in its own colour</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.5,
+    "chapter": "Graph",
+    "step": 4,
+    "steps": 4,
+    "label": "4 of 4 · Graph",
+    "code": "x = sfn.explore(\"order-pipeline\", execution=\"ord-7f3a\", tab=\"graph\")",
+    "outputs": [
+     {
+      "img": "sfn-explorer-graph",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>The workflow as a graph</b>, drawn from its definition."
+     ],
+     [
+      4.33,
+      "The path ord-7f3a took <b>in green</b>, the failure <b>in red</b>,"
+     ],
+     [
+      7.9,
+      "and the states it never reached dashed."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Step Functions explorer",
+    "icon": "images/aws/stepfunctions.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "sfn.explore()",
+     "x.execution(…)",
+     "sfn.explore(…)",
+     "sfn.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/stepfunctions_explorer.html"
+   }
+  ]
+ },
+ "apigateway_explorer": {
+  "eyebrow": "API Gateway explorer",
+  "notebook": "apis.ipynb",
+  "summary": "A notebook tour of aws-analyzer's API Gateway explorer window: every API with its requests and errors, orders-api's routes as a tree with POST /orders open, and a call that timed out, with where its time went and the orders-etl run behind it.",
+  "guide": "apigateway_explorer.html",
+  "video": "videos/apigateway_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "API Gateway explorer",
+    "icon": "images/aws/apigateway.svg",
+    "heading": "Click from a failing API to the call that broke, and the Lambda run behind it",
+    "text": "Every API, failing ones first; its routes as a tree, and its calls one by one.",
+    "ahead": [
+     "Every API",
+     "Routes",
+     "Calls"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Every API",
+    "step": 1,
+    "steps": 3,
+    "label": "1 of 3 · Every API",
+    "code": "from aws_analyzer import APIGatewayView\n\napigw = APIGatewayView()\nx = apigw.explore()",
+    "outputs": [
+     {
+      "img": "apigw-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>: every API, the failing ones first."
+     ],
+     [
+      4.6,
+      "Each with its requests, <b>5xx share</b>, p95, cost and auth,"
+     ],
+     [
+      8.6,
+      "and chips for the failing ones, <b>open routes</b> and unused APIs."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.1,
+    "chapter": "Routes",
+    "step": 2,
+    "steps": 3,
+    "label": "2 of 3 · Routes",
+    "code": "x.route(\"POST /orders\")",
+    "outputs": [
+     {
+      "img": "apigw-explorer-routes",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Its routes as a tree</b>: click one to see where a request goes."
+     ],
+     [
+      2.92,
+      "POST /orders goes through Cognito to <b>orders-etl</b>,"
+     ],
+     [
+      6.5,
+      "and the integration is <b>marked red</b>: its p95 is the 29 s limit."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.4,
+    "chapter": "Calls",
+    "step": 3,
+    "steps": 3,
+    "label": "3 of 3 · Calls",
+    "code": "x.open(\"orders-api\", tab=\"calls\")",
+    "outputs": [
+     {
+      "img": "apigw-explorer-call",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Its calls, one by one</b>, from the stage's access log."
+     ],
+     [
+      3.23,
+      "A <b>504</b> on POST /orders: API Gateway gave up at 29 seconds,"
+     ],
+     [
+      6.8,
+      "and the <b>orders-etl run behind it</b> went on for 41."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "API Gateway explorer",
+    "icon": "images/aws/apigateway.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "apigw.explore()",
+     "x.route(…)",
+     "x.open(…)",
+     "apigw.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/apigateway_explorer.html"
+   }
+  ]
+ },
+ "opensearch_explorer": {
+  "eyebrow": "OpenSearch explorer",
+  "notebook": "vectors.ipynb",
+  "summary": "A notebook tour of aws-analyzer's OpenSearch explorer window: every domain and Serverless collection, the support-docs index with its memory and missing vectors, a sample of its documents with one that has no vector, and the documents nearest a question.",
+  "guide": "opensearch_explorer.html",
+  "video": "videos/opensearch_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "OpenSearch explorer",
+    "icon": "images/aws/opensearch.svg",
+    "heading": "Click through your vector indexes: what's missing, what doesn't fit, what a question finds",
+    "text": "Every domain and collection; an index in detail, a sample of its documents, and a search.",
+    "ahead": [
+     "Every store",
+     "One index",
+     "Documents",
+     "Search"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Every store",
+    "step": 1,
+    "steps": 4,
+    "label": "1 of 4 · Every store",
+    "code": "from aws_analyzer import OpenSearchView\n\nui = OpenSearchView()\nx = ui.explore()",
+    "outputs": [
+     {
+      "img": "os-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>: every domain and collection in the region."
+     ],
+     [
+      4.6,
+      "Each with its status, <b>k-NN memory</b> and monthly cost,"
+     ],
+     [
+      8.6,
+      "the ones <b>with warnings first</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.5,
+    "chapter": "One index",
+    "step": 2,
+    "steps": 4,
+    "label": "2 of 4 · One index",
+    "code": "x.open(\"vectors-prod/support-docs\")",
+    "outputs": [
+     {
+      "img": "os-explorer-index",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Open an index</b> to read its vector fields in plain English."
+     ],
+     [
+      3.29,
+      "support-docs' vectors need <b>15.7 GB</b> against 12.0 GB of k-NN memory,"
+     ],
+     [
+      6.9,
+      "and <b>27,000 documents have no vector</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.0,
+    "chapter": "Documents",
+    "step": 3,
+    "steps": 4,
+    "label": "3 of 4 · Documents",
+    "code": "x.open(\"vectors-prod/support-docs\", tab=\"documents\")",
+    "outputs": [
+     {
+      "img": "os-explorer-documents",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>A sample of its documents</b>, the ones without a vector first."
+     ],
+     [
+      3.83,
+      "Open one: it has <b>no <code>embedding</code></b>,"
+     ],
+     [
+      7.4,
+      "so vector search <b>can never return it</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.5,
+    "chapter": "Search",
+    "step": 4,
+    "steps": 4,
+    "label": "4 of 4 · Search",
+    "code": "x.search(\"how do I get a refund?\")",
+    "outputs": [
+     {
+      "img": "os-explorer-search",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Search it with a question</b>, embedded with a Bedrock model that fits."
+     ],
+     [
+      3.26,
+      "The nearest refund articles, best first,"
+     ],
+     [
+      6.9,
+      "and <b>two of them indexed twice</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "OpenSearch explorer",
+    "icon": "images/aws/opensearch.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.explore()",
+     "x.open(…)",
+     "x.search(…)",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/opensearch_explorer.html"
+   }
+  ]
+ },
+ "athena_explorer": {
+  "eyebrow": "Athena explorer",
+  "notebook": "athena.ipynb",
+  "summary": "A notebook tour of aws-analyzer's Athena explorer window: the Costs tab with the query that is 90% of the bill and its newest run, and the Catalog tab's tables to fix, sales.clicks open with the statement that loads its partitions.",
+  "guide": "athena_explorer.html",
+  "video": "videos/athena_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Athena explorer",
+    "icon": "images/aws/athena.svg",
+    "heading": "Click through what your queries cost, why they fail, and which tables to fix",
+    "text": "The costliest queries, why queries fail, and the catalog's tables that need a fix.",
+    "ahead": [
+     "Costs",
+     "Catalog"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Costs",
+    "step": 1,
+    "steps": 2,
+    "label": "1 of 2 · Costs",
+    "code": "from aws_analyzer import AthenaView\n\nathena = AthenaView()\nx = athena.explore(tab=\"costs\")",
+    "outputs": [
+     {
+      "img": "athena-explorer-costs",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>, here on its Costs tab."
+     ],
+     [
+      4.6,
+      "52 queries cost <b>$25.16</b>: the dashboard's <code>SELECT *</code> is <b>90% of the bill</b>,"
+     ],
+     [
+      8.6,
+      "and its newest run scanned 220 GB <b>reading every column</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.1,
+    "chapter": "Catalog",
+    "step": 2,
+    "steps": 2,
+    "label": "2 of 2 · Catalog",
+    "code": "x.table(\"sales.clicks\")",
+    "outputs": [
+     {
+      "img": "athena-explorer-catalog",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>The Glue tables that need a fix</b>, a chip away."
+     ],
+     [
+      2.92,
+      "sales.clicks has files in S3 but <b>no partitions</b> in the catalog,"
+     ],
+     [
+      6.5,
+      "so its queries return nothing: the <b><code>MSCK REPAIR TABLE</code></b> to run is there."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Athena explorer",
+    "icon": "images/aws/athena.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "athena.explore(…)",
+     "x.table(…)",
+     "athena.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/athena_explorer.html"
+   }
+  ]
+ },
+ "messaging_explorer": {
+  "eyebrow": "Messaging explorer",
+  "notebook": "messaging.ipynb",
+  "summary": "A notebook tour of aws-analyzer's messaging explorer window: every queue, topic and rule, failed messages first, the map of where orders-events' messages go, the dead-letter queues with orders-dlq holding 42, and email-jobs draining on the Live tab.",
+  "guide": "messaging_explorer.html",
+  "video": "videos/messaging_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Messaging explorer",
+    "icon": "images/aws/messaging.svg",
+    "heading": "Click through your queues, topics and rules, and follow a message",
+    "text": "Every queue, topic and rule; where a topic's messages go, the dead letters, and a queue draining live.",
+    "ahead": [
+     "Everything",
+     "Map",
+     "Dead letters",
+     "Live"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.2,
+    "chapter": "Everything",
+    "step": 1,
+    "steps": 4,
+    "label": "1 of 4 · Everything",
+    "code": "from aws_analyzer import MessagingView\n\nmsg = MessagingView()\nx = msg.explore()",
+    "outputs": [
+     {
+      "img": "msg-explorer",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b>: every queue, topic and rule."
+     ],
+     [
+      4.6,
+      "What came in, what failed and <b>what waits</b>,"
+     ],
+     [
+      8.6,
+      "the ones that <b>need attention first</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.5,
+    "chapter": "Map",
+    "step": 2,
+    "steps": 4,
+    "label": "2 of 4 · Map",
+    "code": "x.open(\"orders-events\", tab=\"map\")",
+    "outputs": [
+     {
+      "img": "msg-explorer-map",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Where do its messages go?</b> The Map tab, hop by hop."
+     ],
+     [
+      3.26,
+      "orders-events delivers to shipping-updates and its reader,"
+     ],
+     [
+      6.9,
+      "and <b>two queues keep it out</b> with their policy."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.2,
+    "chapter": "Dead letters",
+    "step": 3,
+    "steps": 4,
+    "label": "3 of 4 · Dead letters",
+    "code": "x = msg.explore(tab=\"dead\")",
+    "outputs": [
+     {
+      "img": "msg-explorer-dead",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>The dead-letter queues</b>, the fullest first."
+     ],
+     [
+      3.04,
+      "orders-dlq holds <b>42 failed orders</b>, the oldest 2.5 days old,"
+     ],
+     [
+      6.6,
+      "with the <b>command that moves them back</b> once the cause is fixed."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.4,
+    "chapter": "Live",
+    "step": 4,
+    "steps": 4,
+    "label": "4 of 4 · Live",
+    "code": "x.open(\"email-jobs\", tab=\"live\")",
+    "outputs": [
+     {
+      "img": "msg-explorer-live",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Watch a queue</b>, looked at every 5 seconds."
+     ],
+     [
+      3.2,
+      "email-jobs is <b>draining 40 messages a minute</b>,"
+     ],
+     [
+      6.8,
+      "<b>empty in about 2.4 minutes</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Messaging explorer",
+    "icon": "images/aws/messaging.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "msg.explore()",
+     "x.open(…)",
+     "msg.explore(…)",
+     "msg.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/messaging_explorer.html"
+   }
+  ]
+ },
+ "bedrock_kb_explorer": {
+  "eyebrow": "Knowledge base explorer",
+  "notebook": "support-docs.ipynb",
+  "summary": "A notebook tour of aws-analyzer's knowledge base explorer window: support-docs' Overview with what to fix, warranty.pdf's page with each step it took into the vector store, a scanned invoice that failed, a search, and Semantic against Hybrid search compared.",
+  "guide": "bedrock_kb_explorer.html",
+  "video": "videos/bedrock_kb_explorer-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Knowledge base explorer",
+    "icon": "images/aws/bedrock.svg",
+    "heading": "Click through a knowledge base: every file, how it was indexed, what a question finds",
+    "text": "Every file next to Bedrock's record of it, how one was indexed, why one failed, and a search.",
+    "ahead": [
+     "Overview",
+     "One file",
+     "A failed file",
+     "Search",
+     "Compare"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 3.8,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install aws-analyzer",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.56.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.56.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it once</b>, in any SageMaker or Jupyter notebook. Read-only: it never changes anything in AWS."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.0,
+    "chapter": "Overview",
+    "step": 1,
+    "steps": 5,
+    "label": "1 of 5 · Overview",
+    "code": "from aws_analyzer import BedrockKBView\n\nui = BedrockKBView()\nx = ui.explore(\"support-docs\")",
+    "outputs": [
+     {
+      "img": "kb-explorer",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>One line opens the window</b> on a knowledge base."
+     ],
+     [
+      4.6,
+      "37 of 44 files are indexed and up to date, <b>6 need you</b>,"
+     ],
+     [
+      8.4,
+      "and <b>one sync</b> fixes three of them, with its command."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.1,
+    "chapter": "One file",
+    "step": 2,
+    "steps": 5,
+    "label": "2 of 5 · One file",
+    "code": "x.file(\"warranty.pdf\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-file",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Open a file</b>: how it got from S3 into the vector store."
+     ],
+     [
+      2.89,
+      "Stored, read by the parser, <b>cut into 5 chunks</b>, embedded, stored as vectors:"
+     ],
+     [
+      6.5,
+      "every step green."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.3,
+    "chapter": "A failed file",
+    "step": 3,
+    "steps": 5,
+    "label": "3 of 5 · A failed file",
+    "code": "x.file(\"scanned-invoice.pdf\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-failed",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Why did a file fail?</b>"
+     ],
+     [
+      3.11,
+      "It's a <b>scan with no text layer</b>, so the parser read nothing,"
+     ],
+     [
+      6.7,
+      "and the finding says <b>which parser reads it</b>, with the sync command."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.6,
+    "chapter": "Search",
+    "step": 4,
+    "steps": 5,
+    "label": "4 of 5 · Search",
+    "code": "x.search(\"What does error E1234 mean?\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-search",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Search the knowledge base</b> from its Search tab."
+     ],
+     [
+      3.42,
+      "The passages found, best first, <b>the question's words highlighted</b>,"
+     ],
+     [
+      7.0,
+      "each a click from <b>how its file was indexed</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.3,
+    "chapter": "Compare",
+    "step": 5,
+    "steps": 5,
+    "label": "5 of 5 · Compare",
+    "code": "x.compare(\"How long do refunds take?\", where=\"team = billing\")",
+    "outputs": [
+     {
+      "img": "kb-explorer-compare",
+      "w": 1476,
+      "h": 1269
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Which search settings suit a question?</b>"
+     ],
+     [
+      4.14,
+      "Semantic and Hybrid return <b>the same passages in the same order</b>,"
+     ],
+     [
+      7.7,
+      "and <b>10 passages add gift-cards.md</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Knowledge base explorer",
+    "icon": "images/aws/bedrock.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.explore(…)",
+     "x.file(…)",
+     "x.search(…)",
+     "x.compare(…)",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/bedrock_kb_explorer.html"
+   }
+  ]
  }
 };

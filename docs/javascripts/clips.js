@@ -2271,8 +2271,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon API Gateway",
-    "label": "Amazon API Gateway",
+    "chapter": "API Gateway explorer",
+    "label": "API Gateway explorer",
     "code": "apigw.explore()",
     "outputs": [
      {
@@ -2298,8 +2298,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon API Gateway",
-    "label": "Amazon API Gateway",
+    "chapter": "API Gateway explorer",
+    "label": "API Gateway explorer",
     "code": "apigw.explore()",
     "outputs": [
      {
@@ -2329,8 +2329,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon API Gateway",
-    "label": "Amazon API Gateway",
+    "chapter": "API Gateway explorer",
+    "label": "API Gateway explorer",
     "code": "apigw.explore()",
     "outputs": [
      {
@@ -2360,8 +2360,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon Athena",
-    "label": "Amazon Athena",
+    "chapter": "Athena explorer",
+    "label": "Athena explorer",
     "code": "athena.explore()",
     "outputs": [
      {
@@ -2391,8 +2391,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon Athena",
-    "label": "Amazon Athena",
+    "chapter": "Athena explorer",
+    "label": "Athena explorer",
     "code": "athena.explore()",
     "outputs": [
      {
@@ -3170,8 +3170,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3201,8 +3201,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3232,8 +3232,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3263,8 +3263,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3294,8 +3294,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3325,8 +3325,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3356,8 +3356,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3387,8 +3387,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3418,8 +3418,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.7,
-    "chapter": "Bedrock Knowledge Bases",
-    "label": "Bedrock Knowledge Bases",
+    "chapter": "Knowledge base explorer",
+    "label": "Knowledge base explorer",
     "code": "ui.explore(\"support-docs\")",
     "outputs": [
      {
@@ -3449,8 +3449,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3476,8 +3476,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3507,8 +3507,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3538,8 +3538,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3569,8 +3569,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3600,8 +3600,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3631,8 +3631,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3662,8 +3662,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.2,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3693,8 +3693,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3724,8 +3724,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3755,8 +3755,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3786,8 +3786,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3817,8 +3817,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.1,
-    "chapter": "AWS Lambda",
-    "label": "AWS Lambda",
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3848,8 +3848,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "SQS, SNS and EventBridge",
-    "label": "SQS, SNS and EventBridge",
+    "chapter": "Messaging explorer",
+    "label": "Messaging explorer",
     "code": "msg.explore()",
     "outputs": [
      {
@@ -3875,8 +3875,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "SQS, SNS and EventBridge",
-    "label": "SQS, SNS and EventBridge",
+    "chapter": "Messaging explorer",
+    "label": "Messaging explorer",
     "code": "msg.explore()",
     "outputs": [
      {
@@ -3906,8 +3906,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "SQS, SNS and EventBridge",
-    "label": "SQS, SNS and EventBridge",
+    "chapter": "Messaging explorer",
+    "label": "Messaging explorer",
     "code": "msg.explore()",
     "outputs": [
      {
@@ -3937,8 +3937,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "SQS, SNS and EventBridge",
-    "label": "SQS, SNS and EventBridge",
+    "chapter": "Messaging explorer",
+    "label": "Messaging explorer",
     "code": "msg.explore()",
     "outputs": [
      {
@@ -3968,8 +3968,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon OpenSearch",
-    "label": "Amazon OpenSearch",
+    "chapter": "OpenSearch explorer",
+    "label": "OpenSearch explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -3995,8 +3995,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon OpenSearch",
-    "label": "Amazon OpenSearch",
+    "chapter": "OpenSearch explorer",
+    "label": "OpenSearch explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -4026,8 +4026,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon OpenSearch",
-    "label": "Amazon OpenSearch",
+    "chapter": "OpenSearch explorer",
+    "label": "OpenSearch explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -4057,8 +4057,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "Amazon OpenSearch",
-    "label": "Amazon OpenSearch",
+    "chapter": "OpenSearch explorer",
+    "label": "OpenSearch explorer",
     "code": "ui.explore()",
     "outputs": [
      {
@@ -4088,8 +4088,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Step Functions",
-    "label": "AWS Step Functions",
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
     "code": "sfn.explore()",
     "outputs": [
      {
@@ -4119,8 +4119,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Step Functions",
-    "label": "AWS Step Functions",
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
     "code": "sfn.explore()",
     "outputs": [
      {
@@ -4150,8 +4150,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Step Functions",
-    "label": "AWS Step Functions",
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
     "code": "sfn.explore()",
     "outputs": [
      {
@@ -4181,8 +4181,8 @@ window.AA_CLIPS = {
    {
     "kind": "cell",
     "dur": 9.6,
-    "chapter": "AWS Step Functions",
-    "label": "AWS Step Functions",
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
     "code": "sfn.explore()",
     "outputs": [
      {

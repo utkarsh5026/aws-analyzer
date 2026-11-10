@@ -98,7 +98,9 @@ class Cell:
     One notebook cell of a tour: the figure whose call it types and whose screenshot is its output, the chapter it
     is in the player's list, and its captions: the first while the call is typed, the rest spread over the report as
     it scrolls by. `**words**` in a caption are stressed and `` `code` `` is code. `code` replaces the figure's call
-    when the cell should type something else, and `pan_max` stops the scroll that many pixels down the report.
+    when the cell should type something else, and `pan_max` stops the scroll that many pixels down the report. An
+    explorer's tour shows its window's screenshots (made by the *_shots.py scripts, not shots.py), so its cells always
+    say their `code`: the call that opens the window, or the window's own command that shows what the screenshot does.
     """
 
     chapter: str
@@ -112,7 +114,8 @@ class Cell:
 class Tour:
     """
     One service's tour: its View and the variable its guide keeps it in, the notebook's name in the tab, the title
-    card's words (the guide's headline), what a screen reader says it shows, and its cells.
+    card's words (the guide's headline), what a screen reader says it shows, and its cells. An explorer's tour also
+    names the variable it keeps the window in (`window`, `x`), whose commands its end card lists too.
     """
 
     service: str
@@ -125,6 +128,7 @@ class Tour:
     text: str
     summary: str
     cells: list[Cell] = field(default_factory=list)
+    window: str = ""
 
 
 LAKE = "s3://acme-ml-data"
@@ -380,6 +384,201 @@ TOURS = [
                ["**The code to run a query**, and what it would read.",
                 "It doesn't filter on `dt`, so it **reads every partition**.",
                 "The tool never starts a query: it shows the code to copy."])]),
+    Tour("lambda_explorer", "LambdaView", "ui", "lambda.ipynb", "Lambda explorer", "lambda",
+         "Click through your Lambda functions: what failed, what's running, and why",
+         "Every function, problems first; one function's logs run by run, its errors, its code, and what runs now.",
+         "A notebook tour of aws-analyzer's Lambda explorer window: every function with its last 14 days, orders-etl "
+         "opened on how it's wired, its logs run by run with a failed run open, a search of them for AccessDenied, its "
+         "errors by cause, its code, and the Live tab following it while it runs.",
+         [Cell("Every function", "lambda-explorer",
+               ["**One line opens the window**: every function in the region, problems first.",
+                "Each line has its **last 14 days of calls**, the failed part in red,",
+                "and **orders-etl** says what's wrong: 224 of 35,130 calls failed."],
+           code="x = ui.explore()"),
+          Cell("One function", "lambda-explorer-overview",
+               ["**Open a function**: a click, or `x.open()` from code.",
+                "**How it's wired**: an SQS queue and a bucket call it, and failed events go **nowhere**,",
+                "its calls a day over 30 days, and a dashed line where it **was last changed**."],
+           code='x.open("orders-etl")'),
+          Cell("Logs", "lambda-explorer-logs",
+               ["**Its logs, run by run**: a line per run, ✓ or ✕, newest first.",
+                "70 runs in 24 hours, **13 failed**, the timeline red where they did,",
+                "and a failed run open: **`KeyError: 'customer_id'`**, with a button to that line of code."],
+           code='x.logs(since="24h")'),
+          Cell("Search", "lambda-explorer-search",
+               ["**Search the logs** for a word, an order ID or a request ID.",
+                "CloudWatch finds **AccessDenied** in two runs,",
+                "each brought back **whole**, the matching line marked."],
+           code='x.logs(search="AccessDenied", since="24h")'),
+          Cell("Errors", "lambda-explorer-errors",
+               ["**Its errors, grouped by cause**: the Errors tab.",
+                "`KeyError` 8 times, a **timeout** 3 times, `ClientError` twice,",
+                "each a click from the runs it failed in, with **what to do** about it."],
+           code='x.open("orders-etl", tab="errors")'),
+          Cell("Code", "lambda-explorer-code",
+               ["**The code in its package**, as a tree you click through.",
+                "The handler's source in colour, ready to copy,",
+                "and a **`.env` file** that shouldn't be in the package."],
+           code='x.open("orders-etl", tab="code")'),
+          Cell("Live", "lambda-explorer-live-follow",
+               ["**What's running now**, looked at every few seconds.",
+                "orders-etl's run is **48 s into its 60 s timeout**,",
+                "its lines **added as they come**, with the command that gives it longer."],
+           code='x.live("orders-etl")')],
+         window="x"),
+    Tour("stepfunctions_explorer", "StepFunctionsView", "sfn", "workflows.ipynb", "Step Functions explorer",
+         "stepfunctions",
+         "Click from a failing workflow to the step that broke it",
+         "Every state machine, failing ones first; an execution's waterfall and log, and the path it took on the graph.",
+         "A notebook tour of aws-analyzer's Step Functions explorer window: every state machine with its failures, "
+         "the failed execution ord-7f3a as a waterfall, one log of its events and its Lambda runs' lines, and the "
+         "graph of order-pipeline with that execution's path drawn on it.",
+         [Cell("Every workflow", "sfn-explorer",
+               ["**One line opens the window**: every state machine, the failing ones first.",
+                "Each with its executions, **failures**, average run, cost and logging,",
+                "and chips for the failing ones, Express ones, or the ones **without logging**."],
+           code="x = sfn.explore()"),
+          Cell("One execution", "sfn-explorer-run",
+               ["**Open an execution**: a click in the Executions tab, or `x.execution()`.",
+                "Its waterfall: **two throttled tries** on ChargeCard and their back-off,",
+                "then **LoadOrders fails** with `KeyError`."],
+           code='x.execution("ord-7f3a")'),
+          Cell("One log", "sfn-explorer-log",
+               ["**Lower on its page, one log** of what happened.",
+                "Step Functions' events and **each Lambda run's lines**,",
+                "merged by time, **each source in its own colour**."],
+           code='x.execution("ord-7f3a")'),
+          Cell("Graph", "sfn-explorer-graph",
+               ["**The workflow as a graph**, drawn from its definition.",
+                "The path ord-7f3a took **in green**, the failure **in red**,",
+                "and the states it never reached dashed."],
+           code='x = sfn.explore("order-pipeline", execution="ord-7f3a", tab="graph")')],
+         window="x"),
+    Tour("apigateway_explorer", "APIGatewayView", "apigw", "apis.ipynb", "API Gateway explorer", "apigateway",
+         "Click from a failing API to the call that broke, and the Lambda run behind it",
+         "Every API, failing ones first; its routes as a tree, and its calls one by one.",
+         "A notebook tour of aws-analyzer's API Gateway explorer window: every API with its requests and errors, "
+         "orders-api's routes as a tree with POST /orders open, and a call that timed out, with where its time went "
+         "and the orders-etl run behind it.",
+         [Cell("Every API", "apigw-explorer",
+               ["**One line opens the window**: every API, the failing ones first.",
+                "Each with its requests, **5xx share**, p95, cost and auth,",
+                "and chips for the failing ones, **open routes** and unused APIs."],
+           code="x = apigw.explore()"),
+          Cell("Routes", "apigw-explorer-routes",
+               ["**Its routes as a tree**: click one to see where a request goes.",
+                "POST /orders goes through Cognito to **orders-etl**,",
+                "and the integration is **marked red**: its p95 is the 29 s limit."],
+           code='x.route("POST /orders")'),
+          Cell("Calls", "apigw-explorer-call",
+               ["**Its calls, one by one**, from the stage's access log.",
+                "A **504** on POST /orders: API Gateway gave up at 29 seconds,",
+                "and the **orders-etl run behind it** went on for 41."],
+           code='x.open("orders-api", tab="calls")')],
+         window="x"),
+    Tour("opensearch_explorer", "OpenSearchView", "ui", "vectors.ipynb", "OpenSearch explorer", "opensearch",
+         "Click through your vector indexes: what's missing, what doesn't fit, what a question finds",
+         "Every domain and collection; an index in detail, a sample of its documents, and a search.",
+         "A notebook tour of aws-analyzer's OpenSearch explorer window: every domain and Serverless collection, the "
+         "support-docs index with its memory and missing vectors, a sample of its documents with one that has no "
+         "vector, and the documents nearest a question.",
+         [Cell("Every store", "os-explorer",
+               ["**One line opens the window**: every domain and collection in the region.",
+                "Each with its status, **k-NN memory** and monthly cost,",
+                "the ones **with warnings first**."],
+           code="x = ui.explore()"),
+          Cell("One index", "os-explorer-index",
+               ["**Open an index** to read its vector fields in plain English.",
+                "support-docs' vectors need **15.7 GB** against 12.0 GB of k-NN memory,",
+                "and **27,000 documents have no vector**."],
+           code='x.open("vectors-prod/support-docs")'),
+          Cell("Documents", "os-explorer-documents",
+               ["**A sample of its documents**, the ones without a vector first.",
+                "Open one: it has **no `embedding`**,",
+                "so vector search **can never return it**."],
+           code='x.open("vectors-prod/support-docs", tab="documents")'),
+          Cell("Search", "os-explorer-search",
+               ["**Search it with a question**, embedded with a Bedrock model that fits.",
+                "The nearest refund articles, best first,",
+                "and **two of them indexed twice**."],
+           code='x.search("how do I get a refund?")')],
+         window="x"),
+    Tour("athena_explorer", "AthenaView", "athena", "athena.ipynb", "Athena explorer", "athena",
+         "Click through what your queries cost, why they fail, and which tables to fix",
+         "The costliest queries, why queries fail, and the catalog's tables that need a fix.",
+         "A notebook tour of aws-analyzer's Athena explorer window: the Costs tab with the query that is 90% of the "
+         "bill and its newest run, and the Catalog tab's tables to fix, sales.clicks open with the statement that "
+         "loads its partitions.",
+         [Cell("Costs", "athena-explorer-costs",
+               ["**One line opens the window**, here on its Costs tab.",
+                "52 queries cost **$25.16**: the dashboard's `SELECT *` is **90% of the bill**,",
+                "and its newest run scanned 220 GB **reading every column**."],
+           code='x = athena.explore(tab="costs")'),
+          Cell("Catalog", "athena-explorer-catalog",
+               ["**The Glue tables that need a fix**, a chip away.",
+                "sales.clicks has files in S3 but **no partitions** in the catalog,",
+                "so its queries return nothing: the **`MSCK REPAIR TABLE`** to run is there."],
+           code='x.table("sales.clicks")')],
+         window="x"),
+    Tour("messaging_explorer", "MessagingView", "msg", "messaging.ipynb", "Messaging explorer", "messaging",
+         "Click through your queues, topics and rules, and follow a message",
+         "Every queue, topic and rule; where a topic's messages go, the dead letters, and a queue draining live.",
+         "A notebook tour of aws-analyzer's messaging explorer window: every queue, topic and rule, failed messages "
+         "first, the map of where orders-events' messages go, the dead-letter queues with orders-dlq holding 42, "
+         "and email-jobs draining on the Live tab.",
+         [Cell("Everything", "msg-explorer",
+               ["**One line opens the window**: every queue, topic and rule.",
+                "What came in, what failed and **what waits**,",
+                "the ones that **need attention first**."],
+           code="x = msg.explore()"),
+          Cell("Map", "msg-explorer-map",
+               ["**Where do its messages go?** The Map tab, hop by hop.",
+                "orders-events delivers to shipping-updates and its reader,",
+                "and **two queues keep it out** with their policy."],
+           code='x.open("orders-events", tab="map")'),
+          Cell("Dead letters", "msg-explorer-dead",
+               ["**The dead-letter queues**, the fullest first.",
+                "orders-dlq holds **42 failed orders**, the oldest 2.5 days old,",
+                "with the **command that moves them back** once the cause is fixed."],
+           code='x = msg.explore(tab="dead")'),
+          Cell("Live", "msg-explorer-live",
+               ["**Watch a queue**, looked at every 5 seconds.",
+                "email-jobs is **draining 40 messages a minute**,",
+                "**empty in about 2.4 minutes**."],
+           code='x.open("email-jobs", tab="live")')],
+         window="x"),
+    Tour("bedrock_kb_explorer", "BedrockKBView", "ui", "support-docs.ipynb", "Knowledge base explorer", "bedrock",
+         "Click through a knowledge base: every file, how it was indexed, what a question finds",
+         "Every file next to Bedrock's record of it, how one was indexed, why one failed, and a search.",
+         "A notebook tour of aws-analyzer's knowledge base explorer window: support-docs' Overview with what to fix, "
+         "warranty.pdf's page with each step it took into the vector store, a scanned invoice that failed, a search, "
+         "and Semantic against Hybrid search compared.",
+         [Cell("Overview", "kb-explorer",
+               ["**One line opens the window** on a knowledge base.",
+                "37 of 44 files are indexed and up to date, **6 need you**,",
+                "and **one sync** fixes three of them, with its command."],
+           code='x = ui.explore("support-docs")'),
+          Cell("One file", "kb-explorer-file",
+               ["**Open a file**: how it got from S3 into the vector store.",
+                "Stored, read by the parser, **cut into 5 chunks**, embedded, stored as vectors:",
+                "every step green."],
+           code='x.file("warranty.pdf")'),
+          Cell("A failed file", "kb-explorer-failed",
+               ["**Why did a file fail?**",
+                "It's a **scan with no text layer**, so the parser read nothing,",
+                "and the finding says **which parser reads it**, with the sync command."],
+           code='x.file("scanned-invoice.pdf")'),
+          Cell("Search", "kb-explorer-search",
+               ["**Search the knowledge base** from its Search tab.",
+                "The passages found, best first, **the question's words highlighted**,",
+                "each a click from **how its file was indexed**."],
+           code='x.search("What does error E1234 mean?")'),
+          Cell("Compare", "kb-explorer-compare",
+               ["**Which search settings suit a question?**",
+                "Semantic and Hybrid return **the same passages in the same order**,",
+                "and **10 passages add gift-cards.md**."],
+           code='x.compare("How long do refunds take?", where="team = billing")')],
+         window="x"),
 ]
 
 
@@ -422,8 +621,11 @@ def cell_code(tour: Tour, cell: Cell, *, first: bool) -> str:
     What a cell types: the figure's setup and call (or the cell's own code), after the import and the View in the
     tour's first cell.
     """
-    figure = figure_named(cell.figure)
-    code = cell.code or "\n".join(part for part in (figure.setup, figure.code) if part)
+    if cell.code:
+        code = cell.code
+    else:
+        figure = figure_named(cell.figure)
+        code = "\n".join(part for part in (figure.setup, figure.code) if part)
     code = with_variable(code, tour.variable)
     if first:
         return f"from aws_analyzer import {tour.view}\n\n{tour.variable} = {tour.view}()\n{code}"
@@ -533,13 +735,15 @@ def install_scene() -> dict:
                                           "Read-only: it never changes anything in AWS.")]]}
 
 
-def short_call(code: str, variable: str) -> str:
+def short_call(code: str, *variables: str) -> str:
     """
-    A cell's call for the end card: the last command it runs on the View, with `(…)` when it took arguments.
+    A cell's call for the end card: the last command it runs on the View (or on an explorer's window), with `(…)`
+    when it took arguments.
     """
-    method, opening = re.findall(rf"^{re.escape(variable)}\.(\w+)\((.?)", code, re.MULTILINE)[-1]
+    names = "|".join(re.escape(variable) for variable in variables if variable)
+    name, method, opening = re.findall(rf"^(?:\w+ = )?({names})\.(\w+)\((.?)", code, re.MULTILINE)[-1]
     arguments = "" if opening == ")" else "…"
-    return f"{variable}.{method}({arguments})"
+    return f"{name}.{method}({arguments})"
 
 
 def end_scene(tour: Tour, calls: list[str]) -> dict:
@@ -559,7 +763,7 @@ def tour_data(tour: Tour) -> dict:
              "icon": f"images/aws/{tour.icon}.svg", "heading": html.escape(tour.heading, quote=False),
              "text": html.escape(tour.text, quote=False), "ahead": [cell.chapter for cell in tour.cells]}
     cells = [cell_scene(tour, cell, number=number) for number, cell in enumerate(tour.cells, 1)]
-    calls = [short_call(scene["code"], tour.variable) for scene in cells]
+    calls = list(dict.fromkeys(short_call(scene["code"], tour.variable, tour.window) for scene in cells))
     return {"eyebrow": tour.eyebrow, "notebook": tour.notebook, "summary": tour.summary,
             "guide": f"{tour.service}.html", "video": f"videos/{tour.service}-tour-light.mp4",
             "scenes": [title, install_scene(), *cells, end_scene(tour, calls)]}
@@ -705,13 +909,13 @@ class Window:
 
 
 WINDOWS = [
-    Window("lambda-explorer", "ui.explore()", "lambda_functions", as_opened=("lambda-explorer",)),
-    Window("kb-explorer", 'ui.explore("support-docs")', "bedrock_kb", as_opened=("kb-explorer",)),
-    Window("sfn-explorer", "sfn.explore()", "stepfunctions", as_opened=("sfn-explorer",)),
-    Window("apigw-explorer", "apigw.explore()", "apigateway", as_opened=("apigw-explorer",)),
-    Window("os-explorer", "ui.explore()", "opensearch", as_opened=("os-explorer",)),
-    Window("athena-explorer", "athena.explore()", "athena"),
-    Window("msg-explorer", "msg.explore()", "messaging", as_opened=("msg-explorer",)),
+    Window("lambda-explorer", "ui.explore()", "lambda_explorer", as_opened=("lambda-explorer",)),
+    Window("kb-explorer", 'ui.explore("support-docs")', "bedrock_kb_explorer", as_opened=("kb-explorer",)),
+    Window("sfn-explorer", "sfn.explore()", "stepfunctions_explorer", as_opened=("sfn-explorer",)),
+    Window("apigw-explorer", "apigw.explore()", "apigateway_explorer", as_opened=("apigw-explorer",)),
+    Window("os-explorer", "ui.explore()", "opensearch_explorer", as_opened=("os-explorer",)),
+    Window("athena-explorer", "athena.explore()", "athena_explorer"),
+    Window("msg-explorer", "msg.explore()", "messaging_explorer", as_opened=("msg-explorer",)),
     Window("explorer", 'x = S3Explorer("s3://acme-ml-data/")', "s3", eyebrow="S3 file explorer"),
     Window("chat", 'chat("support-docs")', eyebrow="Bedrock chat", notebook="support-docs.ipynb"),
     Window("agent", "agent.chat()", eyebrow="Ask in plain English", notebook="agent.ipynb",

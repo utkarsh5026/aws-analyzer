@@ -12,7 +12,7 @@ fake clusters: vectors-prod holds support-docs, product-search and legacy-faq), 
 reads the Domains tab, opens the Indexes tab (support-docs, the vector index with warnings, is picked first), then
 the Documents tab and a document without a vector, then searches with a question. Each figure is the window, 984
 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp, and the height= of both
-its images is set in docs/opensearch.md, by shots.py's set_height.
+its images is set in docs/opensearch_explorer.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
 Playwright installs (playwright install chromium).
@@ -198,7 +198,7 @@ def shoot(lab: Lab, themes: tuple[str, ...], names: list[str], folder: str, out:
             keep(taken, out, heights)
         browser.close()
     for name, sizes in heights.items():
-        shots.set_height(shots.GUIDES["opensearch"], name, max(sizes))
+        shots.set_height(shots.GUIDES["opensearch_explorer"], name, max(sizes))
         print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
 
 

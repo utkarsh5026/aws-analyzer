@@ -20,12 +20,6 @@ Find the APIs that fail or run out of time, see who can call each route, and fol
 The examples use acme's `orders-api`, a REST API whose `POST /orders` route calls the `orders-etl` Lambda function. Some of its calls take longer than API Gateway's 29 seconds and come back as a `504`, while `orders-etl` is still working.
 { .muted }
 
-![The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it](images/apigw-explorer-tour-light.webp#only-light){ width="984" height="865" loading=lazy }
-![The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it](images/apigw-explorer-tour-dark.webp#only-dark){ width="984" height="865" loading=lazy }
-/// caption
-**`explore()`**: from an API to its routes, then to a failed call, where its time went and the Lambda run that timed out.
-///
-
 ## Watch it run { #video }
 
 Two calls in a notebook, from every API to the route that runs out of time: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
@@ -189,36 +183,9 @@ The routes' numbers come from the access log when the stage has one, else from d
 ```python
 apigw.explore()                               # the API failing most, or the first
 apigw.explore("orders-api", tab="calls")      # straight to its calls
-apigw.explore("orders-api/dev", since="7d")   # another stage, the last 7 days
 ```
 
-![The API Gateway explorer: findings, then a search box, chips and six APIs with their requests, 5xx share, p95, cost and auth under column headers that sort](images/apigw-explorer-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The API Gateway explorer: findings, then a search box, chips and six APIs with their requests, 5xx share, p95, cost and auth under column headers that sort](images/apigw-explorer-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-`apigw.explore()`: every API, the failing ones first; search them, pick a chip (Failing, Open routes, Unused, ...) or click a column to sort.
-///
-
-The **Routes** tab is a tree of the API's paths. Click a route to see where a request goes, from the caller through the authorizer to the integration, with the step that fails marked, its settings and the command that calls it.
-
-![The Routes tab: orders-api's paths as a tree on the left, and POST /orders open on the right, its path from the caller through Cognito to orders-etl, the integration marked red with p95 29s of 29s, and a warning that it runs out of time](images/apigw-explorer-routes-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Routes tab: orders-api's paths as a tree on the left, and POST /orders open on the right, its path from the caller through Cognito to orders-etl, the integration marked red with p95 29s of 29s, and a warning that it runs out of time](images/apigw-explorer-routes-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-`POST /orders` in the Routes tab: the integration is where it fails.
-///
-
-The **Calls** tab reads the stage's access log for the time picked: a timeline of calls with the failed ones in red, chips by status, and a search box (typing filters what's read; Enter asks CloudWatch Logs for the text over the whole time). Click a call to see where its time went, and for one that reached Lambda, that run's lines.
-
-![The Calls tab: a timeline, chips for 5xx, 4xx, slow and throttled calls, a list of calls, and a 504 on POST /orders open on the right: 29 seconds in the integration and the log lines of the orders-etl run behind it, which went on for 41 seconds](images/apigw-explorer-call-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Calls tab: a timeline, chips for 5xx, 4xx, slow and throttled calls, a list of calls, and a 504 on POST /orders open on the right: 29 seconds in the integration and the log lines of the orders-etl run behind it, which went on for 41 seconds](images/apigw-explorer-call-dark.webp#only-dark){ width="984" height="866" loading=lazy }
-/// caption
-A call that timed out: API Gateway gave up at 29 seconds, and the `orders-etl` run behind it finished at 41.
-///
-
-**Overview** is `api_info()`, **Performance** is `performance()` and **Stages** is `stages()`; the stage menu at the top switches stage. The window only reads, like the reports, and outside Jupyter `explore()` shows the reports instead.
-
-??? more "How the window reads"
-
-    AWS is read off the notebook's event loop, so a click returns at once: the APIs and their CloudWatch numbers first, then the one you pick with its routes and stages, then its access log. A call's Lambda run is read when you click it, by the Lambda request ID its access log line records, through the [Lambda module](lambda_functions.md). Pick another API while one is still being read and the first one's result is dropped when it comes back.
+The [API Gateway explorer guide](apigateway_explorer.md) covers every tab, with its own video tour.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 

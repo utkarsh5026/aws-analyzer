@@ -29,14 +29,21 @@ nav:
   - S3 file explorer: s3_explorer.md
   - Amazon DynamoDB: dynamodb.md
   - Bedrock Knowledge Bases: bedrock_kb.md
+  - Knowledge base explorer: bedrock_kb_explorer.md
   - Bedrock chat: bedrock_chat.md
   - Amazon SageMaker: sagemaker_env.md
   - Amazon OpenSearch: opensearch.md
+  - OpenSearch explorer: opensearch_explorer.md
   - AWS Lambda: lambda_functions.md
+  - Lambda explorer: lambda_explorer.md
   - AWS Step Functions: stepfunctions.md
+  - Step Functions explorer: stepfunctions_explorer.md
   - Amazon API Gateway: apigateway.md
+  - API Gateway explorer: apigateway_explorer.md
   - Amazon Athena: athena.md
+  - Athena explorer: athena_explorer.md
   - SQS, SNS and EventBridge: messaging.md
+  - Messaging explorer: messaging_explorer.md
   - Ask in plain English: agent.md
   - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 

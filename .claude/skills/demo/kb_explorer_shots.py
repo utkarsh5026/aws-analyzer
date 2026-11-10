@@ -11,7 +11,7 @@ a kernel, so this starts JupyterLab on a notebook that opens the window on demo.
 uses it the way a person would: reads the Overview, opens the Files tab and clicks warranty.pdf, opens one of its
 chunks, asks it a question, filters the list to the failed files and opens one, searches the knowledge base, compares
 search settings for a question with a metadata filter, and opens the Syncs tab. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
-docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/bedrock_kb.md, by shots.py's
+docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/bedrock_kb_explorer.md, by shots.py's
 set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the
@@ -226,7 +226,7 @@ def main() -> int:
                         heights.setdefault(name, set()).add(round(image.height / SCALE))
                 browser.close()
             for name, sizes in heights.items():
-                shots.set_height(shots.GUIDES["bedrock_kb"], name, max(sizes))
+                shots.set_height(shots.GUIDES["bedrock_kb_explorer"], name, max(sizes))
                 print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()

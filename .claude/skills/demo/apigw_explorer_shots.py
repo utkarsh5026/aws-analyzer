@@ -12,7 +12,7 @@ failed calls, in moto), then uses it the way a person would: reads the APIs tab,
 the route that runs out of time, is picked first), then the Calls tab, picks the 5xx chip and clicks the newest 504
 (where its time went, then the Lambda run behind it). Each figure is the window, 984 CSS px wide at 1.5x like the
 other images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
-docs/apigateway.md, by shots.py's set_height.
+docs/apigateway_explorer.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
 Playwright installs (playwright install chromium).
@@ -195,7 +195,7 @@ def shoot(lab: Lab, themes: tuple[str, ...], names: list[str], folder: str, out:
             keep(taken, out, heights)
         browser.close()
     for name, sizes in heights.items():
-        shots.set_height(shots.GUIDES["apigateway"], name, max(sizes))
+        shots.set_height(shots.GUIDES["apigateway_explorer"], name, max(sizes))
         print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
 
 

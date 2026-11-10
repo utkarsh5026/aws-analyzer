@@ -48,7 +48,10 @@ def test_tours_js_is_up_to_date() -> None:
 def test_each_cell_shows_a_figure_in_both_themes(service: str) -> None:
     tour = next(tour for tour in tours.TOURS if tour.service == service)
     for cell in tour.cells:
-        tours.figure_named(cell.figure)
+        if tours.window_of(cell.figure) is None:
+            tours.figure_named(cell.figure)
+        else:
+            assert cell.code, f"{cell.figure}: a window's screenshot comes with the command that shows it"
         for theme in tours.THEMES:
             assert (tours.shots.IMAGES / f"{cell.figure}-{theme}.webp").exists()
         assert len(cell.captions) >= 2, f"{cell.figure}: one caption while typing, at least one on the report"
@@ -70,6 +73,15 @@ def test_cells_type_the_figures_calls_with_the_guides_variable() -> None:
     step_functions = written_tours()["stepfunctions"]["scenes"]
     assert step_functions[2]["code"].endswith("\nsfn = StepFunctionsView()\nsfn.overview()")
     assert step_functions[3]["code"] == 'sfn.failures("order-pipeline")'
+
+
+def test_an_explorer_tour_opens_its_window_and_lists_the_windows_commands() -> None:
+    scenes = written_tours()["lambda_explorer"]["scenes"]
+    assert scenes[2]["code"] == "from aws_analyzer import LambdaView\n\nui = LambdaView()\nx = ui.explore()"
+    assert scenes[2]["outputs"][0]["img"] == "lambda-explorer"
+    assert scenes[3]["code"] == 'x.open("orders-etl")'
+    assert scenes[-1]["calls"][:3] == ["ui.explore()", "x.open(…)", "x.logs(…)"]
+    assert scenes[-1]["url"].endswith("/lambda_explorer.html")
 
 
 def test_scenes_last_long_enough_to_read_every_caption() -> None:

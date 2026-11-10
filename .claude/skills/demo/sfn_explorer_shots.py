@@ -12,7 +12,7 @@ ord-7f3a called, in moto), then uses it the way a person would: reads the State 
 and clicks ord-7f3a (its waterfall, then its log with every Lambda run's lines), then opens the Graph tab with
 LoadOrders picked. Each
 figure is the window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp,
-and the height= of both its images is set in docs/stepfunctions.md, by shots.py's set_height.
+and the height= of both its images is set in docs/stepfunctions_explorer.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the one
 Playwright installs (playwright install chromium).
@@ -195,7 +195,7 @@ def shoot(lab: Lab, themes: tuple[str, ...], names: list[str], folder: str, out:
             keep(taken, out, heights)
         browser.close()
     for name, sizes in heights.items():
-        shots.set_height(shots.GUIDES["stepfunctions"], name, max(sizes))
+        shots.set_height(shots.GUIDES["stepfunctions_explorer"], name, max(sizes))
         print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
 
 
