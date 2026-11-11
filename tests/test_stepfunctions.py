@@ -31,6 +31,9 @@ from aws_analyzer.stepfunctions.analysis.layout import failure_marks, flow_layou
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
+from test_lambda_functions import html_widgets
 
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
@@ -842,3 +845,16 @@ def test_explorer_opens_an_express_execution(fakes):
     assert window["endTime"] - window["startTime"] <= 7 * 60 * 1000
     x.tab_buttons["failures"].click()
     assert "Why image-resize-express fails" in plain(x.failures_view.value)
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(fakes):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(fakes)
+    theme_rules = _theme_css("sfn", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="sfn' in pane.value]
+    assert pages and all('<div class="sfn theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

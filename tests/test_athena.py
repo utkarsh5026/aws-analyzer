@@ -22,6 +22,9 @@ from aws_analyzer.athena import (
     parse_table_ref, query_cost, query_shapes, run_code, sample_sql, schedule_period, selects_every_column,
     split_s3, storage_format, suggested_cutoff, table_findings, tables_in_sql,
 )
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
+from test_lambda_functions import html_widgets
 
 
 GB = 1024**3
@@ -542,3 +545,16 @@ def test_explorer_without_widgets_shows_the_reports(core, capsys):
     assert "Athena in us-east-1" in capsys.readouterr().out
     view = AthenaView(core, mode="text", progress="off")
     assert "needs Jupyter" in run(capsys, view.explore)
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(core):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(core)
+    theme_rules = _theme_css("ath", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="ath' in pane.value]
+    assert pages and all('<div class="ath theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

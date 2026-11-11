@@ -24,6 +24,9 @@ from aws_analyzer.apigateway import (
 from aws_analyzer.apigateway.explorer.frame import _window_text
 from aws_analyzer.apigateway.explorer.routes import _route_tree
 from aws_analyzer.lambda_functions import LambdaAnalyzer
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
+from test_lambda_functions import html_widgets
 
 
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
@@ -546,3 +549,16 @@ def test_explorer_reads_in_the_background(core, world):
         assert x.run.found
 
     asyncio.run(main())
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(core):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(core)
+    theme_rules = _theme_css("apg", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="apg' in pane.value]
+    assert pages and all('<div class="apg theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

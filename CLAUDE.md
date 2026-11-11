@@ -139,8 +139,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   own; `_theme_css(root, name)` scopes every rule of a theme to `.<root>.theme-<name>`, the class `_report_html` puts
   on the report's box, because a notebook applies every output's `<style>` to the whole page and an earlier output
   must keep its theme; the tones are custom properties, lighter on a dark page (`_DARK_PAGES`, `_UNSET_PAGE`, which
-  the windows' terminal theme reads too); `_BaseView._show` passes `theme=_theme_name()`, and the windows call
-  `_render_html` with none, so they keep their own look; a new rule in `_BASE_RULES` for a shared block may need a
+  the windows' terminal theme reads too); `_BaseView._show` passes `theme=_theme_name()`, and so does every explorer
+  window, with the theme it opened with (`self._theme`, its `_theme_css` held once in the window's style and dropped
+  from each page by `_html`), while the chat windows call `_render_html` with none, so they keep their own look; a new rule in `_BASE_RULES` for a shared block may need a
   line in each theme, and `demo.py --look` / a `Figure(theme=)` in `shots.py` show one)
   `focus.py` (`Focus` and `FocusPart`: what an explorer window is showing, as data, pure; each explorer's `focus`
   property builds one in its own `explorer/focus.py`, a `_FocusReads` mixin, and `chips()` / `value(key)` /

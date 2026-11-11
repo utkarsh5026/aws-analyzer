@@ -125,6 +125,8 @@ from aws_analyzer.bedrock_kb import (
     vector_store_monthly_cost,
     with_data_sources,
 )
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
 
 KB_ID = "KBID123456"
 KB2_ID = "KBID654321"
@@ -4457,7 +4459,7 @@ def test_explorer_holds_the_report_css_once(world):
     panes = html_widgets(x.root)
     [style] = [pane for pane in panes if stylemod._CSS in pane.value]
     assert style.layout.display == "none"
-    pages = [pane for pane in panes if '<div class="kba">' in pane.value]
+    pages = [pane for pane in panes if '<div class="kba theme-console">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
              for rule in style.split("</style>")[0].split("\n")]
     assert len(pages) >= 2 and all(rule.startswith(".kba form.tbl:has(") for rule in rules)
@@ -4818,3 +4820,16 @@ def test_view_explore_opens_the_window(world):
     x = view.explorer
     assert isinstance(x, KBExplorer) and x.ui is view and x.selected.name == "faq.md"
     assert x.pages["files"].layout.height == "700px" and view.kb == KB_ID
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(world):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(world)
+    theme_rules = _theme_css("kba", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="kba' in pane.value]
+    assert pages and all('<div class="kba theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

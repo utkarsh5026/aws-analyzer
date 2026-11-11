@@ -12,6 +12,7 @@ from ..._bedrock.files import SavedFileList
 from ..._kit.blocks import _Note
 from ..._kit.errors import _error_name, _why
 from ..._kit.fmt import _plural
+from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _skeleton, _window_errors
 
 from ..models import (
@@ -20,7 +21,7 @@ from ..models import (
 )
 from ..analysis.files import find_files
 from ..analyzer.kb_analyzer import BedrockKBAnalyzer
-from ..style import _CSS, _render_html
+from ..style import _CSS, _ROOT, _render_html
 from ..view.kb_view import BedrockKBView
 from .frame import _EXPLORER_CSS, _EXPLORER_TABS, _window_text
 from .focus import _FocusReads
@@ -220,17 +221,21 @@ class KBExplorer(_OverviewTab, _FilesTab, _FilePane, _SyncsTab, _SearchTab, _Set
 
     def _html(self, blocks: list[Any]) -> str:
         """
-        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it).
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, drawn in the report
+        theme the window opened with, and without the report and theme CSS each one carries (the window's style holds
+        them).
         """
-        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
+        html = _render_html(_for_window(blocks, _window_text), self.ui.max_rows, theme=self._theme)
+        return html.replace(_CSS, "", 1).replace(self._theme_style, "", 1)
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("kbx-backdrop")
         self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
-        self._frame(_CSS + _EXPLORER_CSS, self._head(), self._tab_bar(_EXPLORER_TABS), self._pages())
+        self._theme = _theme_name()
+        self._theme_style = _theme_css(_ROOT, self._theme)
+        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, self._head(), self._tab_bar(_EXPLORER_TABS), self._pages())
         self._show_tab(self._tab)
 
     def _head(self) -> Any:
