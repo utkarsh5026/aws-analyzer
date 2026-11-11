@@ -12,6 +12,7 @@ from ..._kit.blocks import _Note
 from ..._kit.errors import _Hint, _error_name, _why
 from ..._kit.fmt import _count, _plural, _total, human_money, human_size
 from ..._kit.text import _esc
+from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import parse_location
@@ -20,7 +21,7 @@ from ..analysis.cost import domain_monthly_cost
 from ..analysis.vectors import domain_knn_memory, index_vector_memory
 from ..http import OpenSearchError
 from ..analyzer import OpenSearchAnalyzer
-from ..style import _CSS, _render_html
+from ..style import _CSS, _ROOT, _render_html
 from ..view import OpenSearchView, _target_arg
 from .documents import _DocumentsTab
 from .focus import _FocusReads
@@ -219,10 +220,12 @@ class OpenSearchExplorer(_StoresTab, _IndexesTab, _DocumentsTab, _SearchTab, _Fo
 
     def _html(self, blocks: list[Any]) -> str:
         """
-        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it).
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, drawn in the report
+        theme the window opened with, and without the report and theme CSS each one carries (the window's style holds
+        them).
         """
-        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
+        html = _render_html(_for_window(blocks, _window_text), self.ui.max_rows, theme=self._theme)
+        return html.replace(_CSS, "", 1).replace(self._theme_style, "", 1)
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
@@ -244,7 +247,9 @@ class OpenSearchExplorer(_StoresTab, _IndexesTab, _DocumentsTab, _SearchTab, _Fo
         head.add_class("osx-head")
         tabs = self._tab_bar(_EXPLORER_TABS)
         self.overview_view = w.HTML(layout=layout(width="100%"))
-        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
+        self._theme = _theme_name()
+        self._theme_style = _theme_css(_ROOT, self._theme)
+        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, head, tabs, {
             "stores": self._stores_page(),
             "overview": w.VBox([self.overview_view]),
             "indexes": self._indexes_page(),

@@ -72,6 +72,9 @@ from aws_analyzer.opensearch import (
     vector_summary,
     version_at_least,
 )
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
+from test_lambda_functions import html_widgets
 
 REGION = "us-east-1"
 ACCOUNT = "123456789012"
@@ -1364,3 +1367,16 @@ def test_explorer_reads_in_the_background(region):
         assert x.sample is not None and x.doc is not None
 
     asyncio.run(main())
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(region):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(region)
+    theme_rules = _theme_css("osv", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="osv' in pane.value]
+    assert pages and all('<div class="osv theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

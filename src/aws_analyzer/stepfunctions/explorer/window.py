@@ -13,6 +13,7 @@ from ..._kit.blocks import _Note
 from ..._kit.errors import _error_name, _why
 from ..._kit.fmt import _duration, _plural, human_money
 from ..._kit.text import _clip, _esc, search_rank
+from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, execution_name, parse_execution_ref
@@ -20,7 +21,7 @@ from ..models import ExecutionDetail, ExecutionPage, FailureReport, Overview, St
 from ..analysis import monthly_cost
 from ..analysis.story import ExecutionStory, lambda_steps
 from ..analyzer import StepFunctionsAnalyzer
-from ..style import _CSS, _render_html
+from ..style import _CSS, _ROOT, _render_html
 from ..view import StepFunctionsView, _with_story_run
 from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
@@ -174,10 +175,12 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
 
     def _html(self, blocks: list[Any]) -> str:
         """
-        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it).
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, drawn in the report
+        theme the window opened with, and without the report and theme CSS each one carries (the window's style holds
+        them).
         """
-        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
+        html = _render_html(_for_window(blocks, _window_text), self.ui.max_rows, theme=self._theme)
+        return html.replace(_CSS, "", 1).replace(self._theme_style, "", 1)
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
@@ -203,7 +206,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self.failure_opens.add_class("sfx-opens")
         self.failures_view = w.HTML(layout=layout(width="100%"))
         self.definition_view = w.HTML(layout=layout(width="100%"))
-        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
+        self._theme = _theme_name()
+        self._theme_style = _theme_css(_ROOT, self._theme)
+        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, head, tabs, {
             "machines": self._machines_page(),
             "overview": w.VBox([self.overview_view]),
             "executions": self._executions_page(),

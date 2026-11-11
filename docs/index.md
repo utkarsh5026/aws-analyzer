@@ -385,7 +385,7 @@ set_theme("soft")   # "console", "soft", "editorial", "brand" or "classic"; None
 
     The look before themes: thin borders and tinted boxes. `set_theme("classic")`
 
-The `AWS_ANALYZER_THEME` environment variable picks the theme for every notebook (`AWS_ANALYZER_THEME=editorial`). The explorer and chat windows keep their own look, and text output reads the same in every theme.
+The `AWS_ANALYZER_THEME` environment variable picks the theme for every notebook (`AWS_ANALYZER_THEME=editorial`). The explorer windows draw their reports in the theme too (the one set when the window opens). The chat windows keep their own look, and text output reads the same in every theme.
 
 <div class="cta" markdown>
 

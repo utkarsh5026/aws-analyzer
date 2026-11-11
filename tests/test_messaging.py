@@ -52,6 +52,9 @@ from aws_analyzer.messaging.explorer.frame import _window_text
 from aws_analyzer.messaging.style import _render_html
 
 from fake_messaging import ACCOUNT, REGION, seed
+from aws_analyzer import set_theme
+from aws_analyzer._kit.themes import _theme_css
+from test_lambda_functions import html_widgets
 
 QUEUE = f"arn:aws:sqs:{REGION}:{ACCOUNT}:{{}}"
 TOPIC = f"arn:aws:sns:{REGION}:{ACCOUNT}:orders-events"
@@ -564,3 +567,16 @@ def test_live_watches_on_the_loop(core, monkeypatch):
         assert not x.watching and "watch" not in x._tasks
 
     asyncio.run(main())
+
+
+def test_explorer_draws_its_reports_in_the_theme_set(core):
+    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    # _html drops them from each page.
+    set_theme("soft")
+    x = explorer(core)
+    theme_rules = _theme_css("msg", "soft")
+    pages = [pane.value for pane in html_widgets(x.root) if 'class="msg' in pane.value]
+    assert pages and all('<div class="msg theme-soft">' in page for page in pages)
+    assert x.root.children[0].value.count(theme_rules) == 1
+    assert not any(theme_rules in page for page in pages)

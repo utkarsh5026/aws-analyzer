@@ -279,8 +279,8 @@ def set_theme(name: str | None) -> str:
     tiles on a light fill), 'editorial' (a serif title, large figures, almost no boxes), 'brand' (the guide site's
     navy, indigo and amber highlighter) and 'classic' (thin borders and tinted boxes, the look before themes). Each
     suits a light or a dark notebook. None goes back to the default: the theme the AWS_ANALYZER_THEME environment
-    variable names, else 'console'. The windows (explorers and chats) keep their own look, and text output is the
-    same in every theme.
+    variable names, else 'console'. The explorer windows draw their reports in the theme set when they open; the
+    chat windows keep their own look, and text output is the same in every theme.
     """
     global _chosen
     _chosen = None if name is None else _theme_from(name)

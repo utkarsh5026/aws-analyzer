@@ -12,6 +12,7 @@ from ..._kit.blocks import _Note
 from ..._kit.errors import _error_name, _why
 from ..._kit.fmt import _plural, human_money
 from ..._kit.text import _clip, _esc
+from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import parse_api_ref
@@ -19,7 +20,7 @@ from ..models import Api, ApiReport, CallPage, Overview, Stage
 from ..analysis import monthly_cost
 from ..analyzer import APIGatewayAnalyzer
 from ..blocks import _ms
-from ..style import _CSS, _render_html
+from ..style import _CSS, _ROOT, _render_html
 from ..view import APIGatewayView
 from .apis import _ApisTab
 from .calls import _CallsTab
@@ -161,10 +162,12 @@ class APIGatewayExplorer(_ApisTab, _RoutesTab, _CallsTab, _Explorer):
 
     def _html(self, blocks: list[Any]) -> str:
         """
-        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it).
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, drawn in the report
+        theme the window opened with, and without the report and theme CSS each one carries (the window's style holds
+        them).
         """
-        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
+        html = _render_html(_for_window(blocks, _window_text), self.ui.max_rows, theme=self._theme)
+        return html.replace(_CSS, "", 1).replace(self._theme_style, "", 1)
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
@@ -191,7 +194,9 @@ class APIGatewayExplorer(_ApisTab, _RoutesTab, _CallsTab, _Explorer):
         self.overview_view = w.HTML(layout=layout(width="100%"))
         self.performance_view = w.HTML(layout=layout(width="100%"))
         self.stages_view = w.HTML(layout=layout(width="100%"))
-        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
+        self._theme = _theme_name()
+        self._theme_style = _theme_css(_ROOT, self._theme)
+        self._frame(_CSS + _EXPLORER_CSS + self._theme_style, head, tabs, {
             "apis": self._apis_page(),
             "overview": w.VBox([self.overview_view]),
             "routes": self._routes_page(),
