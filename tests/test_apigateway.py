@@ -552,9 +552,11 @@ def test_explorer_reads_in_the_background(core, world):
 
 
 def test_explorer_draws_its_reports_in_the_theme_set(core):
-    # Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
-    # a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
-    # _html drops them from each page.
+    """
+    Like the Lambda and S3 explorers, the window draws its reports in the theme set_theme() names when it opens, so
+    a tab looks like the same command run in a cell. Its hidden style widget holds that theme's rules once, and
+    _html drops them from each page.
+    """
     set_theme("soft")
     x = explorer(core)
     theme_rules = _theme_css("apg", "soft")
