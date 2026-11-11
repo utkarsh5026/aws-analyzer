@@ -1342,6 +1342,7 @@ window follows them.
 | `save_file_list(match=None, path=None, link="s3", expires=3600)` | Saves the knowledge base's files as a text file, one per line, sorted by path, with a **⬇ Download** link that saves it on your computer: each file's `s3://` path, `link="https"` a link that opens it in a browser (presigned, for `expires` seconds) or `link="key"` its path in the bucket. `match=` keeps those whose path contains it; `path` defaults to `<knowledge base>-files.txt` beside the notebook |
 | `kbs(match=None)` | The knowledge bases in the region: name, ID, status, description and when each changed; `match=` finds them by name, ID or description |
 | `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
+| `inference_profiles(match=None)` | Every inference profile in the region, yours and AWS's cross-region ones (US, Europe, Global, ...): what to pass as `model=`, the model each serves, the regions it sends requests to and $ per 1M tokens. Says when a global profile serves the model in use for less; `inference_profiles("global")` keeps those whose ID, name, kind or model holds it |
 
 ### Settings with short names
 
@@ -1458,7 +1459,7 @@ the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations
 | `bedrock:ListKnowledgeBaseDocuments` | The **Files** list, `files`, `save_file_list`, and `files=` by name (an `s3://` path works without it) |
 | `s3:GetObject` on the knowledge base's files | Only to open the links `save_file_list(link="https")` writes, in your browser |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
-| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model list, `models`, and turning `model="sonnet"` into an ID |
+| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model list, `models`, `inference_profiles`, and turning `model="sonnet"` into an ID |
 
 A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read stays empty,
 with a note naming the missing permission, and its search box takes an ID instead. The

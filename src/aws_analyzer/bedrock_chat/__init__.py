@@ -88,9 +88,9 @@ from .._bedrock.files import (
     FILE_LIST_LINKS, SavedFileList, file_list_lines, file_list_name, parse_list_link, presigned_url, write_file_list,
 )
 from .._bedrock.filters import DATA_SOURCE_KEY, build_filter, data_source_filter, describe_sources, with_data_sources
-from .._bedrock.foundation_models import parse_models
+from .._bedrock.foundation_models import parse_models, parse_profiles
 from .._bedrock.helpers import SEARCHABLE, parse_kb_ref, source_name, split_metadata
-from .._bedrock.models import Citation, KBDocument, ModelInfo, Passage
+from .._bedrock.models import Citation, InferenceProfile, KBDocument, ModelInfo, Passage
 from .._bedrock.parsing import match_expected, parse_document, parse_passage, parse_retrieve
 from .._bedrock.prices import (
     BEDROCK_PRICES, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, GLOBAL_MODEL_PRICES, MODEL_PRICES, model_price, short_model,
@@ -113,7 +113,9 @@ from .analysis.request import (
     build_request, build_retrieve_request, coerce_setting, describe_setting, normalize_settings, retrieve_settings,
     settings_from_request, validate_request,
 )
-from .analysis.findings import answer_cost, answer_findings, cited_ranks, compare_findings, settings_findings
+from .analysis.findings import (
+    answer_cost, answer_findings, cited_ranks, compare_findings, profile_findings, settings_findings,
+)
 from .analysis.batches import (
     Batch, BatchItem, batch_changes, batch_estimate, batch_findings, expected_at, format_questions, item_verdict,
     parse_questions, question_list,
@@ -158,6 +160,7 @@ __all__ = [
     "FileList",
     "KBDocument",
     "KnowledgeBase",
+    "InferenceProfile",
     "ModelInfo",
     "Passage",
     "RunScore",
@@ -211,6 +214,7 @@ __all__ = [
     "parse_kb_ref",
     "parse_list_link",
     "parse_models",
+    "parse_profiles",
     "parse_passage",
     "parse_questions",
     "parse_rag",
@@ -223,6 +227,7 @@ __all__ = [
     "question_list",
     "question_terms",
     "rank_runs",
+    "profile_findings",
     "ranking_findings",
     "read_runs",
     "request_schema",

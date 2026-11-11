@@ -1,6 +1,6 @@
 """
 The dataclasses Bedrock's answers are read into: a knowledge base's document, a retrieved passage, a
-citation and a foundation model.
+citation, a foundation model and an inference profile.
 """
 
 from __future__ import annotations
@@ -114,3 +114,51 @@ class ModelInfo:
     price_in: float | None = None
     price_out: float | None = None
     status: str = "ACTIVE"
+
+
+@dataclass
+class InferenceProfile:
+    """
+    A way to call a model that Bedrock offers beside the model's own ID: a cross-region profile AWS defines, which
+    sends each request to whichever of its regions has room, or an application profile your account made to track
+    one application's cost and usage.
+
+        id         'us.anthropic.claude-opus-5-v1:0', or an application profile's short ID
+        invoke_id  what to pass as model=: the ID, or an application profile's ARN
+        geography  where a cross-region profile sends requests: 'US', 'Europe', 'Global', ... ('' for yours)
+        models     the foundation model IDs it serves
+        regions    the regions a request can be sent to, when the profile names them
+        price_in   USD per 1M input tokens (None when it isn't in the price table), and price_out per 1M output
+        status     ACTIVE, or what Bedrock says instead
+    """
+
+    id: str
+    name: str = ""
+    arn: str = ""
+    invoke_id: str = ""
+    is_yours: bool = False
+    geography: str = ""
+    models: list[str] = field(default_factory=list)
+    regions: list[str] = field(default_factory=list)
+    description: str = ""
+    status: str = "ACTIVE"
+    price_in: float | None = None
+    price_out: float | None = None
+
+    @property
+    def kind(self) -> str:
+        """
+        'yours', 'cross-region · US' or 'cross-region · Global'.
+        """
+        if self.is_yours:
+            return "yours"
+        return f"cross-region · {self.geography}" if self.geography else "cross-region"
+
+    @property
+    def sends_to(self) -> str:
+        """
+        'us-east-1, us-west-2', or 'any region' for a global profile that names none.
+        """
+        if self.regions:
+            return ", ".join(self.regions)
+        return "any region" if self.geography == "Global" else "-"

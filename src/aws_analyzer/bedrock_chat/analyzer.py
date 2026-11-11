@@ -20,9 +20,11 @@ from .._bedrock.estimates import estimate_tokens
 from .._bedrock.files import (
     SavedFileList, _link_seconds, _list_target, file_list_name, parse_list_link, presigned_url, write_file_list,
 )
-from .._bedrock.foundation_models import PROFILE_TYPES, names_profile, parse_models, profile_target, unique_profiles
+from .._bedrock.foundation_models import (
+    PROFILE_TYPES, names_profile, parse_models, parse_profiles, profile_target, unique_profiles,
+)
 from .._bedrock.helpers import _KB_ID_RE, _match_kb, _match_sources, _model_id, _session_expired, parse_kb_ref
-from .._bedrock.models import KBDocument, ModelInfo
+from .._bedrock.models import InferenceProfile, KBDocument, ModelInfo
 from .._bedrock.parsing import parse_document, parse_retrieve
 from .._bedrock.prices import BEDROCK_PRICES, DEFAULT_MODEL, MODEL_PRICES, _MODEL_ALIASES, _family_match, short_model
 from .._kit.analyzer import _BaseAnalyzer
@@ -77,6 +79,7 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         self.default_model = default_model  # what model=None means (None: DEFAULT_MODEL)
         self._models: list[ModelInfo] | None = None
         self._profiles: list[dict[str, Any]] = []
+        self._profiles_listed = False
         self.model_errors: dict[str, str] = {}  # 'profiles' -> error code, when inference profiles can't be listed
         self._names: dict[str, str] | None = None  # knowledge base ID -> name
         self._kbs: list[KnowledgeBase] | None = None
@@ -404,6 +407,7 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
                 profiles = None  # models that need a profile say which one when called
                 self.model_errors["profiles"] = _error_name(exc)
             self._profiles = profiles or []
+            self._profiles_listed = profiles is not None
             self._models = parse_models(
                 summaries, profiles, self.region, self.model_prices
             )
@@ -414,6 +418,29 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
             m
             for m in self._models
             if wanted in f"{m.id} {m.invoke_id} {m.name} {m.provider}".lower()
+        ]
+
+    def inference_profiles(
+        self, match: str | None = None, *, refresh: bool = False
+    ) -> list[InferenceProfile]:
+        """
+        Every inference profile in this region that model= takes: the ones your account made, then the cross-region
+        ones for this region's geography, then the global ones. Cached with the model list. match= keeps profiles
+        whose ID, name, ARN, geography or model contains it.
+        """
+        if refresh or not self._profiles_listed:
+            self._profiles = self._inference_profiles(self._bedrock_client())
+            self._profiles_listed = True
+            if self.model_errors.pop("profiles", None):
+                self._models = None
+        profiles = parse_profiles(self._profiles, self.region, self.model_prices)
+        if not match:
+            return profiles
+        wanted = str(match).lower()
+        return [
+            p
+            for p in profiles
+            if wanted in f"{p.id} {p.name} {p.arn} {p.kind} {' '.join(p.models)}".lower()
         ]
 
     def resolve_model(self, name: str | None = None) -> tuple[str, str]:

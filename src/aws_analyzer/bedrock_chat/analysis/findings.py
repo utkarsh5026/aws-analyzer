@@ -10,8 +10,10 @@ from typing import Any
 from ..._bedrock.estimates import estimate_tokens, generation_cost, query_cost
 from ..._bedrock.filters import describe_sources
 from ..._bedrock.helpers import _REFUSAL, source_name
-from ..._bedrock.models import Passage
+from ..._bedrock.models import InferenceProfile, Passage
+from ..._bedrock.prices import _per_million
 from ..._kit.fmt import _plural
+from ..._kit.render import _call
 
 from ..models import Answer
 from .choices import describe_files
@@ -218,3 +220,39 @@ def answer_cost(
         return None
     return generation + query_cost(1, a.settings.get("reranker") or False, prices,
                                    question_tokens=estimate_tokens(a.question))
+
+
+def _cheaper_global(used: InferenceProfile, profiles: list[InferenceProfile]) -> InferenceProfile | None:
+    """
+    The global profile that serves the same model as `used` for less, if there is one.
+    """
+    if used.is_yours or used.geography == "Global" or used.price_in is None or used.price_out is None:
+        return None
+    for profile in profiles:
+        is_same_model = profile.geography == "Global" and set(profile.models) & set(used.models)
+        if not is_same_model or profile.price_in is None or profile.price_out is None:
+            continue
+        if profile.price_in + profile.price_out < used.price_in + used.price_out:
+            return profile
+    return None
+
+
+def profile_findings(profiles: list[InferenceProfile], in_use: str = "") -> list[tuple[str, str]]:
+    """
+    What the inference profiles say about the one in use (`in_use`: the ID or ARN questions are sent to): a
+    global profile that serves the same model for less.
+    """
+    used = next((p for p in profiles if in_use and in_use in (p.invoke_id, p.id, p.arn)), None)
+    if used is None:
+        return []
+    cheaper = _cheaper_global(used, profiles)
+    if cheaper is None:
+        return []
+    return [(
+        "info",
+        f"{cheaper.id} costs less than the profile in use: {_per_million(cheaper.price_in)} in and "
+        f"{_per_million(cheaper.price_out)} out per 1M tokens, instead of {_per_million(used.price_in)} and "
+        f"{_per_million(used.price_out)}. It can send a request to any region, so keep {used.id} when your data has "
+        f"to stay in {', '.join(used.regions) or 'its own regions'}. To switch, "
+        f"{_call('use', model=cheaper.invoke_id)}.",
+    )]

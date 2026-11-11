@@ -4,7 +4,7 @@ The chat window's header fields: a picker with a searchable list, and one line o
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -26,7 +26,8 @@ _PICKER_ROWS = 40  # lines a picker's list shows at once; the search box finds t
 @dataclass
 class _Choice:
     """
-    One line of a picker's list.
+    One line of a picker's list. `section` is what its part of the list holds, in the singular ('model'), and ''
+    in a list without parts; `key` names its line when another line of the list sets the same value.
     """
 
     value: str  # what picking it sets: a knowledge base ID, a model ID, data source IDs, a file's s3:// path
@@ -36,9 +37,42 @@ class _Choice:
     badge: str = ""  # beside the name on the field once it's picked, instead of the detail
     tone: str = ""  # the dot before it: 'ok' | 'warn' | 'bad', or '' for none
     also: tuple[str, ...] = ()  # more text the search box finds it by (an ARN, a model's foundation model ID)
+    section: str = ""
+    key: str = ""
 
     def fields(self) -> tuple[str, ...]:
         return (self.title, self.value, self.detail, self.note, *self.also)
+
+    @property
+    def line(self) -> str:
+        return self.key or self.value
+
+
+@dataclass
+class _Section:
+    """
+    One part of a picker's list, under its own heading: what the search found in it, and the lines shown.
+    """
+
+    noun: str
+    total: int
+    found: list[_Choice] = field(default_factory=list)
+    shown: list[_Choice] = field(default_factory=list)
+
+    @property
+    def heading(self) -> str:
+        """
+        'Inference profiles · 3 of 11, the first 2 shown'.
+        """
+        count = f"{len(self.found):,} of {self.total:,}" if len(self.found) < self.total else f"{self.total:,}"
+        cut = f", the first {len(self.shown):,} shown" if len(self.shown) < len(self.found) else ""
+        return f"{self.noun}s".capitalize() + f" · {count}{cut}"
+
+    def count(self, searching: bool) -> str:
+        """
+        '3 of 11 inference profiles' while searching, else '11 inference profiles'.
+        """
+        return (f"{len(self.found):,} of " if searching else "") + _plural(self.total, self.noun)
 
 
 class _ChoicePicker(_Picker):
@@ -52,6 +86,9 @@ class _ChoicePicker(_Picker):
     what it found marked. Enter picks the first line; when nothing matches, on_text gets the text (an ID the list
     doesn't hold). With multi=True a click ticks or unticks a line and the list stays open. on_pick gets the value
     picked (the values, with multi); setting the value from code (set_value) doesn't call it.
+
+    Choices that name a `section` are listed in parts, each under a heading with its count (the model list's Models
+    and Inference profiles), in the order the parts first appear, and each part shows its share of the list's lines.
 
     While a list is open, the window's backdrop (an invisible button over the rest of the window, under the open
     field) takes a click anywhere else and closes it, as a dropdown would.
@@ -70,6 +107,7 @@ class _ChoicePicker(_Picker):
         self.on_open, self.query, self.describe = on_open, query, describe
         self.choices: list[_Choice] = []
         self.picked: list[str] = []  # the value picked (one, unless multi)
+        self.headings: dict[str, Any] = {}
         self.note = ""  # more to say under the list (only part of it was listed)
         self.tip_off = ""  # the field's tooltip while it's disabled
         self._draw()
@@ -137,6 +175,32 @@ class _ChoicePicker(_Picker):
     def _key(self, c: _Choice) -> str:
         return c.value
 
+    def matches(self) -> list[_Choice]:
+        """
+        The choices the search box finds, best first, a section's together and the sections in their order.
+        """
+        order = list(dict.fromkeys(c.section for c in self.choices))
+        return sorted(super().matches(), key=lambda c: order.index(c.section))
+
+    def _sections(self, found: list[_Choice]) -> list[_Section]:
+        """
+        The list's parts that hold something the search found, each with the lines it shows: the list's
+        _PICKER_ROWS, shared out evenly.
+        """
+        nouns = list(dict.fromkeys(c.section for c in self.choices))
+        sections = [_Section(noun or self.noun, sum(c.section == noun for c in self.choices),
+                             [c for c in found if c.section == noun]) for noun in nouns]
+        sections = [section for section in sections if section.found]
+        for section in sections:
+            section.shown = section.found[:_PICKER_ROWS // len(sections)]
+        return sections
+
+    def _heading(self, section: _Section) -> Any:
+        if section.noun not in self.headings:
+            self.headings[section.noun] = self.w.HTML(layout=self.w.Layout(width="100%"))
+        self.app._set(self.headings[section.noun], _wrap(f'<div class="opg">{_esc(section.heading)}</div>'))
+        return self.headings[section.noun]
+
     def _choice(self, value: str) -> _Choice | None:
         return next((c for c in self.choices if c.value == value), None)
 
@@ -170,7 +234,7 @@ class _ChoicePicker(_Picker):
             self._draw_list()
 
     def _row(self, c: _Choice, words: list[str], dots: bool) -> Any:
-        row, button, text = self._line(c.value)
+        row, button, text = self._line(c.value, c.line)
         on = c.value in self.picked
         _class_if(row, "kbc-on", on)
         tip = " · ".join(part for part in (c.title, c.detail, c.note) if part)
@@ -190,10 +254,16 @@ class _ChoicePicker(_Picker):
     def _draw_list(self) -> None:
         text = str(self.search.value or "").strip()
         found = self.matches()
-        shown = found[:_PICKER_ROWS]
+        sections = self._sections(found)
+        shown = [c for section in sections for c in section.shown]
         words = (self.query(text) if self.query else text).split()
         dots = any(c.tone for c in self.choices)
-        self.list.children = [self._row(c, words, dots) for c in shown]
+        has_parts = any(c.section for c in self.choices)
+        lines: list[Any] = []
+        for section in sections:
+            lines += [self._heading(section)] if has_parts else []
+            lines += [self._row(c, words, dots) for c in section.shown]
+        self.list.children = lines
         self.shown = [c.value for c in shown]
         level, line = "", ""
         if self.message:
@@ -206,10 +276,10 @@ class _ChoicePicker(_Picker):
             line = f"No {self.noun} matches {text!r}." + (
                 " Enter tries it as an ID." if self.on_text is not None and not self.multi else "")
         else:
-            line = (f"{len(found):,} of {_plural(len(self.choices), self.noun)}" if text
-                    else _plural(len(self.choices), self.noun))
+            line = " · ".join(section.count(bool(text)) for section in sections)
             if len(found) > len(shown):
-                line += f", the first {len(shown):,} shown: type more to narrow them"
+                line += (": type more to narrow them" if has_parts
+                         else f", the first {len(shown):,} shown: type more to narrow them")
             if self.multi:
                 line += (f" · {len(self.picked):,} ticked" if self.picked else "") + " · a click ticks or unticks one"
             elif text:

@@ -13,7 +13,8 @@ from ..._bedrock.blocks import _file_list_blocks
 from ..._bedrock.files import _link_seconds, _list_target, _notebook_href, file_list_name, parse_list_link
 from ..._bedrock.filters import describe_sources
 from ..._bedrock.helpers import SEARCHABLE, source_name
-from ..._bedrock.prices import _per_million
+from ..._bedrock.models import InferenceProfile
+from ..._bedrock.prices import _per_million, short_model
 from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone
 from ..._kit.errors import _Hint, _why
 from ..._kit.fmt import _plural, human_age
@@ -22,6 +23,7 @@ from ..._kit.text import _clip
 from ..._kit.view import _friendly_errors
 
 from ..analysis.choices import describe_files, file_labels, match_kbs
+from ..analysis.findings import profile_findings
 
 
 class _KnowledgeBaseCommands:
@@ -277,5 +279,78 @@ class _KnowledgeBaseCommands:
                 f"Couldn't list inference profiles ({_why(self.core.model_errors['profiles'], profiles)}), so models "
                 "that need one show 'inference profile (unknown)'.", "warn"))
         if models:
-            blocks.append(_Next([(_call("use", model=models[0].invoke_id), "ask with this model")]))
+            blocks.append(_Next([(_call("use", model=models[0].invoke_id), "ask with this model"),
+                                 ("inference_profiles()", "every inference profile here, and the regions each sends "
+                                                          "requests to")]))
         self._show(blocks)
+
+    @_friendly_errors
+    def inference_profiles(self, match: str | None = None) -> None:
+        """
+        Every inference profile you can chat through here: the ones your account made and AWS's cross-region ones
+        (US, Europe, Global, ...), with what to pass as model=, the model each serves, the regions it sends
+        requests to and $ per 1M tokens in and out. match= keeps those whose ID, name, kind or model contains it:
+        inference_profiles('global'), inference_profiles('sonnet').
+        """
+        with self._progress("Listing inference profiles", unit="profiles"):
+            every = self.core.inference_profiles()
+            profiles = self.core.inference_profiles(match) if match else every
+            try:
+                current = self.core.resolve_model(self.model)[0]
+            except (ValueError, ClientError, BotoCoreError):
+                current = ""
+        used = next((p for p in every if current and current in (p.invoke_id, p.id)), None)
+        count = f"{len(profiles)} of {len(every)}" if match else f"{len(profiles)}"
+        blocks: list[Any] = [
+            _Title(f"Inference profiles in {self.core.region} ({count})",
+                   (f"matching {match!r} · " if match else "") + "other ways to call a model, each passed as model=; "
+                   "$ per 1M tokens at " + self._price_basis(models=True)),
+            _Cards([("Inference profiles", f"{len(every):,}"),
+                    ("Yours", f"{sum(p.is_yours for p in every):,}"),
+                    ("Cross-region", f"{sum(not p.is_yours for p in every):,}"),
+                    ("In use", (used.name or used.id) if used else "none")]),
+            _Findings(profile_findings(every, current)),
+            _Table(["Pass as model=", "Name", "Kind", "Model", "Sends requests to", "$ in / 1M", "$ out / 1M"],
+                   [self._profile_row(p, every, current) for p in profiles], max_rows=0),
+        ]
+        blocks.append(self._profiles_note(every, profiles, match))
+        if profiles:
+            blocks.append(_Next([(_call("use", model=self._profile_name(profiles[0], every)),
+                                  "ask through this profile"),
+                                 ("models()", "the models themselves, and which profile each is called through")]))
+        self._show(blocks)
+
+    @staticmethod
+    def _profile_name(profile: InferenceProfile, every: list[InferenceProfile]) -> str:
+        """
+        What to pass as model= for a profile: its ID, or for one your account made its name, which is shorter than
+        its ARN, unless another of yours has the same name.
+        """
+        if not profile.is_yours:
+            return profile.invoke_id
+        same_name = [p for p in every if p.is_yours and p.name == profile.name]
+        return profile.name if profile.name and len(same_name) == 1 else profile.invoke_id
+
+    def _profile_row(self, profile: InferenceProfile, every: list[InferenceProfile], current: str) -> list[Any]:
+        is_used = bool(current) and current in (profile.invoke_id, profile.id)
+        serves = ", ".join(short_model(model) for model in profile.models) or "-"
+        kind: Any = profile.kind
+        if profile.status != "ACTIVE":
+            kind = _Tone(f"{profile.kind} ({profile.status.lower()})", "warn")
+        return [self._profile_name(profile, every) + (" (in use)" if is_used else ""), profile.name or "-", kind,
+                serves, profile.sends_to, _per_million(profile.price_in), _per_million(profile.price_out)]
+
+    def _profiles_note(self, every: list[InferenceProfile], profiles: list[InferenceProfile],
+                       match: str | None) -> _Note:
+        """
+        What an inference profile is, in a sentence, or why the table is empty.
+        """
+        if not every:
+            return _Note(f"There are no inference profiles in {self.core.region}. Models are called by their own "
+                         "ID here: models() lists them.")
+        if not profiles:
+            return _Note(f"No inference profile's ID, name, kind or model holds {match!r}. inference_profiles() "
+                         f"lists all {len(every)}.", "warn")
+        return _Note("A cross-region profile lets Bedrock send each request to whichever of its regions has room, "
+                     "and some models can only be called through one. A profile of yours calls one model and "
+                     "keeps its cost and usage apart, under the profile's own name in your bill.")

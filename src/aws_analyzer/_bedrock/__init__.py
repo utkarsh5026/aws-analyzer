@@ -40,9 +40,9 @@ from .prices import (
 )
 from .helpers import SEARCHABLE, parse_kb_ref, source_name, split_metadata
 from .words import best_snippet, question_terms
-from .models import Citation, KBDocument, ModelInfo, Passage
+from .models import Citation, InferenceProfile, KBDocument, ModelInfo, Passage
 from .parsing import match_expected, parse_document, parse_passage, parse_retrieve
-from .foundation_models import parse_models
+from .foundation_models import parse_models, parse_profiles
 from .filters import DATA_SOURCE_KEY, build_filter, data_source_filter, describe_sources, with_data_sources
 from .estimates import estimate_tokens, generation_cost, query_cost
 from .files import (
@@ -59,6 +59,7 @@ __all__ = [
     "MODEL_PRICES",
     "SEARCHABLE",
     "Citation",
+    "InferenceProfile",
     "KBDocument",
     "ModelInfo",
     "Passage",
@@ -79,6 +80,7 @@ __all__ = [
     "parse_list_link",
     "parse_models",
     "parse_passage",
+    "parse_profiles",
     "parse_retrieve",
     "presigned_url",
     "query_cost",

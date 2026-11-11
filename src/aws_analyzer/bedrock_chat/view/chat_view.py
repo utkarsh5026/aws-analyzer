@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._bedrock.filters import describe_sources
+from ..._bedrock.foundation_models import names_profile
 from ..._bedrock.helpers import source_name
 from ..._bedrock.models import Passage
 from ..._bedrock.prices import DEFAULT_MODEL, MODEL_PRICES, short_model
@@ -70,7 +71,8 @@ class BedrockChatView(_ChatCommands, _TestCommands, _RunsCommands, _SettingsComm
         "🧪 Test a list of questions": ("ask_all", "sweep", "results"),
         "📈 Keep and compare test runs": ("runs", "compare_runs", "use_run", "save_runs", "load_runs"),
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request", "code"),
-        "📚 Knowledge base, files and model": ("use", "kbs", "files", "save_file_list", "models"),
+        "📚 Knowledge base, files and model": ("use", "kbs", "files", "save_file_list", "models",
+                                                 "inference_profiles"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -264,6 +266,9 @@ class BedrockChatView(_ChatCommands, _TestCommands, _RunsCommands, _SettingsComm
         for m in self.core._models or []:
             if wanted in (m.invoke_id, m.id, m.arn):
                 return m.name or m.id
+        for profile in self.core._profiles:
+            if names_profile(wanted, profile):
+                return profile.get("inferenceProfileName") or short_model(wanted)
         return short_model(wanted)
 
     def _use_kb(self, kb_id: str) -> None:

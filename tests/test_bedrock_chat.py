@@ -1810,6 +1810,154 @@ def test_ui_use_kbs_and_models(core, capsys):
     assert "kbs() lists all 2." in out
 
 
+def profile(profile_id, name, model, *, regions=("us-east-1", "us-west-2"), kind="SYSTEM_DEFINED"):
+    folder = "application-inference-profile" if kind == "APPLICATION" else "inference-profile"
+    return {"inferenceProfileName": name, "inferenceProfileId": profile_id, "status": "ACTIVE", "type": kind,
+            "inferenceProfileArn": f"arn:aws:bedrock:us-east-1:{ACCOUNT}:{folder}/{profile_id}",
+            "models": [{"modelArn": f"arn:aws:bedrock:{region}::foundation-model/{model}"} for region in regions]}
+
+
+TEAM_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:application-inference-profile/ab12cd34ef56"
+EVERY_PROFILE = [
+    *PROFILES,
+    profile(f"global.{SONNET}", "Global Claude Sonnet 5", SONNET, regions=("",)),
+    profile(f"eu.{SONNET}", "EU Claude Sonnet 5", SONNET, regions=("eu-west-1", "eu-central-1")),
+    profile("ab12cd34ef56", "team-chatbot", SONNET, regions=("us-east-1",), kind="APPLICATION"),
+]
+
+
+def profile_clients(profiles=EVERY_PROFILE, denied=False):
+    """
+    fakes(), with these inference profiles listed by type as Bedrock lists them, or refused.
+    """
+    def listed(typeEquals="SYSTEM_DEFINED", **_):
+        if denied:
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "ListInferenceProfiles")
+        return {"inferenceProfileSummaries": [p for p in profiles if p["type"] == typeEquals]}
+
+    clients = fakes()
+    clients["bedrock"] = Fake("bedrock", {"list_foundation_models": lambda **_: {"modelSummaries": MODEL_LIST},
+                                          "list_inference_profiles": listed})
+    return clients
+
+
+def test_parse_profiles_reads_every_inference_profile():
+    profiles = chatmod.parse_profiles(EVERY_PROFILE, "us-east-1")
+    assert [p.id for p in profiles][:2] == ["ab12cd34ef56", f"us.{HAIKU}"]
+    assert [p.geography for p in profiles[-2:]] == ["Global", "Europe"]
+    by_id = {p.id: p for p in profiles}
+    yours, us, world = by_id["ab12cd34ef56"], by_id[f"us.{SONNET}"], by_id[f"global.{SONNET}"]
+    assert (yours.kind, yours.invoke_id, yours.models, yours.regions) == ("yours", TEAM_PROFILE, [SONNET],
+                                                                         ["us-east-1"])
+    assert (us.kind, us.invoke_id, us.sends_to) == ("cross-region · US", f"us.{SONNET}", "us-east-1")
+    assert (world.kind, world.regions, world.sends_to) == ("cross-region · Global", [], "any region")
+    assert (yours.price_in, yours.price_out) == chatmod.model_price(SONNET)
+    assert (world.price_in, world.price_out) == chatmod.model_price(f"global.{SONNET}")
+    assert chatmod.parse_profiles([]) == []
+
+
+def test_profile_findings_name_a_cheaper_global_profile():
+    profiles = chatmod.parse_profiles(EVERY_PROFILE, "us-east-1")
+    [(level, message)] = chatmod.profile_findings(profiles, f"us.{SONNET}")
+    assert level == "info" and message.startswith(f"global.{SONNET} costs less than the profile in use: ")
+    assert "so keep us.anthropic.claude-sonnet-5 when your data has to stay in us-east-1." in message
+    assert message.endswith(f"use(model='global.{SONNET}').")
+    assert chatmod.profile_findings(profiles, f"global.{SONNET}") == []
+    assert chatmod.profile_findings(profiles, TEAM_PROFILE) == []
+    assert chatmod.profile_findings(profiles, "amazon.nova-pro-v1:0") == []
+    same_price = {"claude-sonnet-5": (9.0, 9.0)}
+    assert chatmod.profile_findings(chatmod.parse_profiles(EVERY_PROFILE, "us-east-1", same_price),
+                                    f"us.{SONNET}") == []
+
+
+def test_inference_profiles_are_listed_once_and_matched():
+    clients = profile_clients()
+    core = BedrockChatAnalyzer(clients=clients)
+    assert len(core.inference_profiles()) == 6
+    core.models()
+    listings = [call for call in clients["bedrock"].calls if call[0] == "list_inference_profiles"]
+    assert len(listings) == 4
+    core.inference_profiles()
+    assert len([call for call in clients["bedrock"].calls if call[0] == "list_inference_profiles"]) == 4
+    assert [p.id for p in core.inference_profiles("global")] == [f"global.{SONNET}"]
+    assert [p.name for p in core.inference_profiles("YOURS")] == ["team-chatbot"]
+    assert len(core.inference_profiles("sonnet")) == 4
+    assert core.resolve_model(f"global.{SONNET}")[0] == f"global.{SONNET}"
+
+
+def test_ui_inference_profiles(capsys):
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients()), kb="support-docs", model="sonnet",
+                         mode="text", progress="off")
+    out = run(capsys, ui.inference_profiles)
+    for text in ("Inference profiles in us-east-1 (6)", "Inference profiles: 6", "Yours: 1", "Cross-region: 5",
+                 "In use: US anthropic.claude-sonnet-5", "us.anthropic.claude-sonnet-5 (in use)",
+                 "global.anthropic.claude-sonnet-5 costs less than the profile in use", "cross-region · Europe",
+                 "eu-west-1, eu-central-1", "any region", "use(model='team-chatbot')", "models()"):
+        assert text in out, text
+    assert TEAM_PROFILE not in out
+    out = run(capsys, ui.inference_profiles, "europe")
+    assert "Inference profiles in us-east-1 (1 of 6)" in out and "matching 'europe'" in out
+    assert "use(model='eu.anthropic.claude-sonnet-5')" in out and "team-chatbot" not in out
+    assert "No inference profile's ID, name, kind or model holds 'nope'" in run(capsys, ui.inference_profiles, "nope")
+    assert "inference_profiles()" in run(capsys, ui.models)
+    out = run(capsys, ui.use, model=f"global.{SONNET}")
+    assert "Global Claude Sonnet 5" in out
+
+
+def test_ui_inference_profiles_without_any_or_without_permission(capsys):
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients([])), mode="text", progress="off")
+    out = run(capsys, ui.inference_profiles)
+    assert "Inference profiles in us-east-1 (0)" in out and "There are no inference profiles in us-east-1." in out
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients(denied=True)), mode="text", progress="off")
+    out = run(capsys, ui.inference_profiles)
+    assert "AccessDenied" in out and "Traceback" not in out
+
+
+def test_window_model_list_has_a_section_of_inference_profiles(monkeypatch):
+    in_cell(monkeypatch, 7)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients()), kb="support-docs", mode="html",
+                           progress="off")
+    view._display = lambda shown: None
+    view.app()
+    picker = view._app.model_pick
+    sections = [choice.section for choice in picker.choices]
+    assert sections == ["model"] * 4 + ["inference profile"] * 6
+    assert [choice.title for choice in picker.choices[4:6]] == ["team-chatbot", f"US {HAIKU}"]
+    assert TEAM_PROFILE not in [choice.value for choice in picker.choices[:4]]
+    picker.button.click()
+    headings = [line.value for line in picker.list.children if line in picker.headings.values()]
+    assert ["Models · 4" in headings[0], "Inference profiles · 6" in headings[1]] == [True, True]
+    assert picker.list.children[0] is picker.headings["model"]
+    assert picker.list.children[5] is picker.headings["inference profile"]
+    assert "4 models · 6 inference profiles" in picker.foot.value
+    world = picker._choice(f"global.{SONNET}")
+    assert (world.title, world.badge) == ("Global Claude Sonnet 5", "Global · $2.00 / $10.00")
+    assert world.note == ("inference profile (cross-region · Global) · sends requests to any region · "
+                          "$2.00 / $10.00 per 1M tokens")
+    assert find(picker, "europe") == [f"eu.{SONNET}"]
+    assert "0 of 4 models" not in picker.foot.value and "1 of 6 inference profiles" in picker.foot.value
+    assert [line for line in picker.list.children if line in picker.headings.values()] == [
+        picker.headings["inference profile"]]
+    assert "Inference profiles · 1 of 6" in picker.headings["inference profile"].value
+    assert find(picker, "sonnet") == [f"us.{SONNET}", TEAM_PROFILE, f"us.{SONNET}", f"global.{SONNET}", f"eu.{SONNET}"]
+    assert "1 of 4 models · 4 of 6 inference profiles" in picker.foot.value
+    picker.rows[f"profile:global.{SONNET}"][1].click()
+    assert view.model == f"global.{SONNET}" and "Global Claude Sonnet 5" in picker.face.value
+    assert "The next question goes to Global Claude Sonnet 5." in view._app.status.value
+
+
+def test_window_model_list_is_one_list_without_inference_profiles(monkeypatch):
+    in_cell(monkeypatch, 7)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients([])), kb="support-docs", mode="html",
+                           progress="off")
+    view._display = lambda shown: None
+    view.app()
+    picker = view._app.model_pick
+    picker.button.click()
+    assert not picker.headings and {choice.section for choice in picker.choices} == {""}
+    assert "1 model" in picker.foot.value and picker.shown == ["amazon.nova-pro-v1:0"]
+
+
 def test_search_rank_and_match_kbs():
     assert search_rank("", ["anything"]) == 3  # an empty search finds everything
     assert search_rank("KBID123456", ["support-docs", "KBID123456"]) == 0  # a whole ID

@@ -11,10 +11,14 @@ from typing import Any
 
 from .prices import model_price
 from .helpers import _model_id
-from .models import ModelInfo
+from .models import InferenceProfile, ModelInfo
 
 
 _GEOGRAPHY_PROFILES = {"us": "us.", "eu": "eu.", "ap": "apac.", "ca": "ca.", "sa": "sa."}
+
+_GEOGRAPHY_NAMES = {"us": "US", "eu": "Europe", "apac": "Asia Pacific", "ap": "Asia Pacific", "ca": "Canada",
+                    "sa": "South America", "jp": "Japan", "au": "Australia", "us-gov": "US GovCloud",
+                    "global": "Global"}
 
 PROFILE_TYPES = ("SYSTEM_DEFINED", "APPLICATION")
 
@@ -148,3 +152,55 @@ def _application_profile_model(profile: dict[str, Any],
         price_in=price[0] if price else None,
         price_out=price[1] if price else None,
     )
+
+
+def parse_profiles(
+    profiles: list[dict[str, Any]],
+    region: str = "",
+    model_prices: dict[str, tuple[float, float]] | None = None,
+) -> list[InferenceProfile]:
+    """
+    ListInferenceProfiles summaries -> every inference profile you can pass as model=: the ones your account made
+    first, then this region's geography ('us.' in us-east-1), then the global ones, then the rest, each by name.
+    """
+    geo = _GEOGRAPHY_PROFILES.get(region.split("-")[0], "")
+    ordered = sorted(profiles, key=lambda profile: (profile.get("type") != "APPLICATION",
+                                                    _profile_preference(profile, geo)[0],
+                                                    profile.get("inferenceProfileName", "").lower(),
+                                                    profile.get("inferenceProfileId", "")))
+    return [_profile_info(profile, model_prices) for profile in ordered]
+
+
+def _profile_info(profile: dict[str, Any], model_prices: dict[str, tuple[float, float]] | None) -> InferenceProfile:
+    """
+    One inference profile. A cross-region one is priced by its own ID (a global profile can cost less), and one
+    your account made as the model it serves.
+    """
+    profile_id = profile.get("inferenceProfileId", "")
+    is_yours = profile.get("type") == "APPLICATION"
+    model_arns = [served.get("modelArn", "") for served in profile.get("models") or []]
+    models = list(dict.fromkeys(_model_id(arn) for arn in model_arns if arn))
+    priced_as = models[0] if is_yours and models else profile_id
+    price = model_price(priced_as, model_prices)
+    return InferenceProfile(
+        id=profile_id,
+        name=profile.get("inferenceProfileName", ""),
+        arn=profile.get("inferenceProfileArn", ""),
+        invoke_id=profile_target(profile)[0],
+        is_yours=is_yours,
+        geography="" if is_yours else _GEOGRAPHY_NAMES.get(profile_id.split(".", 1)[0], ""),
+        models=models,
+        regions=_arn_regions(model_arns),
+        description=profile.get("description", ""),
+        status=profile.get("status", "ACTIVE"),
+        price_in=price[0] if price else None,
+        price_out=price[1] if price else None,
+    )
+
+
+def _arn_regions(arns: list[str]) -> list[str]:
+    """
+    The regions named in a list of ARNs, each once, in order ('arn:aws:bedrock:us-east-1::...' -> 'us-east-1').
+    """
+    regions = [arn.split(":")[3] for arn in arns if arn.count(":") >= 4]
+    return list(dict.fromkeys(region for region in regions if region))

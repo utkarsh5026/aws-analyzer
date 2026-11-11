@@ -242,9 +242,9 @@ _EXTRA_CSS = """\
 .kbc .fbl{font-size:12px;opacity:.65;margin-right:2px;white-space:nowrap}
 .kbc .fxl{font-size:10px;font-weight:650;text-transform:lowercase;color:var(--kt-comment);white-space:nowrap}
 .kbc .fxv{display:flex;align-items:center;gap:7px;min-width:0;margin-top:2px;font-size:13px;white-space:nowrap}
-.kbc .fxv b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 0 auto;max-width:100%}
+.kbc .fxv b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;max-width:100%}
 .kbc .fxv b.fxe{font-weight:400;opacity:.5}
-.kbc .fxb{font-size:11.5px;opacity:.55;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 10 auto}
+.kbc .fxb{font-size:11.5px;opacity:.55;overflow:hidden;text-overflow:ellipsis;min-width:min(7em,100%);flex:0 100000 auto}
 .kbc .fxb.id,.kbc .opi{font-family:var(--kt-mono);font-size:11px}
 .kbc .chev{position:absolute;right:14px;top:50%;width:7px;height:7px;margin-top:-6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(45deg);opacity:.5;transition:transform .15s,margin-top .15s}
 .kbc-open .kbc .chev{transform:rotate(225deg);margin-top:-2px;opacity:.85;color:var(--kc-accent)}
@@ -265,6 +265,7 @@ _EXTRA_CSS = """\
 .kbc .op.on .opk::after{content:"\\2713"}
 .kbc .op.multi .opk{border:1.5px solid var(--kc-line-2);border-radius:5px}
 .kbc .op.multi.on .opk{background:var(--kc-accent);border-color:var(--kc-accent);color:#fff}
+.kbc .opg{font-size:10px;font-weight:650;text-transform:lowercase;color:var(--kt-comment);padding:9px 8px 3px;white-space:nowrap}
 .kbc .opf{font-size:11px;opacity:.6;padding:7px 8px 0;margin-top:4px;border-top:1px solid var(--kc-line);line-height:1.4}
 .kbc .opf.warn{opacity:1;color:var(--kt-warn)}
 .kbc .opf.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
