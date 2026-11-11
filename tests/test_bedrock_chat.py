@@ -1913,25 +1913,49 @@ def test_ui_inference_profiles_without_any_or_without_permission(capsys):
     assert "AccessDenied" in out and "Traceback" not in out
 
 
-def test_window_model_list_holds_the_other_inference_profiles(monkeypatch):
+def test_window_model_list_has_a_section_of_inference_profiles(monkeypatch):
     in_cell(monkeypatch, 7)
     view = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients()), kb="support-docs", mode="html",
                            progress="off")
     view._display = lambda shown: None
     view.app()
     picker = view._app.model_pick
-    values = [choice.value for choice in picker.choices]
-    assert len(values) == len(set(values))
-    assert values[-2:] == [f"global.{SONNET}", f"eu.{SONNET}"]
+    sections = [choice.section for choice in picker.choices]
+    assert sections == ["model"] * 4 + ["inference profile"] * 6
+    assert [choice.title for choice in picker.choices[4:6]] == ["team-chatbot", f"US {HAIKU}"]
+    assert TEAM_PROFILE not in [choice.value for choice in picker.choices[:4]]
+    picker.button.click()
+    headings = [line.value for line in picker.list.children if line in picker.headings.values()]
+    assert ["Models · 4" in headings[0], "Inference profiles · 6" in headings[1]] == [True, True]
+    assert picker.list.children[0] is picker.headings["model"]
+    assert picker.list.children[5] is picker.headings["inference profile"]
+    assert "4 models · 6 inference profiles" in picker.foot.value
     world = picker._choice(f"global.{SONNET}")
     assert (world.title, world.badge) == ("Global Claude Sonnet 5", "Global · $2.00 / $10.00")
     assert world.note == ("inference profile (cross-region · Global) · sends requests to any region · "
                           "$2.00 / $10.00 per 1M tokens")
-    assert find(picker, "profile europe") == [f"eu.{SONNET}"]
-    assert "After the models come 2 more inference profiles" in picker.foot.value
-    click_line(picker, f"global.{SONNET}")
+    assert find(picker, "europe") == [f"eu.{SONNET}"]
+    assert "0 of 4 models" not in picker.foot.value and "1 of 6 inference profiles" in picker.foot.value
+    assert [line for line in picker.list.children if line in picker.headings.values()] == [
+        picker.headings["inference profile"]]
+    assert "Inference profiles · 1 of 6" in picker.headings["inference profile"].value
+    assert find(picker, "sonnet") == [f"us.{SONNET}", TEAM_PROFILE, f"us.{SONNET}", f"global.{SONNET}", f"eu.{SONNET}"]
+    assert "1 of 4 models · 4 of 6 inference profiles" in picker.foot.value
+    picker.rows[f"profile:global.{SONNET}"][1].click()
     assert view.model == f"global.{SONNET}" and "Global Claude Sonnet 5" in picker.face.value
     assert "The next question goes to Global Claude Sonnet 5." in view._app.status.value
+
+
+def test_window_model_list_is_one_list_without_inference_profiles(monkeypatch):
+    in_cell(monkeypatch, 7)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=profile_clients([])), kb="support-docs", mode="html",
+                           progress="off")
+    view._display = lambda shown: None
+    view.app()
+    picker = view._app.model_pick
+    picker.button.click()
+    assert not picker.headings and {choice.section for choice in picker.choices} == {""}
+    assert "1 model" in picker.foot.value and picker.shown == ["amazon.nova-pro-v1:0"]
 
 
 def test_search_rank_and_match_kbs():

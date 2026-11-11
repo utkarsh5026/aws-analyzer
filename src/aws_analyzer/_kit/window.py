@@ -861,15 +861,17 @@ class _Picker:
                   if (rank := search_rank(text, self._fields(c))) is not None]
         return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
 
-    def _line(self, value: str) -> tuple[Any, Any, Any]:
+    def _line(self, value: str, key: str = "") -> tuple[Any, Any, Any]:
         """
-        The widgets of value's line in the list (its line, the line's button, its text), made once.
+        The widgets of value's line in the list (its line, the line's button, its text), made once. `key` names
+        the line when two lines of a list set the same value.
         """
-        if value not in self.rows:
+        key = key or value
+        if key not in self.rows:
             prefix = self.prefix
-            self.rows[value] = _row_button(self.w, (f"{prefix}-opt", f"{prefix}-opt-b", f"{prefix}-opt-t"),
-                                           self.app._safely(lambda _button: self._clicked(value)))
-        return self.rows[value]
+            self.rows[key] = _row_button(self.w, (f"{prefix}-opt", f"{prefix}-opt-b", f"{prefix}-opt-t"),
+                                         self.app._safely(lambda _button: self._clicked(value)))
+        return self.rows[key]
 
     def _draw_list(self) -> None:
         raise NotImplementedError

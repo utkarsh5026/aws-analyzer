@@ -300,40 +300,39 @@ class _PickersPane:
             self.problems.append(str(exc))
         if models:
             view.model = current
-        choices = [self._model_choice(m) for m in models]
-        profiles = self._other_profiles({choice.value for choice in choices})
-        if profiles:
-            picker.note = (f"After the models come {_plural(len(profiles), 'more inference profile')} (global, and "
-                           "other regions'): type global, or a prefix such as eu., to find one")
-        picker.set_choices(choices + [self._profile_choice(p) for p in profiles], current)
+        picker.set_choices(self._model_choices(models), current)
         return picker
 
-    def _other_profiles(self, listed: set[str]) -> list[InferenceProfile]:
+    def _model_choices(self, models: list[ModelInfo]) -> list[_Choice]:
         """
-        The inference profiles the model lines don't already stand for (a model that needs a profile is listed
-        with this region's, and your own profiles are lines already): the global ones and other geographies'.
-        None when the profiles couldn't be listed, which the model list has said already.
+        The Model list: the models, then every inference profile in a section of its own (yours first), so a
+        profile your account made is listed there and not among the models. One list of models when there are no
+        profiles, or they couldn't be listed, which the window has said already.
         """
         core = self.view.core
-        if not core._profiles_listed:
-            return []
-        return [p for p in core.inference_profiles() if p.invoke_id not in listed]
+        profiles = core.inference_profiles() if core._profiles_listed else []
+        if not profiles:
+            return [self._model_choice(m) for m in models]
+        yours = {p.invoke_id for p in profiles if p.is_yours}
+        choices = [self._model_choice(m, section="model") for m in models if m.invoke_id not in yours]
+        return choices + [self._profile_choice(p) for p in profiles]
 
     @staticmethod
     def _profile_choice(p: InferenceProfile) -> _Choice:
         price = f"${p.price_in:,.2f} / ${p.price_out:,.2f}" if p.price_in is not None else ""
         sends_to = f"sends requests to {p.sends_to}" if p.sends_to != "-" else ""
         return _Choice(p.invoke_id, p.name or p.id, detail=p.invoke_id, also=(p.arn, *p.models),
-                       badge=" · ".join(part for part in (p.geography or "profile", price) if part),
+                       section="inference profile", key=f"profile:{p.invoke_id}",
+                       badge=" · ".join(part for part in (p.geography or "yours", price) if part),
                        note=" · ".join(part for part in (f"inference profile ({p.kind})", sends_to,
                                                          f"{price} per 1M tokens" if price else "price unknown")
                                        if part))
 
     @staticmethod
-    def _model_choice(m: ModelInfo) -> _Choice:
+    def _model_choice(m: ModelInfo, section: str = "") -> _Choice:
         price = f"${m.price_in:,.2f} / ${m.price_out:,.2f}" if m.price_in is not None else ""
         how = m.via + (" (legacy)" if m.status == "LEGACY" else "")
-        return _Choice(m.invoke_id, m.name or m.id, detail=m.invoke_id, also=(m.id, m.arn),
+        return _Choice(m.invoke_id, m.name or m.id, detail=m.invoke_id, also=(m.id, m.arn), section=section,
                        badge=" · ".join(part for part in (m.provider, price) if part),
                        note=" · ".join(part for part in (m.provider, how, f"{price} per 1M tokens" if price
                                                          else "price unknown") if part))
