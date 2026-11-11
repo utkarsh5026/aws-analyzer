@@ -14,7 +14,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 💬 **Bedrock chat: see every inference profile**
   - `inference_profiles()` lists yours and AWS's cross-region ones: what to pass as `model=`, the regions, the price.
   - It says when a global profile serves the model in use for less, with the `use(model=...)` call.
-  - The chat window's Model list holds them too: type `profile` or `global` to find one.
+  - The chat window's Model list holds them too: type `global` or `eu.` to find one.
 
 ## [0.57.0] - 2026-11-11
 

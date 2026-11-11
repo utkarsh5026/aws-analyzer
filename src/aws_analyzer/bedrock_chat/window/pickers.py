@@ -304,7 +304,7 @@ class _PickersPane:
         profiles = self._other_profiles({choice.value for choice in choices})
         if profiles:
             picker.note = (f"After the models come {_plural(len(profiles), 'more inference profile')} (global, and "
-                           "other regions'): type profile to see only them")
+                           "other regions'): type global, or a prefix such as eu., to find one")
         picker.set_choices(choices + [self._profile_choice(p) for p in profiles], current)
         return picker
 
