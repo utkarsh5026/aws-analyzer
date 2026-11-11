@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-11-11
+
 ### Added
 
 - 🤖 **Agent: investigators keep long searches out of the chat** ([#234](https://github.com/utkarsh5026/aws-analyzer/pull/234))
@@ -21,7 +23,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 💬 **Bedrock: application inference profiles show up** ([#229](https://github.com/utkarsh5026/aws-analyzer/pull/229))
   - `models()`, the chat window's model list and the agent now list the inference profiles your account made.
   - `ask(model="team-chatbot")` takes one by its name, ID or ARN, and calls it by its ARN.
-- 🔀 **Step Functions: the time range menu is readable in a dark theme**
+- 🔀 **Step Functions: the time range menu is readable in a dark theme** ([#230](https://github.com/utkarsh5026/aws-analyzer/pull/230))
   - The Executions tab's "Last 90 days" list no longer opens as light text on white.
   - The same fix applies to every window's menus (Lambda, API Gateway, Athena, OpenSearch, knowledge bases, chats).
 
@@ -1348,7 +1350,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...HEAD
+[0.57.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.53.0...v0.54.0
