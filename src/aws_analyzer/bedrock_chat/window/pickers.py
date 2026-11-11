@@ -10,7 +10,7 @@ from ..._bedrock.blocks import _Download
 from ..._bedrock.files import _LIST_LINK_BYTES, SavedFileList, _data_href, file_list_name
 from ..._bedrock.filters import describe_sources
 from ..._bedrock.helpers import source_name
-from ..._bedrock.models import ModelInfo
+from ..._bedrock.models import InferenceProfile, ModelInfo
 from ..._bedrock.prices import DEFAULT_MODEL
 from ..._kit.errors import _Hint, _error_name, _why
 from ..._kit.fmt import _plural, human_age
@@ -300,8 +300,34 @@ class _PickersPane:
             self.problems.append(str(exc))
         if models:
             view.model = current
-        picker.set_choices([self._model_choice(m) for m in models], current)
+        choices = [self._model_choice(m) for m in models]
+        profiles = self._other_profiles({choice.value for choice in choices})
+        if profiles:
+            picker.note = (f"After the models come {_plural(len(profiles), 'more inference profile')} (global, and "
+                           "other regions'): type profile to see only them")
+        picker.set_choices(choices + [self._profile_choice(p) for p in profiles], current)
         return picker
+
+    def _other_profiles(self, listed: set[str]) -> list[InferenceProfile]:
+        """
+        The inference profiles the model lines don't already stand for (a model that needs a profile is listed
+        with this region's, and your own profiles are lines already): the global ones and other geographies'.
+        None when the profiles couldn't be listed, which the model list has said already.
+        """
+        core = self.view.core
+        if not core._profiles_listed:
+            return []
+        return [p for p in core.inference_profiles() if p.invoke_id not in listed]
+
+    @staticmethod
+    def _profile_choice(p: InferenceProfile) -> _Choice:
+        price = f"${p.price_in:,.2f} / ${p.price_out:,.2f}" if p.price_in is not None else ""
+        sends_to = f"sends requests to {p.sends_to}" if p.sends_to != "-" else ""
+        return _Choice(p.invoke_id, p.name or p.id, detail=p.invoke_id, also=(p.arn, *p.models),
+                       badge=" · ".join(part for part in (p.geography or "profile", price) if part),
+                       note=" · ".join(part for part in (f"inference profile ({p.kind})", sends_to,
+                                                         f"{price} per 1M tokens" if price else "price unknown")
+                                       if part))
 
     @staticmethod
     def _model_choice(m: ModelInfo) -> _Choice:
