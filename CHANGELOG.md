@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- 🧰 **Every explorer draws its reports in your theme** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🧰 **Every explorer draws its reports in your theme** ([#240](https://github.com/utkarsh5026/aws-analyzer/pull/240))
   - The Step Functions, API Gateway, OpenSearch, Athena, SQS / SNS / EventBridge and Bedrock KB explorers now look like the Lambda and S3 ones: `console` by default.
   - Their tabs follow `set_theme()`, so a tab looks like the same command run in a cell.
   - `set_theme("classic")` before opening one brings back the old look.
