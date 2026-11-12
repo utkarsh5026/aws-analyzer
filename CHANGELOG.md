@@ -9,12 +9,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
-### Changed
-
-- 🧰 **Every explorer draws its reports in your theme** ([#240](https://github.com/utkarsh5026/aws-analyzer/pull/240))
-  - The Step Functions, API Gateway, OpenSearch, Athena, SQS / SNS / EventBridge and Bedrock KB explorers now look like the Lambda and S3 ones: `console` by default.
-  - Their tabs follow `set_theme()`, so a tab looks like the same command run in a cell.
-  - `set_theme("classic")` before opening one brings back the old look.
+## [0.58.0] - 2026-11-11
 
 ### Added
 
@@ -22,6 +17,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `inference_profiles()` lists yours and AWS's cross-region ones: what to pass as `model=`, the regions, the price.
   - It says when a global profile serves the model in use for less, with the `use(model=...)` call.
   - The chat window's Model list has a section for them under the models, each with its regions and price.
+
+### Changed
+
+- 🧰 **Every explorer draws its reports in your theme** ([#240](https://github.com/utkarsh5026/aws-analyzer/pull/240))
+  - The Step Functions, API Gateway, OpenSearch, Athena, SQS / SNS / EventBridge and Bedrock KB explorers now look like the Lambda and S3 ones: `console` by default.
+  - Their tabs follow `set_theme()`, so a tab looks like the same command run in a cell.
+  - `set_theme("classic")` before opening one brings back the old look.
 
 ## [0.57.0] - 2026-11-11
 
@@ -1364,7 +1366,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...HEAD
+[0.58.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.54.0...v0.55.0
