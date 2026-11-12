@@ -32,7 +32,7 @@ deepagents==0.7.26
 langchain-openai==1.7.2
 langchain-aws==1.9.0
 langgraph-checkpoint-sqlite==3.1.2
-mcp==1.30.0
+mcp==2.3.0
 # Optional for users (agent/sandboxes/: the local sandbox runs Python in Pyodide on Deno); installed here so it's
 # tested for real. Its tests download Pyodide's files once a run (CI caches them), and skip without the internet.
 deno==2.9.8
