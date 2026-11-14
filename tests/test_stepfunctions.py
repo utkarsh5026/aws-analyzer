@@ -31,6 +31,7 @@ from aws_analyzer.stepfunctions.analysis.layout import failure_marks, flow_layou
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
+from aws_analyzer.stepfunctions.helpers import console_url
 from aws_analyzer import set_theme
 from aws_analyzer._kit.themes import _theme_css
 from test_lambda_functions import html_widgets
@@ -845,6 +846,34 @@ def test_explorer_opens_an_express_execution(fakes):
     assert window["endTime"] - window["startTime"] <= 7 * 60 * 1000
     x.tab_buttons["failures"].click()
     assert "Why image-resize-express fails" in plain(x.failures_view.value)
+
+
+def test_console_url():
+    machine = "arn:aws:states:us-east-1:123456789012:stateMachine:order-pipeline"
+    assert console_url(machine) == ("https://us-east-1.console.aws.amazon.com/states/home?region=us-east-1"
+                                    f"#/statemachines/view/{machine}")
+    standard = "arn:aws:states:eu-west-1:123456789012:execution:order-pipeline:ord-7f3a"
+    assert console_url(standard).endswith(f"#/v2/executions/details/{standard}")
+    assert parse_execution_ref(console_url(standard)) == (None, standard)
+    express = "arn:aws:states:us-east-1:1:express:resize:r-1:r-1-uuid"
+    started = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    assert console_url(express, started=started).endswith(
+        f"#/express-executions/details/{express}?startDate={int(started.timestamp() * 1000)}")
+    assert console_url("arn:aws-cn:states:cn-north-1:1:stateMachine:x").startswith(
+        "https://cn-north-1.console.amazonaws.cn/states/home?region=cn-north-1#")
+    assert console_url("order-pipeline") == "" and console_url("arn:aws:lambda:us-east-1:1:function:x") == ""
+
+
+def test_explorer_links_to_the_console(fakes):
+    x = explorer(fakes, "order-pipeline")
+    assert f'href="{html_lib.escape(console_url(x.machine.arn))}"' in x.console_link.value
+    assert 'target="_blank"' in x.console_link.value and x.execution_link.value == ""
+    x.tab_buttons["executions"].click()
+    row = next(line for line in x._rows if line.key.endswith(":ord-7f3a"))
+    row.button.click()
+    assert f"#/v2/executions/details/{row.key}" in x.execution_link.value
+    x._open_machine(x.core.resolve("kb-sync"))
+    assert x.execution_link.value == "" and "kb-sync" in x.console_link.value
 
 
 def test_explorer_draws_its_reports_in_the_theme_set(fakes):
