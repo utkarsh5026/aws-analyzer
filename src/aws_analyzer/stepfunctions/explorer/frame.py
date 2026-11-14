@@ -276,6 +276,9 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app .sfx-bar>*{margin:0}
 .sfx-app.sfx-app button.sfx-small{width:auto;height:30px;padding:0 13px;border-radius:999px;font-size:12px}
 .sfx-app.sfx-app button.sfx-ghost{background:transparent;border-color:transparent}
+.sfx-app a.sfx-console{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--sx-line-2);color:var(--sx-accent);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;background:var(--sx-surface)}
+.sfx-app a.sfx-console:hover{background:var(--sx-tint-2)}
+.sfx-app .sfx-exec-link{display:flex;justify-content:flex-end;padding:2px 0 6px}
 .sfx-app.sfx-app button.sfx-ghost:hover:enabled{background:var(--sx-tint-2)}
 .sfx-app.sfx-app button.sfx-x{padding:0;width:26px;min-width:26px;height:26px;border-radius:999px;background:transparent;border-color:transparent;opacity:.6}
 .sfx-app.sfx-app button.sfx-x:hover:enabled{opacity:1;background:rgba(239,68,68,.12);color:var(--sx-ink-bad)}

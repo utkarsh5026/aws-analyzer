@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔀 **Step Functions explorer: open it in the AWS console** ([#246](https://github.com/utkarsh5026/aws-analyzer/pull/246))
+  - ↗ Console beside ↻ Refresh opens the state machine in the Step Functions console.
+  - Above an open execution, ↗ Console opens that execution there, to redrive or start it again.
+  - `console_url(arn)` gives the same link from code.
+
 ## [0.58.0] - 2026-11-11
 
 ### Added

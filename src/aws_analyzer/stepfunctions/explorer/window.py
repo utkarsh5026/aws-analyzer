@@ -5,6 +5,7 @@ StepFunctionsExplorer, the Step Functions explorer window, and explore() to open
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -16,7 +17,7 @@ from ..._kit.text import _clip, _esc, search_rank
 from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
 
-from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, execution_name, parse_execution_ref
+from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, console_url, execution_name, parse_execution_ref
 from ..models import ExecutionDetail, ExecutionPage, FailureReport, Overview, StateMachine
 from ..analysis import monthly_cost
 from ..analysis.story import ExecutionStory, lambda_steps
@@ -30,6 +31,14 @@ from .frame import (
 from .graph import _GraphTab
 from .machines import _MachinesTab
 from .widgets import _Line, _MachineField
+
+
+def _console_link_html(url: str, tip: str) -> str:
+    """
+    ↗ Console: a link that opens the AWS console's page in a new tab, looking like the window's small buttons.
+    """
+    return (f'<a class="sfx-console" href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
+            f'title="{_esc(tip)}">↗ Console</a>')
 
 
 _EXECUTIONS_READ = 500
@@ -64,7 +73,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
     height: the height of the tabs' pages (pixels, or CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports
     elsewhere), 'widgets' or 'text'.
 
-    It only reads: nothing here starts, stops or redrives an execution. x.ui is a StepFunctionsView for reports in
+    ↗ Console beside ↻ Refresh opens the state machine in the AWS console, and the one above an execution opens that
+    execution there. It only reads: nothing here starts, stops or redrives an execution. x.ui is a StepFunctionsView for reports in
     other cells; x.overview, x.machine, x.page, x.detail, x.story and x.report hold the data behind what's shown.
     """
 
@@ -192,7 +202,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
                                        "again", layout=layout(width="auto", flex="0 0 auto"))
         self.refresh_button.add_class("sfx-small")
         self.refresh_button.on_click(self._safely(lambda _button: self.refresh()))
-        top = w.HBox([self.title, self.refresh_button], layout=layout(width="100%"))
+        self.console_link = w.HTML(layout=layout(width="auto", flex="0 0 auto"))
+        top = w.HBox([self.title, self.console_link, self.refresh_button], layout=layout(width="100%"))
         top.add_class("sfx-top")
         self.field = _MachineField(self, on_pick=self._open_machine, on_text=self._typed_machine)
         self.stats = w.HTML(layout=layout(flex="1 1 360px", min_width="0"))
@@ -247,7 +258,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self.left = w.VBox([finder, self.chips, self.rows_box, pager])
         self.left.add_class("sfx-left")
         self.execution_view = w.HTML(layout=layout(width="100%"))
-        self.right = w.VBox([self.execution_view])
+        self.execution_link = w.HTML(layout=layout(width="100%"))
+        self.right = w.VBox([self.execution_link, self.execution_view])
         self.right.add_class("sfx-right")
         self.split = w.HBox([self.left, self.right])
         self.split.add_class("sfx-split")
@@ -357,6 +369,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self._set(self.title, f'<div class="sfx-brand"><span class="sfx-logo">{_LOGO}</span><div style="min-width:0">'
                               f'<div class="sfx-name">Step Functions explorer<span>{_esc(self.core.region)}</span>'
                               f'</div><div class="sfx-sub">{_esc(sub)}</div></div></div>')
+        machine_url = console_url(machine.arn) if machine is not None else ""
+        self._set(self.console_link, _console_link_html(machine_url, f"{machine.name} in the Step Functions console "
+                                                        "(opens a new tab)") if machine_url else "")
 
     def _draw_stats(self) -> None:
         """
@@ -408,6 +423,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
                              (self.execution_view, "Listing its executions…"),
                              (self.graph_view, "Drawing its graph…")):
             self._set(widget, _skeleton(text))
+        self._set(self.execution_link, "")
         self.failure_opens.children = []
         self.rows_box.children, self.chips.children = [], []
         self._draw_pager()
@@ -584,7 +600,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         """
         w = self._w
         self.execution_view = w.HTML(layout=w.Layout(width="100%"))
-        self.right = w.VBox([self.execution_view])
+        self.execution_link = w.HTML(layout=w.Layout(width="100%"))
+        self.right = w.VBox([self.execution_link, self.execution_view])
         self.right.add_class("sfx-right")
         self.split.children = [self.left, self.right]
 
@@ -604,8 +621,19 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self._status(f"Reading {name}…", busy=True, owner="execution")
         listed = next((e for e in self.page.executions if e.arn == arn), None) if self.page else None
         started = listed.start if listed else None
+        self._draw_execution_link(arn, started)
         self._later("execution", lambda: self.core.execution(arn, logs=False, started=started), self._got_execution,
                     self._execution_failed)
+
+    def _draw_execution_link(self, arn: str, started: datetime | None) -> None:
+        """
+        ↗ Console above the execution open: its page in the Step Functions console, where it can be redriven or
+        started again (this window only reads).
+        """
+        url = console_url(arn, started=started)
+        tip = f"{execution_name(arn)} in the Step Functions console: its graph, events and redrive (opens a new tab)"
+        html = f'<div class="sfx-exec-link">{_console_link_html(url, tip)}</div>' if url else ""
+        self._set(self.execution_link, html)
 
     def _execution_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)
