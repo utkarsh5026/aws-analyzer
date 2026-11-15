@@ -493,6 +493,12 @@ FAILED_RUN = "c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c"
 
 ORDER = {"order_id": "88219", "customer": {"email": "dana@example.com"}, "items": ["a.jpg", "b.jpg", "c.jpg"]}
 
+GOOD_ORDER = {**ORDER, "customer_id": "C-4471"}
+"""
+An order with the customer_id orders-etl needs: the orders that go through carry it, and the ones that fail at
+LoadOrders with KeyError don't (ORDER), which compare() finds.
+"""
+
 
 def _rid(n: int) -> str:
     return f"{n:08x}-0000-4000-8000-{n:012x}"
@@ -503,8 +509,8 @@ def _good_order(start: datetime, n: int, *, throttled_first: bool = False, load_
     An order that went through: throttled_first has Lambda throttle ChargeCard's first try (retried a second
     later), and load_seconds is how long LoadOrders took.
     """
-    history = History(start, ORDER)
-    history.lambda_task("ValidateOrder", "validate-order", [Try(0.21, request_id=_rid(n))], data=ORDER)
+    history = History(start, GOOD_ORDER)
+    history.lambda_task("ValidateOrder", "validate-order", [Try(0.21, request_id=_rid(n))], data=GOOD_ORDER)
     history.state("Choice", "IsPriority").sdk_task("ReserveStock", "dynamodb:updateItem")
     charge = [Try(0.85, request_id=_rid(n + 1), wait=1.0 if throttled_first else 0.0)]
     if throttled_first:

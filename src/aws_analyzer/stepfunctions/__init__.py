@@ -51,7 +51,8 @@ from .analysis import (
     unbounded_waits, unretried_lambda_states, ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines,
     waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, state_timings, timing_findings,
     DayCount, FailureJump, daily_counts, failure_jump, trend_findings,
-    ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
+    ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
+    comparison_findings, ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
     timing_marks, timing_report,
 )
 from .analyzer import StepFunctionsAnalyzer
@@ -59,6 +60,13 @@ from .view import StepFunctionsView
 from .explorer.window import StepFunctionsExplorer, explore
 
 __all__ = [
+    "ExecutionComparison",
+    "InputDifference",
+    "StepDifference",
+    "compare_executions",
+    "compare_inputs",
+    "compare_steps",
+    "comparison_findings",
     "Change",
     "ChangeVerdict",
     "change_findings",

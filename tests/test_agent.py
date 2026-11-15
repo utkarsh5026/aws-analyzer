@@ -2497,6 +2497,9 @@ def test_a_step_functions_answers_calls_are_places_in_its_explorer():
                                                                    {"tab": "failures"})
     assert target_for("StepFunctionsView().state_machine('kb-sync')", "stepfunctions").kwargs == {"tab": "overview"}
     assert target_for("StepFunctionsView().overview()", "stepfunctions") is None
+    compare = target_for("StepFunctionsView().compare('order-pipeline/ord-7f3a', other='ord-cfae')", "stepfunctions")
+    assert (compare.label, compare.command, compare.args, compare.kwargs) == (
+        "Compare ord-7f3a with a success", "compare", ("order-pipeline/ord-7f3a",), {"other": "ord-cfae"})
     assert target_for("StepFunctionsView().failures('x')", "lambda") is None
 
 

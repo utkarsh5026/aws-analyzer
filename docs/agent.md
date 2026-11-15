@@ -353,6 +353,7 @@ Eighteen read-only tools over Lambda and S3, seven for [Bedrock knowledge bases]
     | `state_machine_failures(state_machine, since)` | The failed, timed-out and aborted executions grouped by the state they stopped at and the error, each with its share, its newest execution and the Lambda run's function and request ID |
     | `list_executions(state_machine, status, since, limit)` | Its executions in a window, newest first, with how many ended each way |
     | `execution_details(execution, state_machine)` | One execution step by step, the step that ended it, and the failed Lambda step's run: its last lines and the file and line its traceback names |
+    | `compare_with_success(execution, other, state_machine)` | The execution beside the newest that succeeded before it: the states that differ, the input fields missing, extra or empty, and the likely cause when the error names one |
 
     **API Gateway**, which [leads to Lambda](#across-services) too:
 

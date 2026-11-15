@@ -20,10 +20,21 @@ from .layout import FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout,
 from .history import fill_detail, request_id_of_cause, request_id_of_output
 from .timing import state_timings, timing_findings, timing_report
 from .trend import DayCount, FailureJump, daily_counts, failure_jump, trend_findings
+from .compare import (
+    ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
+    comparison_findings,
+)
 from .suspects import ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
+    "ExecutionComparison",
+    "InputDifference",
+    "StepDifference",
+    "compare_executions",
+    "compare_inputs",
+    "compare_steps",
+    "comparison_findings",
     "ChangeVerdict",
     "DayCount",
     "FailureJump",

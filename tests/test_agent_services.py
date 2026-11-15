@@ -101,6 +101,13 @@ def test_a_failed_workflow_leads_to_the_lambda_run_that_broke_it(sfn_world):
     assert failures["findings"][0]["level"] == "warn"
     assert failures["region"] == REGION and failures["window"]["hours"] == 168.0
 
+    compared = tool(core, "compare_with_success")("order-pipeline/ord-7f3a")
+    assert compared["complete"] and compared["compared_with"]["name"] == "ord-cfae"
+    assert compared["input_fields_that_differ"] == [
+        {"field": "customer_id", "difference": "missing", "here": None, "there": '"C-4471"'}]
+    assert [s["state"] for s in compared["states_that_differ"]] == ["ChargeCard", "LoadOrders"]
+    assert compared["findings"][0]["message"].startswith("ord-7f3a's input has no customer_id")
+
     detail = tool(core, "execution_details")("order-pipeline/ord-7f3a")
     assert detail["failed_step"]["state"] == "LoadOrders" and detail["status"] == "FAILED"
     run = detail["lambda_run"]

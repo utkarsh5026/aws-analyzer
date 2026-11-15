@@ -1648,6 +1648,33 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "sfn-compare": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.compare(\"order-pipeline/ord-7f3a\"): sfn.compare(\"order-pipeline/ord-7f3a\"): the run that succeeded just before it had a customer_id; this one didn't, and that's the key LoadOrders failed on.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 11.3,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.compare(\"order-pipeline/ord-7f3a\")",
+    "outputs": [
+     {
+      "img": "sfn-compare",
+      "w": 1476,
+      "h": 1446
+     }
+    ],
+    "captions": [
+     [
+      3.39,
+      "The run that succeeded just before it had a <code>customer_id</code>; this one didn't, and that's the key LoadOrders failed on."
+     ]
+    ]
+   }
+  ]
+ },
  "sfn-state-machine": {
   "notebook": "workflows.ipynb",
   "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.",
@@ -4133,6 +4160,37 @@ window.AA_CLIPS = {
      [
       6.3,
       "The cards say how the one picked is doing."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-compare": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): ⇄ Compare on ord-7f3a: the run that succeeded just before it had a customer_id, and this one didn't.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-compare",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "⇄ Compare on ord-7f3a: the run that succeeded just before it had a <code>customer_id</code>, and this one didn't."
      ]
     ]
    }

@@ -1301,7 +1301,7 @@ class AgentView(_BaseView):
         rows = [[fn.__name__, _first_line(fn.__doc__), _reads_text(reads.get(fn.__name__, ()), fn.__name__)]
                 for fn in core.tools()]
         blocks.append(_Table(["Tool", "What it does", "AWS reads"], rows, title="Tools", prose_cols=(1,),
-                             sortable=False))
+                             max_rows=0, sortable=False))
         limits = self._budget_rows()
         has_kb = any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits)
         blocks.append(_Table(["Limit", "Per question", "What happens past it"], limits, title="Budget",

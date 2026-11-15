@@ -11,7 +11,7 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.blocks import _Note
-from ..._kit.errors import _error_name, _why
+from ..._kit.errors import _Hint, _error_name, _why
 from ..._kit.fmt import _duration, _plural, human_money
 from ..._kit.text import _clip, _esc, search_rank
 from ..._kit.themes import _theme_css, _theme_name
@@ -31,6 +31,7 @@ from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
     _execution_face, _window_text,
 )
+from .compare import _CompareSlot
 from .failures import _FailuresTab
 from .graph import _GraphTab
 from .machines import _MachinesTab
@@ -55,7 +56,7 @@ _SINCE_DAYS = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
 
 
 
-class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, _Explorer):
+class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _CompareSlot, _FocusReads, _Explorer):
     """
     The Step Functions explorer: a window to look through your state machines by clicking. The state machine field at
     the top switches to another one; the cards beside it say how it's doing.
@@ -184,6 +185,24 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, 
         self._open_execution(arn)
 
     @_window_errors
+    def compare(self, ref: str | None = None, *, other: str | None = None) -> None:
+        """
+        Shows an execution beside the newest one that succeeded before it (or other=), above its page in the
+        Executions tab, as ⇄ Compare does: the states and input fields that differ, and the likely cause. Without
+        ref, the execution open.
+        """
+        machine = self.machine.arn if self.machine else None
+        if self._w is None:
+            self.ui.compare(ref or self._selected, other=other, machine=machine)
+            return
+        if ref is not None:
+            self._show_tab("executions")
+            self._open_execution(self.core.execution_arn(ref, machine=machine))
+        elif not self._selected:
+            raise _Hint("Open an execution in the Executions tab first, or name one: x.compare('ord-7f3a').")
+        self._start_compare(self._selected, other)
+
+    @_window_errors
     def refresh(self) -> None:
         """
         Reads everything again: the state machines, and the one shown (the ↻ button).
@@ -285,8 +304,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, 
         self.left = w.VBox([finder, self.days_view, self.chips, self.rows_box, pager, self.cut_note])
         self.left.add_class("sfx-left")
         self.execution_view = w.HTML(layout=layout(width="100%"))
-        self.execution_link = w.HTML(layout=layout(width="100%"))
-        self.right = w.VBox([self.execution_link, self.execution_view])
+        self.execution_link = w.HTML(layout=layout(width="auto"))
+        self._compare_widgets()
+        self.right = w.VBox([self._compare_row(), self.compare_view, self.execution_view])
         self.right.add_class("sfx-right")
         self.split = w.HBox([self.left, self.right])
         self.split.add_class("sfx-split")
@@ -704,8 +724,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, 
         """
         w = self._w
         self.execution_view = w.HTML(layout=w.Layout(width="100%"))
-        self.execution_link = w.HTML(layout=w.Layout(width="100%"))
-        self.right = w.VBox([self.execution_link, self.execution_view])
+        self.execution_link = w.HTML(layout=w.Layout(width="auto"))
+        self.right = w.VBox([self._compare_row(), self.compare_view, self.execution_view])
         self.right.add_class("sfx-right")
         self.split.children = [self.left, self.right]
 
@@ -717,6 +737,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, 
         self._selected = arn
         self.detail = self.story = None
         self._drop("story")
+        self._reset_compare()
         for line in self._rows:
             _class_if(line.box, "sfx-on", line.key == arn)
         self._renew_pane()
@@ -746,6 +767,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _FocusReads, 
 
     def _got_execution(self, detail: ExecutionDetail) -> None:
         self.detail = detail
+        self._show_compare_button(detail)
         self._draw_graph()
         steps, _ = lambda_steps(detail, 1)
         reading = [_Note("Reading the Lambda runs it called, for its log…")] if steps else []

@@ -38,8 +38,8 @@ from .lambda_tools import _run_entry
 
 if TYPE_CHECKING:
     from ...stepfunctions import (
-        Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview,
-        StateDef, StateMachine, StepFunctionsAnalyzer, StepRun,
+        Execution, ExecutionComparison, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers,
+        Overview, StateDef, StateMachine, StepFunctionsAnalyzer, StepRun,
     )
 
 _LIST = ("states:ListStateMachines", "states:DescribeStateMachine")
@@ -55,6 +55,8 @@ STEPFUNCTIONS_TOOL_READS: dict[str, tuple[str, ...]] = {
     "list_executions": (*_LIST, "states:ListExecutions", *_EXPRESS_LOGS),
     "execution_details": (*_LIST, "states:DescribeExecution", "states:GetExecutionHistory", *_EXPRESS_LOGS,
                           *_LAMBDA_RUN),
+    "compare_with_success": (*_LIST, "states:ListExecutions", "states:DescribeExecution",
+                             "states:GetExecutionHistory", *_EXPRESS_LOGS),
 }
 _DAYS = 7
 _MOST_DAYS = 90
@@ -288,6 +290,25 @@ def summarize_failures(report: FailureReport, now: datetime | None = None) -> di
     return out
 
 
+def summarize_comparison(comparison: ExecutionComparison) -> dict[str, Any]:
+    """
+    compare_with_success()'s answer: the two executions, the states that differ and how, the input fields that
+    differ (field names and short values, secrets hidden), and the findings.
+    """
+    sfn = _sfn_module()
+    this, other = comparison.this.execution, comparison.other.execution
+    steps = [{"state": step.state, "difference": step.kind, "says": step.words}
+             for step in comparison.differing_steps]
+    inputs = [{"field": d.path, "difference": d.kind, "here": hide_secrets(d.this) or None,
+               "there": hide_secrets(d.other) or None} for d in comparison.inputs]
+    return {"execution": {"name": this.name, "status": this.status, "start": this.start},
+            "compared_with": {"name": other.name, "status": other.status, "start": other.start,
+                              "started_before": comparison.other_is_before},
+            "states_that_differ": steps, "input_fields_that_differ": inputs,
+            "states_compared": len(comparison.steps),
+            "findings": model_findings(sfn.comparison_findings(comparison))}
+
+
 def summarize_executions(page: ExecutionPage, *, limit: int = _DEFAULT_EXECUTIONS) -> dict[str, Any]:
     """
     list_executions()'s answer: a state machine's executions in the window, newest first, with how many ended each
@@ -455,12 +476,13 @@ AWS Step Functions
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
-        find_state_machines, state_machine_details, state_machine_failures, list_executions and execution_details:
+        find_state_machines, state_machine_details, state_machine_failures, list_executions, execution_details and
+        compare_with_success:
         methods whose type hints and docstrings tell the model how to call them, each reading through
         StepFunctionsAnalyzer and returning a compact, JSON-ready summary.
         """
         return [self.find_state_machines, self.state_machine_details, self.state_machine_failures,
-                self.list_executions, self.execution_details]
+                self.list_executions, self.execution_details, self.compare_with_success]
 
     def find_state_machines(self, match: str = "", days: int = _DAYS) -> dict[str, Any]:
         """
@@ -587,6 +609,28 @@ AWS Step Functions
         sfn = _sfn_module()
         ref = sfn.helpers.execution_ref(detail.execution.machine, detail.execution.name, detail.execution.arn)
         out["_next"] = [(self._view_call("execution", ref), "every step, and the Lambda lines that broke it")]
+        return out
+
+    def compare_with_success(self, execution: str, other: str = "", state_machine: str = "") -> dict[str, Any]:
+        """
+        One execution beside another of the same state machine, by default the newest that succeeded before it:
+        each state that differs (failed only here, more tries, much slower, never reached, only here), the input
+        fields missing, extra, empty or of another type in this one (values that just differ aren't listed), and
+        the findings, the likely cause first when the error names a field its input lacks. Use it on a failed
+        execution to see what was different about it. execution / other: an ARN or 'state-machine/execution-name'
+        (or a name with state_machine=).
+        """
+        core = self.analyzer
+        named = str(state_machine or "").strip() or None
+        comparison = core.compare(execution, other=str(other or "").strip() or None, machine=named)
+        out = summarize_comparison(comparison)
+        out["region"] = core.region
+        out["_summary"] = (f"beside {comparison.other.execution.name}: "
+                           f"{_plural(len(comparison.differing_steps), 'state')} and "
+                           f"{_plural(len(comparison.inputs), 'input field')} differ")
+        this = comparison.this.execution
+        ref = _sfn_module().helpers.execution_ref(this.machine, this.name, this.arn)
+        out["_next"] = [(self._view_call("compare", ref), "the two side by side, state by state")]
         return out
 
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:

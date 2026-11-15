@@ -114,8 +114,15 @@ The **Executions** tab lists them newest first. Pick a time range, filter by out
 - **The chips** show only the executions that **Failed**, **Timed out**, were **Aborted**, are **Running** or **Succeeded**.
 - **The bars** over the list are its executions a day in the time range (from 7 days), the part that didn't succeed in red, and the day failures jumped outlined. Point at a bar for its numbers.
 - **The search box** finds an execution by its name.
+- **⇄ Compare with the last success**, beside ↗ Console on an execution that didn't succeed, puts it beside the newest one that succeeded before it, above its page: the states and input fields that differ, and the likely cause. Click it again to hide it; `x.compare("ord-7f3a")` does the same from a cell.
 - **A busy state machine** has more executions than one read lists (500). The list then holds the newest 500 and, read on their own, every one that didn't succeed in the range, so the Failed chip counts them all. The line under the pager says so, against what CloudWatch counted. The cards over the tabs count the time range picked.
 - **↗ Console**, above the open execution, opens it in the Step Functions console, where you can redrive it or start it again. The one beside ↻ Refresh opens the state machine there.
+
+![The Executions tab with ord-7f3a open and ⇄ Compare clicked: over its page, ord-7f3a beside ord-cfae, the last execution that succeeded before it, with the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError](images/sfn-explorer-compare-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Executions tab with ord-7f3a open and ⇄ Compare clicked: over its page, ord-7f3a beside ord-cfae, the last execution that succeeded before it, with the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError](images/sfn-explorer-compare-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+⇄ Compare on ord-7f3a: the run that succeeded just before it had a `customer_id`, and this one didn't.
+///
 
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="866" loading=lazy }
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="866" loading=lazy }

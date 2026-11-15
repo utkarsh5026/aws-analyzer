@@ -81,6 +81,7 @@ One workflow
 { .qgroup }
 
 -   [What happened in this execution?](#execution) `sfn.execution("order-pipeline/ord-7f3a")`{ .long }
+-   [What was different about this failed one?](#compare) `sfn.compare("order-pipeline/ord-7f3a")`{ .long }
 -   [What does this workflow do, and what could go wrong?](#state-machine) `sfn.state_machine("order-pipeline")`{ .long }
 -   [Which state is slow, and which one retries?](#timings) `sfn.graph("order-pipeline", timings=True)`{ .long }
 
@@ -165,6 +166,26 @@ At the end, folded, are **what it returned** (for an execution that succeeded), 
 ![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-dark.webp#only-dark){ width="984" height="1791" loading=lazy }
 /// caption
 `sfn.execution("order-pipeline/ord-7f3a")`: the waterfall, then one log where orders-etl's traceback sits between the step that called it and the Catch that ended the execution.
+///
+
+## Beside the last success { #compare }
+
+`compare()` puts a failed execution beside the newest one that succeeded before it, and says what was different: the states, and the input's fields.
+{ .gist }
+
+```python
+sfn.compare("order-pipeline/ord-7f3a")                    # with the last success before it
+sfn.compare("order-pipeline/ord-7f3a", other="ord-25a8")  # with one you pick
+```
+
+A table lists each state either execution went through: how it ran in each, and the difference. It flags a state that failed only here, took more tries or ran much slower. The states it never reached after failing, and where its Catch sent the error, are shown but not counted as differences. A second table lists the **input fields** that are missing, extra, empty or of another type. Values that just differ aren't listed, since every order has its own ID.
+
+When the error names a field the input lacks, the first finding says so: "The likely cause: ord-7f3a's input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, naming it". In the explorer, **⇄ Compare with the last success** beside **↗ Console** shows the same over a failed execution's page.
+
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-light.webp#only-light){ width="984" height="964" loading=lazy }
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-dark.webp#only-dark){ width="984" height="964" loading=lazy }
+/// caption
+`sfn.compare("order-pipeline/ord-7f3a")`: the run that succeeded just before it had a `customer_id`; this one didn't, and that's the key LoadOrders failed on.
 ///
 
 ??? more "How the Lambda lines are read"
@@ -335,6 +356,7 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 | `graph(name, execution=None, failures=None, timings=None)` | The flow drawn as a graph, coloured by an execution's path, where executions stop or where the time goes, and Mermaid to paste |
 | `executions(name, status=None, since="7d", n=25)` | Its latest executions, newest first |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step: its waterfall, and one log with every Lambda run's lines |
+| `compare(execution, other=None, machine=None, since="30d")` | An execution beside the last success before it (or other=): the states and input fields that differ, and the likely cause |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |
 | `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The explorer window: every state machine, its executions with their waterfall and log, failures and definition |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |

@@ -292,15 +292,19 @@ def _execution_ref(call: ViewCall) -> str:
 
 def _stepfunctions_target(call: ViewCall) -> Target | None:
     """
-    A StepFunctionsView call as a place in the Step Functions explorer: an execution in the Executions tab, or one of
-    a state machine's tabs.
+    A StepFunctionsView call as a place in the Step Functions explorer: an execution in the Executions tab, one beside
+    a success (compare), or one of a state machine's tabs.
     """
     if not call.args or not isinstance(call.args[0], str):
         return None
     first = call.args[0]
-    if call.command == "execution":
+    if call.command in ("execution", "compare"):
         ref = _execution_ref(call)
         name = ref.rsplit(":", 1)[-1].rsplit("/", 1)[-1]
+        if call.command == "compare":
+            other = call.kwargs.get("other")
+            kwargs = {"other": other} if isinstance(other, str) and other else {}
+            return Target(f"Compare {_clip(name, _LABEL_CHARS)} with a success", "compare", (ref,), kwargs)
         return Target(f"Execution {_clip(name, _LABEL_CHARS)} in the Executions tab", "execution", (ref,))
     if call.command not in _SFN_TABS:
         return None

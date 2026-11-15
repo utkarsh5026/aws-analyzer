@@ -24,6 +24,7 @@ from .models import (
 )
 from .prices import STEPFUNCTIONS_PRICES
 from .changes import _ChangeReads
+from .comparing import _CompareReads
 from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
@@ -100,7 +101,7 @@ def _midnight_after(now: datetime) -> datetime:
     return today + timedelta(days=1)
 
 
-class StepFunctionsAnalyzer(_ChangeReads, _ExpressReads, _BaseAnalyzer):
+class StepFunctionsAnalyzer(_ChangeReads, _CompareReads, _ExpressReads, _BaseAnalyzer):
     """
     Pure-logic Step Functions analysis: every method returns data; nothing is printed, started or changed.
 

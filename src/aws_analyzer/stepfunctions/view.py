@@ -34,6 +34,7 @@ from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, 
 from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
 from .analysis.trend import daily_counts, failure_jump
+from .analysis.compare import ExecutionComparison, StateRuns, _runs_text, comparison_findings
 from .analysis.suspects import (
     SUSPECT_WINDOW, change_findings, change_verdict, group_change_findings, relevant_changes,
 )
@@ -126,6 +127,28 @@ def _changes_blocks(report: FailureReport, group: FailureGroup) -> list[Any]:
     until = min(end + pad, max(_utcnow(), end))
     return [_Changes(shown, group.executions, report.machine.name, start - pad, until, suspect=verdict.before,
                      title="What changed around these failures")]
+
+
+_DIFFERENCE_TONES = {"failed": "bad", "retried": "warn", "slower": "warn"}
+
+_INPUT_WORDS = {"missing": "missing here", "extra": "only here", "empty": "empty here", "type": "another type"}
+
+
+def _runs_cell(runs: StateRuns | None) -> str:
+    return _runs_text(runs) if runs is not None else "-"
+
+
+def _compare_rows(comparison: ExecutionComparison) -> list[list[Any]]:
+    """
+    A row per state either execution went through: how it ran in each, and the difference (in colour when it
+    failed only here, retried more or ran much slower).
+    """
+    rows = []
+    for step in comparison.steps:
+        tone = _DIFFERENCE_TONES.get(step.kind, "")
+        difference: Any = _Tone(step.words, tone) if tone else step.words
+        rows.append([_state_label(step.state, step.depth), _runs_cell(step.this), _runs_cell(step.other), difference])
+    return rows
 
 
 def _state_label(name: str, depth: int) -> str:
@@ -283,7 +306,7 @@ class StepFunctionsView(_BaseView):
     _render_html = staticmethod(_render_html)
     _GROUPS = {
         "🔀 State machines": ("overview", "state_machine", "graph"),
-        "🏃 Executions": ("executions", "execution", "failures"),
+        "🏃 Executions": ("executions", "execution", "compare", "failures"),
         "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
@@ -663,6 +686,55 @@ class StepFunctionsView(_BaseView):
             _with_story_run(detail, story)
         self._show(self._execution_blocks(detail, story))
 
+    @_friendly_errors
+    def compare(self, execution: str, other: str | None = None, *, machine: str | None = None,
+                since: Any = "30d") -> None:
+        """
+        An execution beside another, by default the newest that succeeded before it: which states each went
+        through and how (where it failed, more tries, much slower), which of its input's fields are missing, extra
+        or empty, and the likely cause when its error names a field its input lacks. Name them as execution() does;
+        other= picks the one to compare with, since= how far back to look for a success.
+
+            sfn.compare("order-pipeline/ord-7f3a")                    # with the last success before it
+            sfn.compare("order-pipeline/ord-7f3a", other="ord-25a8")
+        """
+        with self._progress("Reading both executions", unit="events"):
+            comparison = self.core.compare(execution, other=other, machine=machine, since=since)
+        self._show(self._compare_blocks(comparison))
+
+    def _compare_blocks(self, comparison: ExecutionComparison) -> list[Any]:
+        this, other = comparison.this.execution, comparison.other.execution
+        word = STATUS_WORDS.get(other.status, other.status.lower())
+        when = "before" if comparison.other_is_before else "after"
+        sub = (f"{this.machine} · {other.name} {word}, started {_fmt_dt(other.start, zone=True)} "
+               f"({human_age(other.start)}), {when} {this.name}")
+        differing, fields = len(comparison.differing_steps), len(comparison.inputs)
+        cards = [
+            (this.name, f"{STATUS_WORDS.get(this.status, this.status)} · {_seconds(this.seconds)}",
+             STATUS_TONES.get(this.status, "")),
+            (other.name, f"{word} · {_seconds(other.seconds)}", STATUS_TONES.get(other.status, "")),
+            ("States that differ", _count(differing), "warn" if differing else ""),
+            ("Input fields that differ", _count(fields), "warn" if fields else ""),
+        ]
+        blocks: list[Any] = [_Title(f"{this.name} beside {other.name}", sub), _Cards([_card(c) for c in cards]),
+                             _Findings(comparison_findings(comparison))]
+        blocks.append(_Table(["State", this.name, other.name, "Difference"], _compare_rows(comparison),
+                             title=f"Each state either went through, in the order {this.name} entered them",
+                             max_rows=0, sortable=False))
+        if comparison.inputs:
+            rows = [[d.path, d.this or "-", d.other or "-", _Tone(_INPUT_WORDS[d.kind], "warn")]
+                    for d in comparison.inputs]
+            blocks.append(_Table(["Input field", this.name, other.name, "Difference"], rows,
+                                 title="The input fields that differ (values that just differ aren't listed)",
+                                 max_rows=0, sortable=False))
+        machine = comparison.this.machine.name if comparison.this.machine is not None else this.machine
+        blocks.append(_Next([
+            (_call("execution", execution_ref(machine, this.name, this.arn)), f"{this.name} step by step"),
+            (_call("execution", execution_ref(machine, other.name, other.arn)), f"{other.name} step by step"),
+            (_call("failures", machine), "how often it fails like this"),
+        ]))
+        return blocks
+
     def _execution_blocks(self, detail: ExecutionDetail, story: ExecutionStory | None = None) -> list[Any]:
         execution, step = detail.execution, detail.failed_step
         status_word = STATUS_WORDS.get(execution.status, execution.status)
@@ -701,6 +773,8 @@ class StepFunctionsView(_BaseView):
         if step is not None and step.function:
             steps.append((f"LambdaView().{_call('errors', step.function)}", f"every error {step.function} logged"))
         if detail.execution.failed and (detail.machine is None or detail.machine.has_executions):
+            ref = execution_ref(machine_name, detail.execution.name, detail.execution.arn)
+            steps.append((_call("compare", ref), "beside the last one that succeeded: what differs"))
             steps.append((_call("failures", machine_name), "how often it fails like this"))
         steps.append((_call("executions", machine_name), "its other executions"))
         return steps[:3]

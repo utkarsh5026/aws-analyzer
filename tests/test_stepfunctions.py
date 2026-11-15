@@ -38,6 +38,10 @@ from aws_analyzer.stepfunctions.analysis.suspects import (
     change_findings, change_verdict, gap_text, group_change_findings,
 )
 from aws_analyzer.stepfunctions.models import Change, FailureGroup, FailureReport
+from aws_analyzer.stepfunctions.analysis.compare import (
+    compare_executions, compare_inputs, comparison_findings,
+)
+from aws_analyzer.stepfunctions.comparing import _newest_before
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -1387,3 +1391,87 @@ def test_what_changed_in_the_reports_and_the_window(core, fakes, capsys):
     other = next(line for line in x._failure_lines if line.key == "ChargeCard · Lambda.TooManyRequestsException")
     other.button.click()
     assert "Nothing changed in the 2 days before ChargeCard" in plain(x.failures_view.value)
+
+
+def test_inputs_differ_by_field_not_by_value():
+    this = json.dumps({"order_id": "1", "customer": {"email": ""}, "items": [1], "total": "12", "coupon": "X"})
+    other = json.dumps({"order_id": "2", "customer_id": "C-1", "customer": {"email": "a@b.c"}, "items": [2],
+                        "total": 12})
+    found = {d.path: (d.kind, d.this, d.other) for d in compare_inputs(this, other)}
+    assert found == {"customer_id": ("missing", "", '"C-1"'), "customer.email": ("empty", '""', '"a@b.c"'),
+                     "total": ("type", '"12"', "12"), "coupon": ("extra", '"X"', "")}
+    assert compare_inputs("not json", "{}") == [] and compare_inputs("", "") == []
+
+
+def test_a_failed_execution_beside_the_last_success(core):
+    this = core.execution("order-pipeline/ord-7f3a", logs=False)
+    other = core.execution("order-pipeline/ord-cfae", logs=False)
+    comparison = compare_executions(this, other)
+    kinds = {step.state: step.kind for step in comparison.steps}
+    assert kinds["ValidateOrder"] == "same" and kinds["ChargeCard"] == "retried" and kinds["LoadOrders"] == "failed"
+    assert kinds["OrderFailed"] == "after_failure" and kinds["NotifyCustomer"] == "not_reached"
+    assert [step.state for step in comparison.differing_steps] == ["ChargeCard", "LoadOrders"]
+    assert comparison.other_is_before
+    found = comparison_findings(comparison)
+    assert found[0] == ("warn", 'ord-7f3a\'s input has no customer_id, which ord-cfae\'s had ("C-4471"): that\'s the '
+                                "likely cause, since LoadOrders failed with KeyError, naming it. Find what sent this "
+                                "input without it, or make the state handle a missing customer_id.")
+    assert ("info", "ChargeCard took 3 tries in ord-7f3a and 2 in ord-cfae: it was retried more, so its errors were "
+                    "the kind a Retry catches.") in found
+    assert not any(text.startswith("LoadOrders failed in") for _, text in found)
+    assert not any("different branches" in text for _, text in found)
+
+
+def test_without_a_named_field_the_failed_state_is_the_finding(core):
+    this = core.execution("order-pipeline/ord-77e0", logs=False)
+    comparison = compare_executions(this, core.execution("order-pipeline/ord-cfae", logs=False))
+    found = comparison_findings(comparison)
+    assert found[0][0] == "warn" and found[0][1].startswith("ChargeCard failed in ord-77e0 with ")
+    same = compare_executions(core.execution("order-pipeline/ord-cfae", logs=False),
+                              core.execution("order-pipeline/ord-cfae", logs=False))
+    assert same.differing_steps == []
+    assert "ran the same states with the same input fields" in comparison_findings(same)[0][1]
+    later = compare_executions(this, core.execution("order-pipeline/ord-25a8", logs=False))
+    assert not later.other_is_before and "which started after it" in comparison_findings(later)[-1][1]
+
+
+def test_compare_finds_the_last_success_before_it(core):
+    comparison = core.compare("order-pipeline/ord-7f3a")
+    assert comparison.other.execution.name == "ord-cfae" and comparison.other_is_before
+    named = core.compare("order-pipeline/ord-7f3a", other="ord-25a8")
+    assert named.other.execution.name == "ord-25a8" and not named.other_is_before
+    with pytest.raises(_Hint, match="No execution of refund-approvals succeeded in the last 30d"):
+        core.compare("refund-approvals/refund-42")
+    page = core.executions("order-pipeline", status="succeeded", since="30d")
+    assert _newest_before(page.executions, None) is page.executions[0] and _newest_before([], NOW) is None
+
+
+def test_compare_report(ui, capsys):
+    out = run(capsys, ui.compare, "order-pipeline/ord-7f3a")
+    for expected in ("ord-7f3a beside ord-cfae", "States that differ: 2 (!)", "Input fields that differ: 1 (!)",
+                     "[!] ord-7f3a's input has no customer_id, which ord-cfae's had",
+                     "customer_id  -         \"C-4471\"  missing here",
+                     "failed here with KeyError; went through in ord-cfae", "execution('order-pipeline/ord-cfae')"):
+        assert expected in out, expected
+    assert "No execution of refund-approvals succeeded" in run(capsys, ui.compare, "refund-approvals/refund-42")
+    out = run(capsys, ui.execution, "order-pipeline/ord-7f3a", logs=False)
+    assert "compare('order-pipeline/ord-7f3a')" in out
+
+
+def test_explorer_compares_a_failed_execution_with_the_last_success(fakes):
+    x = explorer(fakes, "order-pipeline")
+    x.execution("ord-25a8")
+    assert x.compare_button.layout.display == "none"
+    x.execution("ord-7f3a")
+    assert x.compare_button.layout.display == "" and x.compare_view.value == ""
+    x.compare_button.click()
+    assert x.comparison.other.execution.name == "ord-cfae"
+    shown = plain(x.compare_view.value)
+    assert "ord-7f3a beside ord-cfae" in shown and "That's the likely cause" in shown
+    assert x.compare_button.description == "✕ Hide the comparison"
+    x.compare_button.click()
+    assert x.comparison is None and x.compare_view.value == "" and x.compare_button.layout.display == ""
+    x.compare("ord-5d21", other="ord-25a8")
+    assert x._selected.endswith("ord-5d21") and x.comparison.other.execution.name == "ord-25a8"
+    x.execution("ord-0b17")
+    assert x.comparison is None and x.compare_view.value == ""
