@@ -48,13 +48,30 @@ _QUESTIONS: dict[tuple[str, str], tuple[str, ...]] = {
                                  "Is the file that should answer this indexed, and does a search find it?"),
     ("bedrock_chat", "test_run"): ("Why did these questions miss their expected files?",
                                    "Are the missed files indexed, and does a search find them?"),
+    ("stepfunctions", "machines"): ("Which of these state machines need attention first?",
+                                    "Which of them failed in the last 24 hours, and why?"),
+    ("stepfunctions", "machine"): ("How is {state_machine} doing, and what should I fix first?",
+                                   "What does {state_machine} cost, and can it cost less?"),
+    ("stepfunctions", "executions"): ("Which of these executions failed, and why?",
+                                      "Are {state_machine}'s executions slower than usual?"),
+    ("stepfunctions", "execution"): ("What happened in {execution}?", "Which step took the longest, and why?"),
+    ("stepfunctions", "graph"): ("Where do {state_machine}'s executions fail?",
+                                 "Which states retry, and could a retry hide a failure?"),
+    ("stepfunctions", "state"): ("What does the {state} do, and how can it go wrong?",
+                                 "Do executions fail at the {state}, and why?"),
+    ("stepfunctions", "failures"): ("Why does {state_machine} fail, and what should I change?",
+                                    "When did these failures start, and what changed then?"),
+    ("stepfunctions", "definition"): ("What does {state_machine} do, step by step?",
+                                      "What in {state_machine}'s definition could break, and how do I fix it?"),
 }
 
 _UNNAMED = {"function": "this function", "file": "this file", "folder": "this folder",
-            "knowledge_base": "this knowledge base", "state": "it does"}
+            "knowledge_base": "this knowledge base", "state": "it does", "state_machine": "this state machine",
+            "execution": "this execution"}
 
 _FIRST_INSTEAD = {
     ("lambda", "run", "error"): "Why did this run fail, and what should I change?",
+    ("stepfunctions", "execution", "error"): "Why did {execution} fail, and what should I change?",
     ("bedrock_kb", "file", "indexed"): "What questions does {file} answer?",
 }
 
@@ -256,13 +273,49 @@ def _kb_target(call: ViewCall) -> Target | None:
     return None
 
 
+_SFN_TABS = {"state_machine": ("overview", "Overview tab"), "executions": ("executions", "Executions tab"),
+             "graph": ("graph", "Graph tab"), "failures": ("failures", "Failures tab")}
+
+
+def _execution_ref(call: ViewCall) -> str:
+    """
+    The execution a StepFunctionsView().execution(...) call names, as the explorer's execution() takes it: its ARN,
+    or 'machine/name' when the call names the state machine apart.
+    """
+    ref = call.args[0]
+    machine = call.kwargs.get("machine")
+    if isinstance(machine, str) and machine and "/" not in ref and not ref.startswith("arn:"):
+        return f"{machine}/{ref}"
+    return ref
+
+
+def _stepfunctions_target(call: ViewCall) -> Target | None:
+    """
+    A StepFunctionsView call as a place in the Step Functions explorer: an execution in the Executions tab, or one of
+    a state machine's tabs.
+    """
+    if not call.args or not isinstance(call.args[0], str):
+        return None
+    first = call.args[0]
+    if call.command == "execution":
+        ref = _execution_ref(call)
+        name = ref.rsplit(":", 1)[-1].rsplit("/", 1)[-1]
+        return Target(f"Execution {_clip(name, _LABEL_CHARS)} in the Executions tab", "execution", (ref,))
+    if call.command not in _SFN_TABS:
+        return None
+    tab, title = _SFN_TABS[call.command]
+    name = first.rsplit(":", 1)[-1]
+    return Target(f"{_clip(name, _LABEL_CHARS)}'s {title}", "open", (first,), {"tab": tab})
+
+
 _TARGETS = {("lambda", "LambdaView"): _lambda_target, ("s3", "S3View"): _s3_target,
-           ("bedrock_kb", "BedrockKBView"): _kb_target}
+           ("bedrock_kb", "BedrockKBView"): _kb_target,
+           ("stepfunctions", "StepFunctionsView"): _stepfunctions_target}
 
 
 def target_for(call: str, service: str) -> Target | None:
     """
-    Where a window of `service` ('lambda', 's3', 'bedrock_kb') shows what a View call an answer names does, as a
+    Where a window of `service` ('lambda', 's3', 'bedrock_kb', 'stepfunctions') shows what a View call an answer names does, as a
     button's label and the window's command; None when the call is another service's, or the window can't show it.
     """
     read = parse_call(call)

@@ -41,7 +41,7 @@ def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
 
 
 _FOCUS_WINDOWS = {"lambda": "the Lambda explorer", "s3": "the S3 explorer", "bedrock_kb": "the knowledge base explorer",
-                  "bedrock_chat": "the knowledge base chat window"}
+                  "bedrock_chat": "the knowledge base chat window", "stepfunctions": "the Step Functions explorer"}
 _FOCUS_VALUE_CHARS = 400
 
 
