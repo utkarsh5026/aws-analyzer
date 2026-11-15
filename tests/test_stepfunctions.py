@@ -42,6 +42,10 @@ from aws_analyzer.stepfunctions.analysis.compare import (
     compare_executions, compare_inputs, comparison_findings,
 )
 from aws_analyzer.stepfunctions.comparing import _newest_before
+from aws_analyzer.stepfunctions.analysis.retries import (
+    advice_finding, error_kind, matching_retry, retry_advice, roomier_rule,
+)
+from aws_analyzer.stepfunctions.models import StateDef
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -1475,3 +1479,71 @@ def test_explorer_compares_a_failed_execution_with_the_last_success(fakes):
     assert x._selected.endswith("ord-5d21") and x.comparison.other.execution.name == "ord-25a8"
     x.execution("ord-0b17")
     assert x.comparison is None and x.compare_view.value == ""
+
+
+def test_an_errors_kind_says_whether_it_passes():
+    assert error_kind("Lambda.TooManyRequestsException") == "transient"
+    assert error_kind("DynamoDB.ProvisionedThroughputExceededException") == "transient"
+    assert error_kind("Lambda.ServiceException") == "transient"
+    assert error_kind("KeyError") == "permanent" and error_kind("TypeError") == "permanent"
+    assert error_kind("States.Permissions") == "permanent" and error_kind("S3.AccessDeniedException") == "permanent"
+    assert error_kind("States.Timeout") == "timeout"
+    assert error_kind("Lambda.Unknown", "Task timed out after 30.03 seconds") == "timeout"
+    assert error_kind("Runtime.OutOfMemory") == "memory" and error_kind("Something.Odd") == "unknown"
+
+
+def test_a_states_retry_matches_as_step_functions_picks_one():
+    named = {"ErrorEquals": ["Lambda.TooManyRequestsException"], "MaxAttempts": 2}
+    everything = {"ErrorEquals": ["States.ALL"], "MaxAttempts": 3}
+    task_failed = {"ErrorEquals": ["States.TaskFailed"]}
+    state = StateDef("ChargeCard", "Task", retries=[named, everything])
+    assert matching_retry(state, "Lambda.TooManyRequestsException") is named
+    assert matching_retry(state, "KeyError") is everything and matching_retry(state, "States.Runtime") is None
+    only_tasks = StateDef("X", "Task", retries=[task_failed])
+    assert matching_retry(only_tasks, "KeyError") is task_failed and matching_retry(only_tasks, "States.Timeout") is None
+    assert matching_retry(None, "KeyError") is None and matching_retry(StateDef("Y", "Task"), "KeyError") is None
+    assert roomier_rule("ThrottlingException", None) == {"ErrorEquals": ["ThrottlingException"], "IntervalSeconds": 2,
+                                                         "MaxAttempts": 6, "BackoffRate": 2, "JitterStrategy": "FULL"}
+    assert roomier_rule("X", {**named, "MaxAttempts": 8})["MaxAttempts"] == 10
+    assert roomier_rule("X", named)["MaxAttempts"] == 6 and roomier_rule("X", named)["JitterStrategy"] == "FULL"
+
+
+def test_each_kind_of_failure_says_whether_a_retry_would_help(core):
+    report = core.failures("order-pipeline")
+    advice = {g.state: retry_advice(report.machine, g) for g in report.groups}
+    load, charge, resize = advice["LoadOrders"], advice["ChargeCard"], advice["ResizeImage"]
+    assert (load.kind, load.would_help, load.verdict, load.suggested) == ("permanent", False, "no: fix the cause", None)
+    assert (charge.kind, charge.would_help) == ("transient", True) and charge.rule is not None
+    assert charge.suggested["MaxAttempts"] == 6 and charge.verdict == "it retries, but ran out: give it more tries"
+    assert (resize.kind, resize.would_help) == ("timeout", None)
+    level, text = advice_finding(charge)
+    assert level == "warn" and text.startswith("ChargeCard retries Lambda.TooManyRequestsException (×2, back-off 2) "
+                                               "and still ran out of tries once")
+    assert advice_finding(load)[1].startswith("A Retry won't help the 3 executions that failed at LoadOrders")
+
+
+def test_a_retry_that_only_repeats_a_code_error(core):
+    report = core.failures("order-pipeline")
+    group = next(g for g in report.groups if g.state == "LoadOrders")
+    report.machine.state("LoadOrders").retries = [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 3}]
+    advice = retry_advice(report.machine, group)
+    assert advice.verdict == "no, and its Retry repeats it"
+    level, text = advice_finding(advice)
+    assert level == "warn" and "its Retry on States.ALL (×3, back-off 2.0) only repeats the failure" in text
+    report.machine.state("LoadOrders").retries = []
+    nothing = next(g for g in report.groups if g.state == "ChargeCard")
+    nothing.error = "Something.Odd"
+    assert advice_finding(retry_advice(report.machine, nothing)) is None
+
+
+def test_the_reports_and_the_window_say_whether_a_retry_helps(core, fakes, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "Would a Retry help?" in out and "no: fix the cause" in out
+    assert "it retries, but ran out: give it more tries" in out and "not first: find why it's slow" in out
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["failures"].click()
+    next(line for line in x._failure_lines if line.key.startswith("ChargeCard")).button.click()
+    page = plain(x.failures_view.value)
+    assert "A Retry rule for ChargeCard, to paste into its Retry list" in page and '"MaxAttempts": 6' in page
+    next(line for line in x._failure_lines if line.key.startswith("LoadOrders")).button.click()
+    assert "to paste into its Retry list" not in plain(x.failures_view.value)

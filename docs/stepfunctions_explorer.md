@@ -166,7 +166,7 @@ The toggle over the graph picks what colours it: **This execution** (its path, t
 The other tabs are the [Step Functions guide](stepfunctions.md)'s reports, a click away.
 { .gist }
 
-- **Failures** is [`failures()`](stepfunctions.md#failures) as a list: **All failures** first (the summary, findings and executions a day), then a line per kind of failure, the state they stopped at and the error, the most common first, with how many and since when. Click one for what changed just before it began (a deploy of its function or the definition updated, on a timeline with its failures), its error, the run to read, the commands that redrive the ones that still can, and its executions, each a click from its waterfall in the Executions tab.
+- **Failures** is [`failures()`](stepfunctions.md#failures) as a list: **All failures** first (the summary, findings and executions a day), then a line per kind of failure, the state they stopped at and the error, the most common first, with how many and since when. Click one for whether a Retry would have saved it (with the rule to paste when one would), what changed just before it began (a deploy of its function or the definition updated, on a timeline with its failures), its error, the run to read, the commands that redrive the ones that still can, and its executions, each a click from its waterfall in the Executions tab.
 - **Overview** is [`state_machine()`](stepfunctions.md#state-machine): how it's doing, what its definition risks, and every state.
 - **Definition** is [`graph()`](stepfunctions.md#state-machine): the flow drawn as a graph, with Mermaid to paste.
 

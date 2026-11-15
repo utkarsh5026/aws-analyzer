@@ -14,6 +14,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🔀 **Step Functions: executions a day, and when failures jumped** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
   - `state_machine()`, `failures()` and the explorer's Executions tab draw a bar a day, what didn't succeed in red.
   - A finding names the day failures jumped, with the `failures(name, since=)` call that reads just those.
+- 🔀 **Step Functions: would a Retry have helped?** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `failures()` says it per kind of failure: yes for a throttle, no for a code error, not first for a timeout.
+  - Where one would help, the Retry rule to paste; where a Retry only repeats a code error, it says so.
 - 🔀 **Step Functions: a failed execution beside the last success** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
   - `compare("order-pipeline/ord-7f3a")`: the states and input fields that differ, the likely cause first.
   - In the explorer, ⇄ Compare with the last success beside ↗ Console; the agent has `compare_with_success`.

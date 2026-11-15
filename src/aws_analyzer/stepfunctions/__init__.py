@@ -52,7 +52,8 @@ from .analysis import (
     waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, state_timings, timing_findings,
     DayCount, FailureJump, daily_counts, failure_jump, trend_findings,
     ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
-    comparison_findings, ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
+    comparison_findings, RetryAdvice, advice_finding, error_kind, matching_retry, retry_advice, retry_findings,
+    ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
     timing_marks, timing_report,
 )
 from .analyzer import StepFunctionsAnalyzer
@@ -60,6 +61,12 @@ from .view import StepFunctionsView
 from .explorer.window import StepFunctionsExplorer, explore
 
 __all__ = [
+    "RetryAdvice",
+    "advice_finding",
+    "error_kind",
+    "matching_retry",
+    "retry_advice",
+    "retry_findings",
     "ExecutionComparison",
     "InputDifference",
     "StepDifference",

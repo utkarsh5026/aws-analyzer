@@ -24,10 +24,17 @@ from .compare import (
     ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
     comparison_findings,
 )
+from .retries import RetryAdvice, advice_finding, error_kind, matching_retry, retry_advice, retry_findings
 from .suspects import ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
+    "RetryAdvice",
+    "advice_finding",
+    "error_kind",
+    "matching_retry",
+    "retry_advice",
+    "retry_findings",
     "ExecutionComparison",
     "InputDifference",
     "StepDifference",

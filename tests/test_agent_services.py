@@ -333,5 +333,8 @@ def test_the_failures_tool_says_what_changed_just_before():
     assert top["changed_just_before"]["what"] == "orders-etl version 2 was published"
     assert top["changed_just_before"]["minutes_before_first_failure"] == 4 and top["first_failure"] < now
     assert "changed_just_before" not in summary["groups"][1]
+    assert top["would_a_retry_help"] == {"answer": False, "says": "no: fix the cause", "error_kind": "permanent"}
+    charge = next(g for g in summary["groups"] if g["state"] == "ChargeCard")
+    assert charge["would_a_retry_help"]["answer"] is True
     assert any("4 minutes after orders-etl version 2" in f["message"] for f in summary["findings"])
     json.dumps(summary, default=str)

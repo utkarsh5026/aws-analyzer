@@ -241,7 +241,8 @@ def _failure_group_row(report: FailureReport, group: FailureGroup, total: int) -
     """
     One group of failures: the state and error, the cause in one line, how many and their share of the failures
     read, the first and newest one (the newest to open with execution_details), how many can still be redriven,
-    the Lambda run behind the newest when the state called Lambda, and the change just before it began.
+    the Lambda run behind the newest when the state called Lambda, the change just before it began, and whether a
+    Retry would have saved it (answer None when that depends).
     """
     sfn = _sfn_module()
     machine = report.machine.name
@@ -261,6 +262,8 @@ def _failure_group_row(report: FailureReport, group: FailureGroup, total: int) -
     changed = _change_before(report, group)
     if changed:
         row["changed_just_before"] = changed
+    advice = sfn.retry_advice(report.machine, group)
+    row["would_a_retry_help"] = {"answer": advice.would_help, "says": advice.verdict, "error_kind": advice.kind}
     return row
 
 
@@ -280,7 +283,8 @@ def summarize_failures(report: FailureReport, now: datetime | None = None) -> di
         "groups": [_failure_group_row(report, g, grouped) for g in report.groups[:_FAILURE_GROUPS]],
         "cloudwatch": _machine_numbers(report.numbers), "cut_short": report.truncated,
         "window": _window(report.since, now),
-        "findings": model_findings(sfn.failure_findings(report, now) + sfn.change_findings(report)),
+        "findings": model_findings(sfn.failure_findings(report, now) + sfn.retry_findings(report)
+                                   + sfn.change_findings(report)),
     }
     if len(report.groups) > _FAILURE_GROUPS:
         out["more_groups"] = len(report.groups) - _FAILURE_GROUPS
@@ -549,9 +553,10 @@ AWS Step Functions
         Why a state machine's executions failed in a window: the newest failed, timed-out and aborted executions
         (up to 50), grouped by the state they stopped at and the error, the biggest group first, each with its
         cause in one line, its share, how many can still be redriven, its first and newest execution (the newest to
-        open with execution_details), for a Lambda state the function and request ID of the run that failed, and
+        open with execution_details), for a Lambda state the function and request ID of the run that failed,
         what changed just before it began (a deploy of its function, or the definition updated: timing, not
-        proof); with CloudWatch's count over the same days and the findings. state_machine: its name or ARN. since:
+        proof), and whether a Retry would have saved it (a throttle yes, a code error no); with CloudWatch's count
+        over the same days and the findings. state_machine: its name or ARN. since:
         ISO UTC ('2026-10-15T18:00Z') or relative ('24h', '7d').
         """
         core = self.analyzer

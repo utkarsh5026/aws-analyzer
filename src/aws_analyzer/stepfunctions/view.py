@@ -35,6 +35,7 @@ from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
 from .analysis.trend import daily_counts, failure_jump
 from .analysis.compare import ExecutionComparison, StateRuns, _runs_text, comparison_findings
+from .analysis.retries import advice_finding, retry_advice, retry_findings, rule_json
 from .analysis.suspects import (
     SUSPECT_WINDOW, change_findings, change_verdict, group_change_findings, relevant_changes,
 )
@@ -149,6 +150,18 @@ def _compare_rows(comparison: ExecutionComparison) -> list[list[Any]]:
         difference: Any = _Tone(step.words, tone) if tone else step.words
         rows.append([_state_label(step.state, step.depth), _runs_cell(step.this), _runs_cell(step.other), difference])
     return rows
+
+
+_RETRY_TONES = {True: "ok", False: "bad", None: ""}
+
+
+def _retry_cell(machine: StateMachine, group: FailureGroup) -> Any:
+    """
+    Whether a Retry would have saved a kind of failure, in a few words: green when it would, red when it wouldn't.
+    """
+    advice = retry_advice(machine, group)
+    tone = _RETRY_TONES[advice.would_help]
+    return _Tone(advice.verdict, tone) if tone else advice.verdict
 
 
 def _state_label(name: str, depth: int) -> str:
@@ -813,7 +826,7 @@ class StepFunctionsView(_BaseView):
         blocks: list[Any] = [
             _Title(f"Why {machine.name} fails", sub),
             _Cards([_card(c) for c in cards]),
-            _Findings(failure_findings(report, _utcnow()) + change_findings(report),
+            _Findings(failure_findings(report, _utcnow()) + retry_findings(report) + change_findings(report),
                       empty=f"No execution failed, timed out or was aborted {window}."),
         ]
         if gaps:
@@ -829,10 +842,12 @@ class StepFunctionsView(_BaseView):
                 rows.append([group.state + (f" · λ {group.function}" if group.function else ""), group.error,
                              _clip(short_cause(group.cause), 120) or "-", f"{group.count:,}",
                              human_age(group.first_seen) if group.first_seen is not None else "-",
-                             human_age(newest.start) if newest is not None else "-", read])
-            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Since", "Newest", "To read next"],
+                             human_age(newest.start) if newest is not None else "-",
+                             _retry_cell(report.machine, group), read])
+            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Since", "Newest",
+                                  "Would a Retry help?", "To read next"],
                                  rows, title="Failures by where they stopped and why, the most common first",
-                                 code_cols=(6,)))
+                                 code_cols=(7,)))
         blocks.append(_Next(self._failure_next(report)))
         return blocks
 
@@ -856,9 +871,14 @@ class StepFunctionsView(_BaseView):
             ("Can be redriven", _count(group.redrivable)),
         ]
         blocks: list[Any] = [_Title(f"{group.state} fails with {group.error}", sub), _Cards([_card(c) for c in cards])]
-        found = group_change_findings(report, group)
+        advice = retry_advice(report.machine, group)
+        retry = advice_finding(advice)
+        found = ([retry] if retry is not None else []) + group_change_findings(report, group)
         if found:
             blocks.append(_Findings(found))
+        if advice.suggested is not None:
+            blocks.append(_Text(rule_json(advice.suggested), title=f"A Retry rule for {group.state}, to paste into its "
+                                                                   "Retry list", code=True))
         blocks += _changes_blocks(report, group)
         if group.function and group.request_id:
             blocks.append(_Note(f"Read the newest run's lines: {lambda_logs_call(group.function, group.request_id)}"))

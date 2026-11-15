@@ -1609,7 +1609,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 2101
+      "h": 2584
      }
     ],
     "captions": [

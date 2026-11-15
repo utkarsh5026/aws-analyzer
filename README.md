@@ -2187,13 +2187,14 @@ steps an execution took), `waterfall`, `step_lines` and `merge_log` (an executio
 `flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
 `timing_report` (where the time goes over several executions' steps), `daily_counts` and `failure_jump` (its
 executions a day, and the day its failures jumped), `compare_executions`, `compare_steps` and `compare_inputs` (two
-executions side by side), `change_verdict` and `change_text` (whether a deploy or a
+executions side by side), `error_kind`, `matching_retry` and `retry_advice` (whether a Retry would have saved a kind
+of failure), `change_verdict` and `change_text` (whether a deploy or a
 definition update came just before a kind of failure began), `resource_label`, `retry_label`,
 `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
 `failure_findings`, `timing_findings`, `trend_findings`, `change_findings`, `group_change_findings`,
-`comparison_findings`.
+`comparison_findings`, `retry_findings`.
 
 </details>
 
