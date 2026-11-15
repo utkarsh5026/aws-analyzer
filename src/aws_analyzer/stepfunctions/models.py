@@ -152,14 +152,18 @@ class Execution:
 class ExecutionPage:
     """
     The executions of one state machine that list_executions read, newest first; truncated when it stopped at the
-    limit before `since`. source is 'history' (ListExecutions) or 'logs' (an Express workflow's log group, read back
-    to covered_from), and note says what the logs can't tell.
+    limit before `since`. with_failures says the ones that didn't succeed in the whole range were listed on their own
+    and added after the newest (executions_with_failures), and failures_truncated that there were more of those than
+    the limit. source is 'history' (ListExecutions) or 'logs' (an Express workflow's log group, read back to
+    covered_from), and note says what the logs can't tell.
     """
 
     machine: StateMachine
     executions: list[Execution] = field(default_factory=list)
     since: datetime | None = None
     truncated: bool = False
+    with_failures: bool = False
+    failures_truncated: bool = False
     source: str = "history"
     covered_from: datetime | None = None
     note: str = ""

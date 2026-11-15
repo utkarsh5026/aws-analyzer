@@ -9,7 +9,7 @@ import boto3
 import pytest
 from fake_stepfunctions import (
     FAILED_RUN, ORDER_PIPELINE, RESIZE_FAILED_RUN, express_arn, express_log_lines, express_runs, REFUND_APPROVALS, FakeCloudWatch, FakeStepFunctions, History, Try, clients,
-    lambda_lines, machine_arn, run_arn, scene, story_logs,
+    lambda_error, lambda_lines, machine_arn, run_arn, scene, story_logs,
 )
 from moto import mock_aws
 from test_lambda_functions import create, lambda_clients, put_logs
@@ -27,7 +27,10 @@ from aws_analyzer.stepfunctions import (
 from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
 )
-from aws_analyzer.stepfunctions.analysis.layout import failure_marks, flow_layout, path_marks
+from aws_analyzer.stepfunctions.analysis.layout import (
+    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, owner_of, path_marks,
+)
+from aws_analyzer.stepfunctions.explorer.graph import _execution_blocks as graph_execution_blocks
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -885,3 +888,95 @@ def test_explorer_draws_its_reports_in_the_theme_set(fakes):
     assert pages and all('<div class="sfn theme-soft">' in page for page in pages)
     assert x.root.children[0].value.count(theme_rules) == 1
     assert not any(theme_rules in page for page in pages)
+
+
+def test_executions_cut_short_still_list_every_failure(core, fakes):
+    page = core.executions_with_failures("order-pipeline", since="30d", limit=7)
+    names = [e.name for e in page.executions]
+    assert len(names) == 10 and page.truncated and page.with_failures and not page.failures_truncated
+    assert names[7:] == ["ord-77e0", "ord-3c9b", "ord-e2f4"]
+    filters = [call.get("statusFilter") for call in fakes["stepfunctions"].called("list_executions")]
+    assert filters == [None, "FAILED", "TIMED_OUT", "ABORTED"]
+    whole = core.executions_with_failures("order-pipeline", since="30d")
+    assert not whole.truncated and not whole.with_failures and len(whole.executions) == 10
+    assert core.executions_with_failures("order-pipeline", since="30d", limit=2).failures_truncated
+
+
+def test_explorer_list_counts_agree_with_the_header(fakes, monkeypatch):
+    monkeypatch.setattr(sfnmod.explorer.window, "_EXECUTIONS_READ", 6)
+    x = explorer(fakes, "order-pipeline")
+    chips = {c.description.rsplit(" ", 1)[0]: c.description.rsplit(" ", 1)[1] for c in x.chips.children}
+    assert chips["Failed"] == "4" and chips["Timed out"] == "1"
+    assert plain(x.cut_note.value) == "The newest 6 of about 1,239, and every one that didn't succeed."
+    assert "(the newest 6 and every one that didn't succeed)" in plain(x.status.value)
+    assert "Executions · 7d 1,239" in plain(x.stats.value)
+    x.since_pick.value = "24h"
+    assert x.range_numbers.days == 1 and "Executions · 1d 177 Didn't succeed 7 (4.0%)" in plain(x.stats.value)
+    assert {e.name for e in x.page.executions if e.failed} == {"ord-7f3a", "ord-0b17", "ord-5d21"}
+    assert plain(x.cut_note.value) == "The newest 6 of about 177, and every one that didn't succeed."
+    x.since_pick.value = "7d"
+    assert x.range_numbers is None and "Executions · 7d 1,239" in plain(x.stats.value)
+    x.open("refund-approvals")
+    assert plain(x.cut_note.value) == "" and x.range_numbers is None
+
+
+def test_execution_report_shows_what_it_returned_as_a_tree(ui, capsys):
+    out = run(capsys, ui.execution, "order-pipeline/ord-25a8", logs=False)
+    assert "What it returned" in out and '"notified": true' in out
+    detail = ui.core.execution("order-pipeline/ord-25a8", logs=False)
+    html = sfnmod.view._render_html(ui._execution_blocks(detail), 50)
+    assert "What it returned" in html and "jt" in html and ".sfn .jt" in html
+    failed = run(capsys, ui.execution, "order-pipeline/ord-7f3a", logs=False)
+    assert "What it returned" not in failed and "The execution's input" in failed
+
+
+def test_express_output_comes_from_its_log_lines():
+    history = History(NOW, {"key": "a.jpg"})
+    history.state("Pass", "Resize").succeed({"thumbnail": "a-small.jpg"})
+    execution = Execution(arn="arn", name="x", machine="m", status="SUCCEEDED")
+    fill_detail(ExecutionDetail(execution), history.events)
+    assert json.loads(execution.output) == {"thumbnail": "a-small.jpg"}
+
+
+def test_states_inside_a_map_can_be_picked(fakes):
+    x = explorer(fakes, "order-pipeline")
+    keys = [line.key for line in x._state_lines]
+    assert keys.index("ResizeImage") == keys.index("ProcessItems") + 1 and len(keys) == 10
+    face = next(line for line in x._state_lines if line.key == "ResizeImage").face.value
+    assert 'class="er d1"' in face and "↳ ResizeImage" in plain(face)
+    x.execution("ord-25a8")
+    x.tab_buttons["graph"].click()
+    line = next(line for line in x._state_lines if line.key == "ResizeImage")
+    assert "ran 3 times" in plain(line.face.value) and "m-ok" in line.face.value
+    line.button.click()
+    inspector = plain(x.state_view.value)
+    assert "Inside ProcessItems, a Map: it runs once for each item" in inspector
+    assert "It ran 3 times in ord-25a8: the last one is shown." in inspector
+    assert 'class="fn t-map m-ok sel"' in x.graph_view.value
+    x.execution("ord-0b17")
+    assert "m-running" in line.face.value and "ran 1 time" in plain(line.face.value)
+
+
+def test_a_map_shows_its_failed_item_first():
+    history = History(NOW, {"items": [1, 2, 3]})
+    history.map_state("ProcessItems", "ResizeImage", "resize-image",
+                      [Try(1, request_id="r1"), Try(1, "Boom", lambda_error("Boom", "bad item", "r2")),
+                       Try(1, request_id="r3")])
+    execution = Execution(arn="arn", name="ord-x", machine="order-pipeline", status="FAILED")
+    detail = fill_detail(ExecutionDetail(execution, machine=order_pipeline()), history.events)
+    marks = inner_path_marks(order_pipeline(), detail)
+    assert marks.states["ResizeImage"] == "failed" and marks.notes["ResizeImage"] == "ran 3 times, 1 failed"
+    blocks = graph_execution_blocks("ResizeImage", detail, None)
+    assert blocks[0].text == "It ran 3 times in ord-x, 1 of them failed: the last failed one is shown."
+    assert blocks[0].level == "warn" and blocks[1].rows[0][4] == "Boom"
+    assert inner_states(order_pipeline(), "ProcessItems")[0].name == "ResizeImage"
+    assert owner_of(order_pipeline(), "ResizeImage") == "ProcessItems"
+    assert owner_of(order_pipeline(), "ChargeCard") == "ChargeCard"
+
+
+def test_failures_inside_a_map_are_shaded_on_their_line():
+    machine = order_pipeline()
+    report = sfnmod.FailureReport(machine, NOW, groups=[sfnmod.FailureGroup("ResizeImage", "Boom", count=1),
+                                                        sfnmod.FailureGroup("LoadOrders", "KeyError", count=3)])
+    marks = inner_failure_marks(machine, report)
+    assert marks.states == {"ResizeImage": "h2"} and marks.notes["ResizeImage"] == "1 stopped here (25%)"

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from ..._kit.fmt import _plural
 
-from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine
+from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine, StepRun
 from .definition import resource_label
 
 
@@ -293,13 +293,18 @@ def failure_marks(layout: FlowLayout, report: FailureReport) -> FlowMarks:
         counts[owners.get(group.state, group.state)] += group.count
     total = sum(counts.values())
     for node in layout.nodes:
-        count = counts.get(node.name, 0)
-        if not count:
-            continue
-        share = count / total
-        marks.states[node.name] = next(level for floor, level in _HEAT_SHARES if share >= floor)
-        marks.notes[node.name] = f"{count:,} stopped here ({share:.0%})"
+        if counts.get(node.name):
+            _mark_share(marks, node.name, counts[node.name], total)
     return marks
+
+
+def _mark_share(marks: FlowMarks, name: str, count: int, total: int) -> None:
+    """
+    Shades a state by its share of the failures, with how many under its name.
+    """
+    share = count / total
+    marks.states[name] = next(level for floor, level in _HEAT_SHARES if share >= floor)
+    marks.notes[name] = f"{count:,} stopped here ({share:.0%})"
 
 
 def _owners(layout: FlowLayout, report: FailureReport) -> dict[str, str]:
@@ -311,3 +316,66 @@ def _owners(layout: FlowLayout, report: FailureReport) -> dict[str, str]:
         if state.depth:
             owners[state.name] = state.path.split(" > ")[0]
     return {name: top for name, top in owners.items() if layout.node(top) is not None}
+
+
+def inner_states(machine: StateMachine, name: str) -> list[StateDef]:
+    """
+    The states inside a Map or Parallel (at any depth), in definition order; none for any other state.
+    """
+    state = machine.state(name)
+    if state is None:
+        return []
+    inside = f"{state.path} > "
+    return [s for s in machine.states if s.path.startswith(inside)]
+
+
+def owner_of(machine: StateMachine, name: str) -> str:
+    """
+    The top-level state whose box a state is drawn in: itself, or the Map or Parallel it sits inside.
+    """
+    state = machine.state(name)
+    return state.path.split(" > ")[0] if state is not None and state.depth else name
+
+
+def _inner_mark(runs: list[StepRun]) -> tuple[str, str]:
+    """
+    How an inner state's runs in one execution went: a mark and a note ('ran 3 times, 1 failed').
+    """
+    if not runs:
+        return "skip", "never ran"
+    failed = sum(1 for run in runs if run.status == "failed")
+    unfinished = any(run.status == "running" for run in runs)
+    mark = "failed" if failed else ("running" if unfinished else "ok")
+    note = f"ran {_plural(len(runs), 'time')}" + (f", {failed:,} failed" if failed else "")
+    return mark, note
+
+
+def inner_path_marks(machine: StateMachine, detail: ExecutionDetail) -> FlowMarks:
+    """
+    How each state inside a Map or Parallel went in one execution, for the lines that list them (the graph draws
+    the top-level boxes only): failed when any of its runs failed, still running, ok, or never ran, with how many
+    times it ran and failed.
+    """
+    marks = FlowMarks()
+    for state in machine.states:
+        if not state.depth:
+            continue
+        runs = [step for step in detail.steps if step.depth and step.name == state.name]
+        marks.states[state.name], marks.notes[state.name] = _inner_mark(runs)
+    return marks
+
+
+def inner_failure_marks(machine: StateMachine, report: FailureReport) -> FlowMarks:
+    """
+    Where executions stopped inside a Map or Parallel over the report's window: each inner state shaded by its
+    share of all the failures, as failure_marks shades the boxes.
+    """
+    marks = FlowMarks()
+    counts: Counter[str] = Counter()
+    for group in report.groups:
+        counts[group.state] += group.count
+    total = sum(counts.values())
+    for state in machine.states:
+        if state.depth and counts.get(state.name):
+            _mark_share(marks, state.name, counts[state.name], total)
+    return marks

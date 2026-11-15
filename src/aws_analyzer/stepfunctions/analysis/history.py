@@ -27,6 +27,8 @@ _END_STATES = ("Fail", "Succeed")
 _EXECUTION_ENDS = {"ExecutionFailed": "executionFailedEventDetails", "ExecutionTimedOut":
                    "executionTimedOutEventDetails", "ExecutionAborted": "executionAbortedEventDetails"}
 
+_SUCCEEDED = "ExecutionSucceeded"
+
 
 def _details(event: dict[str, Any]) -> dict[str, Any]:
     """
@@ -72,6 +74,7 @@ class _HistoryReader:
         self.steps: dict[int, StepRun] = {}
         self.owners: dict[int, int | None] = {}
         self.ending: tuple[str, str, str] | None = None
+        self.output = ""
         self.open_nesting: list[int] = []
 
     def owner_id(self, event: dict[str, Any]) -> int | None:
@@ -117,6 +120,9 @@ class _HistoryReader:
         if kind in _EXECUTION_ENDS:
             details = event.get(_EXECUTION_ENDS[kind]) or {}
             self.ending = (kind, details.get("error", ""), details.get("cause", ""))
+            return
+        if kind == _SUCCEEDED:
+            self.output = str(_details(event).get("output") or "")
             return
         if kind.endswith(_ENTERED):
             self.enter(event, kind[: -len(_ENTERED)])
@@ -267,7 +273,8 @@ def _failed_step(steps: list[StepRun], status: str) -> StepRun | None:
 def fill_detail(detail: ExecutionDetail, events: list[dict[str, Any]]) -> ExecutionDetail:
     """
     Fills an ExecutionDetail from its history's events (any order, all or the newest part): its steps, the step
-    that failed, and the execution's error and cause when DescribeExecution didn't give them.
+    that failed, and the execution's error, cause and output when DescribeExecution didn't give them (an Express
+    execution's come from its log lines).
     """
     reader = _HistoryReader(events)
     detail.steps = reader.read()
@@ -277,6 +284,7 @@ def fill_detail(detail: ExecutionDetail, events: list[dict[str, Any]]) -> Execut
         _, error, cause = reader.ending
         execution.error = execution.error or error
         execution.cause = execution.cause or cause
+    execution.output = execution.output or reader.output
     if execution.failed:
         detail.failed_step = _failed_step(detail.steps, execution.status)
     return detail

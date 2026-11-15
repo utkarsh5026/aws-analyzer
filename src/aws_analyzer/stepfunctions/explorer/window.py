@@ -17,7 +17,7 @@ from ..._kit.themes import _theme_css, _theme_name
 from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, execution_name, parse_execution_ref
-from ..models import ExecutionDetail, ExecutionPage, FailureReport, Overview, StateMachine
+from ..models import ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine
 from ..analysis import monthly_cost
 from ..analysis.story import ExecutionStory, lambda_steps
 from ..analyzer import StepFunctionsAnalyzer
@@ -36,6 +36,8 @@ from .widgets import _Line, _MachineField
 _EXECUTIONS_READ = 500
 
 _OVERVIEW_DAYS = 7
+
+_SINCE_DAYS = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
 
 _FAILURE_BUTTONS = 6
 
@@ -110,6 +112,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self.height = height
         self.overview: Overview | None = None
         self.numbers: dict[str, Any] = {}
+        self.range_numbers: MachineNumbers | None = None
         self.machine: StateMachine | None = None
         self.page: ExecutionPage | None = None
         self.detail: ExecutionDetail | None = None
@@ -260,7 +263,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
             self.page_buttons[key] = button
         pager = w.HBox([self.pager_text, *self.page_buttons.values()], layout=layout(width="100%"))
         pager.add_class("sfx-pager")
-        self.left = w.VBox([finder, self.chips, self.rows_box, pager])
+        self.cut_note = w.HTML(layout=layout(width="100%"))
+        self.cut_note.add_class("sfx-cut")
+        self.left = w.VBox([finder, self.chips, self.rows_box, pager, self.cut_note])
         self.left.add_class("sfx-left")
         self.execution_view = w.HTML(layout=layout(width="100%"))
         self.right = w.VBox([self.execution_view])
@@ -380,14 +385,15 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         The cards beside the state machine field: the one shown at a glance, or the region's before one is.
         """
         machine = self.machine
-        numbers = self.numbers.get(machine.arn) if machine else None
+        numbers = self._machine_numbers()
         if machine is None:
             cards = self._region_cards()
         else:
             failing = numbers is not None and numbers.unsuccessful > 0
             logging_tone = "warn" if machine.is_express and machine.log_level == "OFF" else ""
+            days = numbers.days if numbers else _OVERVIEW_DAYS
             cards = [
-                (f"Executions · {_OVERVIEW_DAYS}d", f"{numbers.started:,}" if numbers else "-", ""),
+                (f"Executions · {days}d", f"{numbers.started:,}" if numbers else "-", ""),
                 ("Didn't succeed", f"{numbers.unsuccessful:,} ({numbers.failure_rate:.1%})" if failing
                  else ("0" if numbers else "-"), "bad" if failing else ""),
                 ("Avg run", _duration((numbers.avg_ms or 0) / 1000) if numbers and numbers.avg_ms else "-", ""),
@@ -397,6 +403,14 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         html_cards = "".join(f'<div class="sfx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b>'
                              "</div>" for label, value, tone in cards)
         self._set(self.stats, f'<div class="sfx-stats">{html_cards}</div>')
+
+    def _machine_numbers(self) -> MachineNumbers | None:
+        """
+        The state machine's CloudWatch numbers for the time range picked when they've been read, else its 7 days'.
+        """
+        if self.machine is None:
+            return None
+        return self.range_numbers or self.numbers.get(self.machine.arn)
 
     def _region_cards(self) -> list[tuple[str, str, str]]:
         if self.overview is None:
@@ -412,8 +426,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         Shows a state machine: its settings and definition first, then its executions, in the background; what's
         still being read for the one shown before is dropped when it comes back.
         """
-        self._drop("machine", "executions", "execution", "story", "failures")
-        self.machine = self.page = self.detail = self.story = self.report = None
+        self._drop("machine", "executions", "numbers", "execution", "story", "failures")
+        self.machine = self.page = self.detail = self.story = self.report = self.range_numbers = None
         self._selected, self._status_filter, self._query, self._offset = "", "", "", 0
         self._quietly(self.find, value="")
         self.field.value = arn
@@ -428,6 +442,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self.failure_opens.children = []
         self.rows_box.children, self.chips.children = [], []
         self._draw_pager()
+        self._draw_cut_note()
         self._status(f"Reading {name}…", busy=True, owner="machine")
         self._later("machine", lambda: self.core.state_machine(arn), self._described, self._machine_failed)
 
@@ -444,6 +459,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._draw("overview", self.overview_view, self.ui._machine_blocks(machine, self.numbers.get(machine.arn)))
         self._draw("definition", self.definition_view, self.ui._graph_blocks(machine))
         self._graph_machine()
+        self._load_range_numbers()
         want_tab, self._want_tab = self._want_tab, None
         if want_tab:
             self._show_tab(want_tab)
@@ -470,8 +486,27 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._status(f"Listing {machine.name}'s executions in the last {self._since_label()}…", busy=True,
                      owner="executions")
         arn, since = machine.arn, self._since
-        self._later("executions", lambda: self.core.executions(arn, since=since, limit=_EXECUTIONS_READ),
+        self._later("executions", lambda: self.core.executions_with_failures(arn, since=since, limit=_EXECUTIONS_READ),
                     self._got_executions, self._executions_failed)
+
+    def _load_range_numbers(self) -> None:
+        """
+        The state machine's CloudWatch numbers over the time range picked, so the header's cards count what the
+        list covers; the 7 days' are read with the state machines already.
+        """
+        self._drop("numbers")
+        self.range_numbers = None
+        machine, days = self.machine, _SINCE_DAYS[self._since]
+        if machine is None or days == _OVERVIEW_DAYS:
+            self._draw_stats()
+            return
+        self._later("numbers", lambda: self.core.numbers([machine], days=days)[0].get(machine.arn),
+                    self._got_range_numbers, lambda _exc: None)
+
+    def _got_range_numbers(self, numbers: MachineNumbers | None) -> None:
+        self.range_numbers = numbers
+        self._draw_stats()
+        self._draw_cut_note()
 
     def _executions_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)
@@ -484,7 +519,11 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._refilter()
         unsuccessful = sum(1 for e in page.executions if e.failed)
         _class_if(self.tab_buttons["executions"], "sfx-alarm", bool(unsuccessful))
-        cut = f" (the newest {len(page.executions):,})" if page.truncated else ""
+        self._draw_cut_note()
+        cut = ""
+        if page.truncated:
+            cut = f" (the newest {_EXECUTIONS_READ:,}"
+            cut += " and every one that didn't succeed)" if page.with_failures and not page.failures_truncated else ")"
         self._status(f"{_plural(len(page.executions), 'execution')} in the last {self._since_label()}{cut}"
                      + (f" · {unsuccessful:,} didn't succeed" if unsuccessful else ""), owner="executions")
         wanted, self._want_execution = self._want_execution, None
@@ -507,10 +546,12 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
     def _since_changed(self, change: dict[str, Any]) -> None:
         self._since = change["new"]
         self.report = None
-        if self.machine is not None and self.machine.has_executions:
-            self._load_executions()
-            if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
-                self._load_failures()
+        self._load_range_numbers()
+        if self.machine is None or not self.machine.has_executions:
+            return
+        self._load_executions()
+        if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
+            self._load_failures()
 
     def _find_typed(self, change: dict[str, Any]) -> None:
         self._query = str(change["new"] or "").strip()
@@ -585,6 +626,27 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         for key, button in self.page_buttons.items():
             button.layout.display = "" if more else "none"
             button.disabled = (self._offset == 0) if key in ("first", "previous") else (last >= total)
+
+    def _cut_text(self) -> str:
+        """
+        What the list holds when one read couldn't list every execution in the range: the newest, of about how many
+        CloudWatch counted, and the ones that didn't succeed, listed on their own.
+        """
+        page = self.page
+        if page is None or not page.truncated:
+            return ""
+        numbers = self._machine_numbers()
+        counted = numbers is not None and numbers.days == _SINCE_DAYS[self._since]
+        newest = f"The newest {_EXECUTIONS_READ:,}" + (f" of about {numbers.started:,}" if counted else "")
+        if not page.with_failures:
+            return f"{newest} in the last {self._since_label()}: pick a shorter range for the others."
+        if page.failures_truncated:
+            return f"{newest}, and the newest {_EXECUTIONS_READ:,} that didn't succeed."
+        return f"{newest}, and every one that didn't succeed."
+
+    def _draw_cut_note(self) -> None:
+        text = self._cut_text()
+        self._set(self.cut_note, f'<div class="sfx-cutn">{_esc(text)}</div>' if text else "")
 
     def _page_to(self, where: str) -> None:
         end = max(0, (len(self._visible) - 1) // _EXECUTION_PAGE * _EXECUTION_PAGE)

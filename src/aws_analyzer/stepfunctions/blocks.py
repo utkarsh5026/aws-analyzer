@@ -1,16 +1,19 @@
 """
 The Step Functions reports' own blocks, with their drawings: _Waterfall (an execution's states on one time axis),
 _Story (its log, Step Functions' lines and every Lambda run's merged by time) and _FlowGraph (the state machine as a
-graph, coloured by an execution's path or by where failures happen).
+graph, coloured by an execution's path or by where failures happen), and _payload_block, which draws an input, an
+output or an error's cause.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .._kit.blocks import _Report, _draws
+from .._kit.blocks import _Report, _Text, _draws
+from .._kit.jsontree import _JsonTree
 from .._kit.fmt import _duration, _fmt_dt, _in_zone, _tz_label
 from .._kit.render import _prose
 from .._kit.text import _clip, _esc
@@ -31,6 +34,28 @@ _LEGEND = (("ok", "ran"), ("retry", "a try that failed and was retried"), ("wait
 _TICKS = 4
 
 _LINE_CHARS = 2_000
+
+_PAYLOAD_ITEMS = 50
+
+_PAYLOAD_CHARS = 4_000
+
+
+def _payload_block(text: str, title: str, *, name: str = "data") -> Any:
+    """
+    A payload Step Functions recorded (an execution's input or output, what a state was given or gave back, an
+    error's cause) folded under `title`: a JSON object or array as a tree to unfold, field by field, anything else as
+    its text, clipped to _PAYLOAD_CHARS. `name` starts each field's path in its tooltip (output['items'][0]).
+    """
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        value = None
+    if isinstance(value, (dict, list)):
+        return _JsonTree(value, items=_PAYLOAD_ITEMS, title=title, name=name, collapsed=True)
+    shown = text or ""
+    if len(shown) > _PAYLOAD_CHARS:
+        shown = f"{shown[:_PAYLOAD_CHARS]}\n… ({len(shown) - _PAYLOAD_CHARS:,} more characters)"
+    return _Text(shown, title=title, collapsed=True)
 
 
 @dataclass

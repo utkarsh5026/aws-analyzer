@@ -28,7 +28,7 @@ from .analysis.express import logging_gaps
 from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks
 from .analysis.story import ExecutionStory, waterfall
 from .analyzer import StepFunctionsAnalyzer
-from .blocks import _FlowGraph, _Story, _Waterfall
+from .blocks import _FlowGraph, _Story, _Waterfall, _payload_block
 from .style import _render_html
 
 
@@ -171,6 +171,24 @@ def _story_blocks(story: ExecutionStory | None) -> list[Any]:
                      f"{len(story.runs)} were).")
     return [_Story(story.lines, story.sources, title="What happened, in order: Step Functions and every Lambda run "
                                                      "it called", note=" ".join(notes))]
+
+
+def _payload_blocks(detail: ExecutionDetail) -> list[Any]:
+    """
+    What an execution returned (when it succeeded), the error the failed step returned (when its Lambda run's lines
+    aren't shown), what that step was given and the execution's input, each folded, JSON as a tree.
+    """
+    execution, step = detail.execution, detail.failed_step
+    blocks = []
+    if execution.status == "SUCCEEDED" and execution.output:
+        blocks.append(_payload_block(execution.output, "What it returned", name="output"))
+    if step is not None and step.cause and detail.lambda_run is None:
+        blocks.append(_payload_block(step.cause, f"The error {step.name} returned", name="cause"))
+    if step is not None and step.input and step.input != execution.input:
+        blocks.append(_payload_block(step.input, f"What {step.name} was given", name="state_input"))
+    if execution.input:
+        blocks.append(_payload_block(execution.input, "The execution's input", name="input"))
+    return blocks
 
 
 def _with_story_run(detail: ExecutionDetail, story: ExecutionStory) -> None:
@@ -481,6 +499,10 @@ class StepFunctionsView(_BaseView):
         if page.covered_from is not None:
             blocks.append(_Note(f"Its log group has more lines than one read holds: these go back to "
                                 f"{_fmt_dt(page.covered_from, zone=True)}. Pass since= for a shorter window."))
+        elif page.with_failures:
+            some = "the newest of them" if page.failures_truncated else "every one of them"
+            blocks.append(_Note(f"More executions started than one read lists: these are the newest, and {some} that "
+                                "didn't succeed in the range, listed on their own after them."))
         elif page.truncated:
             blocks.append(_Note(f"Stopped at {_plural(len(executions), 'execution')}: these are the newest. Pass "
                                 "n= for more, or since= for a shorter window."))
@@ -549,13 +571,7 @@ class StepFunctionsView(_BaseView):
             _Table(["State", "Type", "Does", "Entered", "Took", "Tries", "Result"], _step_rows(detail),
                    title="The states it passed through, in order", max_rows=0, sortable=False),
         ]
-        blocks += _story_blocks(story) + _missing_run_note(detail)
-        if step is not None and step.cause and detail.lambda_run is None:
-            blocks.append(_Text(_pretty_json(step.cause), title=f"The error {step.name} returned", collapsed=True))
-        if step is not None and step.input and step.input != execution.input:
-            blocks.append(_Text(_pretty_json(step.input), title=f"What {step.name} was given", collapsed=True))
-        if execution.input:
-            blocks.append(_Text(_pretty_json(execution.input), title="The execution's input", collapsed=True))
+        blocks += _story_blocks(story) + _missing_run_note(detail) + _payload_blocks(detail)
         blocks.append(_Next(self._execution_next(detail)))
         return blocks
 

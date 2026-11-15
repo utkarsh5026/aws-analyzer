@@ -154,6 +154,8 @@ A **waterfall** puts each state on one time axis, with a task's tries, the back-
 
 The states inside a Map or Parallel are summed up under it (`×12`, how many failed, the longest), retries show as tries, and a Catch that moved on is said in a finding.
 
+At the end, folded, are **what it returned** (for an execution that succeeded), the error the failed step returned, what that step was given and the execution's input. JSON shows as a tree: unfold the object or array you need, and point at a field for its path.
+
 ![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-light.webp#only-light){ width="984" height="1791" loading=lazy }
 ![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-dark.webp#only-dark){ width="984" height="1791" loading=lazy }
 /// caption

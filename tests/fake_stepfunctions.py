@@ -342,6 +342,9 @@ class FakeStepFunctions(_Checked):
             answer["cause"] = details["cause"]
         if run.status in ("FAILED", "TIMED_OUT", "ABORTED"):
             answer["redriveStatus"] = "REDRIVABLE"
+        succeeded = ending.get("executionSucceededEventDetails") or {}
+        if run.status == "SUCCEEDED" and succeeded.get("output"):
+            answer["output"] = succeeded["output"]
         return answer
 
     def _get_execution_history(self, executionArn: str, maxResults: int = 1000, reverseOrder: bool = False,
