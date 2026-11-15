@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
 
 
@@ -20,6 +21,8 @@ EXECUTION_ARN_RE = re.compile(
 LAMBDA_ARN_RE = re.compile(r"^arn:aws[\w-]*:lambda:(?P<region>[\w-]+):\d+:function:(?P<name>[^:]+)")
 
 CONSOLE_EXECUTION_RE = re.compile(r"/states/home\?region=(?P<region>[\w-]+)#/v2/executions/details/(?P<arn>[^?&#]+)")
+
+_CONSOLE_DOMAINS = (("cn-", "console.amazonaws.cn"), ("us-gov-", "console.amazonaws-us-gov.com"))
 
 TERMINAL_STATUSES = ("SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED")
 
@@ -125,3 +128,25 @@ def short_cause(cause: str, width: int = 160) -> str:
     else:
         text = " ".join(str(cause or "").split()).split(" (Service: ")[0]
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def console_url(arn: str, *, started: datetime | None = None) -> str:
+    """
+    The Step Functions console's page for a state machine or execution ARN: a state machine's page, a Standard
+    execution's graph and history, or an Express execution's (read from its logs, so the console needs `started` to
+    find it). '' for anything else.
+    """
+    region = arn_region(arn)
+    if not region:
+        return ""
+    domain = next((domain for start, domain in _CONSOLE_DOMAINS if region.startswith(start)), "console.aws.amazon.com")
+    home = f"https://{region}.{domain}/states/home?region={region}"
+    if STATE_MACHINE_ARN_RE.match(arn):
+        return f"{home}#/statemachines/view/{arn}"
+    found = EXECUTION_ARN_RE.match(arn)
+    if not found:
+        return ""
+    if found.group("kind") == "execution":
+        return f"{home}#/v2/executions/details/{arn}"
+    start_date = f"?startDate={int(started.timestamp() * 1000)}" if started else ""
+    return f"{home}#/express-executions/details/{arn}{start_date}"

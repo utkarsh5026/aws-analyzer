@@ -114,6 +114,7 @@ The **Executions** tab lists them newest first. Pick a time range, filter by out
 - **The chips** show only the executions that **Failed**, **Timed out**, were **Aborted**, are **Running** or **Succeeded**.
 - **The search box** finds an execution by its name.
 - **A busy state machine** has more executions than one read lists (500). The list then holds the newest 500 and, read on their own, every one that didn't succeed in the range, so the Failed chip counts them all. The line under the pager says so, against what CloudWatch counted. The cards over the tabs count the time range picked.
+- **↗ Console**, above the open execution, opens it in the Step Functions console, where you can redrive it or start it again. The one beside ↻ Refresh opens the state machine there.
 
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="866" loading=lazy }
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="866" loading=lazy }
