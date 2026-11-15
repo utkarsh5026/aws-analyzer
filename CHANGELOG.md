@@ -20,7 +20,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Above an open execution, ↗ Console opens that execution there, to redrive or start it again.
   - `console_url(arn)` gives the same link from code.
 
+- 🔀 **Step Functions: see what an execution returned** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
+  - `execution()` and the explorer show a succeeded execution's output; inputs, outputs and errors fold out as a JSON tree.
+  - The Graph tab lists the states inside a Map or Parallel to pick, with how often each ran and failed.
+
 ### Fixed
+
+- 🔀 **Step Functions explorer: the Executions list counts every failure** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
+  - When a range holds more than 500 executions, the ones that didn't succeed are listed too, so the Failed chip matches the header.
+  - The header's cards count the time range picked, and a line under the list says what it holds.
 
 - 🔀 **Step Functions explorer: ✦ Ask no longer stops with a TypeError** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
   - With `set_assistant(agent)`, clicking ✦ Ask on this window said `focus= takes an explorer window`; it opens the chat now.

@@ -270,6 +270,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfx-empty{padding:26px 10px;text-align:center;opacity:.62;font-size:12.5px;line-height:1.5}
 .sfx-app.sfx-app .sfx-pager{align-items:center;gap:2px;padding:6px 2px 2px;border-top:1px solid var(--sx-line);margin-top:4px}
 .sfx-app.sfx-app .sfx-pager>*{margin:0}
+.sfx-app .sfx-cutn{font-size:11.5px;line-height:1.4;color:var(--sft-dim);padding:2px 2px 4px}
 .sfx-app.sfx-app button.sfx-pg{width:30px;min-width:30px;height:26px;padding:0;border:0;background:transparent;font-size:15px;line-height:1}
 .sfx-app .sfx-pager .widget-html-content,.sfx-app .sfx-pager .jupyter-widget-html-content{font-size:12px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sfx-app.sfx-app .sfx-bar{position:sticky;top:0;z-index:3;gap:8px;align-items:center;padding:0 0 10px;margin:0 0 4px;background:var(--sx-bg);border-bottom:1px solid var(--sx-line);flex-wrap:wrap}
@@ -345,6 +346,10 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfx-states .er{height:38px;gap:9px}
 .sfx-app .sfx-states .en{font-size:12.5px}
 .sfx-app .sfx-states .ef{margin-top:0}
+.sfx-app .sfx-states .er.d1{padding-left:26px}
+.sfx-app .sfx-states .er.d2{padding-left:44px}
+.sfx-app .sfx-states .er.d3{padding-left:62px}
+.sfx-app .sfx-states .er.d1 .en,.sfx-app .sfx-states .er.d2 .en,.sfx-app .sfx-states .er.d3 .en{font-weight:500}
 .sfx-app .ei.m-ok{background:rgba(16,185,129,.18)}
 .sfx-app .ei.m-failed{background:rgba(239,68,68,.2)}
 .sfx-app .ei.m-running{background:rgba(59,130,246,.2)}

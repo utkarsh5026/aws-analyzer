@@ -1,12 +1,13 @@
 """
 The look of Step Functions reports: their CSS root class, stylesheet (the shared rules, then the waterfall's, the
-execution log's and the graph's) and badge.
+execution log's, the graph's and the JSON trees') and badge.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from .._kit.jsontree import _json_tree_css
 from .._kit.render import _base_css, _Look, _report_html
 
 
@@ -95,7 +96,7 @@ body[data-jp-theme-light="false"] .sfn .story .sl.error{color:#f87171}
 .sfn .fend{fill:none;stroke:currentColor;stroke-width:2;opacity:.75}
 """
 
-_CSS = _base_css(_ROOT, _EXTRA_CSS)
+_CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 
 _BADGE = "🔀 Step Functions"
 

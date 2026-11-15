@@ -277,6 +277,23 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         page.executions, page.truncated = self._list_executions(machine, _status_filter(status), start, cap)
         return page
 
+    def executions_with_failures(self, ref: str, *, since: Any = "7d", limit: Any = 500) -> ExecutionPage:
+        """
+        A state machine's newest `limit` executions since `since`, as executions() lists them, and when they stop
+        short of `since`, every one that didn't succeed in the range too (failed, timed out or aborted: three more
+        ListExecutions, at most `limit` of them), added after the newest, so a failure older than the newest `limit`
+        is still listed. page.with_failures says they were added.
+        """
+        page = self.executions(ref, since=since, limit=limit)
+        if not page.truncated or page.source != "history":
+            return page
+        start = page.since or datetime.min.replace(tzinfo=timezone.utc)
+        failed, page.failures_truncated = self._failed_executions(page.machine, start, _as_count(limit, "limit"))
+        listed = {execution.arn for execution in page.executions}
+        page.executions += [execution for execution in failed if execution.arn not in listed]
+        page.with_failures = True
+        return page
+
     def _list_executions(self, machine: StateMachine, status: str | None, start: datetime | None,
                          cap: int | None) -> tuple[list[Execution], bool]:
         """
