@@ -471,10 +471,10 @@ _TILE_LABEL_SHARE = 0.025
 
 _TREEMAP_RULES = """\
 .{root} .tmap{{position:relative;max-width:760px;aspect-ratio:3.4;margin:8px 0 6px;border-radius:6px;overflow:hidden}}
-.{root} .tmap>span{{position:absolute;box-sizing:border-box;overflow:hidden;padding:5px 7px;border:1.5px solid Canvas;border-radius:5px;font-size:11.5px;line-height:1.3;color:#fff;background:var(--info,#3b82f6)}}
-.{root} .tmap>span:nth-child(n+2){{background:color-mix(in srgb,var(--info,#3b82f6) 78%,Canvas)}}
-.{root} .tmap>span:nth-child(n+4){{background:color-mix(in srgb,var(--info,#3b82f6) 60%,Canvas)}}
-.{root} .tmap>span:nth-child(n+7){{background:color-mix(in srgb,var(--info,#3b82f6) 45%,Canvas)}}
+.{root} .tmap>span{{position:absolute;box-sizing:border-box;overflow:hidden;padding:5px 7px;border:1.5px solid Canvas;border-radius:5px;font-size:11.5px;line-height:1.3;color:#fff;background:color-mix(in srgb,var(--info,#3b82f6) 80%,#0f172a)}}
+.{root} .tmap>span:nth-child(n+2){{background:color-mix(in srgb,var(--info,#3b82f6) 64%,#0f172a)}}
+.{root} .tmap>span:nth-child(n+4){{background:color-mix(in srgb,var(--info,#3b82f6) 52%,#0f172a)}}
+.{root} .tmap>span:nth-child(n+7){{background:color-mix(in srgb,var(--info,#3b82f6) 42%,#0f172a)}}
 .{root} .tmap>span.rest{{background:rgba(127,127,127,.35);color:inherit}}
 .{root} .tmap b{{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 .{root} .tmap i{{font-style:normal;opacity:.9;white-space:nowrap}}

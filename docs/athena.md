@@ -20,8 +20,8 @@ Find the queries that cost the most and the ones that fail, read why in plain wo
 The examples use acme's data lake: a dashboard runs `SELECT *` on `sales.events`, a CSV table with no partitions, three times a day, and analysts query `sales.orders`, a Parquet table partitioned by day.
 { .muted }
 
-![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped](images/athena-overview-light.webp#only-light){ width="984" height="2065" loading=lazy }
-![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped](images/athena-overview-dark.webp#only-dark){ width="984" height="2065" loading=lazy }
+![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-light.webp#only-light){ width="984" height="2438" loading=lazy }
+![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-dark.webp#only-dark){ width="984" height="2438" loading=lazy }
 /// caption
 **`athena.overview()`**: one dashboard query is 90% of the bill, two tables point at nothing, and two crawlers stopped.
 ///
@@ -110,8 +110,8 @@ A table is named `"database.table"`; `"sales/events"`, `'"sales"."events"'` and 
 athena.expensive()               # or expensive(since="30d", workgroup="primary")
 ```
 
-![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-light.webp#only-light){ width="984" height="1321" loading=lazy }
-![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-dark.webp#only-dark){ width="984" height="1321" loading=lazy }
+![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-light.webp#only-light){ width="984" height="1687" loading=lazy }
+![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-dark.webp#only-dark){ width="984" height="1687" loading=lazy }
 /// caption
 `athena.expensive()`: the dashboard's `SELECT *` ran 21 times and cost $22.56.
 ///
