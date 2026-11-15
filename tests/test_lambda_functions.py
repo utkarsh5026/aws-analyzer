@@ -2494,6 +2494,9 @@ def test_performance_report(ui, capsys):
     assert "Performance of etl-nightly" in out and "Runs: 1" in out and "Memory used: 88 of 1,024 MB" in out
     assert "Cold starts: 100.0% · 300 ms" in out and "-- The slowest runs --" in out
     assert "256 MB still leaves room" in out
+    assert "-- Memory: the most a run used, of what it has --" in out
+    assert "88 MB of 1,024 MB (9%)" in out and "256 MB would do" in out
+    assert "Every run, by when it ran" not in out
     assert f"logs('etl-nightly', request_id='{RID}')" in out
     assert "No REPORT lines" not in out
     assert "has no log group yet" in run(capsys, ui.performance, "api-handler")

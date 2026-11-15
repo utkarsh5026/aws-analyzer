@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generator
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .._kit.charts import _Dots, _Meter, _Part, _Point
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
 from .._kit.deps import _require
 from .._kit.errors import _Hint, _error_code, _why
@@ -32,7 +33,8 @@ from .helpers import (
     runtime_family,
 )
 from .models import (
-    CodePackage, ErrorReport, Function, FunctionDetail, LogEvent, LogGroup, PackageDownload, Performance, RuntimeStatus,
+    CodePackage, ErrorReport, Function, FunctionDetail, Invocation, LogEvent, LogGroup, PackageDownload, Performance,
+    RuntimeStatus,
     SavedPage, Trigger,
 )
 from .analysis.text import _reason, _window
@@ -42,7 +44,7 @@ from .analysis.findings import _day_age, _errors_level, _times, account_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
 from .analysis.logs import parse_report, readable_line
 from .analysis.word_search import WordSearch, word_search
-from .analysis.performance import percentile, performance_findings
+from .analysis.performance import memory_to_try, percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
 )
@@ -239,6 +241,62 @@ def _since_arg(since: Any, default: str) -> dict[str, Any]:
     since= for a next step: carried over when the user chose one (as text), left out when it's the default.
     """
     return {"since": since} if isinstance(since, str) and since != default else {}
+
+
+def _run_tone(run: Invocation) -> str:
+    """
+    How a run's dot is coloured: red when it failed or timed out, violet for a cold start.
+    """
+    if run.status:
+        return "bad"
+    return "note" if run.init is not None else ""
+
+
+def _run_label(run: Invocation) -> str:
+    """
+    What pointing at a run's dot says: when, how long, and how it ended.
+    """
+    parts = [_fmt_dt(run.time, seconds=True), human_ms(run.duration)]
+    if run.status:
+        parts.append(run.status)
+    if run.init is not None:
+        parts.append("cold start")
+    return " · ".join(parts)
+
+
+def _runs_dots(perf: Performance) -> _Dots | None:
+    """
+    Every run read as a dot by when it ran and how long it took, under its timeout, so runs that hit it, and
+    whether slow runs are all the time or some of the time, show at once.
+    """
+    timed = sorted((run for run in perf.invocations if run.time is not None), key=lambda run: run.time)
+    if len(timed) < 2:
+        return None
+    fn = perf.function
+    timeout_ms = fn.timeout * 1000.0
+    points = [_Point(run.time.timestamp(), run.duration, _run_tone(run), _run_label(run)) for run in timed]
+    top = max(timeout_ms, max(point.value for point in points))
+    note = f"These are the newest {len(timed):,} runs: the reading stopped there." if perf.truncated else ""
+    return _Dots(points, top, human_ms(top), _fmt_dt(timed[0].time), _fmt_dt(timed[-1].time),
+                 limit=timeout_ms, limit_text=f"timeout {fn.timeout} s",
+                 tones={"bad": "failed or timed out", "note": "cold starts"}, noun="run",
+                 title=f"Every run, by when it ran and how long it took ({_tz_label()})", note=note)
+
+
+def _memory_meter(perf: Performance, memory: int) -> _Meter | None:
+    """
+    The most memory a run used against what the function has, with the size worth trying marked when it's far
+    more than runs use.
+    """
+    used = max((run.max_memory or 0 for run in perf.invocations), default=0)
+    if not used or not memory:
+        return None
+    suggested = memory_to_try(used, memory)
+    meter = _Meter([_Part("most a run used", float(used), f"{used:,} MB")], float(memory), f"{memory:,} MB",
+                   f"{used:,} MB", title="Memory: the most a run used, of what it has")
+    if suggested:
+        meter.mark, meter.mark_text = float(suggested), f"{suggested:,} MB would do"
+    return meter
 
 
 class LambdaView(_BaseView):
@@ -1041,6 +1099,8 @@ class LambdaView(_BaseView):
         blocks.append(_Findings(found, empty=(
             f"Runs stay well inside the {fn.timeout} s timeout and the {memory:,} MB of memory, and the memory isn't "
             "far more than they use.")))
+        charts = [_runs_dots(perf), _memory_meter(perf, memory)]
+        blocks += [chart for chart in charts if chart]
 
         def spread(values: list[float], show: Callable[[float | None], str]) -> list[str]:
             return [show(percentile(values, q)) for q in (50, 90, 99)] + [show(max(values) if values else None)]

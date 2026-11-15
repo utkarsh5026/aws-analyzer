@@ -139,7 +139,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   setting that would do; `_Split`, a whole as one bar of its parts, which `_fold_parts` cuts to the largest few and
   "N others", so a whole of thousands draws like one of five; `_Treemap`, the same parts as tiles laid out by
   `_squarified` (S3's summary: what takes the space by folder), one line in text; `_Bars`, an amount per day or hour,
-  the bad part red),
+  the bad part red; `_Dots`, a `_Point` per event by time and amount under a limit line, which past `most` points
+  draws a band (median to highest per slice) and keeps only the toned points as dots: Lambda's performance report,
+  its runs under the timeout, beside a `_Meter` of memory marked at `memory_to_try`),
   `themes.py` (how a View's reports
   look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
   by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its

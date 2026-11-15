@@ -1,6 +1,7 @@
 """
 Charts every service can put in a report: _Meter, an amount against a limit as one bar; _Split, a whole as one bar
-of its largest parts; _Treemap, a whole as tiles sized by their parts; _Bars, an amount per day or hour.
+of its largest parts; _Treemap, a whole as tiles sized by their parts; _Bars, an amount per day or hour; _Dots, one
+mark per event over time, under a limit.
 
 A chart is a block like any other, drawn in HTML and as lines of text. Its HTML is plain HTML and CSS, so it still
 draws in a reopened notebook, and the rules it needs go in the report's own <style> (report.rules), so a service
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .blocks import _Report, _draws
+from .fmt import _plural
 from .render import _prose
 from .text import _clip, _esc, _text_bar
 
@@ -516,3 +518,185 @@ def _treemap_lines(treemap: _Treemap, report: _Report) -> list[str]:
     out = [f"{treemap.title}: " if treemap.title else "", f"  of {treemap.total_text}: " + " · ".join(named)]
     out = [""] + [line for line in out if line]
     return out + ([f"  {treemap.note}"] if treemap.note else [])
+
+
+@dataclass
+class _Point:
+    """
+    One event on a _Dots chart: when (any number that grows with time, seconds say), its amount, its tone ('' for
+    an ordinary one, 'bad', 'warn' or 'note') and what pointing at it says.
+    """
+
+    at: float
+    value: float
+    tone: str = ""
+    label: str = ""
+
+
+@dataclass
+class _Dots:
+    """
+    Events over time, a dot each, under a dashed line at their limit, so "three runs sat on the timeout" is seen.
+    Past `most` dots it draws a band instead, the typical and the highest per slice of time, keeping only the events
+    with a tone as dots (the newest `most`), so a million runs draw as fast as a hundred and still show the ones
+    that matter.
+
+        points      the events
+        top         the top of the scale, in the points' unit (the limit, or the highest value when more)
+        top_text    the top as people read it ('60 s')
+        start_text  the left end of the time axis as people read it; end_text the right
+        limit       the line to draw (a timeout), in the points' unit; limit_text its label
+        tones       what each tone means, for the key ('bad': 'failed', 'note': 'cold start')
+        title, note a heading over the chart and a sentence under it
+        noun        what one event is ('run'), for the key and text mode
+    """
+
+    points: list[_Point]
+    top: float
+    top_text: str
+    start_text: str
+    end_text: str
+    limit: float | None = None
+    limit_text: str = ""
+    tones: dict[str, str] | None = None
+    title: str = ""
+    note: str = ""
+    noun: str = "event"
+    most: int = 300
+
+    @property
+    def is_banded(self) -> bool:
+        """
+        Whether there are too many events for a dot each.
+        """
+        return len(self.points) > self.most
+
+
+_PLOT_WIDTH = 760
+_PLOT_HEIGHT = 150
+_PLOT_PAD = 6
+_BAND_SLICES = 60
+_DOT_RADIUS = 2.6
+_TONED_RADIUS = 3.4
+
+_DOTS_RULES = """\
+.{root} .dts{{max-width:760px;margin:8px 0 14px}}
+.{root} .dts svg{{display:block;width:100%;height:auto;overflow:visible}}
+.{root} .dts .ax{{stroke:currentColor;stroke-opacity:.35;stroke-width:1}}
+.{root} .dts .lim{{stroke:var(--bad,#ef4444);stroke-width:1.2;stroke-dasharray:4 4}}
+.{root} .dts text{{font-size:11px;fill:currentColor;fill-opacity:.65}}
+.{root} .dts text.lim-t{{fill:var(--bad-fg,#b91c1c);fill-opacity:1}}
+.{root} .dts circle{{fill:var(--info,#3b82f6);fill-opacity:.75}}
+.{root} .dts circle.t-bad,.{root} .dts .key i.t-bad{{fill:var(--bad,#ef4444);background:var(--bad,#ef4444);fill-opacity:1}}
+.{root} .dts circle.t-warn,.{root} .dts .key i.t-warn{{fill:var(--warn,#d97706);background:var(--warn,#d97706);fill-opacity:1}}
+.{root} .dts circle.t-note,.{root} .dts .key i.t-note{{fill:#8b5cf6;background:#8b5cf6;fill-opacity:1}}
+.{root} .dts .band{{fill:var(--info,#3b82f6);fill-opacity:.22}}
+.{root} .dts .mid{{fill:none;stroke:var(--info,#3b82f6);stroke-width:1.6}}
+.{root} .dts .key{{display:flex;flex-wrap:wrap;gap:2px 14px;margin-top:4px;font-size:12px;opacity:.85}}
+.{root} .dts .key i{{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%;background:var(--info,#3b82f6)}}
+.{root} .dts-note{{margin-top:6px;font-size:12.5px}}
+"""
+
+
+def _plot_x(at: float, start: float, span: float) -> float:
+    """
+    Where a moment goes across the plot.
+    """
+    return _PLOT_PAD + (at - start) / span * (_PLOT_WIDTH - 2 * _PLOT_PAD)
+
+
+def _plot_y(value: float, top: float) -> float:
+    """
+    Where an amount goes up the plot (0 at the bottom).
+    """
+    share = max(0.0, min(1.0, value / top)) if top > 0 else 0.0
+    return _PLOT_HEIGHT - share * (_PLOT_HEIGHT - 2 * _PLOT_PAD) - _PLOT_PAD
+
+
+def _middle(values: list[float]) -> float:
+    """
+    The median of some amounts.
+    """
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def _band_paths(dots: _Dots, start: float, span: float) -> str:
+    """
+    The typical (median) amount per slice of time as a line, over a band up to the highest, for too many points.
+    """
+    slices: list[list[float]] = [[] for _ in range(_BAND_SLICES)]
+    for point in dots.points:
+        index = min(int((point.at - start) / span * _BAND_SLICES), _BAND_SLICES - 1)
+        slices[index].append(point.value)
+    filled = [(i, values) for i, values in enumerate(slices) if values]
+    xs = [_plot_x(start + (i + 0.5) / _BAND_SLICES * span, start, span) for i, _ in filled]
+    highs = [_plot_y(max(values), dots.top) for _, values in filled]
+    middles = [_plot_y(_middle(values), dots.top) for _, values in filled]
+    upper = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, highs))
+    lower = " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(list(zip(xs, middles))))
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, middles))
+    return f'<polygon class="band" points="{upper} {lower}"/><polyline class="mid" points="{line}"/>'
+
+
+def _dot_html(point: _Point, x: float, y: float) -> str:
+    """
+    One event's dot, with what it is when pointed at.
+    """
+    radius = _TONED_RADIUS if point.tone else _DOT_RADIUS
+    kind = f' class="t-{_esc(point.tone)}"' if point.tone else ""
+    tip = f"<title>{_esc(point.label)}</title>" if point.label else ""
+    return f'<circle{kind} cx="{x:.1f}" cy="{y:.1f}" r="{radius}">{tip}</circle>'
+
+
+def _dots_key(dots: _Dots) -> str:
+    """
+    The key under the plot: what a plain dot is (or the band), then each tone that's drawn, with how many.
+    """
+    counts = {tone: sum(1 for p in dots.points if p.tone == tone) for tone in (dots.tones or {})}
+    plain = f"typical {dots.noun}, and up to the highest, per slice of time" if dots.is_banded else f"a {dots.noun}"
+    keys = [f"<span><i></i>{_esc(plain)}</span>"]
+    keys += [f'<span><i class="t-{_esc(tone)}"></i>{_esc(meaning)} <b>{counts[tone]:,}</b></span>'
+             for tone, meaning in (dots.tones or {}).items() if counts[tone]]
+    return f'<div class="key">{"".join(keys)}</div>'
+
+
+@_draws(_Dots, "html")
+def _dots_html(dots: _Dots, report: _Report) -> str:
+    report.rules.add(_DOTS_RULES.format(root=report.root or "mtr-any"))
+    start = min((p.at for p in dots.points), default=0.0)
+    span = (max((p.at for p in dots.points), default=0.0) - start) or 1.0
+    shown = dots.points
+    marks = ""
+    if dots.is_banded:
+        marks = _band_paths(dots, start, span)
+        shown = [p for p in dots.points if p.tone][-dots.most:]
+    marks += "".join(_dot_html(p, _plot_x(p.at, start, span), _plot_y(p.value, dots.top)) for p in shown)
+    limit = ""
+    if dots.limit is not None:
+        y = _plot_y(dots.limit, dots.top)
+        limit = (f'<line class="lim" x1="0" x2="{_PLOT_WIDTH}" y1="{y:.1f}" y2="{y:.1f}"/>'
+                 f'<text class="lim-t" x="{_PLOT_WIDTH}" y="{y - 4:.1f}" text-anchor="end">'
+                 f"{_esc(dots.limit_text)}</text>")
+    axis = (f'<line class="ax" x1="0" x2="{_PLOT_WIDTH}" y1="{_PLOT_HEIGHT}" y2="{_PLOT_HEIGHT}"/>'
+            f'<text x="0" y="{_PLOT_HEIGHT + 14}">{_esc(dots.start_text)}</text>'
+            f'<text x="{_PLOT_WIDTH}" y="{_PLOT_HEIGHT + 14}" text-anchor="end">{_esc(dots.end_text)}</text>')
+    title = f"<h4>{_prose(dots.title)}</h4>" if dots.title else ""
+    note = f'<div class="dts-note">{_prose(dots.note)}</div>' if dots.note else ""
+    svg = (f'<svg viewBox="0 -4 {_PLOT_WIDTH} {_PLOT_HEIGHT + 22}" role="img" '
+           f'aria-label="{_esc(dots.title or "events over time")}">{limit}{marks}{axis}</svg>')
+    return f'{title}<div class="dts">{svg}{_dots_key(dots)}{note}</div>'
+
+
+@_draws(_Dots, "text")
+def _dots_lines(dots: _Dots, report: _Report) -> list[str]:
+    out = ["", f"-- {dots.title} --"] if dots.title else [""]
+    counted = [f"{_plural(len(dots.points), dots.noun)} from {dots.start_text} to {dots.end_text}"]
+    for tone, meaning in (dots.tones or {}).items():
+        count = sum(1 for p in dots.points if p.tone == tone)
+        if count:
+            counted.append(f"{count:,} {meaning}")
+    out.append("  " + " · ".join(counted))
+    if dots.note:
+        out.append(f"  {dots.note}")
+    return out

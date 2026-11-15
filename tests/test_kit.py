@@ -22,7 +22,9 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
-from aws_analyzer._kit.charts import _Bars, _Meter, _Part, _Split, _Treemap, _fold_parts, _squarified
+from aws_analyzer._kit.charts import (
+    _Bars, _Dots, _Meter, _Part, _Point, _Split, _Treemap, _fold_parts, _squarified,
+)
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
@@ -564,3 +566,28 @@ def test_a_treemap_names_big_tiles_and_sums_up_in_one_line_of_text():
     assert "<b>f7/</b><i>128 B · 50%</i>" in html and 'class="rest"' in html
     text = _render_text([treemap], 0)
     assert "of 255 B: f7/ 50% · f6/ 25% · f5/ 13% · f4/ 6% · 2 more" in text
+
+
+def _runs(count: int, *, failed_every: int = 0) -> list[_Point]:
+    return [_Point(float(n), 100.0 + n % 7, "bad" if failed_every and n % failed_every == 0 else "", f"run {n}")
+            for n in range(count)]
+
+
+def test_dots_draw_a_dot_each_under_their_limit():
+    dots = _Dots(_runs(50, failed_every=10), 200.0, "200 ms", "09:00", "10:00", limit=150.0, limit_text="limit",
+                 tones={"bad": "failed"}, noun="run", title="Every run")
+    assert not dots.is_banded
+    html = _report_html([dots], 0, _Look("", "zz", ""))
+    assert html.count("<circle") == 50 and html.count('<circle class="t-bad"') == 5 and "<polygon" not in html
+    assert 'class="lim"' in html and "<title>run 3</title>" in html and "failed <b>5</b>" in html
+    assert "50 runs from 09:00 to 10:00 · 5 failed" in _render_text([dots], 0)
+
+
+def test_too_many_dots_become_a_band_that_keeps_the_ones_that_matter():
+    dots = _Dots(_runs(100_000, failed_every=1_000), 200.0, "200 ms", "a", "b", tones={"bad": "failed"},
+                 noun="run", most=300)
+    assert dots.is_banded
+    html = _report_html([dots], 0, _Look("", "zz", ""))
+    assert html.count("<polygon") == 1 and html.count("<circle") == 100
+    assert "typical run, and up to the highest, per slice of time" in html
+    assert len(html) < 60_000
