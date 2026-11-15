@@ -63,8 +63,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
                         one for its waterfall (each state on one time axis, with its tries and back-off) and one log
                         of what happened, Step Functions' events and every Lambda run's lines merged by time
         Graph           the state machine drawn as a graph: the path the execution open took (green ran, red
-                        failed, dashed never reached), or where executions stop in the time range, shaded; pick a
-                        state beside it for its tries, its Lambda run's lines, or the failures that stopped there
+                        failed, dashed never reached), where executions stop in the time range, or where the time
+                        goes over the newest 20 that succeeded, shaded; pick a state beside it for its tries, its
+                        Lambda run's lines, the failures that stopped there, or its median, longest and retries
         Failures        where and why its executions fail, grouped by the state they stopped at and the error, each
                         group's newest execution a click away
         Definition      each state, what it does and where it goes next, and the flow as Mermaid to paste
@@ -80,9 +81,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
 
     ↗ Console beside ↻ Refresh opens the state machine in the AWS console, and the one above an execution opens that
     execution there. It only reads: nothing here starts, stops or redrives an execution. x.ui is a StepFunctionsView
-    for reports in other cells; x.overview, x.machine, x.page, x.detail, x.story and x.report hold the data behind
-    what's shown, and x.focus says what the window is showing (the state machine, tab, execution or state), which the
-    ✦ Ask drawer asks about.
+    for reports in other cells; x.overview, x.machine, x.page, x.detail, x.story, x.report and x.timings hold the data
+    behind what's shown, and x.focus says what the window is showing (the state machine, tab, execution or state),
+    which the ✦ Ask drawer asks about.
     """
 
     _PREFIX, _THREADS = "sfx", "sfn-explorer"
@@ -294,6 +295,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         wants_failures = key == "failures" or (key == "graph" and self.graph_mode == "failures")
         if wants_failures and self.report is None and self.machine is not None and self.machine.has_executions:
             self._load_failures()
+        elif self._wants_timings():
+            self._load_timings()
         elif not self._said[2] and self._said[1] != "warn":
             self._status(self._tab_line(key))
         self._focus_moved()
@@ -441,8 +444,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         Shows a state machine: its settings and definition first, then its executions, in the background; what's
         still being read for the one shown before is dropped when it comes back.
         """
-        self._drop("machine", "executions", "numbers", "execution", "story", "failures")
+        self._drop("machine", "executions", "numbers", "execution", "story", "failures", "timings")
         self.machine = self.page = self.detail = self.story = self.report = self.range_numbers = None
+        self.timings = None
         self._selected, self._status_filter, self._query, self._offset = "", "", "", 0
         self._quietly(self.find, value="")
         self.field.value = arn
@@ -485,6 +489,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._load_executions()
         if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
             self._load_failures()
+        self._load_timings_if_wanted()
 
     def _unrecorded_executions(self, machine: StateMachine) -> None:
         note = _Note(f"{machine.name} is an Express workflow with logging off: Step Functions keeps no list or "
@@ -561,13 +566,15 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
 
     def _since_changed(self, change: dict[str, Any]) -> None:
         self._since = change["new"]
-        self.report = None
+        self.report = self.timings = None
+        self._drop("timings")
         self._load_range_numbers()
         if self.machine is None or not self.machine.has_executions:
             return
         self._load_executions()
         if self._tab == "failures" or (self._tab == "graph" and self.graph_mode == "failures"):
             self._load_failures()
+        self._load_timings_if_wanted()
 
     def _find_typed(self, change: dict[str, Any]) -> None:
         self._query = str(change["new"] or "").strip()
@@ -781,7 +788,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
             buttons.append(button)
         self.failure_opens.children = buttons
         _class_if(self.tab_buttons["failures"], "sfx-alarm", bool(report.groups))
-        self._finish("failures", f"{_plural(len(report.failed), 'execution')} didn't succeed since "
+        self._finish("failures", f"{_plural(len(report.failed), 'execution')} didn't succeed in the last "
                                  f"{self._since_label()}, in {_plural(len(report.groups), 'group')}",
                      tabs=("failures",))
 

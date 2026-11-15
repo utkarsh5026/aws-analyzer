@@ -2141,7 +2141,7 @@ Grouped the way `sfn.help()` lists them.
 | :--------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `overview(days=7)`                       | Every state machine in the region: its type, executions and how many **didn't succeed** (CloudWatch, 7 days), its average run, its **estimated monthly cost** and its logging, the ones with failures first. Warnings: executions failing, starts throttled, Express workflows whose executions leave no record |
 | `state_machine(name, days=7)`            | One state machine: the same numbers, every state with what it calls, where it goes next, its retries and where an error sends it, the Lambda functions it calls, how the cost was worked out, and the definition. Findings: **Lambda tasks with no retry for Lambda's own errors** (with the Retry rule AWS recommends, to paste), waits for a callback with no timeout, logging that hides Express executions |
-| `graph(name, execution=None, failures=None)` | How it flows, **drawn as a graph**: a box per state (a Map's or Parallel's inner states listed in it), an arrow per transition, dashed where an error goes, round the side for a loop. `execution="ord-7f3a"` colours **the path that execution took** (ran, failed, never reached, each with its time and tries); `failures="7d"` shades **where executions stop**. Then each state with where it goes next, and the flow as a **Mermaid flowchart** to paste into a Markdown cell |
+| `graph(name, execution=None, failures=None, timings=None)` | How it flows, **drawn as a graph**: a box per state (a Map's or Parallel's inner states listed in it), an arrow per transition, dashed where an error goes, round the side for a loop. `execution="ord-7f3a"` colours **the path that execution took** (ran, failed, never reached, each with its time and tries); `failures="7d"` shades **where executions stop**; `timings=True` shades **where the time goes** over the newest 20 succeeded executions, with each state's median, longest, share of the time and tries a run, and which states retry often (each retry is a billed state transition). Then each state with where it goes next, and the flow as a **Mermaid flowchart** to paste into a Markdown cell |
 
 #### Explore by clicking
 
@@ -2176,16 +2176,18 @@ detail.lambda_run.events                               # the Lambda run's lines 
 story = core.execution_story(detail)                   # ExecutionStory: .lines (LogLine, merged), .runs, .sources
 waterfall(detail).rows                                 # WaterfallRow: name, depth, segments (each try, back-off)
 core.failures("order-pipeline").groups                 # FailureGroup: state, error, count, newest, request_id
+core.timings("order-pipeline").states                  # StateTiming: runs, median, longest, share, tries_per_run
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on definitions and histories you already have:
 `parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
 steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
-`flow_layout`, `path_marks` and `failure_marks` (the graph and what colours it), `resource_label`, `retry_label`,
+`flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
+`timing_report` (where the time goes over several executions' steps), `resource_label`, `retry_label`,
 `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
-`failure_findings`.
+`failure_findings`, `timing_findings`.
 
 </details>
 
@@ -2211,7 +2213,7 @@ Read-only. Grant what you need:
 | Permission                                                        | For                                                                          |
 | :---------------------------------------------------------------- | :--------------------------------------------------------------------------- |
 | `states:ListStateMachines`, `states:DescribeStateMachine`         | The state machines, their definitions and logging                             |
-| `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution` and `failures`                         |
+| `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution`, `failures` and `graph(timings=True)`  |
 | `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
 | `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
 | `logs:FilterLogEvents` on the state machine's log group           | An Express workflow's executions, steps and failures                          |

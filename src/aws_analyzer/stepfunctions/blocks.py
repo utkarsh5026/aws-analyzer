@@ -180,7 +180,8 @@ _ARROW = 6
 _LABEL_CHARS = 26
 
 _MARK_WORDS = {"ok": "ran", "failed": "failed", "running": "never finished", "skip": "not reached",
-               "h1": "some stopped here", "h2": "many stopped here", "h3": "most stopped here"}
+               "h1": "some stopped here", "h2": "many stopped here", "h3": "most stopped here",
+               "t1": "under 15% of the time", "t2": "15% of the time or more", "t3": "half the time or more"}
 
 
 @dataclass

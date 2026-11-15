@@ -1,7 +1,7 @@
 """
 A state machine drawn as a graph: its top-level states placed in layers from StartAt down (a loop's way back drawn
 beside it, a Map's or Parallel's inner states listed in its box), and what to colour it by: the path one execution
-took, or where executions stopped over a window.
+took, where executions stopped over a window, or where their time goes.
 """
 
 from __future__ import annotations
@@ -11,8 +11,9 @@ from dataclasses import dataclass, field
 
 from ..._kit.fmt import _plural
 
-from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine, StepRun
+from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine, StateTiming, StepRun, TimingReport
 from .definition import resource_label
+from .timing import took_text
 
 
 NODE_WIDTH = 196
@@ -33,7 +34,7 @@ START_SPACE = 34
 
 END_SPACE = 30
 
-_HEAT_SHARES = ((0.5, "h3"), (0.15, "h2"), (0.0, "h1"))
+_HEAT_SHARES = ((0.5, 3), (0.15, 2), (0.0, 1))
 
 
 @dataclass
@@ -91,8 +92,8 @@ class FlowLayout:
 @dataclass
 class FlowMarks:
     """
-    What to colour a drawing by: each state's mark ('ok', 'failed', 'running', 'skip', or a heat 'h1'..'h3'), the
-    arrows taken, a short note under each state's name, and the state picked (drawn with a ring).
+    What to colour a drawing by: each state's mark ('ok', 'failed', 'running', 'skip', a failure heat 'h1'..'h3' or a
+    time heat 't1'..'t3'), the arrows taken, a short note under each state's name, and the state picked (drawn with a ring).
     """
 
     states: dict[str, str] = field(default_factory=dict)
@@ -298,12 +299,20 @@ def failure_marks(layout: FlowLayout, report: FailureReport) -> FlowMarks:
     return marks
 
 
+def _heat(share: float, kind: str) -> str:
+    """
+    A share's shade: 'h' (failures) or 't' (time), then 3 for half or more, 2 from 15%, else 1.
+    """
+    level = next(level for floor, level in _HEAT_SHARES if share >= floor)
+    return f"{kind}{level}"
+
+
 def _mark_share(marks: FlowMarks, name: str, count: int, total: int) -> None:
     """
     Shades a state by its share of the failures, with how many under its name.
     """
     share = count / total
-    marks.states[name] = next(level for floor, level in _HEAT_SHARES if share >= floor)
+    marks.states[name] = _heat(share, "h")
     marks.notes[name] = f"{count:,} stopped here ({share:.0%})"
 
 
@@ -378,4 +387,56 @@ def inner_failure_marks(machine: StateMachine, report: FailureReport) -> FlowMar
     for state in machine.states:
         if state.depth and counts.get(state.name):
             _mark_share(marks, state.name, counts[state.name], total)
+    return marks
+
+
+def _timing_note(timing: StateTiming) -> str:
+    """
+    A state's time in a few words, for under its name, what matters most first since a box clips it: its share,
+    its tries a run when it retries, then its median run ('72% · 1.3 tries · 9.5s').
+    """
+    parts = [f"{timing.share:.0%}"] if timing.share is not None else []
+    if timing.retried_runs and timing.tries_per_run is not None:
+        parts.append(f"{timing.tries_per_run:.2g} tries")
+    parts.append(took_text(timing.median) if timing.median is not None else "never finished")
+    return " · ".join(parts)
+
+
+def _sample_words(report: TimingReport) -> str:
+    read = len(report.executions)
+    if read == report.asked:
+        return f"the newest {read:,} succeeded executions"
+    return f"{_plural(read, 'succeeded execution')} (all there were)"
+
+
+def timing_marks(layout: FlowLayout, report: TimingReport) -> FlowMarks:
+    """
+    Where the time goes over the succeeded executions read: each top-level state shaded by its share of their time
+    (t3 for half or more, t2 from 15%), with its median run, its share and, when it retries, its tries a run under its
+    name; a state none of them entered stays plain.
+    """
+    marks = FlowMarks(legend=f"Where the time goes in {_sample_words(report)}")
+    for node in layout.nodes:
+        timing = report.state(node.name)
+        if timing is None or timing.depth:
+            continue
+        if timing.share is not None:
+            marks.states[node.name] = _heat(timing.share, "t")
+        marks.notes[node.name] = _timing_note(timing)
+    return marks
+
+
+def inner_timing_marks(machine: StateMachine, report: TimingReport) -> FlowMarks:
+    """
+    How long each state inside a Map or Parallel takes, for the lines that list them: how many times it runs an
+    execution (a Map's once per item) and its median run, unshaded, since its runs can overlap.
+    """
+    marks = FlowMarks()
+    for state in machine.states:
+        timing = report.state(state.name) if state.depth else None
+        if timing is None:
+            continue
+        per_execution = timing.runs / max(1, timing.executions)
+        median = took_text(timing.median) if timing.median is not None else "never finished"
+        marks.notes[state.name] = f"{per_execution:.3g}× an execution · {median}"
     return marks

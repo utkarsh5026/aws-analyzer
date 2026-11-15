@@ -20,12 +20,13 @@ from .._kit.fmt import _as_count, _utcnow, parse_time
 from .helpers import EXECUTION_ARN_RE, FAILED_STATUSES, STATE_MACHINE_ARN_RE, execution_arn, parse_execution_ref
 from .models import (
     Attempt, Execution, ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine,
-    StepRun,
+    StepRun, TimingReport,
 )
 from .prices import STEPFUNCTIONS_PRICES
 from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
+from .analysis.timing import timing_report
 
 
 _METRIC_STAT_AND_FIELD = {
@@ -51,6 +52,10 @@ _LOG_PAD = timedelta(minutes=2)
 _TIME_MATCH_LINES = 2_000
 
 _STORY_STEPS = 12
+
+TIMING_SAMPLE = 20
+
+TIMING_EVENTS = 5_000
 
 
 def _lambda_module() -> Any:
@@ -358,9 +363,13 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             detail.lambda_run, detail.lambda_note = self.lambda_run(step)
         return detail
 
-    def _history(self, arn: str, cap: int | None) -> tuple[list[dict[str, Any]], bool]:
+    def _history(self, arn: str, cap: int | None, *, data: bool = True) -> tuple[list[dict[str, Any]], bool]:
+        """
+        An execution's events oldest first, at most `cap`, and whether there were more. data=False leaves out each
+        event's input and output, which timings don't need.
+        """
         events: list[dict[str, Any]] = []
-        params: dict[str, Any] = {"executionArn": arn, "maxResults": 1000, "includeExecutionData": True}
+        params: dict[str, Any] = {"executionArn": arn, "maxResults": 1000, "includeExecutionData": data}
         while True:
             answer = self.client.get_execution_history(**params)
             events += answer.get("events", [])
@@ -431,6 +440,62 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         return min(started, key=lambda run: run.start) if started else None
 
 
+    def timings(
+        self,
+        ref: str,
+        *,
+        n: Any = TIMING_SAMPLE,
+        since: Any = "7d",
+        progress: Callable[..., None] | None = None,
+    ) -> TimingReport:
+        """
+        Where a state machine's time goes: the newest `n` executions that succeeded since `since`, each one's history
+        read (GetExecutionHistory: free, but rate-limited, hence a small sample), and per state how many times it ran,
+        its median and longest run, its share of the time and its tries a run. An Express workflow's are read from
+        its log group, which has them only when it logs everything.
+        """
+        machine = self.state_machine(ref)
+        start = parse_time(since) or _utcnow() - timedelta(days=7)
+        asked = _as_count(n, "n") or TIMING_SAMPLE
+        report = TimingReport(machine, start, asked)
+        if machine.is_express:
+            details, report.note = self._express_timings(machine, start, asked)
+            report.source = "logs"
+        else:
+            succeeded, _ = self._list_executions(machine, "SUCCEEDED", start, asked)
+            details = self._timed_details(machine, succeeded, progress)
+        timing_report(machine, details, report)
+        report.numbers = self._numbers_or_none(machine, start)
+        return report
+
+    def _timed_details(self, machine: StateMachine, executions: list[Execution],
+                       progress: Callable[..., None] | None) -> list[ExecutionDetail]:
+        """
+        Each execution's steps, read from its whole history without inputs and outputs, newest first.
+        """
+        def read(execution: Execution) -> ExecutionDetail:
+            detail = ExecutionDetail(execution, machine=machine)
+            events, detail.partial = self._history(execution.arn, TIMING_EVENTS, data=False)
+            return fill_detail(detail, events)
+
+        details = []
+        for detail in self._map(read, executions):
+            details.append(detail)
+            if progress is not None:
+                progress(len(details), len(executions))
+        return details
+
+    def _numbers_or_none(self, machine: StateMachine, start: datetime) -> MachineNumbers | None:
+        """
+        A state machine's CloudWatch numbers from `start` to today, or None when they can't be read.
+        """
+        try:
+            days = max(1, (_utcnow() - start).days)
+            return self.numbers([machine], days=days)[0].get(machine.arn)
+        except (ClientError, BotoCoreError):
+            return None
+
+
     def failures(
         self,
         ref: str,
@@ -457,11 +522,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             details = self._standard_failures(machine, failed, progress)
         report.read = len(details)
         report.groups = group_failures(details, _utcnow(), express=machine.is_express)
-        try:
-            days = max(1, (_utcnow() - start).days)
-            report.numbers = self.numbers([machine], days=days)[0].get(machine.arn)
-        except (ClientError, BotoCoreError):
-            report.numbers = None
+        report.numbers = self._numbers_or_none(machine, start)
         return report
 
     def _standard_failures(self, machine: StateMachine, failed: list[Execution],

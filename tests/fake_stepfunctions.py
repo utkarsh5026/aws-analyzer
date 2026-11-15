@@ -452,12 +452,19 @@ def _rid(n: int) -> str:
     return f"{n:08x}-0000-4000-8000-{n:012x}"
 
 
-def _good_order(start: datetime, n: int) -> History:
+def _good_order(start: datetime, n: int, *, throttled_first: bool = False, load_seconds: float = 5.7) -> History:
+    """
+    An order that went through: throttled_first has Lambda throttle ChargeCard's first try (retried a second
+    later), and load_seconds is how long LoadOrders took.
+    """
     history = History(start, ORDER)
     history.lambda_task("ValidateOrder", "validate-order", [Try(0.21, request_id=_rid(n))], data=ORDER)
     history.state("Choice", "IsPriority").sdk_task("ReserveStock", "dynamodb:updateItem")
-    history.lambda_task("ChargeCard", "charge-card", [Try(0.85, request_id=_rid(n + 1))])
-    history.lambda_task("LoadOrders", "orders-etl", [Try(5.7, request_id=_rid(n + 2))])
+    charge = [Try(0.85, request_id=_rid(n + 1), wait=1.0 if throttled_first else 0.0)]
+    if throttled_first:
+        charge.insert(0, Try(0.04, "Lambda.TooManyRequestsException", throttled(f"9be1a2b3-0000-4000-8000-{n:012x}")))
+    history.lambda_task("ChargeCard", "charge-card", charge)
+    history.lambda_task("LoadOrders", "orders-etl", [Try(load_seconds, request_id=_rid(n + 2))])
     history.map_state("ProcessItems", "ResizeImage", "resize-image", [Try(9.5, request_id=_rid(n + 3 + i))
                                                                       for i in range(3)])
     return history.sdk_task("NotifyCustomer", "sns:publish").succeed({"notified": True})
@@ -518,7 +525,8 @@ def _approval(start: datetime) -> History:
 def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict[tuple[str, str], dict[datetime,
                                                                                                     float]]]:
     """
-    acme's state machines: order-pipeline (Standard, failing at LoadOrders on orders without a customer_id),
+    acme's state machines: order-pipeline (Standard, failing at LoadOrders on orders without a customer_id; of the
+    orders that went through, one retried a throttled ChargeCard and one was slow at LoadOrders),
     refund-approvals (waits for a manager with no timeout), image-resize-express (Express, logging everything) and
     kb-sync (not started in a week); their executions; and their CloudWatch numbers for the last 7 days.
     """
@@ -541,10 +549,11 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
         FakeRun("order-pipeline", "ord-91c2", "RUNNING", History(ago(minutes=2), ORDER)),
         FakeRun("order-pipeline", "ord-25a8", "SUCCEEDED", _good_order(ago(minutes=40), 100)),
         FakeRun("order-pipeline", "ord-7f3a", "FAILED", _keyerror_order(ago(minutes=58), FAILED_RUN)),
-        FakeRun("order-pipeline", "ord-cfae", "SUCCEEDED", _good_order(ago(hours=1, minutes=20), 200)),
+        FakeRun("order-pipeline", "ord-cfae", "SUCCEEDED", _good_order(ago(hours=1, minutes=20), 200,
+                                                                         throttled_first=True)),
         FakeRun("order-pipeline", "ord-0b17", "TIMED_OUT", _stuck_order(ago(hours=2, minutes=40))),
         FakeRun("order-pipeline", "ord-5d21", "FAILED", _keyerror_order(ago(hours=5), _rid(901))),
-        FakeRun("order-pipeline", "ord-a410", "SUCCEEDED", _good_order(ago(hours=9), 300)),
+        FakeRun("order-pipeline", "ord-a410", "SUCCEEDED", _good_order(ago(hours=9), 300, load_seconds=21.4)),
         FakeRun("order-pipeline", "ord-77e0", "FAILED", _throttled_order(ago(days=1, hours=2))),
         FakeRun("order-pipeline", "ord-3c9b", "FAILED", _keyerror_order(ago(days=3), _rid(902)), redrive_count=1),
         FakeRun("order-pipeline", "ord-e2f4", "FAILED", _keyerror_order(ago(days=20), _rid(903))),

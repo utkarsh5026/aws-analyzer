@@ -361,6 +361,9 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ei.m-h1{background:rgba(245,158,11,.2)}
 .sfx-app .ei.m-h2{background:rgba(249,115,22,.28)}
 .sfx-app .ei.m-h3{background:rgba(239,68,68,.32)}
+.sfx-app .ei.m-t1{background:rgba(217,119,6,.1)}
+.sfx-app .ei.m-t2{background:rgba(217,119,6,.26)}
+.sfx-app .ei.m-t3{background:rgba(217,119,6,.45)}
 .sfx-app .ei{width:14px;height:14px}
 .sfx-app .sfx-states .sfn .tt{margin-top:8px}
 """ + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"

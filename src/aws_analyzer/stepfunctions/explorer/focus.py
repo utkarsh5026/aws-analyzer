@@ -75,13 +75,16 @@ def _list_parts(x: StepFunctionsExplorer) -> list[FocusPart]:
 
 def _graph_parts(x: StepFunctionsExplorer) -> list[FocusPart]:
     """
-    What the Graph tab colours (the execution open, or where executions stop in the time range) and the state picked.
+    What the Graph tab colours (the execution open, where executions stop in the time range, or where the time goes)
+    and the state picked.
     """
     parts = []
     if x.graph_mode == "execution" and x._selected:
         parts.append(FocusPart("execution", x._selected, f"execution {execution_name(x._selected)}"))
-    if x.graph_mode == "failures":
+    if x.graph_mode in ("failures", "timing"):
         parts.append(_range_part(x._since))
+    if x.graph_mode == "timing":
+        parts.append(FocusPart("mode", "timing", "where the time goes"))
     if x.picked_state:
         parts.append(FocusPart("state", x.picked_state, f"{x.picked_state} state"))
     return parts

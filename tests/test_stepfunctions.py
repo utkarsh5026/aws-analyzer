@@ -28,8 +28,10 @@ from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
 )
 from aws_analyzer.stepfunctions.analysis.layout import (
-    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, owner_of, path_marks,
+    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, inner_timing_marks, owner_of,
+    path_marks, timing_marks,
 )
+from aws_analyzer.stepfunctions.analysis.timing import state_timings, timing_findings, timing_report, took_text
 from aws_analyzer.stepfunctions.explorer.graph import _execution_blocks as graph_execution_blocks
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
@@ -1026,3 +1028,165 @@ def test_failures_inside_a_map_are_shaded_on_their_line():
                                                         sfnmod.FailureGroup("LoadOrders", "KeyError", count=3)])
     marks = inner_failure_marks(machine, report)
     assert marks.states == {"ResizeImage": "h2"} and marks.notes["ResizeImage"] == "1 stopped here (25%)"
+
+
+SUCCEEDED = ("ord-25a8", "ord-cfae", "ord-a410")
+
+
+def timings_of(names=SUCCEEDED, numbers=None):
+    report = sfnmod.TimingReport(order_pipeline(), NOW - timedelta(days=7), asked=20, numbers=numbers)
+    return timing_report(report.machine, [detail_of(name) for name in names], report)
+
+
+def test_state_timings_over_succeeded_executions():
+    timings = {t.name: t for t in state_timings([detail_of(name) for name in SUCCEEDED])}
+    assert list(timings)[:3] == ["ValidateOrder", "IsPriority", "ReserveStock"] and "BackorderWait" not in timings
+    charge = timings["ChargeCard"]
+    assert (charge.runs, charge.tries, charge.tried_runs, charge.retried_runs, charge.retries) == (3, 4, 3, 1, 1)
+    assert charge.tries_per_run == pytest.approx(4 / 3) and charge.retry_error == "Lambda.TooManyRequestsException"
+    assert charge.retried_in.name == "ord-cfae" and charge.function == "charge-card"
+    load = timings["LoadOrders"]
+    assert load.median == pytest.approx(5.725) and load.longest == pytest.approx(21.425)
+    assert load.slowest.name == "ord-a410"
+    resize = timings["ResizeImage"]
+    assert (resize.depth, resize.runs, resize.executions, resize.share) == (1, 9, 3, None)
+    assert timings["IsPriority"].tries_per_run is None
+    top_shares = [t.share for t in timings.values() if t.depth == 0]
+    assert max(top_shares) == timings["ProcessItems"].share and sum(top_shares) <= 1.0
+    assert state_timings([]) == []
+    assert took_text(0.04) == "0.04s" and took_text(9.5) == "9.5s" and took_text(None) == "-"
+
+
+def test_timing_findings_say_what_retries_and_what_takes_the_time():
+    numbers = MachineNumbers(days=7, started=7 * 177)
+    report = timings_of(numbers=numbers)
+    found = timing_findings(report, STEPFUNCTIONS_PRICES)
+    levels = [level for level, _ in found]
+    assert levels == ["warn", "info", "info"]
+    retry, slow, uneven = (message for _, message in found)
+    assert retry.startswith("ChargeCard retries in 1 of its 3 runs (1.33 tries a run, mostly after Lambda.Too")
+    assert "about 1,770 retries a month at this pace, $0.04" in retry
+    assert "give charge-card reserved concurrency" in retry and "execution('order-pipeline/ord-cfae')" in retry
+    assert slow.startswith("ProcessItems takes 6") and "Inside it, ResizeImage takes the most" in slow
+    assert "LambdaView().performance('resize-image')" in slow
+    assert uneven.startswith("LoadOrders runs unevenly") and "execution('order-pipeline/ord-a410')" in uneven
+    unpriced = timing_findings(timings_of(), STEPFUNCTIONS_PRICES)[0][1]
+    assert "$" not in unpriced and "a month" not in unpriced
+    quiet = timing_findings(timings_of(("ord-25a8",)), STEPFUNCTIONS_PRICES)
+    assert [message.split(" ")[0] for _, message in quiet] == ["ProcessItems"]
+    assert timing_findings(timings_of(()), STEPFUNCTIONS_PRICES) == []
+
+
+def test_timing_marks_shade_boxes_by_their_share_of_the_time():
+    layout = flow_layout(order_pipeline())
+    report = timings_of()
+    marks = timing_marks(layout, report)
+    assert marks.legend == "Where the time goes in 3 succeeded executions (all there were)"
+    assert marks.states["ProcessItems"] == "t3" and marks.states["LoadOrders"] == "t2"
+    assert marks.states["ValidateOrder"] == "t1" and "BackorderWait" not in marks.states
+    assert marks.notes["ChargeCard"] == "3% · 1.3 tries · 0.9s" and marks.notes["IsPriority"] == "0% · 0.01s"
+    inner = inner_timing_marks(order_pipeline(), report)
+    assert inner.notes == {"ResizeImage": "3× an execution · 9.5s"} and inner.states == {}
+    report.asked = 3
+    assert timing_marks(layout, report).legend == "Where the time goes in the newest 3 succeeded executions"
+
+
+def test_timings_read_the_newest_succeeded_histories(core, fakes):
+    report = core.timings("order-pipeline", n=2)
+    assert [e.name for e in report.executions] == ["ord-25a8", "ord-cfae"] and report.asked == 2
+    assert report.source == "history" and report.numbers is not None and report.partial == 0
+    sfn = fakes["stepfunctions"]
+    assert {call.get("statusFilter") for call in sfn.called("list_executions")} == {"SUCCEEDED"}
+    histories = sfn.called("get_execution_history")
+    assert len(histories) == 2 and all(call["includeExecutionData"] is False for call in histories)
+    assert report.state("ChargeCard").retried_runs == 1
+    assert list(report.to_df()["state"])[:2] == ["ValidateOrder", "IsPriority"]
+    express = core.timings("image-resize-express")
+    assert express.source == "logs" and len(express.executions) == 3 and express.state("Resize").runs == 3
+    assert core.timings("refund-approvals").executions == []
+
+
+def test_express_timings_need_every_event_logged(fakes):
+    fakes["stepfunctions"].machines["image-resize-express"]["logging"]["level"] = "ERROR"
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    report = core.timings("image-resize-express")
+    assert "only executions that failed are in its log group" in report.note
+    fakes["stepfunctions"].machines["image-resize-express"]["logging"]["level"] = "OFF"
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    with pytest.raises(_Hint, match="logging off"):
+        core.timings("image-resize-express")
+
+
+def test_graph_report_shows_where_the_time_goes(ui, capsys):
+    out = run(capsys, ui.graph, "order-pipeline", timings=True)
+    assert "Where the time goes in 3 succeeded executions (all there were)" in out
+    assert "ProcessItems (Map) [half the time or more] · 69% · 29s" in out
+    assert "[!] ChargeCard retries in 1 of its 3 runs" in out
+    assert "-- Each state's time, from 3 succeeded executions since" in out
+    assert re.search(r"↳ ResizeImage\s+9 \(3 an execution\)\s+9\.5s", out)
+    assert "graph('order-pipeline', timings=50) reads more" in out
+    assert out.index("Findings") < out.index("Where the time goes") < out.index("Each state, what it does")
+    out = run(capsys, ui.graph, "order-pipeline")
+    assert "graph('order-pipeline', timings=True)" in out and "Each state's time" not in out
+    out = run(capsys, ui.graph, "refund-approvals", timings=2)
+    assert "No execution of refund-approvals succeeded since" in out
+    view = StepFunctionsView(ui.core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.graph("order-pipeline", timings=True)
+    html = sfnmod.view._render_html(shown[0], 50)
+    assert 'class="fn t-map m-t3"' in html and 'class="m-t3"' in html and "half the time or more" in html
+
+
+def test_explorer_graph_tab_shows_where_the_time_goes(fakes):
+    fakes["stepfunctions"].machines["kb-sync"]["type"] = "EXPRESS"
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["graph"].click()
+    assert x.timings is None
+    x.mode_pick.value = "timing"
+    assert x.timings is not None and len(x.timings.executions) == 3
+    graph = plain(x.graph_view.value)
+    assert "Where the time goes in 3 succeeded executions" in graph and "ChargeCard retries in 1 of its 3 runs" in graph
+    assert "ord-cfae in the Executions tab shows one" in graph and "Each state's time" not in graph
+    assert "From 3 succeeded executions since" in graph
+    assert "where the time goes" in x.focus.chips() and "last 7 days" in x.focus.chips()
+    load = next(line for line in x._state_lines if line.key == "LoadOrders")
+    assert "27% · 5.7s" in plain(load.face.value) and "m-t2" in load.face.value
+    resize = next(line for line in x._state_lines if line.key == "ResizeImage")
+    assert "3× an execution · 9.5s" in plain(resize.face.value)
+    load.button.click()
+    inspector = plain(x.state_view.value)
+    assert "Its time in the succeeded executions read" in inspector and "Slowest in ord-a410" in inspector
+    next(line for line in x._state_lines if line.key == "ChargeCard").button.click()
+    assert "Retried in ord-cfae" in plain(x.state_view.value)
+    read = x.timings
+    x.mode_pick.value = "plain"
+    x.mode_pick.value = "timing"
+    assert x.timings is read
+    x.since_pick.value = "24h"
+    assert x.timings is not read and x.timings.since > read.since
+    x.open("image-resize-express")
+    assert x.timings is not None and x.timings.source == "logs"
+    x.open("kb-sync")
+    assert x.timings is None and "logging off leaves no record" in plain(x.graph_view.value)
+
+
+def test_explorer_reads_timings_in_the_background(fakes):
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*x._tasks.values())
+
+    async def main():
+        x = explorer(fakes, "order-pipeline", tab="graph")
+        await settle(x)
+        history = fakes["stepfunctions"].holds["get_execution_history"] = threading.Event()
+        x.mode_pick.value = "timing"
+        assert "timings" in x._tasks and x.timings is None
+        assert "Reading the newest succeeded executions" in plain(x.graph_view.value)
+        assert "Reading order-pipeline's newest succeeded executions" in plain(x.status.value)
+        history.set()
+        await settle(x)
+        assert len(x.timings.executions) == 3 and "Where the time goes" in plain(x.graph_view.value)
+        assert "Where the time goes, from 3 succeeded executions in the last 7 days" in plain(x.status.value)
+
+    asyncio.run(main())
