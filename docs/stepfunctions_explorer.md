@@ -164,9 +164,24 @@ The window is an object you can drive: what a click does, a command does too.
 ```python
 x = sfn.explore()
 x.open("order-pipeline")          # another state machine, a name or ARN
+x.open("kb-sync", tab="failures") # on one of its tabs
 x.execution("ord-7f3a")           # an execution: its ARN, 'machine/name', or a name of the one shown
 x.refresh()                       # read everything again (the ↻ button)
+x.focus.chips()                   # what you're looking at: ['order-pipeline', 'Executions tab', 'last 7 days', ...]
 ```
+
+### Ask the agent about it: ✦ Ask { #ask }
+
+Give the window the agent, and **✦ Ask** at the end of the tab bar opens its chat beside the tabs, asking about what you have open.
+{ .gist }
+
+```python
+from aws_analyzer import AgentView
+
+x = sfn.explore("order-pipeline", assistant=AgentView(provider="bedrock"))   # or x.attach(agent) later
+```
+
+Its **Looking at** line is `x.focus`: the state machine and tab, the time range, and the execution you opened with how it ended, its error and the state it stopped at (on the Graph tab, the state you picked). It offers questions for that, "Why did execution ord-7f3a fail, and what should I change?" on a failed one, and under each answer a button such as **Execution ord-0b17 in the Executions tab ›** or **order-pipeline's Failures tab ›** takes the window there. [The agent's guide](agent.md#ask-drawer) says more.
 
 ??? more "How the window reads"
 
@@ -178,8 +193,10 @@ x.refresh()                       # read everything again (the ↻ button)
 
 | Command | What it does |
 |---|---|
-| `explore(machine=None, execution=None, tab=None, since="7d", region=None, profile=None, height=None)` | Opens the window and returns it; `sfn.explore(...)` on a `StepFunctionsView` takes the same |
-| `x.open(machine)` | Shows another state machine (a name or ARN) |
+| `explore(machine=None, execution=None, tab=None, since="7d", region=None, profile=None, height=None, assistant=None)` | Opens the window and returns it; `sfn.explore(...)` on a `StepFunctionsView` takes the same |
+| `x.open(machine, tab=None)` | Shows another state machine (a name or ARN), on the tab given or the one open |
+| `x.focus` | What the window shows: the state machine, the tab, the time range and the execution or state picked |
+| `x.attach(agent)` | Adds **✦ Ask**: the agent's chat beside the tabs, asking about what's open (`x.attach(None)` takes it away) |
 | `x.execution(ref)` | Opens an execution in the Executions tab: its waterfall and one log of what happened |
 | `x.refresh()` | Reads everything again (the ↻ button) |
 

@@ -152,6 +152,7 @@ class _GraphTab:
         if self.graph_mode == "failures" and self.report is None and self.machine and self.machine.has_executions:
             self._load_failures()
         self._draw_graph()
+        self._focus_moved()
 
     def _graph_marks(self: StepFunctionsExplorer) -> tuple[FlowMarks, str]:
         """
@@ -206,6 +207,7 @@ class _GraphTab:
         if line.key:
             self.picked_state = line.key
             self._draw_graph()
+            self._focus_moved()
 
     def _draw_state(self: StepFunctionsExplorer) -> None:
         """

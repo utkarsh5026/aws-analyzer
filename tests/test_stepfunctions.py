@@ -730,6 +730,31 @@ def test_graph_report_colours_a_path_or_failures(ui, capsys):
     assert "<script" not in html
 
 
+def test_explorer_says_what_it_shows_as_a_focus(fakes):
+    x = explorer(fakes)
+    assert (x.focus.service, x.focus.kind, x.focus.chips()) == ("stepfunctions", "machines", ["State machines tab"])
+    x.tab_buttons["overview"].click()
+    assert x.focus.kind == "machine" and x.focus.chips() == ["order-pipeline", "Overview tab"]
+    assert x.focus.value("state_machine") == machine_arn("order-pipeline") and x.focus.since is None
+    x.tab_buttons["executions"].click()
+    assert x.focus.kind == "executions" and x.focus.since == x.page.since
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()
+    x.find.value = "ord-7"
+    assert x.focus.chips()[2:] == ["last 7 days", "failed only", "search: ord-7"]
+    x.execution("ord-7f3a")
+    assert x.focus.kind == "execution" and x.focus.value("error") == "OrderFailed"
+    assert x.focus.chips()[3:] == ["execution ord-7f3a", "failed", "OrderFailed", "stopped at LoadOrders (KeyError)"]
+    x.tab_buttons["graph"].click()
+    next(line for line in x._state_lines if line.key == "ChargeCard").button.click()
+    assert x.focus.kind == "state" and x.focus.chips()[2:] == ["execution ord-7f3a", "ChargeCard state"]
+    x.mode_pick.value = "failures"
+    assert x.focus.chips()[2:] == ["last 7 days", "ChargeCard state"] and x.focus.since == x.report.since
+    x.open("kb-sync", tab="definition")
+    assert x._tab == "definition" and x.focus.kind == "definition" and x.focus.chips()[0] == "kb-sync"
+    x.open("kb-sync", tab="logs")
+    assert "tab is one of overview" in plain(x.status.value)
+
+
 def test_explorer_graph_tab(fakes):
     x = explorer(fakes, "order-pipeline")
     x.tab_buttons["graph"].click()

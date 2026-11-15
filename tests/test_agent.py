@@ -2473,6 +2473,50 @@ def test_an_answers_calls_are_places_in_the_explorer():
     assert target_for("LambdaView().diff('etl')", "lambda") is None
 
 
+def test_a_step_functions_answers_calls_are_places_in_its_explorer():
+    from aws_analyzer.agent.window.drawer import target_for
+
+    run = target_for("StepFunctionsView().execution('ord-7f3a', machine='order-pipeline')", "stepfunctions")
+    assert (run.label, run.command, run.args) == ("Execution ord-7f3a in the Executions tab", "execution",
+                                                  ("order-pipeline/ord-7f3a",))
+    arn = "arn:aws:states:us-east-1:123456789012:execution:order-pipeline:ord-0b17"
+    assert target_for(f"StepFunctionsView().execution('{arn}')", "stepfunctions").args == (arn,)
+    failures = target_for("StepFunctionsView().failures('order-pipeline', since='30d')", "stepfunctions")
+    assert (failures.label, failures.command, failures.kwargs) == ("order-pipeline's Failures tab", "open",
+                                                                   {"tab": "failures"})
+    assert target_for("StepFunctionsView().state_machine('kb-sync')", "stepfunctions").kwargs == {"tab": "overview"}
+    assert target_for("StepFunctionsView().overview()", "stepfunctions") is None
+    assert target_for("StepFunctionsView().failures('x')", "lambda") is None
+
+
+def test_the_ask_drawer_asks_about_a_step_functions_execution():
+    pytest.importorskip("ipywidgets")
+    from fake_stepfunctions import clients
+
+    from aws_analyzer.agent.window.drawer import focus_questions
+    from aws_analyzer.stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer
+
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=clients(datetime.now(timezone.utc)))
+    core.max_workers = 1
+    model = scripted(says("ord-7f3a stopped at LoadOrders: a row had no `customer_id`."))
+    agent = AgentView(make(model), mode="html", progress="off")
+    agent._display = lambda widget: None
+    x = StepFunctionsExplorer("order-pipeline", core=core, mode="widgets", assistant=agent)
+    x.execution("ord-7f3a")
+    x.ask_button.click()
+    drawer = x.drawer
+    line = html.unescape(drawer.focus_line.value)
+    assert "looking at" in line and "execution ord-7f3a" in line and "stopped at LoadOrders (KeyError)" in line
+    assert drawer.offered == focus_questions(x.focus) == ["Why did execution ord-7f3a fail, and what should I change?",
+                                                          "Which step took the longest, and why?"]
+    drawer.empty.children[1].children[0].click()
+    asked = model.prompts[0][-1].content
+    assert "[Looking at the Step Functions explorer (execution)" in asked and "error: OrderFailed" in asked
+    assert agent.core.history[-1].focus.value("execution").endswith(":ord-7f3a")
+    x.tab_buttons["definition"].click()
+    assert "Definition tab" in drawer.focus_line.value and "ord-7f3a" not in drawer.focus_line.value
+
+
 def test_the_ask_drawer_points_at_the_evidence(seeded):
     pytest.importorskip("ipywidgets")
     from aws_analyzer.lambda_functions import LambdaExplorer
