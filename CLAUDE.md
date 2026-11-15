@@ -307,7 +307,11 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `commands` (the `aws sqs` / `sns` / `events` commands findings show), `access` (feeders, blocked senders and
   `access_fixes`, one SetQueueAttributes per queue since it replaces the whole policy), `queues` / `topics` / `rules`
   (findings), `world` (reports and findings built from an `Overview`) and `flow` (`follow_map`, the tree `follow()`
-  draws), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3 minutes").
+  draws), `layout` (`map_layout`: the map as boxes in columns, each parent level with the middle of its branches,
+  a queue reached two ways drawn once, at most `MOST_BRANCHES` per parent with problems kept and the rest one
+  "+N more" box), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3
+  minutes"). `blocks.py`'s `_HopMap` draws `map_layout` as SVG in `follow()` and the Map tab (nothing in text, where
+  the table of hops says it).
   `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`.
 - `messaging`'s explorer window, `MessagingExplorer` (`messaging/explorer/`: `window.py` with `explore()`, composed of
   `_EverythingTab` (`items.py`: `region_items` turns the overview into `_Item`s, a line each, with its findings;
