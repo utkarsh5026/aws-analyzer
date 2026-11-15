@@ -137,7 +137,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   hold, each drawn in HTML and text and adding its own rules to `report.rules`, so no service's stylesheet changes:
   `_Meter`, an amount against a limit as one bar of `_Part`s, the part past the limit in red, an optional `mark` for a
   setting that would do; `_Split`, a whole as one bar of its parts, which `_fold_parts` cuts to the largest few and
-  "N others", so a whole of thousands draws like one of five; `_Bars`, an amount per day or hour, the bad part red),
+  "N others", so a whole of thousands draws like one of five; `_Treemap`, the same parts as tiles laid out by
+  `_squarified` (S3's summary: what takes the space by folder), one line in text; `_Bars`, an amount per day or hour,
+  the bad part red),
   `themes.py` (how a View's reports
   look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
   by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its

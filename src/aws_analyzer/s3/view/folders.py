@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, Iterable
 
+from ..._kit.charts import _Part, _Treemap, _fold_parts
 from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from ..._kit.fmt import (
     Stat, _duration, _fmt_dt, _in_zone, _plural, _share, _tz_label, human_age, human_money, human_size,
@@ -17,7 +18,7 @@ from ..._kit.render import _call
 from ..._kit.view import _friendly_errors
 
 from ..helpers import GB, base_prefix, parse_s3_uri, relative_key, s3_uri
-from ..models import FileDetailsReport, ObjectInfo
+from ..models import FileDetailsReport, ObjectInfo, PrefixSummary
 from ..analysis.summary import summary_findings
 from ..analysis.details import (
     _KIND_NAMES, _TABLE_KINDS, FileDetails, _clock, _count_text, _sheets_text, _short_count, file_details_findings,
@@ -270,6 +271,26 @@ def _details_cards(report: FileDetailsReport) -> list[tuple[str, ...]]:
     return cards
 
 
+_TREEMAP_TILES = 11
+
+
+def _folder_treemap(summary: PrefixSummary, folder_depth: int) -> _Treemap | None:
+    """
+    What takes the space below a prefix, as tiles sized by bytes: the largest folders named, the rest folded into
+    one; None when there's only one folder to show.
+    """
+    parts = [_Part(_folder_label(folder), float(stat.size), human_size(stat.size))
+             for folder, stat in summary.by_folder.items() if stat.size]
+    if len(parts) < 2:
+        return None
+    note = ""
+    if summary.truncated:
+        note = f"These sizes cover the first {summary.object_count:,} objects only: limit= stopped the scan there."
+    level = "folder" if folder_depth == 1 else f"folder, {folder_depth} levels down"
+    return _Treemap(_fold_parts(parts, _TREEMAP_TILES, human_size), human_size(summary.total_size),
+                    title=f"What takes the space, by {level}", note=note)
+
+
 class _FolderCommands:
     """
     S3View's commands to explore a folder: ls(), tree(), summary(), find(), file_details(), largest(),
@@ -439,6 +460,9 @@ class _FolderCommands:
             )
         )
         blocks.append(findings)
+        treemap = _folder_treemap(s, folder_depth)
+        if treemap:
+            blocks.append(treemap)
         n, size = s.object_count, s.total_size
         blocks += [
             _stat_table(

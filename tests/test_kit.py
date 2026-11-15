@@ -22,7 +22,7 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
-from aws_analyzer._kit.charts import _Bars, _Meter, _Part, _Split, _fold_parts
+from aws_analyzer._kit.charts import _Bars, _Meter, _Part, _Split, _Treemap, _fold_parts, _squarified
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
@@ -547,3 +547,20 @@ def test_bars_scale_to_the_highest_and_draw_the_bad_part_in_red():
     html = _report_html([bars], 0, _Look("", "zz", ""))
     assert '<i class="bad" style="height:25.00%">' in html and "highest 4 calls" in html
     assert "<span>Nov 9</span><span>Nov 10</span>" in html
+
+
+def test_squarified_tiles_fill_the_map_by_share():
+    tiles = _squarified([6, 6, 4, 3, 2, 2, 1], aspect=1.5)
+    assert (tiles[0].width, tiles[0].height) == (50.0, 50.0)
+    assert round(sum(t.width * t.height for t in tiles)) == 10_000
+    assert all(t.left + t.width <= 100.0001 and t.top + t.height <= 100.0001 for t in tiles)
+    assert _squarified([0, 0]) == []
+
+
+def test_a_treemap_names_big_tiles_and_sums_up_in_one_line_of_text():
+    parts = _fold_parts([_Part(f"f{n}/", float(2 ** n), f"{2 ** n} B") for n in range(8)], 5, lambda a: f"{a:g} B")
+    treemap = _Treemap(parts, "255 B", title="What takes the space")
+    html = _report_html([treemap], 0, _Look("", "zz", ""))
+    assert "<b>f7/</b><i>128 B · 50%</i>" in html and 'class="rest"' in html
+    text = _render_text([treemap], 0)
+    assert "of 255 B: f7/ 50% · f6/ 25% · f5/ 13% · f4/ 6% · 2 more" in text

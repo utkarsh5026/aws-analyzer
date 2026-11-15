@@ -1,6 +1,6 @@
 """
 Charts every service can put in a report: _Meter, an amount against a limit as one bar; _Split, a whole as one bar
-of its largest parts; _Bars, an amount per day or hour.
+of its largest parts; _Treemap, a whole as tiles sized by their parts; _Bars, an amount per day or hour.
 
 A chart is a block like any other, drawn in HTML and as lines of text. Its HTML is plain HTML and CSS, so it still
 draws in a reopened notebook, and the rules it needs go in the report's own <style> (report.rules), so a service
@@ -377,3 +377,142 @@ def _bars_chart_lines(bars: _Bars, report: _Report) -> list[str]:
     if bars.note:
         out.append(f"  {bars.note}")
     return out
+
+
+@dataclass
+class _Tile:
+    """
+    Where a treemap's tile goes, in percent of the map's width and height.
+    """
+
+    left: float
+    top: float
+    width: float
+    height: float
+
+
+def _worst_ratio(row: list[float], side: float) -> float:
+    """
+    How far from square the most stretched tile of a row would be, laid along a side of this length.
+    """
+    total = sum(row)
+    thickness = total / side
+    return max(max(thickness * thickness / area, area / (thickness * thickness)) for area in row)
+
+
+def _lay_row(row: list[float], box: _Tile, tiles: list[_Tile]) -> _Tile:
+    """
+    Lays a row of areas along the box's shorter side and returns the box that's left.
+    """
+    total = sum(row)
+    if box.width >= box.height:
+        thickness = total / box.height
+        top = box.top
+        for area in row:
+            tiles.append(_Tile(box.left, top, thickness, area / thickness))
+            top += area / thickness
+        return _Tile(box.left + thickness, box.top, box.width - thickness, box.height)
+    thickness = total / box.width
+    left = box.left
+    for area in row:
+        tiles.append(_Tile(left, box.top, area / thickness, thickness))
+        left += area / thickness
+    return _Tile(box.left, box.top + thickness, box.width, box.height - thickness)
+
+
+def _squarified(amounts: list[float], *, aspect: float = 1.0) -> list[_Tile]:
+    """
+    Tiles for amounts given largest first, filling a map `aspect` times as wide as it is high, each tile's area its
+    share of the whole and as close to square as rows allow (Bruls, Huizing and van Wijk's _squarified layout), in
+    percent of the map's width and height.
+    """
+    total = sum(amounts)
+    if total <= 0:
+        return []
+    width, height = aspect, 1.0
+    areas = [amount / total * width * height for amount in amounts]
+    tiles: list[_Tile] = []
+    box = _Tile(0.0, 0.0, width, height)
+    row: list[float] = []
+    for area in areas:
+        side = min(box.width, box.height)
+        if row and _worst_ratio(row + [area], side) > _worst_ratio(row, side):
+            box = _lay_row(row, box, tiles)
+            row = []
+        row.append(area)
+    if row:
+        _lay_row(row, box, tiles)
+    return [_Tile(t.left / width * 100, t.top / height * 100, t.width / width * 100, t.height / height * 100)
+            for t in tiles]
+
+
+@dataclass
+class _Treemap:
+    """
+    A whole as tiles, each sized by its part, so what takes the space is seen at once: a folder's subfolders by
+    bytes.
+
+        parts       the parts, largest first; fold_parts keeps the largest few and folds the rest into one
+        total_text  the whole as people read it ('4.3 TB')
+        title       the heading over the map
+        note        a sentence under it
+    """
+
+    parts: list[_Part]
+    total_text: str
+    title: str = ""
+    note: str = ""
+
+
+_TREEMAP_ASPECT = 3.4
+_TILE_LABEL_SHARE = 0.025
+
+_TREEMAP_RULES = """\
+.{root} .tmap{{position:relative;max-width:760px;aspect-ratio:3.4;margin:8px 0 6px;border-radius:6px;overflow:hidden}}
+.{root} .tmap>span{{position:absolute;box-sizing:border-box;overflow:hidden;padding:5px 7px;border:1.5px solid Canvas;border-radius:5px;font-size:11.5px;line-height:1.3;color:#fff;background:var(--info,#3b82f6)}}
+.{root} .tmap>span:nth-child(n+2){{background:color-mix(in srgb,var(--info,#3b82f6) 78%,Canvas)}}
+.{root} .tmap>span:nth-child(n+4){{background:color-mix(in srgb,var(--info,#3b82f6) 60%,Canvas)}}
+.{root} .tmap>span:nth-child(n+7){{background:color-mix(in srgb,var(--info,#3b82f6) 45%,Canvas)}}
+.{root} .tmap>span.rest{{background:rgba(127,127,127,.35);color:inherit}}
+.{root} .tmap b{{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.{root} .tmap i{{font-style:normal;opacity:.9;white-space:nowrap}}
+.{root} .tmap-note{{font-size:12.5px;max-width:760px}}
+"""
+
+
+def _tile_html(part: _Part, tile: _Tile, share: float) -> str:
+    """
+    One tile, placed by percent, named and sized when it's big enough to hold the words; pointing at it says all.
+    """
+    place = (f"left:{tile.left:.3f}%;top:{tile.top:.3f}%;width:{tile.width:.3f}%;height:{tile.height:.3f}%")
+    words = (f"<b>{_esc(part.label)}</b><i>{_esc(part.text)} · {share:.0%}</i>"
+             if share >= _TILE_LABEL_SHARE else "")
+    kind = ' class="rest"' if part.is_rest else ""
+    return f'<span{kind} style="{place}" title="{_esc(part.label)}: {_esc(part.text)} ({share:.0%})">{words}</span>'
+
+
+@_draws(_Treemap, "html")
+def _treemap_html(treemap: _Treemap, report: _Report) -> str:
+    report.rules.add(_TREEMAP_RULES.format(root=report.root or "mtr-any"))
+    shown = [part for part in treemap.parts if part.amount > 0]
+    total = sum(part.amount for part in shown) or 1.0
+    tiles = _squarified([part.amount for part in shown], aspect=_TREEMAP_ASPECT)
+    body = "".join(_tile_html(part, tile, part.amount / total) for part, tile in zip(shown, tiles))
+    title = f"<h4>{_prose(treemap.title)}</h4>" if treemap.title else ""
+    note = f'<div class="tmap-note">{_prose(treemap.note)}</div>' if treemap.note else ""
+    return f'{title}<div class="tmap">{body}</div>{note}'
+
+
+_TEXT_TILES = 4
+
+
+@_draws(_Treemap, "text")
+def _treemap_lines(treemap: _Treemap, report: _Report) -> list[str]:
+    total = sum(part.amount for part in treemap.parts) or 1.0
+    named = [f"{part.label} {part.amount / total:.0%}" for part in treemap.parts[:_TEXT_TILES]]
+    rest = len(treemap.parts) - _TEXT_TILES
+    if rest > 0:
+        named.append(f"{rest} more")
+    out = [f"{treemap.title}: " if treemap.title else "", f"  of {treemap.total_text}: " + " · ".join(named)]
+    out = [""] + [line for line in out if line]
+    return out + ([f"  {treemap.note}"] if treemap.note else [])
