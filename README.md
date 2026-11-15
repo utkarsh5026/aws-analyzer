@@ -2128,6 +2128,7 @@ where executions stop; pick a state for its tries, its Lambda run's lines or the
 
 ```python
 sfn.explore("order-pipeline", execution="ord-7f3a")   # or explore(tab="failures", since="30d")
+sfn.explore("order-pipeline", assistant=AgentView())   # ✦ Ask: the agent beside the tabs, asking about what's open
 ```
 
 ### Commands (`StepFunctionsView`)

@@ -636,13 +636,14 @@ class StepFunctionsView(_BaseView):
         return steps[:3]
 
     @_friendly_errors
-    def explore(self, name: str | None = None, *, execution: str | None = None, tab: str | None = None,
-                since: str = "7d", height: int | str | None = None) -> None:
+    def explore(self, name: str | None = None, *, execution: str | None = None, tab: str | None = None,  # noqa: PLR0913
+                since: str = "7d", height: int | str | None = None, assistant: Any = None) -> None:
         """
         The explorer window: every state machine and how it's doing, and for the one you click its executions to
         click through, each with its waterfall and one log of what happened (Step Functions' events and every Lambda
         run's lines, merged by time), its failures by cause and its definition. Needs Jupyter and ipywidgets;
-        view.explorer is the window.
+        view.explorer is the window. assistant=AgentView(...) adds ✦ Ask: a drawer where you ask the agent about what
+        the window shows.
         """
         if not self.use_html:
             raise _Hint(
@@ -654,7 +655,7 @@ class StepFunctionsView(_BaseView):
         from .explorer.window import StepFunctionsExplorer
 
         self.explorer = StepFunctionsExplorer(name, execution=execution, tab=tab, since=since, view=self,
-                                              height=height, mode="widgets")
+                                              height=height, mode="widgets", assistant=assistant)
 
 
 def _needs_attention(machine: StateMachine, numbers: MachineNumbers | None) -> bool:

@@ -11,10 +11,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🔀 **Step Functions explorer: ✦ Ask about the execution you have open** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
+  - `sfn.explore(..., assistant=agent)` or `x.attach(agent)`: the agent's chat beside the tabs, about what's open.
+  - `x.focus` is the state machine, tab, time range and execution (its error, where it stopped) or state picked.
+  - Answers' calls become buttons that open that execution or tab; `x.open(name, tab="failures")` does it too.
 - 🔀 **Step Functions explorer: open it in the AWS console** ([#246](https://github.com/utkarsh5026/aws-analyzer/pull/246))
   - ↗ Console beside ↻ Refresh opens the state machine in the Step Functions console.
   - Above an open execution, ↗ Console opens that execution there, to redrive or start it again.
   - `console_url(arn)` gives the same link from code.
+
+### Fixed
+
+- 🔀 **Step Functions explorer: ✦ Ask no longer stops with a TypeError** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
+  - With `set_assistant(agent)`, clicking ✦ Ask on this window said `focus= takes an explorer window`; it opens the chat now.
 
 ## [0.58.0] - 2026-11-11
 

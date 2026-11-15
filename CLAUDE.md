@@ -820,6 +820,10 @@ How the View layer works:
   into `LogLine`s with Lambda's `readable_line`. `tests/fake_stepfunctions.py`'s `holds` hold a call back for the
   background tests; `story_logs()` and `ok_run_lines()` give the Lambda steps' runs, and
   `.claude/skills/demo/sfn_explorer_shots.py` makes the guide's `sfn-explorer*` figures in a real JupyterLab.
+  `explorer/focus.py`'s `_FocusReads` gives it a `focus` (service 'stepfunctions': kind 'machines', 'machine',
+  'executions', 'execution' with its status, error and `failed_state`, 'graph', 'state', 'failures' or 'definition'),
+  so `assistant=` / `x.attach()` add the ✦ Ask drawer; `_show_tab`, the chips, the search box and the Graph tab's
+  mode and state lines call `_focus_moved`, and `x.open(name, tab=)` is what the drawer's buttons call.
   The Graph tab (`explorer/graph.py`'s `_GraphTab` mixin) and `graph()` draw `_FlowGraph` (`blocks.py`: an inline
   SVG of boxes and arrows, arrowheads as paths, a `<title>` per box; text lists the states by layer) from
   `analysis/layout.py` (pure): `flow_layout()` puts the top-level states in layers by the longest way from StartAt,
@@ -1280,8 +1284,9 @@ functions); a test patches a name in the module that looks it up (`harness._hide
   they change, `offered`), and `_ask` asks with `focus=` (`_asked_focus`, read on the loop before the work starts),
   the question showing it under the bubble (`_question_html(about=)`). Under each answer, `_targets_row` puts a button
   per place its calls point at in the window (`answer_next`'s calls through `window/drawer.py`'s `target_for`:
-  `parse_call` reads a View call with `ast`, literals only, and `_lambda_target`, `_s3_target` or `_kb_target` maps
-  it to the explorer's own command, `x.logs(name, search=request_id)`, `x.open(name, tab=)`, `x.open(path)`, `x.file(path)`; `_go_to` runs it).
+  `parse_call` reads a View call with `ast`, literals only, and `_lambda_target`, `_s3_target`, `_kb_target` or
+  `_stepfunctions_target` maps it to the explorer's own command, `x.logs(name, search=request_id)`,
+  `x.open(name, tab=)`, `x.open(path)`, `x.file(path)`, `x.execution(ref)`; `_go_to` runs it).
   `AgentView._ask_query_` writes the Logs tab's ✦ query: `prompt.py`'s `query_prompt` and `parse_query_reply`, one
   call through LangChain's `batch()` (not `invoke()`, which `rules.py` would read as Lambda's Invoke). Every window shares one conversation:
   `AgentView._windows()` (the chat's and each drawer), `_busy_window()` (one question at a time, whichever window asks;

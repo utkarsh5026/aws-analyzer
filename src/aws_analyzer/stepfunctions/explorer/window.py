@@ -15,7 +15,7 @@ from ..._kit.errors import _error_name, _why
 from ..._kit.fmt import _duration, _plural, human_money
 from ..._kit.text import _clip, _esc, search_rank
 from ..._kit.themes import _theme_css, _theme_name
-from ..._kit.window import _Explorer, _class_if, _for_window, _skeleton, _window_errors
+from ..._kit.window import _Explorer, _check_assistant, _class_if, _for_window, _skeleton, _window_errors
 
 from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, console_url, execution_name, parse_execution_ref
 from ..models import ExecutionDetail, ExecutionPage, FailureReport, Overview, StateMachine
@@ -24,6 +24,7 @@ from ..analysis.story import ExecutionStory, lambda_steps
 from ..analyzer import StepFunctionsAnalyzer
 from ..style import _CSS, _ROOT, _render_html
 from ..view import StepFunctionsView, _with_story_run
+from .focus import _FocusReads
 from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
     _execution_face, _window_text,
@@ -48,7 +49,7 @@ _OVERVIEW_DAYS = 7
 _FAILURE_BUTTONS = 6
 
 
-class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
+class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
     """
     The Step Functions explorer: a window to look through your state machines by clicking. The state machine field at
     the top switches to another one; the cards beside it say how it's doing.
@@ -71,11 +72,15 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
     tab: the tab to start on. since: how far back the Executions and Failures tabs read ('24h', '7d', '30d', '90d').
     view / core: a StepFunctionsView or StepFunctionsAnalyzer to use (else one is made from region / profile).
     height: the height of the tabs' pages (pixels, or CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports
-    elsewhere), 'widgets' or 'text'.
+    elsewhere), 'widgets' or 'text'. assistant: an AgentView to ask about what the window shows: ✦ Ask, at the end of
+    the tab bar, opens a drawer where "why did this fail?" means the state machine, execution or state you have open
+    (x.attach(agent) does it later, and aws_analyzer.set_assistant(agent) for every explorer).
 
     ↗ Console beside ↻ Refresh opens the state machine in the AWS console, and the one above an execution opens that
-    execution there. It only reads: nothing here starts, stops or redrives an execution. x.ui is a StepFunctionsView for reports in
-    other cells; x.overview, x.machine, x.page, x.detail, x.story and x.report hold the data behind what's shown.
+    execution there. It only reads: nothing here starts, stops or redrives an execution. x.ui is a StepFunctionsView
+    for reports in other cells; x.overview, x.machine, x.page, x.detail, x.story and x.report hold the data behind
+    what's shown, and x.focus says what the window is showing (the state machine, tab, execution or state), which the
+    ✦ Ask drawer asks about.
     """
 
     _PREFIX, _THREADS = "sfx", "sfn-explorer"
@@ -94,6 +99,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         profile: str | None = None,
         height: int | str | None = None,
         mode: str = "auto",
+        assistant: Any = None,
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
@@ -103,6 +109,9 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         if since not in [value for _, value in _SINCE_CHOICES]:
             raise ValueError(f"since is one of {', '.join(v for _, v in _SINCE_CHOICES)}, not {since!r}")
         super().__init__()
+        if assistant is not None:
+            _check_assistant(assistant)
+            self.assistant = assistant
         if view is None:
             view = StepFunctionsView(core or StepFunctionsAnalyzer(region=region, profile=profile),
                                      mode="text" if mode == "text" else "auto")
@@ -138,10 +147,17 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         return f"StepFunctionsExplorer({name}) · help(StepFunctionsExplorer) says what it shows"
 
     @_window_errors
-    def open(self, machine: str) -> None:
+    def open(self, machine: str, *, tab: str | None = None) -> None:
         """
-        Shows another state machine (a name or ARN), as picking it in the state machine field does.
+        Shows another state machine (a name or ARN), as picking it in the state machine field does, on the tab given
+        ('overview', 'executions', 'graph', 'failures' or 'definition') or the one open.
         """
+        if tab is not None and tab not in _MACHINE_TABS:
+            raise ValueError(f"tab is one of {', '.join(_MACHINE_TABS)}, not {tab!r}")
+        if self._w is None:
+            self.ui.state_machine(machine)
+            return
+        self._want_tab = tab
         self._open_machine(self.core.resolve(machine))
 
     @_window_errors
@@ -275,6 +291,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
             self._load_failures()
         elif not self._said[2] and self._said[1] != "warn":
             self._status(self._tab_line(key))
+        self._focus_moved()
 
     def _tab_line(self, key: str) -> str:
         """
@@ -515,6 +532,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self._query = str(change["new"] or "").strip()
         self._offset = 0
         self._refilter()
+        self._focus_moved()
 
     def _draw_chips(self) -> None:
         """
@@ -543,6 +561,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _Explorer):
         self._offset = 0
         self._draw_chips()
         self._refilter()
+        self._focus_moved()
 
     def _refilter(self) -> None:
         executions = self.page.executions if self.page else []
@@ -718,6 +737,7 @@ def explore(  # noqa: PLR0913
     region: str | None = None,
     profile: str | None = None,
     height: int | str | None = None,
+    assistant: Any = None,
 ) -> StepFunctionsExplorer:
     """
     Opens the Step Functions explorer window and returns it: every state machine, its executions to click through,
@@ -729,7 +749,8 @@ def explore(  # noqa: PLR0913
         explore("order-pipeline", execution="ord-7f3a")  # with one execution open
         explore("order-pipeline", tab="failures", since="30d")
 
-    It only reads: nothing here starts, stops or redrives an execution.
+    It only reads: nothing here starts, stops or redrives an execution. assistant=AgentView(...) adds ✦ Ask: a drawer
+    where you ask the agent about what the window shows.
     """
     return StepFunctionsExplorer(machine, execution=execution, tab=tab, since=since, region=region, profile=profile,
-                                 height=height)
+                                 height=height, assistant=assistant)
