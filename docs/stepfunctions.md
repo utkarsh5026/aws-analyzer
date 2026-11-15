@@ -66,7 +66,7 @@ Five calls in a notebook, from every state machine to the path an execution took
 
 ## Start here { #tour }
 
-Five questions people bring to a workflow, and the one line that answers each. None of them change anything.
+Six questions people bring to a workflow, and the one line that answers each. None of them change anything.
 { .gist }
 
 <div class="quick" markdown>
@@ -81,7 +81,9 @@ One workflow
 { .qgroup }
 
 -   [What happened in this execution?](#execution) `sfn.execution("order-pipeline/ord-7f3a")`{ .long }
+-   [What was different about this failed one?](#compare) `sfn.compare("order-pipeline/ord-7f3a")`{ .long }
 -   [What does this workflow do, and what could go wrong?](#state-machine) `sfn.state_machine("order-pipeline")`{ .long }
+-   [Which state is slow, and which one retries?](#timings) `sfn.graph("order-pipeline", timings=True)`{ .long }
 
 Rather click?
 { .qgroup }
@@ -107,10 +109,10 @@ sfn.overview()            # or overview(days=30)
 
 The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command, such as `failures('order-pipeline')`.
 
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="807" loading=lazy }
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="807" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="889" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="889" loading=lazy }
 /// caption
-`sfn.overview()`: order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first.
+`sfn.overview()`: order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first.
 ///
 
 !!! tip "Worth knowing"
@@ -131,12 +133,18 @@ sfn.failures("order-pipeline")                  # the last 7 days, the newest 50
 sfn.failures("order-pipeline", since="30d", limit=200)
 ```
 
-For each failure it reads only the end of the execution's history (one request, whatever the history's length), which is where the failure is. When the failing state called Lambda, the group names the function and the newest run's request ID, ready for `LambdaView().logs('orders-etl', request_id='c0ffee00-…')`. It also says how many of the failed executions can still be **redriven**, started again from the state that failed, and shows the command; it never runs it.
+For each failure it reads only the end of the execution's history (one request, whatever the history's length), which is where the failure is. When the failing state called Lambda, the group names the function and the newest run's request ID, ready for `LambdaView().logs('orders-etl', request_id='c0ffee00-…')`. Each group says since when it has failed that way, as far back as the failures read go. It also says how many of the failed executions can still be **redriven**, started again from the state that failed, and shows the command; it never runs it.
 
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-light.webp#only-light){ width="984" height="958" loading=lazy }
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-dark.webp#only-dark){ width="984" height="958" loading=lazy }
+Each kind of failure also says **whether a Retry would have saved it**, in a column and a finding. A throttle or a Lambda service error passes in seconds, so the finding gives the Retry rule to paste (or, when the state already retries it and ran out, a rule with more tries, further apart). A code error like `KeyError` fails the same way every time, so a Retry won't help, and one on `States.ALL` only repeats it. A timeout needs the slowness found first. It's judged from the error's name and the state's own Retry rules.
+
+It then asks what changed before each kind of failure began: when the Lambda function it stopped in was deployed (each published version, or its last change), and when the definition the first failure ran with was last updated. A change in the two days before the first failure is the first thing to check, and a finding says so: "LoadOrders began failing with KeyError 4 minutes after orders-etl version 2 was published", with the call that shows the function. It's timing, not proof, and the finding says that too. When nothing changed nearby, the finding says when each last did and points at the failing execution's input instead.
+
+A strip of bars shows the executions a day, the part that didn't succeed in red, from CloudWatch's whole UTC days. When most of the failures came in the last few days, the day they jumped is outlined and a finding says so: "Failures jumped on 12 Nov: 40 of the 49 in the last 7 days came since then", with the `failures(..., since=)` call that reads just those. `state_machine()` shows the same strip.
+
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-light.webp#only-light){ width="984" height="1723" loading=lazy }
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-dark.webp#only-dark){ width="984" height="1723" loading=lazy }
 /// caption
-`sfn.failures("order-pipeline")`: most failures stop at LoadOrders with `KeyError: 'customer_id'`, and the newest run's `request_id` is filled in.
+`sfn.failures("order-pipeline")`: most failures stop at LoadOrders with `KeyError: 'customer_id'`, and they began 4 minutes after orders-etl version 2 went out.
 ///
 
 ## One execution, step by step { #execution }
@@ -162,6 +170,26 @@ At the end, folded, are **what it returned** (for an execution that succeeded), 
 `sfn.execution("order-pipeline/ord-7f3a")`: the waterfall, then one log where orders-etl's traceback sits between the step that called it and the Catch that ended the execution.
 ///
 
+## Beside the last success { #compare }
+
+`compare()` puts a failed execution beside the newest one that succeeded before it, and says what was different: the states, and the input's fields.
+{ .gist }
+
+```python
+sfn.compare("order-pipeline/ord-7f3a")                    # with the last success before it
+sfn.compare("order-pipeline/ord-7f3a", other="ord-25a8")  # with one you pick
+```
+
+A table lists each state either execution went through: how it ran in each, and the difference. It flags a state that failed only here, took more tries or ran much slower. The states it never reached after failing, and where its Catch sent the error, are shown but not counted as differences. A second table lists the **input fields** that are missing, extra, empty or of another type. Values that just differ aren't listed, since every order has its own ID.
+
+When the error names a field the input lacks, the first finding says so: "The likely cause: ord-7f3a's input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, naming it". In the explorer, **⇄ Compare with the last success** beside **↗ Console** shows the same over a failed execution's page.
+
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-light.webp#only-light){ width="984" height="964" loading=lazy }
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-dark.webp#only-dark){ width="984" height="964" loading=lazy }
+/// caption
+`sfn.compare("order-pipeline/ord-7f3a")`: the run that succeeded just before it had a `customer_id`; this one didn't, and that's the key LoadOrders failed on.
+///
+
 ??? more "How the Lambda lines are read"
 
     The Step Functions module doesn't read CloudWatch Logs itself: it asks the [Lambda module](lambda_functions.md) for the run, `LambdaAnalyzer.log_events(name, request_id=...)`, the same read `LambdaView().logs()` makes, and draws its lines the same way. The Lambda module loads only when a failed Lambda step needs it, so `sfn.overview()` never imports it.
@@ -180,10 +208,10 @@ sfn.graph("order-pipeline", failures="7d")          # shaded by where executions
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
 
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1163" loading=lazy }
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1163" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1401" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1401" loading=lazy }
 /// caption
-`sfn.state_machine("order-pipeline")`: LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste.
+`sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.
 ///
 
 ![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="850" loading=lazy }
@@ -191,6 +219,29 @@ The findings read the definition: a Lambda task with no Retry for Lambda's own e
 /// caption
 `sfn.graph("order-pipeline", execution="ord-7f3a")`: the path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).
 ///
+
+## Where the time goes { #timings }
+
+`graph(timings=True)` reads the newest 20 executions that succeeded and shades each state by its share of their time, so you see which state is slow by habit and which one retries.
+{ .gist }
+
+```python
+sfn.graph("order-pipeline", timings=True)           # the newest 20 succeeded executions
+sfn.graph("order-pipeline", timings=50)             # more of them, for a steadier median
+```
+
+One execution's waterfall can be an outlier; twenty show a habit. Each state gets its median and longest run, its share of the executions' time and its tries a run. A state inside a Map gets how many times it runs an execution instead of a share, since its runs can overlap.
+
+The findings name the state that takes most of the time and where to look in it (a Map's slowest inner state, a Lambda task's function), a state whose runs vary a lot with the execution that shows the slow one, and every state that retries in one run out of ten or more. A retry waits its back-off, and on a Standard workflow it's another state transition on the bill, so that finding prices it at your pace from CloudWatch and says what to change: for a throttled Lambda, reserved concurrency or a lower `MaxConcurrency`.
+
+![graph('order-pipeline', timings=True): findings that ChargeCard retries after Lambda throttles it, priced a month, that ProcessItems takes 69% of the time and ResizeImage inside it the most, and that LoadOrders runs unevenly; the flow with each box shaded by its share of the time; and a table of every state's runs, median, longest, share and tries a run](images/sfn-graph-timings-light.webp#only-light){ width="984" height="1720" loading=lazy }
+![graph('order-pipeline', timings=True): findings that ChargeCard retries after Lambda throttles it, priced a month, that ProcessItems takes 69% of the time and ResizeImage inside it the most, and that LoadOrders runs unevenly; the flow with each box shaded by its share of the time; and a table of every state's runs, median, longest, share and tries a run](images/sfn-graph-timings-dark.webp#only-dark){ width="984" height="1720" loading=lazy }
+/// caption
+`sfn.graph("order-pipeline", timings=True)`: ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes.
+///
+
+!!! tip "Worth knowing"
+    Each execution's history is one `GetExecutionHistory` call. Reading it costs nothing, but AWS rate-limits it, so the sample stays small and the report says how many it read. An Express workflow's executions come from its log group, and only when it logs everything (`ALL`): at `ERROR` the succeeded ones leave no line.
 
 ## Explore by clicking { #explorer }
 
@@ -219,6 +270,7 @@ core.executions("order-pipeline", status="failed").to_df()
 detail = core.execution("order-pipeline/ord-7f3a")  # ExecutionDetail: .steps, .failed_step, .lambda_run
 detail.failed_step.request_id                       # the Lambda run behind the failure
 core.failures("order-pipeline").groups              # FailureGroup: state, error, count, newest, request_id
+core.timings("order-pipeline").to_df()              # per state: runs, median, longest, share, tries a run
 ```
 
 The analysis functions make no AWS calls, so they also work on a definition or a history you already have:
@@ -234,7 +286,7 @@ detail = fill_detail(ExecutionDetail(parse_execution(described)), history_events
 
 Costs are estimates at us-east-1 list prices (`STEPFUNCTIONS_PRICES`): $0.025 per 1,000 state transitions for Standard workflows, and for Express $1.00 per million executions plus $0.00001667 per GB-second at 64 MB, the least Express bills. A Standard execution is counted as one transition per top-level state; Map iterations add more, and the 4,000 free transitions a month aren't taken off. Pass your own prices with `StepFunctionsAnalyzer(prices={"transition": 0.0000275})`.
 
-`overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many it read. Executions, histories and Lambda logs cost nothing to read.
+`overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many it read. Executions, histories and Lambda logs cost nothing to read. A retry is a state transition too, so a state that retries often costs money as well as time: `graph(timings=True)` prices its retries.
 
 ## Permissions { #permissions }
 
@@ -249,7 +301,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Effect": "Allow",
       "Action": [
         "states:ListStateMachines", "states:DescribeStateMachine", "states:ListExecutions",
-        "states:DescribeExecution", "states:GetExecutionHistory"
+        "states:DescribeExecution", "states:GetExecutionHistory", "states:DescribeStateMachineForExecution"
       ],
       "Resource": "*"
     },
@@ -262,14 +314,14 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
     {
       "Sid": "ReadLambdaRuns",
       "Effect": "Allow",
-      "Action": ["lambda:GetFunction", "logs:FilterLogEvents"],
+      "Action": ["lambda:GetFunction", "lambda:ListVersionsByFunction", "logs:FilterLogEvents"],
       "Resource": "*"
     }
   ]
 }
 ```
 
-The last statement is only for the Lambda lines in `execution()`; without it the report says the run couldn't be read and shows the call that reads it.
+The last statement is only for the Lambda lines in `execution()` and the deploys `failures()` compares with when each kind of failure began; without it the report says what it couldn't read and shows the call that reads it. `states:DescribeStateMachineForExecution` dates the definition a failure ran with.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -303,9 +355,10 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 |---|---|
 | `overview(days=7)` | Every state machine: executions, how many didn't succeed, average run, cost, logging |
 | `state_machine(name, days=7)` | One state machine: its numbers, every state, what its definition risks, the definition |
-| `graph(name, execution=None, failures=None)` | The flow drawn as a graph, coloured by an execution's path or where executions stop, and Mermaid to paste |
+| `graph(name, execution=None, failures=None, timings=None)` | The flow drawn as a graph, coloured by an execution's path, where executions stop or where the time goes, and Mermaid to paste |
 | `executions(name, status=None, since="7d", n=25)` | Its latest executions, newest first |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step: its waterfall, and one log with every Lambda run's lines |
+| `compare(execution, other=None, machine=None, since="30d")` | An execution beside the last success before it (or other=): the states and input fields that differ, and the likely cause |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |
 | `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The explorer window: every state machine, its executions with their waterfall and log, failures and definition |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |

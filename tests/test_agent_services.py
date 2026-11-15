@@ -101,6 +101,13 @@ def test_a_failed_workflow_leads_to_the_lambda_run_that_broke_it(sfn_world):
     assert failures["findings"][0]["level"] == "warn"
     assert failures["region"] == REGION and failures["window"]["hours"] == 168.0
 
+    compared = tool(core, "compare_with_success")("order-pipeline/ord-7f3a")
+    assert compared["complete"] and compared["compared_with"]["name"] == "ord-cfae"
+    assert compared["input_fields_that_differ"] == [
+        {"field": "customer_id", "difference": "missing", "here": None, "there": '"C-4471"'}]
+    assert [s["state"] for s in compared["states_that_differ"]] == ["ChargeCard", "LoadOrders"]
+    assert compared["findings"][0]["message"].startswith("ord-7f3a's input has no customer_id")
+
     detail = tool(core, "execution_details")("order-pipeline/ord-7f3a")
     assert detail["failed_step"]["state"] == "LoadOrders" and detail["status"] == "FAILED"
     run = detail["lambda_run"]
@@ -313,3 +320,21 @@ def test_opensearch_tools_explain_vector_indexes_and_check_their_vectors(opensea
 
     nameless = tool(opensearch, "index_details")("vectors-prod")
     assert nameless["complete"] is False and "store_indexes('vectors-prod')" in nameless["message"]
+
+
+def test_the_failures_tool_says_what_changed_just_before():
+    from aws_analyzer.agent.toolkits.stepfunctions_tools import summarize_failures
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    sfn = StepFunctionsAnalyzer(region=REGION, clients=sfn_clients(now))
+    sfn.max_workers = 1
+    summary = summarize_failures(sfn.failures("order-pipeline"), now)
+    top = summary["groups"][0]
+    assert top["changed_just_before"]["what"] == "orders-etl version 2 was published"
+    assert top["changed_just_before"]["minutes_before_first_failure"] == 4 and top["first_failure"] < now
+    assert "changed_just_before" not in summary["groups"][1]
+    assert top["would_a_retry_help"] == {"answer": False, "says": "no: fix the cause", "error_kind": "permanent"}
+    charge = next(g for g in summary["groups"] if g["state"] == "ChargeCard")
+    assert charge["would_a_retry_help"]["answer"] is True
+    assert any("4 minutes after orders-etl version 2" in f["message"] for f in summary["findings"])
+    json.dumps(summary, default=str)

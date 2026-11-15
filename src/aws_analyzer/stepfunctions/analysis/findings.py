@@ -16,6 +16,7 @@ from ..models import ExecutionDetail, FailureReport, MachineNumbers, Overview, S
 from .cost import monthly_cost
 from .definition import lambda_retry_block, unbounded_waits, unretried_lambda_states
 from .failures import REDRIVE_DAYS, can_redrive
+from .trend import trend_findings
 
 
 Finding = tuple[str, str]
@@ -30,6 +31,14 @@ _LOGGING_COMMAND = ("aws stepfunctions update-state-machine --state-machine-arn 
                     '{{"logGroupArn": "{group}"}}}}]}}')
 
 _REDRIVE_COMMAND = "aws stepfunctions redrive-execution --execution-arn {arn}"
+
+
+def redrive_command(arn: str) -> str:
+    """
+    The AWS CLI command that redrives an execution (starts it again from the state that failed), to copy: shown,
+    never run.
+    """
+    return _REDRIVE_COMMAND.format(arn=arn)
 
 
 def _names(names: list[str]) -> str:
@@ -95,8 +104,8 @@ def definition_findings(machine: StateMachine) -> list[Finding]:
 
 def numbers_findings(machine: StateMachine, numbers: MachineNumbers | None) -> list[Finding]:
     """
-    What a state machine's CloudWatch numbers say: executions that didn't succeed, starts that were throttled, and
-    no executions at all.
+    What a state machine's CloudWatch numbers say: executions that didn't succeed, a day their failures jumped on,
+    and starts that were throttled.
     """
     if numbers is None:
         return []
@@ -113,6 +122,8 @@ def numbers_findings(machine: StateMachine, numbers: MachineNumbers | None) -> l
         found.append((level, f"{numbers.unsuccessful:,} of {numbers.started:,} {machine.name} executions didn't "
                              f"succeed in {window} ({numbers.failure_rate:.1%}, {detail}). See where and why: "
                              f"{where}"))
+    if machine.has_executions:
+        found += trend_findings(machine, numbers)
     if numbers.throttled:
         found.append(("warn", f"Starting {machine.name} was throttled {numbers.throttled:,} times in {window}: "
                               "those executions never started unless the caller retried. Ask for a higher quota in "
@@ -203,7 +214,7 @@ def execution_findings(detail: ExecutionDetail, now: datetime) -> list[Finding]:
     if can_redrive(execution, now, express=express):
         found.append(("info", f"It can still be redriven (for {REDRIVE_DAYS} days after it stopped): that starts it "
                               "again from the state that failed, keeping the steps that succeeded. When the cause "
-                              f"is fixed: {_REDRIVE_COMMAND.format(arn=execution.arn)}"))
+                              f"is fixed: {redrive_command(execution.arn)}"))
     if detail.partial:
         found.append(("info", f"The history was read up to {_plural(detail.events, 'event')}, so later steps may be "
                               "missing. Pass max_events= for more."))
@@ -234,7 +245,7 @@ def failure_findings(report: FailureReport, now: datetime) -> list[Finding]:
     redrivable = sum(g.redrivable for g in report.groups)
     if redrivable:
         newest = next((e for e in report.failed if can_redrive(e, now, express=report.machine.is_express)), None)
-        command = _REDRIVE_COMMAND.format(arn=newest.arn) if newest is not None else ""
+        command = redrive_command(newest.arn) if newest is not None else ""
         found.append(("info", f"{_plural(redrivable, 'failed execution')} can still be redriven: once the cause is "
                               "fixed, each starts again from the state that failed, without repeating the steps that "
                               f"succeeded. For the newest: {command}"))

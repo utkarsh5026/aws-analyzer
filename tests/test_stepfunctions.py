@@ -28,9 +28,24 @@ from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
 )
 from aws_analyzer.stepfunctions.analysis.layout import (
-    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, owner_of, path_marks,
+    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, inner_timing_marks, owner_of,
+    path_marks, timing_marks,
 )
+from aws_analyzer.stepfunctions.analysis.timing import state_timings, timing_findings, timing_report, took_text
 from aws_analyzer.stepfunctions.explorer.graph import _execution_blocks as graph_execution_blocks
+from aws_analyzer.stepfunctions.analysis.trend import daily_counts, failure_jump, trend_findings
+from aws_analyzer.stepfunctions.analysis.suspects import (
+    change_findings, change_verdict, gap_text, group_change_findings,
+)
+from aws_analyzer.stepfunctions.models import Change, FailureGroup, FailureReport
+from aws_analyzer.stepfunctions.analysis.compare import (
+    compare_executions, compare_inputs, comparison_findings,
+)
+from aws_analyzer.stepfunctions.comparing import _newest_before
+from aws_analyzer.stepfunctions.analysis.retries import (
+    advice_finding, error_kind, matching_retry, retry_advice, roomier_rule,
+)
+from aws_analyzer.stepfunctions.models import StateDef
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer import frame as sfx_frame
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
@@ -546,15 +561,38 @@ def test_explorer_filters_searches_and_reads_another_range(fakes):
     assert len(x.page.executions) == 10 and x.report is None
 
 
-def test_explorer_failures_tab_opens_the_newest_of_each_group(fakes):
+def test_explorer_failures_tab_lists_each_kind_of_failure(fakes):
+    """
+    The Failures tab is a list: every failure at once first (the report's summary and days, without the table the
+    list replaces), then a line per kind, the most common first; a kind opens its error, what to read, its redrive
+    commands and its executions, each a line into the Executions tab.
+    """
     x = explorer(fakes, "order-pipeline")
     x.tab_buttons["failures"].click()
-    assert x.report is not None and "Why order-pipeline fails" in plain(x.failures_view.value)
-    assert "ord-0b17 in the Executions tab" in plain(x.failures_view.value)
-    labels = [b.description for b in x.failure_opens.children]
-    assert labels[0] == "Open ord-7f3a (LoadOrders: KeyError)" and len(labels) == 3
-    x.failure_opens.children[1].click()
-    assert x._tab == "executions" and x.detail.execution.name == "ord-0b17"
+    assert x.report is not None and x.picked_failure == ""
+    summary = plain(x.failures_view.value)
+    assert "Why order-pipeline fails" in summary and "Executions a day" in summary
+    assert "Failures by where they stopped" not in summary
+    lines = [line for line in x._failure_lines if line.box in x.failure_list.children]
+    assert [line.key for line in lines] == ["", "LoadOrders · KeyError", "ResizeImage · States.Timeout",
+                                            "ChargeCard · Lambda.TooManyRequestsException"]
+    assert "All failures" in plain(lines[0].face.value) and "×3" in plain(lines[1].face.value)
+    assert "since 3d ago" in plain(lines[1].face.value)
+    lines[1].button.click()
+    assert x.picked_failure == "LoadOrders · KeyError" and "sfx-on" in lines[1].box._dom_classes
+    group = plain(x.failures_view.value)
+    assert "LoadOrders fails with KeyError" in group and "The error it returned" in group
+    assert "LambdaView().logs('orders-etl'" in group and "aws stepfunctions redrive-execution" in group
+    runs = [line for line in x._failure_runs if line.box in x.failure_runs_box.children]
+    assert [line.key.rsplit(":", 1)[-1] for line in runs] == ["ord-7f3a", "ord-5d21", "ord-3c9b"]
+    assert "3 executions that failed this way" in plain(x.failure_runs_head.value)
+    assert x.focus.value("failed_state") == "LoadOrders" and x.focus.value("error") == "KeyError"
+    runs[1].button.click()
+    assert x._tab == "executions" and x.detail.execution.name == "ord-5d21"
+    x.tab_buttons["failures"].click()
+    assert x.picked_failure == "LoadOrders · KeyError"
+    lines[0].button.click()
+    assert x.picked_failure == "" and not x.failure_runs_box.children and not x.focus.value("error")
 
 
 def test_explorer_express_and_picking(fakes):
@@ -790,6 +828,23 @@ def test_explorer_graph_tab(fakes):
     assert "Where 1 execution stopped" in plain(x.graph_view.value)
 
 
+
+def test_explorer_lays_out_by_the_room_its_pages_get(fakes):
+    """
+    The pages sit in a box the stylesheet measures (.sfx-main), so opening the ✦ Ask drawer stacks the Executions and
+    Graph tabs' panes, the tab bar keeps its names (or icons) whole with ✦ Ask in view, and a narrow log puts each
+    message on its own line.
+    """
+    x = explorer(fakes, "order-pipeline")
+    main = x.root.children[2].children[0]
+    assert "sfx-main" in main._dom_classes
+    css = x.root.children[0].value
+    assert ".sfx-main{container:sfx-main/inline-size}" in css
+    assert "@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap" in css
+    assert ".sfx-states{flex:0 0 44%;min-width:360px;max-width:560px" in css
+    assert ".sfx-tabs button.sfx-assist{position:sticky;right:0" in css
+    assert ".sfn .story{container-type:inline-size" in css and ".sfn .story .sx{grid-column:1/-1" in css
+
 def test_log_lines_read_back_as_history_events():
     runs = express_runs(NOW)
     arn = express_arn("rsz-0099")
@@ -946,7 +1001,7 @@ def test_explorer_list_counts_agree_with_the_header(fakes, monkeypatch):
     assert "(the newest 6 and every one that didn't succeed)" in plain(x.status.value)
     assert "Executions · 7d 1,239" in plain(x.stats.value)
     x.since_pick.value = "24h"
-    assert x.range_numbers.days == 1 and "Executions · 1d 177 Didn't succeed 7 (4.0%)" in plain(x.stats.value)
+    assert x.range_numbers.days == 1 and "Executions · 1d 177 Didn't succeed 10 (5.6%)" in plain(x.stats.value)
     assert {e.name for e in x.page.executions if e.failed} == {"ord-7f3a", "ord-0b17", "ord-5d21"}
     assert plain(x.cut_note.value) == "The newest 6 of about 177, and every one that didn't succeed."
     x.since_pick.value = "7d"
@@ -1015,3 +1070,486 @@ def test_failures_inside_a_map_are_shaded_on_their_line():
                                                         sfnmod.FailureGroup("LoadOrders", "KeyError", count=3)])
     marks = inner_failure_marks(machine, report)
     assert marks.states == {"ResizeImage": "h2"} and marks.notes["ResizeImage"] == "1 stopped here (25%)"
+
+
+SUCCEEDED = ("ord-25a8", "ord-cfae", "ord-a410")
+
+
+def timings_of(names=SUCCEEDED, numbers=None):
+    report = sfnmod.TimingReport(order_pipeline(), NOW - timedelta(days=7), asked=20, numbers=numbers)
+    return timing_report(report.machine, [detail_of(name) for name in names], report)
+
+
+def test_state_timings_over_succeeded_executions():
+    timings = {t.name: t for t in state_timings([detail_of(name) for name in SUCCEEDED])}
+    assert list(timings)[:3] == ["ValidateOrder", "IsPriority", "ReserveStock"] and "BackorderWait" not in timings
+    charge = timings["ChargeCard"]
+    assert (charge.runs, charge.tries, charge.tried_runs, charge.retried_runs, charge.retries) == (3, 4, 3, 1, 1)
+    assert charge.tries_per_run == pytest.approx(4 / 3) and charge.retry_error == "Lambda.TooManyRequestsException"
+    assert charge.retried_in.name == "ord-cfae" and charge.function == "charge-card"
+    load = timings["LoadOrders"]
+    assert load.median == pytest.approx(5.725) and load.longest == pytest.approx(21.425)
+    assert load.slowest.name == "ord-a410"
+    resize = timings["ResizeImage"]
+    assert (resize.depth, resize.runs, resize.executions, resize.share) == (1, 9, 3, None)
+    assert timings["IsPriority"].tries_per_run is None
+    top_shares = [t.share for t in timings.values() if t.depth == 0]
+    assert max(top_shares) == timings["ProcessItems"].share and sum(top_shares) <= 1.0
+    assert state_timings([]) == []
+    assert took_text(0.04) == "0.04s" and took_text(9.5) == "9.5s" and took_text(None) == "-"
+
+
+def test_timing_findings_say_what_retries_and_what_takes_the_time():
+    numbers = MachineNumbers(days=7, started=7 * 177)
+    report = timings_of(numbers=numbers)
+    found = timing_findings(report, STEPFUNCTIONS_PRICES)
+    levels = [level for level, _ in found]
+    assert levels == ["warn", "info", "info"]
+    retry, slow, uneven = (message for _, message in found)
+    assert retry.startswith("ChargeCard retries in 1 of its 3 runs (1.33 tries a run, mostly after Lambda.Too")
+    assert "about 1,770 retries a month at this pace, $0.04" in retry
+    assert "give charge-card reserved concurrency" in retry and "execution('order-pipeline/ord-cfae')" in retry
+    assert slow.startswith("ProcessItems takes 6") and "Inside it, ResizeImage takes the most" in slow
+    assert "LambdaView().performance('resize-image')" in slow
+    assert uneven.startswith("LoadOrders runs unevenly") and "execution('order-pipeline/ord-a410')" in uneven
+    unpriced = timing_findings(timings_of(), STEPFUNCTIONS_PRICES)[0][1]
+    assert "$" not in unpriced and "a month" not in unpriced
+    quiet = timing_findings(timings_of(("ord-25a8",)), STEPFUNCTIONS_PRICES)
+    assert [message.split(" ")[0] for _, message in quiet] == ["ProcessItems"]
+    assert timing_findings(timings_of(()), STEPFUNCTIONS_PRICES) == []
+
+
+def test_timing_marks_shade_boxes_by_their_share_of_the_time():
+    layout = flow_layout(order_pipeline())
+    report = timings_of()
+    marks = timing_marks(layout, report)
+    assert marks.legend == "Where the time goes in 3 succeeded executions (all there were)"
+    assert marks.states["ProcessItems"] == "t3" and marks.states["LoadOrders"] == "t2"
+    assert marks.states["ValidateOrder"] == "t1" and "BackorderWait" not in marks.states
+    assert marks.notes["ChargeCard"] == "3% · 1.3 tries · 0.9s" and marks.notes["IsPriority"] == "0% · 0.01s"
+    inner = inner_timing_marks(order_pipeline(), report)
+    assert inner.notes == {"ResizeImage": "3× an execution · 9.5s"} and inner.states == {}
+    report.asked = 3
+    assert timing_marks(layout, report).legend == "Where the time goes in the newest 3 succeeded executions"
+
+
+def test_timings_read_the_newest_succeeded_histories(core, fakes):
+    report = core.timings("order-pipeline", n=2)
+    assert [e.name for e in report.executions] == ["ord-25a8", "ord-cfae"] and report.asked == 2
+    assert report.source == "history" and report.numbers is not None and report.partial == 0
+    sfn = fakes["stepfunctions"]
+    assert {call.get("statusFilter") for call in sfn.called("list_executions")} == {"SUCCEEDED"}
+    histories = sfn.called("get_execution_history")
+    assert len(histories) == 2 and all(call["includeExecutionData"] is False for call in histories)
+    assert report.state("ChargeCard").retried_runs == 1
+    assert list(report.to_df()["state"])[:2] == ["ValidateOrder", "IsPriority"]
+    express = core.timings("image-resize-express")
+    assert express.source == "logs" and len(express.executions) == 3 and express.state("Resize").runs == 3
+    assert core.timings("refund-approvals").executions == []
+
+
+def test_express_timings_need_every_event_logged(fakes):
+    fakes["stepfunctions"].machines["image-resize-express"]["logging"]["level"] = "ERROR"
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    report = core.timings("image-resize-express")
+    assert "only executions that failed are in its log group" in report.note
+    fakes["stepfunctions"].machines["image-resize-express"]["logging"]["level"] = "OFF"
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    with pytest.raises(_Hint, match="logging off"):
+        core.timings("image-resize-express")
+
+
+def test_graph_report_shows_where_the_time_goes(ui, capsys):
+    out = run(capsys, ui.graph, "order-pipeline", timings=True)
+    assert "Where the time goes in 3 succeeded executions (all there were)" in out
+    assert "ProcessItems (Map) [half the time or more] · 69% · 29s" in out
+    assert "[!] ChargeCard retries in 1 of its 3 runs" in out
+    assert "-- Each state's time, from 3 succeeded executions since" in out
+    assert re.search(r"↳ ResizeImage\s+9 \(3 an execution\)\s+9\.5s", out)
+    assert "graph('order-pipeline', timings=50) reads more" in out
+    assert out.index("Findings") < out.index("Where the time goes") < out.index("Each state, what it does")
+    out = run(capsys, ui.graph, "order-pipeline")
+    assert "graph('order-pipeline', timings=True)" in out and "Each state's time" not in out
+    out = run(capsys, ui.graph, "refund-approvals", timings=2)
+    assert "No execution of refund-approvals succeeded since" in out
+    view = StepFunctionsView(ui.core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.graph("order-pipeline", timings=True)
+    html = sfnmod.view._render_html(shown[0], 50)
+    assert 'class="fn t-map m-t3"' in html and 'class="m-t3"' in html and "half the time or more" in html
+
+
+def test_explorer_graph_tab_shows_where_the_time_goes(fakes):
+    fakes["stepfunctions"].machines["kb-sync"]["type"] = "EXPRESS"
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["graph"].click()
+    assert x.timings is None
+    x.mode_pick.value = "timing"
+    assert x.timings is not None and len(x.timings.executions) == 3
+    graph = plain(x.graph_view.value)
+    assert "Where the time goes in 3 succeeded executions" in graph and "ChargeCard retries in 1 of its 3 runs" in graph
+    assert "ord-cfae in the Executions tab shows one" in graph and "Each state's time" not in graph
+    assert "From 3 succeeded executions since" in graph
+    assert "where the time goes" in x.focus.chips() and "last 7 days" in x.focus.chips()
+    load = next(line for line in x._state_lines if line.key == "LoadOrders")
+    assert "27% · 5.7s" in plain(load.face.value) and "m-t2" in load.face.value
+    resize = next(line for line in x._state_lines if line.key == "ResizeImage")
+    assert "3× an execution · 9.5s" in plain(resize.face.value)
+    load.button.click()
+    inspector = plain(x.state_view.value)
+    assert "Its time in the succeeded executions read" in inspector and "Slowest in ord-a410" in inspector
+    next(line for line in x._state_lines if line.key == "ChargeCard").button.click()
+    assert "Retried in ord-cfae" in plain(x.state_view.value)
+    read = x.timings
+    x.mode_pick.value = "plain"
+    x.mode_pick.value = "timing"
+    assert x.timings is read
+    x.since_pick.value = "24h"
+    assert x.timings is not read and x.timings.since > read.since
+    x.open("image-resize-express")
+    assert x.timings is not None and x.timings.source == "logs"
+    x.open("kb-sync")
+    assert x.timings is None and "logging off leaves no record" in plain(x.graph_view.value)
+
+
+def test_explorer_reads_timings_in_the_background(fakes):
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*x._tasks.values())
+
+    async def main():
+        x = explorer(fakes, "order-pipeline", tab="graph")
+        await settle(x)
+        history = fakes["stepfunctions"].holds["get_execution_history"] = threading.Event()
+        x.mode_pick.value = "timing"
+        assert "timings" in x._tasks and x.timings is None
+        assert "Reading the newest succeeded executions" in plain(x.graph_view.value)
+        assert "Reading order-pipeline's newest succeeded executions" in plain(x.status.value)
+        history.set()
+        await settle(x)
+        assert len(x.timings.executions) == 3 and "Where the time goes" in plain(x.graph_view.value)
+        assert "Where the time goes, from 3 succeeded executions in the last 7 days" in plain(x.status.value)
+
+    asyncio.run(main())
+
+
+BARS = re.compile(r'class="dz( jz)?"')
+
+
+def week(*unsuccessful, started=100):
+    """
+    MachineNumbers for a week ending on 15 Nov 2026 with these failures a day, oldest first.
+    """
+    return MachineNumbers(days=len(unsuccessful), started=started * len(unsuccessful),
+                          failed=sum(unsuccessful), daily_started=[started] * len(unsuccessful),
+                          daily_failed=list(unsuccessful), daily_unsuccessful=list(unsuccessful),
+                          first_day=datetime(2026, 11, 9).date())
+
+
+def test_failures_jump_on_the_day_they_rose_most():
+    days = daily_counts(week(3, 2, 4, 3, 2, 21, 14))
+    assert [d.unsuccessful for d in days] == [3, 2, 4, 3, 2, 21, 14] and days[0].day.day == 9
+    jump = failure_jump(days)
+    assert jump.day.day == 14 and jump.after == 35 and jump.total == 49 and jump.days_after == 2
+    assert jump.per_day_before == pytest.approx(2.8)
+
+
+def test_no_jump_without_enough_failures_or_a_real_rise():
+    assert failure_jump(daily_counts(week(3, 3, 3, 3, 3, 3, 3))) is None
+    assert failure_jump(daily_counts(week(0, 0, 0, 0, 0, 1, 2))) is None
+    assert failure_jump(daily_counts(week(9, 9, 9, 9, 9, 12, 12))) is None
+    assert failure_jump(daily_counts(week(0, 9))) is None
+    assert daily_counts(MachineNumbers(days=7)) == [] and daily_counts(None) == []
+
+
+def test_a_jump_is_a_finding_that_reads_just_those_failures(core):
+    machine = core.state_machine("order-pipeline")
+    found = trend_findings(machine, week(3, 2, 4, 3, 2, 21, 14))
+    assert found[0][0] == "warn" and found[0][1].startswith("Failures jumped on 14 Nov: 35 of the 49 in the last 7 days")
+    assert "failures('order-pipeline', since='2d')" in found[0][1]
+    assert trend_findings(machine, week(3, 3, 3, 3, 3, 3, 3)) == []
+
+
+def test_reports_draw_executions_a_day(core, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").state_machine, "order-pipeline")
+    assert "-- Executions a day, the part that didn't succeed in red --" in out
+    assert "177 started · 10 didn't succeed  <- failures jumped" in out and "Failures jumped on" in out
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "Executions a day" in out and "Since" in out and "3d ago" in out
+    view = StepFunctionsView(core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.state_machine("order-pipeline")
+    page = sfnmod.view._render_html(shown[0], 50)
+    assert len(BARS.findall(page)) == 7 and page.count('class="dz jz"') == 1 and "UTC days" in page
+
+
+def test_explorer_shows_executions_a_day_over_the_range(fakes):
+    x = explorer(fakes, "order-pipeline")
+    assert plain(x.days_view.value).count("Nov") == 7 and 'class="dz jz"' in x.days_view.value
+    x.since_pick.value = "24h"
+    assert x.days_view.value == ""
+    x.since_pick.value = "30d"
+    assert x.range_numbers.days == 30 and len(BARS.findall(x.days_view.value)) == 30
+
+
+def test_a_failure_group_lists_its_executions_and_redrive_commands(core):
+    report = core.failures("order-pipeline")
+    group = report.groups[0]
+    assert [e.name for e in group.executions] == ["ord-7f3a", "ord-5d21", "ord-3c9b"]
+    assert group.first_seen == group.executions[-1].start
+    blocks = StepFunctionsView(core, mode="text")._failure_group_blocks(report, group)
+    assert blocks[0].text == "LoadOrders fails with KeyError"
+    commands = [b for b in blocks if getattr(b, "code", False)]
+    assert len(commands) == 1 and commands[0].text.count("aws stepfunctions redrive-execution") == 3
+
+
+def keyerror_report(core, *changes, since_days=7, truncated=False):
+    """
+    A FailureReport with one group, LoadOrders failing with KeyError in orders-etl: three executions, the first
+    three days ago and the newest an hour ago, and these changes.
+    """
+    machine = core.state_machine("order-pipeline")
+    starts = [NOW - timedelta(hours=1), NOW - timedelta(days=1), NOW - timedelta(days=3)]
+    executions = [Execution(f"arn:x:{i}", f"ord-{i}", "order-pipeline", "FAILED", start=start)
+                  for i, start in enumerate(starts)]
+    group = FailureGroup("LoadOrders", "KeyError", count=3, newest=executions[0], function="orders-etl",
+                         executions=executions)
+    return FailureReport(machine, NOW - timedelta(days=since_days), failed=executions, groups=[group],
+                         truncated=truncated, changes=list(changes))
+
+
+def deploy(ago, name="orders-etl", detail="version 7"):
+    return Change(NOW - ago, "function", name, detail)
+
+
+def test_a_deploy_just_before_the_first_failure_is_the_suspect(core):
+    report = keyerror_report(core, deploy(timedelta(days=30), detail="version 6"),
+                             deploy(timedelta(days=3, minutes=4)), deploy(timedelta(hours=5), name="charge-card"))
+    verdict = change_verdict(report, report.groups[0])
+    assert verdict.before.detail == "version 7" and verdict.exact
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "warn" and text.startswith(
+        "LoadOrders began failing with KeyError 4 minutes after orders-etl version 7 was published: ")
+    assert "Timing, not proof" in text and "LambdaView().function_info('orders-etl')" in text
+
+
+def test_a_change_after_it_began_that_it_failed_past(core):
+    report = keyerror_report(core, Change(NOW - timedelta(days=2), "definition", "order-pipeline"))
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "info" and text.startswith("order-pipeline's definition was updated 2d ago, after LoadOrders")
+    assert "didn't fix it" in text
+
+
+def test_nothing_changed_nearby_points_at_the_input(core):
+    report = keyerror_report(core, deploy(timedelta(days=30)))
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "info" and text.startswith("Nothing changed in the 2 days before LoadOrders began failing")
+    assert "orders-etl version 7 was published 27 days before" in text and "execution('order-pipeline/ord-0')" in text
+
+
+def test_a_start_that_may_be_earlier_is_said_or_not_claimed(core):
+    early = keyerror_report(core, deploy(timedelta(days=3, minutes=4)), since_days=3, truncated=True)
+    assert "It may have begun earlier" in group_change_findings(early, early.groups[0])[0][1]
+    quiet = keyerror_report(core, deploy(timedelta(days=30)), truncated=True)
+    assert group_change_findings(quiet, quiet.groups[0]) == []
+    assert gap_text(timedelta(seconds=20)) == "1 minute" and gap_text(timedelta(hours=30)) == "30 hours"
+
+
+def test_failures_read_what_changed(core, fakes):
+    report = core.failures("order-pipeline")
+    deployed = [(c.name, c.detail) for c in report.changes if c.kind == "function"]
+    assert ("orders-etl", "version 2") in deployed and ("charge-card", "version 1") in deployed
+    assert [c.name for c in report.changes if c.kind == "definition"] == ["order-pipeline"]
+    asked = fakes["stepfunctions"].called("describe_state_machine_for_execution")
+    assert len(asked) == len(report.groups) and not report.change_errors
+    found = change_findings(report)
+    assert found[0][1].startswith("LoadOrders began failing with KeyError 4 minutes after orders-etl version 2")
+    assert sum(text.startswith("Nothing changed") for _, text in found) == 2
+
+
+def test_what_changed_degrades_to_a_note(fakes):
+    fakes["lambda"].denied.add("get_function")
+    fakes["stepfunctions"].denied.add("describe_state_machine_for_execution")
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    core.max_workers = 1
+    report = core.failures("order-pipeline")
+    assert report.change_errors["definition"] == "AccessDeniedException"
+    assert report.change_errors["lambda:orders-etl"] == "AccessDeniedException" and report.changes == []
+    assert "Couldn't read what changed before these failures" in change_findings(report)[-1][1]
+    asked = len(fakes["stepfunctions"].called("describe_state_machine_for_execution"))
+    express = core.failures("image-resize-express")
+    assert len(fakes["stepfunctions"].called("describe_state_machine_for_execution")) == asked
+    assert "definition" not in express.change_errors
+
+
+def test_what_changed_in_the_reports_and_the_window(core, fakes, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "LoadOrders began failing with KeyError 4 minutes after orders-etl version 2 was published" in out
+    report = core.failures("order-pipeline")
+    blocks = StepFunctionsView(core, mode="text")._failure_group_blocks(report, report.groups[0])
+    timeline = next(b for b in blocks if type(b).__name__ == "_Changes")
+    assert timeline.suspect is not None and timeline.suspect.detail == "version 2"
+    text = "\n".join(sfnmod.blocks._changes_text(timeline, None))
+    assert "◆ orders-etl version 2 was published  <- just before" in text and "✕ ord-3c9b failed" in text
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["failures"].click()
+    next(line for line in x._failure_lines if line.key == "LoadOrders · KeyError").button.click()
+    page = x.failures_view.value
+    assert 'class="chl sus"' in page and "4 minutes after orders-etl version 2" in plain(page)
+    other = next(line for line in x._failure_lines if line.key == "ChargeCard · Lambda.TooManyRequestsException")
+    other.button.click()
+    assert "Nothing changed in the 2 days before ChargeCard" in plain(x.failures_view.value)
+
+
+def test_inputs_differ_by_field_not_by_value():
+    this = json.dumps({"order_id": "1", "customer": {"email": ""}, "items": [1], "total": "12", "coupon": "X"})
+    other = json.dumps({"order_id": "2", "customer_id": "C-1", "customer": {"email": "a@b.c"}, "items": [2],
+                        "total": 12})
+    found = {d.path: (d.kind, d.this, d.other) for d in compare_inputs(this, other)}
+    assert found == {"customer_id": ("missing", "", '"C-1"'), "customer.email": ("empty", '""', '"a@b.c"'),
+                     "total": ("type", '"12"', "12"), "coupon": ("extra", '"X"', "")}
+    assert compare_inputs("not json", "{}") == [] and compare_inputs("", "") == []
+
+
+def test_a_failed_execution_beside_the_last_success(core):
+    this = core.execution("order-pipeline/ord-7f3a", logs=False)
+    other = core.execution("order-pipeline/ord-cfae", logs=False)
+    comparison = compare_executions(this, other)
+    kinds = {step.state: step.kind for step in comparison.steps}
+    assert kinds["ValidateOrder"] == "same" and kinds["ChargeCard"] == "retried" and kinds["LoadOrders"] == "failed"
+    assert kinds["OrderFailed"] == "after_failure" and kinds["NotifyCustomer"] == "not_reached"
+    assert [step.state for step in comparison.differing_steps] == ["ChargeCard", "LoadOrders"]
+    assert comparison.other_is_before
+    found = comparison_findings(comparison)
+    assert found[0] == ("warn", 'ord-7f3a\'s input has no customer_id, which ord-cfae\'s had ("C-4471"): that\'s the '
+                                "likely cause, since LoadOrders failed with KeyError, naming it. Find what sent this "
+                                "input without it, or make the state handle a missing customer_id.")
+    assert ("info", "ChargeCard took 3 tries in ord-7f3a and 2 in ord-cfae: it was retried more, so its errors were "
+                    "the kind a Retry catches.") in found
+    assert not any(text.startswith("LoadOrders failed in") for _, text in found)
+    assert not any("different branches" in text for _, text in found)
+
+
+def test_without_a_named_field_the_failed_state_is_the_finding(core):
+    this = core.execution("order-pipeline/ord-77e0", logs=False)
+    comparison = compare_executions(this, core.execution("order-pipeline/ord-cfae", logs=False))
+    found = comparison_findings(comparison)
+    assert found[0][0] == "warn" and found[0][1].startswith("ChargeCard failed in ord-77e0 with ")
+    same = compare_executions(core.execution("order-pipeline/ord-cfae", logs=False),
+                              core.execution("order-pipeline/ord-cfae", logs=False))
+    assert same.differing_steps == []
+    assert "ran the same states with the same input fields" in comparison_findings(same)[0][1]
+    later = compare_executions(this, core.execution("order-pipeline/ord-25a8", logs=False))
+    assert not later.other_is_before and "which started after it" in comparison_findings(later)[-1][1]
+
+
+def test_compare_finds_the_last_success_before_it(core):
+    comparison = core.compare("order-pipeline/ord-7f3a")
+    assert comparison.other.execution.name == "ord-cfae" and comparison.other_is_before
+    named = core.compare("order-pipeline/ord-7f3a", other="ord-25a8")
+    assert named.other.execution.name == "ord-25a8" and not named.other_is_before
+    with pytest.raises(_Hint, match="No execution of refund-approvals succeeded in the last 30d"):
+        core.compare("refund-approvals/refund-42")
+    page = core.executions("order-pipeline", status="succeeded", since="30d")
+    assert _newest_before(page.executions, None) is page.executions[0] and _newest_before([], NOW) is None
+
+
+def test_compare_report(ui, capsys):
+    out = run(capsys, ui.compare, "order-pipeline/ord-7f3a")
+    for expected in ("ord-7f3a beside ord-cfae", "States that differ: 2 (!)", "Input fields that differ: 1 (!)",
+                     "[!] ord-7f3a's input has no customer_id, which ord-cfae's had",
+                     "customer_id  -         \"C-4471\"  missing here",
+                     "failed here with KeyError; went through in ord-cfae", "execution('order-pipeline/ord-cfae')"):
+        assert expected in out, expected
+    assert "No execution of refund-approvals succeeded" in run(capsys, ui.compare, "refund-approvals/refund-42")
+    out = run(capsys, ui.execution, "order-pipeline/ord-7f3a", logs=False)
+    assert "compare('order-pipeline/ord-7f3a')" in out
+
+
+def test_explorer_compares_a_failed_execution_with_the_last_success(fakes):
+    x = explorer(fakes, "order-pipeline")
+    x.execution("ord-25a8")
+    assert x.compare_button.layout.display == "none"
+    x.execution("ord-7f3a")
+    assert x.compare_button.layout.display == "" and x.compare_view.value == ""
+    x.compare_button.click()
+    assert x.comparison.other.execution.name == "ord-cfae"
+    shown = plain(x.compare_view.value)
+    assert "ord-7f3a beside ord-cfae" in shown and "That's the likely cause" in shown
+    assert x.compare_button.description == "✕ Hide the comparison"
+    x.compare_button.click()
+    assert x.comparison is None and x.compare_view.value == "" and x.compare_button.layout.display == ""
+    x.compare("ord-5d21", other="ord-25a8")
+    assert x._selected.endswith("ord-5d21") and x.comparison.other.execution.name == "ord-25a8"
+    x.execution("ord-0b17")
+    assert x.comparison is None and x.compare_view.value == ""
+
+
+def test_an_errors_kind_says_whether_it_passes():
+    assert error_kind("Lambda.TooManyRequestsException") == "transient"
+    assert error_kind("DynamoDB.ProvisionedThroughputExceededException") == "transient"
+    assert error_kind("Lambda.ServiceException") == "transient"
+    assert error_kind("KeyError") == "permanent" and error_kind("TypeError") == "permanent"
+    assert error_kind("States.Permissions") == "permanent" and error_kind("S3.AccessDeniedException") == "permanent"
+    assert error_kind("States.Timeout") == "timeout"
+    assert error_kind("Lambda.Unknown", "Task timed out after 30.03 seconds") == "timeout"
+    assert error_kind("Runtime.OutOfMemory") == "memory" and error_kind("Something.Odd") == "unknown"
+
+
+def test_a_states_retry_matches_as_step_functions_picks_one():
+    named = {"ErrorEquals": ["Lambda.TooManyRequestsException"], "MaxAttempts": 2}
+    everything = {"ErrorEquals": ["States.ALL"], "MaxAttempts": 3}
+    task_failed = {"ErrorEquals": ["States.TaskFailed"]}
+    state = StateDef("ChargeCard", "Task", retries=[named, everything])
+    assert matching_retry(state, "Lambda.TooManyRequestsException") is named
+    assert matching_retry(state, "KeyError") is everything and matching_retry(state, "States.Runtime") is None
+    only_tasks = StateDef("X", "Task", retries=[task_failed])
+    assert matching_retry(only_tasks, "KeyError") is task_failed and matching_retry(only_tasks, "States.Timeout") is None
+    assert matching_retry(None, "KeyError") is None and matching_retry(StateDef("Y", "Task"), "KeyError") is None
+    assert roomier_rule("ThrottlingException", None) == {"ErrorEquals": ["ThrottlingException"], "IntervalSeconds": 2,
+                                                         "MaxAttempts": 6, "BackoffRate": 2, "JitterStrategy": "FULL"}
+    assert roomier_rule("X", {**named, "MaxAttempts": 8})["MaxAttempts"] == 10
+    assert roomier_rule("X", named)["MaxAttempts"] == 6 and roomier_rule("X", named)["JitterStrategy"] == "FULL"
+
+
+def test_each_kind_of_failure_says_whether_a_retry_would_help(core):
+    report = core.failures("order-pipeline")
+    advice = {g.state: retry_advice(report.machine, g) for g in report.groups}
+    load, charge, resize = advice["LoadOrders"], advice["ChargeCard"], advice["ResizeImage"]
+    assert (load.kind, load.would_help, load.verdict, load.suggested) == ("permanent", False, "no: fix the cause", None)
+    assert (charge.kind, charge.would_help) == ("transient", True) and charge.rule is not None
+    assert charge.suggested["MaxAttempts"] == 6 and charge.verdict == "it retries, but ran out: give it more tries"
+    assert (resize.kind, resize.would_help) == ("timeout", None)
+    level, text = advice_finding(charge)
+    assert level == "warn" and text.startswith("ChargeCard retries Lambda.TooManyRequestsException (×2, back-off 2) "
+                                               "and still ran out of tries once")
+    assert advice_finding(load)[1].startswith("A Retry won't help the 3 executions that failed at LoadOrders")
+
+
+def test_a_retry_that_only_repeats_a_code_error(core):
+    report = core.failures("order-pipeline")
+    group = next(g for g in report.groups if g.state == "LoadOrders")
+    report.machine.state("LoadOrders").retries = [{"ErrorEquals": ["States.ALL"], "MaxAttempts": 3}]
+    advice = retry_advice(report.machine, group)
+    assert advice.verdict == "no, and its Retry repeats it"
+    level, text = advice_finding(advice)
+    assert level == "warn" and "its Retry on States.ALL (×3, back-off 2.0) only repeats the failure" in text
+    report.machine.state("LoadOrders").retries = []
+    nothing = next(g for g in report.groups if g.state == "ChargeCard")
+    nothing.error = "Something.Odd"
+    assert advice_finding(retry_advice(report.machine, nothing)) is None
+
+
+def test_the_reports_and_the_window_say_whether_a_retry_helps(core, fakes, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "Would a Retry help?" in out and "no: fix the cause" in out
+    assert "it retries, but ran out: give it more tries" in out and "not first: find why it's slow" in out
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["failures"].click()
+    next(line for line in x._failure_lines if line.key.startswith("ChargeCard")).button.click()
+    page = plain(x.failures_view.value)
+    assert "A Retry rule for ChargeCard, to paste into its Retry list" in page and '"MaxAttempts": 6' in page
+    next(line for line in x._failure_lines if line.key.startswith("LoadOrders")).button.click()
+    assert "to paste into its Retry list" not in plain(x.failures_view.value)

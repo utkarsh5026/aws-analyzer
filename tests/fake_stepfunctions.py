@@ -11,7 +11,7 @@ import json
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -281,10 +281,12 @@ class FakeStepFunctions(_Checked):
 
     service = "stepfunctions"
 
-    def __init__(self, machines: dict[str, dict[str, Any]], runs: list[FakeRun], region: str = REGION):
+    def __init__(self, machines: dict[str, dict[str, Any]], runs: list[FakeRun], region: str = REGION, *,
+                 updated: dict[str, datetime] | None = None):
         super().__init__(region)
         self.machines = machines
         self.runs = runs
+        self.updated = dict(updated or {})
 
     def _missing(self, code: str, message: str, operation: str) -> ClientError:
         return ClientError({"Error": {"Code": code, "Message": message}}, operation)
@@ -329,6 +331,12 @@ class FakeStepFunctions(_Checked):
         if found is None:
             raise self._missing("ExecutionDoesNotExist", f"Execution Does Not Exist: '{arn}'", operation)
         return found
+
+    def _describe_state_machine_for_execution(self, executionArn: str, **params: Any) -> dict[str, Any]:
+        run = self._run(executionArn, "DescribeStateMachineForExecution")
+        answer = self._describe_state_machine(machine_arn(run.machine))
+        return {key: answer[key] for key in ("stateMachineArn", "name", "definition", "roleArn")} | {
+            "updateDate": self.updated.get(run.machine, answer["creationDate"]), "revisionId": "r3"}
 
     def _describe_execution(self, executionArn: str, **params: Any) -> dict[str, Any]:
         run = self._run(executionArn, "DescribeExecution")
@@ -386,6 +394,44 @@ class FakeCloudWatch(_Checked):
 LAMBDA_RETRY = {"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException",
                                 "Lambda.TooManyRequestsException"], "IntervalSeconds": 1, "MaxAttempts": 3,
                 "BackoffRate": 2}
+
+
+def _lambda_time(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+
+
+class FakeLambda(_Checked):
+    """
+    GetFunction and ListVersionsByFunction over `deploys`: function name -> when each published version was made,
+    oldest first (the last one is also $LATEST's LastModified). A name it doesn't hold is ResourceNotFound.
+    """
+
+    service = "lambda"
+
+    def __init__(self, deploys: dict[str, list[datetime]], region: str = REGION):
+        super().__init__(region)
+        self.deploys = deploys
+
+    def _config(self, name: str, version: str, when: datetime) -> dict[str, Any]:
+        return {"FunctionName": name, "FunctionArn": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{name}",
+                "Runtime": "python3.12", "Handler": "app.handler", "MemorySize": 512, "Timeout": 30,
+                "LastModified": _lambda_time(when), "Version": version, "CodeSize": 4_096}
+
+    def _deploys_of(self, name: str, operation: str) -> list[datetime]:
+        if name not in self.deploys:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException",
+                                         "Message": f"Function not found: {name}"}}, operation)
+        return self.deploys[name]
+
+    def _get_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
+        deploys = self._deploys_of(FunctionName, "GetFunction")
+        return {"Configuration": self._config(FunctionName, "$LATEST", deploys[-1])}
+
+    def _list_versions_by_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
+        deploys = self._deploys_of(FunctionName, "ListVersionsByFunction")
+        versions = [self._config(FunctionName, "$LATEST", deploys[-1])]
+        versions += [self._config(FunctionName, str(i), when) for i, when in enumerate(deploys, start=1)]
+        return {"Versions": versions}
 
 
 def invoke(function: str, **state: Any) -> dict[str, Any]:
@@ -447,17 +493,30 @@ FAILED_RUN = "c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c"
 
 ORDER = {"order_id": "88219", "customer": {"email": "dana@example.com"}, "items": ["a.jpg", "b.jpg", "c.jpg"]}
 
+GOOD_ORDER = {**ORDER, "customer_id": "C-4471"}
+"""
+An order with the customer_id orders-etl needs: the orders that go through carry it, and the ones that fail at
+LoadOrders with KeyError don't (ORDER), which compare() finds.
+"""
+
 
 def _rid(n: int) -> str:
     return f"{n:08x}-0000-4000-8000-{n:012x}"
 
 
-def _good_order(start: datetime, n: int) -> History:
-    history = History(start, ORDER)
-    history.lambda_task("ValidateOrder", "validate-order", [Try(0.21, request_id=_rid(n))], data=ORDER)
+def _good_order(start: datetime, n: int, *, throttled_first: bool = False, load_seconds: float = 5.7) -> History:
+    """
+    An order that went through: throttled_first has Lambda throttle ChargeCard's first try (retried a second
+    later), and load_seconds is how long LoadOrders took.
+    """
+    history = History(start, GOOD_ORDER)
+    history.lambda_task("ValidateOrder", "validate-order", [Try(0.21, request_id=_rid(n))], data=GOOD_ORDER)
     history.state("Choice", "IsPriority").sdk_task("ReserveStock", "dynamodb:updateItem")
-    history.lambda_task("ChargeCard", "charge-card", [Try(0.85, request_id=_rid(n + 1))])
-    history.lambda_task("LoadOrders", "orders-etl", [Try(5.7, request_id=_rid(n + 2))])
+    charge = [Try(0.85, request_id=_rid(n + 1), wait=1.0 if throttled_first else 0.0)]
+    if throttled_first:
+        charge.insert(0, Try(0.04, "Lambda.TooManyRequestsException", throttled(f"9be1a2b3-0000-4000-8000-{n:012x}")))
+    history.lambda_task("ChargeCard", "charge-card", charge)
+    history.lambda_task("LoadOrders", "orders-etl", [Try(load_seconds, request_id=_rid(n + 2))])
     history.map_state("ProcessItems", "ResizeImage", "resize-image", [Try(9.5, request_id=_rid(n + 3 + i))
                                                                       for i in range(3)])
     return history.sdk_task("NotifyCustomer", "sns:publish").succeed({"notified": True})
@@ -515,10 +574,18 @@ def _approval(start: datetime) -> History:
     return history
 
 
+ORDER_PIPELINE_FAILED = (2, 2, 2, 9, 9, 9, 9)
+"""
+order-pipeline's failed executions a day, oldest first: a few a day, then more from three days ago, when LoadOrders
+began failing with KeyError (42 in the week, as before).
+"""
+
+
 def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict[tuple[str, str], dict[datetime,
                                                                                                     float]]]:
     """
-    acme's state machines: order-pipeline (Standard, failing at LoadOrders on orders without a customer_id),
+    acme's state machines: order-pipeline (Standard, failing at LoadOrders on orders without a customer_id; of the
+    orders that went through, one retried a throttled ChargeCard and one was slow at LoadOrders),
     refund-approvals (waits for a manager with no timeout), image-resize-express (Express, logging everything) and
     kb-sync (not started in a week); their executions; and their CloudWatch numbers for the last 7 days.
     """
@@ -541,10 +608,11 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
         FakeRun("order-pipeline", "ord-91c2", "RUNNING", History(ago(minutes=2), ORDER)),
         FakeRun("order-pipeline", "ord-25a8", "SUCCEEDED", _good_order(ago(minutes=40), 100)),
         FakeRun("order-pipeline", "ord-7f3a", "FAILED", _keyerror_order(ago(minutes=58), FAILED_RUN)),
-        FakeRun("order-pipeline", "ord-cfae", "SUCCEEDED", _good_order(ago(hours=1, minutes=20), 200)),
+        FakeRun("order-pipeline", "ord-cfae", "SUCCEEDED", _good_order(ago(hours=1, minutes=20), 200,
+                                                                         throttled_first=True)),
         FakeRun("order-pipeline", "ord-0b17", "TIMED_OUT", _stuck_order(ago(hours=2, minutes=40))),
         FakeRun("order-pipeline", "ord-5d21", "FAILED", _keyerror_order(ago(hours=5), _rid(901))),
-        FakeRun("order-pipeline", "ord-a410", "SUCCEEDED", _good_order(ago(hours=9), 300)),
+        FakeRun("order-pipeline", "ord-a410", "SUCCEEDED", _good_order(ago(hours=9), 300, load_seconds=21.4)),
         FakeRun("order-pipeline", "ord-77e0", "FAILED", _throttled_order(ago(days=1, hours=2))),
         FakeRun("order-pipeline", "ord-3c9b", "FAILED", _keyerror_order(ago(days=3), _rid(902)), redrive_count=1),
         FakeRun("order-pipeline", "ord-e2f4", "FAILED", _keyerror_order(ago(days=20), _rid(903))),
@@ -553,26 +621,53 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
     end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     days = [end - timedelta(days=d) for d in range(7, 0, -1)]
     per_day = {
-        "order-pipeline": {"ExecutionsStarted": 177, "ExecutionsSucceeded": 168, "ExecutionsFailed": 6,
-                           "ExecutionsTimedOut": 1, "ExecutionTime": 38_200},
+        "order-pipeline": {"ExecutionsStarted": 177, "ExecutionsSucceeded": 168,
+                           "ExecutionsFailed": ORDER_PIPELINE_FAILED, "ExecutionsTimedOut": 1, "ExecutionTime": 38_200},
         "image-resize-express": {"ExecutionsStarted": 26_057, "ExecutionsSucceeded": 26_000, "ExecutionsFailed": 57,
                                  "ExecutionTime": 410},
         "refund-approvals": {"ExecutionsStarted": 3, "ExecutionsSucceeded": 3, "ExecutionTime": 3 * 3_600_000},
     }
-    daily = {(machine, metric): {day: float(value) for day in days}
-             for machine, metrics in per_day.items() for metric, value in metrics.items()}
+    daily = {(machine, metric): _by_day(days, value) for machine, metrics in per_day.items()
+             for metric, value in metrics.items()}
     return machines, runs, daily
+
+
+def _by_day(days: list[datetime], value: float | tuple[float, ...]) -> dict[datetime, float]:
+    """
+    A metric's value for each day: the same every day, or a tuple of one a day, oldest first.
+    """
+    if isinstance(value, tuple):
+        return {day: float(v) for day, v in zip(days, value)}
+    return {day: float(value) for day in days}
+
+
+DEFINITION_UPDATED = timedelta(days=20)
+
+DEPLOYED_BEFORE_KEYERROR = timedelta(minutes=4)
+
+
+def deploys(now: datetime, runs: list[FakeRun]) -> dict[str, list[datetime]]:
+    """
+    When each Lambda function order-pipeline calls was deployed (a published version each), oldest first:
+    orders-etl's version 7 went out four minutes before the first KeyError (ord-3c9b), the others weeks ago.
+    """
+    first_keyerror = next(run.history.start for run in runs if run.name == "ord-3c9b")
+    return {"orders-etl": [now - timedelta(days=30), first_keyerror - DEPLOYED_BEFORE_KEYERROR],
+            "charge-card": [now - timedelta(days=40)], "validate-order": [now - timedelta(days=40)],
+            "resize-image": [now - timedelta(days=30)]}
 
 
 def clients(now: datetime) -> dict[str, Any]:
     """
-    The fake Step Functions, CloudWatch and CloudWatch Logs clients over scene(now) (the Logs one holds
-    image-resize-express's log group), for StepFunctionsAnalyzer(clients=...).
+    The fake Step Functions, CloudWatch, CloudWatch Logs and Lambda clients over scene(now) (the Logs one holds
+    image-resize-express's log group; the Lambda one when each function was deployed, deploys()), for
+    StepFunctionsAnalyzer(clients=...).
     """
     machines, runs, daily = scene(now)
     lines = [line for arn, history in express_runs(now).items() for line in express_log_lines(arn, history)]
-    return {"stepfunctions": FakeStepFunctions(machines, runs), "cloudwatch": FakeCloudWatch(daily),
-            "logs": FakeLogs({"/aws/states/resize": lines})}
+    updated = {"order-pipeline": now - DEFINITION_UPDATED}
+    return {"stepfunctions": FakeStepFunctions(machines, runs, updated=updated), "cloudwatch": FakeCloudWatch(daily),
+            "logs": FakeLogs({"/aws/states/resize": lines}), "lambda": FakeLambda(deploys(now, runs))}
 
 
 def lambda_lines(start: datetime, request_id: str = FAILED_RUN) -> list[tuple[datetime, str]]:

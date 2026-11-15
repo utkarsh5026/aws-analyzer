@@ -27,6 +27,7 @@ Quick start
     sfn.execution("order-pipeline/ord-7f3a")       # one execution step by step, and the Lambda lines that broke it
     sfn.executions("order-pipeline", status="failed")
     sfn.graph("order-pipeline", execution="ord-7f3a")  # the flow drawn, coloured by the path one execution took
+    sfn.graph("order-pipeline", timings=True)      # which states take the time, and which retry, over 20 executions
     sfn.explore("order-pipeline")                  # a window to click through it all (Jupyter, ipywidgets)
 
     core = sfn.core                                # the same analyzer, raw data
@@ -39,8 +40,8 @@ from __future__ import annotations
 from .prices import STEPFUNCTIONS_PRICES
 from .helpers import console_url, execution_name, lambda_name, machine_name, parse_execution_ref, short_cause
 from .models import (
-    Attempt, Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview,
-    StateDef, StateMachine, StepRun,
+    Attempt, Change, Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview,
+    StateDef, StateMachine, StateTiming, StepRun, TimingReport,
 )
 from .analysis import (
     LAMBDA_SERVICE_ERRORS, REDRIVE_DAYS, can_redrive, catch_label, definition_findings, execution_findings,
@@ -48,13 +49,42 @@ from .analysis import (
     monthly_cost, numbers_findings, overview_findings, parse_definition, parse_execution, parse_state_machine,
     request_id_of_cause, request_id_of_output, resource_label, retry_label, transitions_per_execution,
     unbounded_waits, unretried_lambda_states, ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines,
-    waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks,
+    waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, state_timings, timing_findings,
+    DayCount, FailureJump, daily_counts, failure_jump, trend_findings,
+    ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
+    comparison_findings, RetryAdvice, advice_finding, error_kind, matching_retry, retry_advice, retry_findings,
+    ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
+    timing_marks, timing_report,
 )
 from .analyzer import StepFunctionsAnalyzer
 from .view import StepFunctionsView
 from .explorer.window import StepFunctionsExplorer, explore
 
 __all__ = [
+    "RetryAdvice",
+    "advice_finding",
+    "error_kind",
+    "matching_retry",
+    "retry_advice",
+    "retry_findings",
+    "ExecutionComparison",
+    "InputDifference",
+    "StepDifference",
+    "compare_executions",
+    "compare_inputs",
+    "compare_steps",
+    "comparison_findings",
+    "Change",
+    "ChangeVerdict",
+    "change_findings",
+    "change_text",
+    "change_verdict",
+    "group_change_findings",
+    "DayCount",
+    "FailureJump",
+    "daily_counts",
+    "failure_jump",
+    "trend_findings",
     "LAMBDA_SERVICE_ERRORS",
     "REDRIVE_DAYS",
     "STEPFUNCTIONS_PRICES",
@@ -73,10 +103,12 @@ __all__ = [
     "Overview",
     "StateDef",
     "StateMachine",
+    "StateTiming",
     "StepFunctionsAnalyzer",
     "StepFunctionsExplorer",
     "StepFunctionsView",
     "StepRun",
+    "TimingReport",
     "Waterfall",
     "WaterfallRow",
     "can_redrive",
@@ -111,7 +143,11 @@ __all__ = [
     "resource_label",
     "retry_label",
     "short_cause",
+    "state_timings",
     "step_lines",
+    "timing_findings",
+    "timing_marks",
+    "timing_report",
     "transitions_per_execution",
     "unbounded_waits",
     "unretried_lambda_states",

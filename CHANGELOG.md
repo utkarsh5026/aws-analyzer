@@ -9,6 +9,42 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-15
+
+### Added
+
+- 🔀 **Step Functions: which state is slow, and which retries** ([#250](https://github.com/utkarsh5026/aws-analyzer/pull/250))
+  - `graph(name, timings=True)` shades each state by its share of the time over the newest 20 succeeded executions.
+  - Findings price a state's retries (each is a state transition) and name the execution that shows one.
+  - The explorer's Graph tab has it too: pick **Where time goes** on the toggle.
+- 🔀 **Step Functions: executions a day, and when failures jumped** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `state_machine()`, `failures()` and the explorer's Executions tab draw a bar a day, what didn't succeed in red.
+  - A finding names the day failures jumped, with the `failures(name, since=)` call that reads just those.
+- 🔀 **Step Functions: would a Retry have helped?** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `failures()` says it per kind of failure: yes for a throttle, no for a code error, not first for a timeout.
+  - Where one would help, the Retry rule to paste; where a Retry only repeats a code error, it says so.
+- 🔀 **Step Functions: a failed execution beside the last success** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `compare("order-pipeline/ord-7f3a")`: the states and input fields that differ, the likely cause first.
+  - In the explorer, ⇄ Compare with the last success beside ↗ Console; the agent has `compare_with_success`.
+- 🔀 **Step Functions: what changed just before failures began** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `failures()` puts each kind of failure's first run beside the Lambda deploys and definition updates before it.
+  - "LoadOrders began failing with KeyError 4 minutes after orders-etl version 2 was published", or "Nothing changed".
+  - Needs `states:DescribeStateMachineForExecution` and `lambda:ListVersionsByFunction`; the agent's tool says it too.
+- 🔀 **Step Functions explorer: the Failures tab is a list to click** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - A line per kind of failure (state and error) with how many and since when; `failures()` has a Since column too.
+  - Click one for its error, the run to read, the commands that redrive it and its executions to open.
+
+### Fixed
+
+- 🤖 **Agent: `tools()` lists every tool** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - Its table stopped at 50 rows, so the last tools (the investigator's among them) went unlisted.
+- 🔀 **Step Functions explorer: room for the ✦ Ask drawer** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - With the drawer open, tabs show their icons and the open tab's name, and ✦ Ask stays in view.
+  - The Executions and Graph tabs stack their panes instead of squeezing them; the graph stays full size.
+  - The Graph tab's side pane grows with the window, so a state's Lambda lines read on one line each.
+
+## [0.59.0] - 2026-11-15
+
 ### Added
 
 - 🔀 **Step Functions explorer: ✦ Ask about the execution you have open** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
@@ -19,7 +55,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - ↗ Console beside ↻ Refresh opens the state machine in the Step Functions console.
   - Above an open execution, ↗ Console opens that execution there, to redrive or start it again.
   - `console_url(arn)` gives the same link from code.
-
 - 🔀 **Step Functions: see what an execution returned** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - `execution()` and the explorer show a succeeded execution's output; inputs, outputs and errors fold out as a JSON tree.
   - The Graph tab lists the states inside a Map or Parallel to pick, with how often each ran and failed.
@@ -29,7 +64,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🔀 **Step Functions explorer: the Executions list counts every failure** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - When a range holds more than 500 executions, the ones that didn't succeed are listed too, so the Failed chip matches the header.
   - The header's cards count the time range picked, and a line under the list says what it holds.
-
 - 🔀 **Step Functions explorer: ✦ Ask no longer stops with a TypeError** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
   - With `set_assistant(agent)`, clicking ✦ Ask on this window said `focus= takes an explorer window`; it opens the chat now.
 
@@ -1390,7 +1424,9 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...HEAD
+[0.60.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...v0.60.0
+[0.59.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.55.0...v0.56.0

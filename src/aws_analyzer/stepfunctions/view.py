@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import statistics
+from datetime import timedelta
 from typing import Any
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
@@ -17,18 +18,29 @@ from .._kit.text import _clip
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import STATUS_TONES, STATUS_WORDS, execution_ref, short_cause
-from .models import ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine, StepRun
+from .models import (
+    ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview, StateMachine, StateTiming,
+    StepRun, TimingReport,
+)
 from .analysis import (
     catch_label, execution_findings, failure_findings, logging_findings, machine_findings, mermaid, monthly_cost,
     numbers_findings, overview_findings, resource_label, retry_label, transitions_per_execution,
 )
 from .analysis.cost import free_tier_note
-from .analysis.findings import lambda_logs_call
+from .analysis.failures import can_redrive
+from .analysis.findings import lambda_logs_call, redrive_command
 from .analysis.express import logging_gaps
-from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks
+from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, timing_marks
+from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
-from .analyzer import StepFunctionsAnalyzer
-from .blocks import _FlowGraph, _Story, _Waterfall, _payload_block
+from .analysis.trend import daily_counts, failure_jump
+from .analysis.compare import ExecutionComparison, StateRuns, _runs_text, comparison_findings
+from .analysis.retries import advice_finding, retry_advice, retry_findings, rule_json
+from .analysis.suspects import (
+    SUSPECT_WINDOW, change_findings, change_verdict, group_change_findings, relevant_changes,
+)
+from .analyzer import TIMING_EVENTS, TIMING_SAMPLE, StepFunctionsAnalyzer
+from .blocks import _Changes, _Days, _FlowGraph, _Story, _Waterfall, _payload_block
 from .style import _render_html
 
 
@@ -81,8 +93,105 @@ def _pretty_json(text: str) -> str:
     return shown
 
 
+def _days_blocks(numbers: MachineNumbers | None) -> list[Any]:
+    """
+    The executions a day as a strip of bars, the day failures jumped outlined, when CloudWatch's daily numbers were
+    read (none otherwise).
+    """
+    days = daily_counts(numbers)
+    if not days:
+        return []
+    return [_Days(days, failure_jump(days), title="Executions a day, the part that didn't succeed in red")]
+
+
+_TIMELINE_PAD = 0.06
+
+_SHORTEST_PAD = timedelta(minutes=30)
+
+
+def _changes_blocks(report: FailureReport, group: FailureGroup) -> list[Any]:
+    """
+    The changes around a kind of failure on one time axis with its failures, when anything it depends on changed
+    between SUSPECT_WINDOW before its first failure and its newest (none otherwise: its finding says so).
+    """
+    verdict = change_verdict(report, group)
+    if verdict is None:
+        return []
+    newest = group.newest.start if group.newest is not None and group.newest.start else verdict.first
+    shown = [c for c in relevant_changes(group, report.changes)
+             if verdict.first - SUSPECT_WINDOW <= c.when <= max(newest, verdict.first)]
+    if not shown:
+        return []
+    start = min([verdict.first] + [c.when for c in shown])
+    end = max([newest] + [c.when for c in shown])
+    pad = max((end - start) * _TIMELINE_PAD, _SHORTEST_PAD)
+    until = min(end + pad, max(_utcnow(), end))
+    return [_Changes(shown, group.executions, report.machine.name, start - pad, until, suspect=verdict.before,
+                     title="What changed around these failures")]
+
+
+_DIFFERENCE_TONES = {"failed": "bad", "retried": "warn", "slower": "warn"}
+
+_INPUT_WORDS = {"missing": "missing here", "extra": "only here", "empty": "empty here", "type": "another type"}
+
+
+def _runs_cell(runs: StateRuns | None) -> str:
+    return _runs_text(runs) if runs is not None else "-"
+
+
+def _compare_rows(comparison: ExecutionComparison) -> list[list[Any]]:
+    """
+    A row per state either execution went through: how it ran in each, and the difference (in colour when it
+    failed only here, retried more or ran much slower).
+    """
+    rows = []
+    for step in comparison.steps:
+        tone = _DIFFERENCE_TONES.get(step.kind, "")
+        difference: Any = _Tone(step.words, tone) if tone else step.words
+        rows.append([_state_label(step.state, step.depth), _runs_cell(step.this), _runs_cell(step.other), difference])
+    return rows
+
+
+_RETRY_TONES = {True: "ok", False: "bad", None: ""}
+
+
+def _retry_cell(machine: StateMachine, group: FailureGroup) -> Any:
+    """
+    Whether a Retry would have saved a kind of failure, in a few words: green when it would, red when it wouldn't.
+    """
+    advice = retry_advice(machine, group)
+    tone = _RETRY_TONES[advice.would_help]
+    return _Tone(advice.verdict, tone) if tone else advice.verdict
+
+
 def _state_label(name: str, depth: int) -> str:
     return f"{'    ' * depth}{'↳ ' if depth else ''}{name}"
+
+
+def _timing_row(timing: StateTiming) -> list[Any]:
+    """
+    A state's line in the timings table: its runs (and how many an execution, when it runs more than once in one),
+    median, longest, share of the time and tries a run, the tries toned when it retries.
+    """
+    per_execution = timing.runs / max(1, timing.executions)
+    runs = f"{timing.runs:,}" + (f" ({per_execution:.3g} an execution)" if per_execution > 1 else "")
+    tries: Any = "-"
+    if timing.tries_per_run is not None:
+        tries = _Tone(f"{timing.tries_per_run:.2f}", "warn") if timing.retried_runs else f"{timing.tries_per_run:.2f}"
+    share = f"{timing.share:.0%}" if timing.share is not None else "-"
+    return [_state_label(timing.name, timing.depth), runs, took_text(timing.median), took_text(timing.longest), share,
+            tries]
+
+
+def _timing_sample(report: TimingReport) -> str:
+    """
+    Which executions the timings come from: 'the newest 20 succeeded executions since ...', or all there were.
+    """
+    read = len(report.executions)
+    since = f"since {_fmt_dt(report.since, zone=True)}"
+    if read == report.asked:
+        return f"the newest {read:,} succeeded executions {since}"
+    return f"{_plural(read, 'succeeded execution')} {since}, all there were"
 
 
 def _offset(step: StepRun, detail: ExecutionDetail) -> str:
@@ -210,7 +319,7 @@ class StepFunctionsView(_BaseView):
     _render_html = staticmethod(_render_html)
     _GROUPS = {
         "🔀 State machines": ("overview", "state_machine", "graph"),
-        "🏃 Executions": ("executions", "execution", "failures"),
+        "🏃 Executions": ("executions", "execution", "compare", "failures"),
         "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
@@ -383,6 +492,7 @@ class StepFunctionsView(_BaseView):
                                                        "task retries Lambda's own errors.")]
         if machine.description:
             blocks.append(_Note(machine.description))
+        blocks += _days_blocks(numbers)
         blocks.append(self._states_table(machine, title="Its states, in the order the definition lists them"))
         if machine.functions:
             blocks.append(_Note(f"It calls {_plural(len(machine.functions), 'Lambda function')}: "
@@ -427,17 +537,19 @@ class StepFunctionsView(_BaseView):
                       sortable=False)
 
     @_friendly_errors
-    def graph(self, name: str, *, execution: str | None = None, failures: Any = None) -> None:
+    def graph(self, name: str, *, execution: str | None = None, failures: Any = None, timings: Any = None) -> None:
         """
         How a state machine flows, drawn as a graph: a box per state (the states inside a Map or Parallel listed
         in it), an arrow per transition, dashed where an error goes. execution='ord-7f3a' colours the path that
         execution took (green ran, red failed, dashed not reached, each with its time and tries); failures='7d'
-        shades the states where executions stopped. Then every state with where it goes next, and the flow as
-        Mermaid to paste into a Markdown cell.
+        shades the states where executions stopped; timings=True shades where the time goes over the newest 20
+        executions that succeeded (timings=50 for more), with each state's median, longest, share and tries a run,
+        and which states retry often. Then every state with where it goes next, and the flow as Mermaid to paste
+        into a Markdown cell.
         """
         machine = self.core.state_machine(name)
         layout = flow_layout(machine)
-        marks = FlowMarks()
+        marks, timing = FlowMarks(), None
         if execution is not None:
             with self._progress("Reading the execution", unit="events"):
                 detail = self.core.execution(execution, machine=machine.arn, logs=False)
@@ -446,9 +558,15 @@ class StepFunctionsView(_BaseView):
             with self._progress("Reading failed executions", unit="executions") as tick:
                 report = self.core.failures(machine.arn, since=failures, progress=tick)
             marks = failure_marks(layout, report)
-        self._show(self._graph_blocks(machine, marks))
+        elif timings is not None and timings is not False:
+            sample = TIMING_SAMPLE if timings is True else timings
+            with self._progress("Reading succeeded executions", unit="executions") as tick:
+                timing = self.core.timings(machine.arn, n=sample, progress=tick)
+            marks = timing_marks(layout, timing)
+        self._show(self._graph_blocks(machine, marks, timing))
 
-    def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None) -> list[Any]:
+    def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None,
+                      timing: TimingReport | None = None) -> list[Any]:
         top = sum(1 for s in machine.states if s.depth == 0)
         nested = len(machine.states) - top
         sub = f"starts at {machine.start_at} · {_plural(top, 'state')}" + (
@@ -457,14 +575,52 @@ class StepFunctionsView(_BaseView):
         if machine.has_executions:
             steps.append((_call("graph", machine.name, failures="7d"), "where its executions stop, in the last 7 "
                                                                        "days"))
-        return [
-            _Title(f"How {machine.name} flows", sub),
-            _FlowGraph(flow_layout(machine), marks or FlowMarks()),
+        if machine.has_executions and timing is None:
+            steps.append((_call("graph", machine.name, timings=True), "which states take the time, and which retry"))
+        blocks: list[Any] = [_Title(f"How {machine.name} flows", sub)]
+        if timing is not None:
+            blocks.append(self._timing_findings(timing))
+        blocks.append(_FlowGraph(flow_layout(machine), marks or FlowMarks()))
+        if timing is not None:
+            blocks += self._timing_blocks(timing)
+        return blocks + [
             self._states_table(machine, title="Each state, what it does, and where it goes next"),
             _Text(mermaid(machine), title="As a Mermaid flowchart: paste it into a Markdown cell (```mermaid) or "
                                           "mermaid.live", code=True, collapsed=True),
-            _Next(steps),
+            _Next(steps[:3]),
         ]
+
+    def _timing_findings(self, report: TimingReport) -> _Findings:
+        return _Findings(timing_findings(report, self.core.prices),
+                         empty="No state retries often, and none takes most of the time: there's nothing that "
+                               "stands out to speed up.")
+
+    def _timing_blocks(self, report: TimingReport) -> list[Any]:
+        """
+        Each state's time over the executions read, as a table, and where those numbers come from; or why there
+        are none.
+        """
+        machine = report.machine
+        if not report.executions:
+            why = (report.note or f"No execution of {machine.name} succeeded since "
+                                  f"{_fmt_dt(report.since, zone=True)}, and timings read the succeeded ones.")
+            return [_Note(why, "warn" if report.note else "info")]
+        rows = [_timing_row(timing) for timing in report.states]
+        blocks: list[Any] = [_Table(["State", "Runs", "Median", "Longest", "Share of time", "Tries a run"], rows,
+                                    title=f"Each state's time, from {_timing_sample(report)}", max_rows=0)]
+        how = ("one GetExecutionHistory each, which is free but rate-limited, so the sample stays small"
+               if report.source == "history" else "read from its log group")
+        blocks.append(_Note(f"From {_timing_sample(report)}: {how}. A run lasts from entering the state to leaving "
+                            f"it (a Map's or Parallel's includes everything inside it), and a share is of the "
+                            f"{_duration(report.total)} those executions took in all. "
+                            f"{_call('graph', machine.name, timings=50)} reads more."))
+        if report.partial:
+            histories = "1 history" if report.partial == 1 else f"{report.partial:,} histories"
+            blocks.append(_Note(f"{histories} had more than {TIMING_EVENTS:,} events and were read in part: their "
+                                "later states are missing.", "warn"))
+        if report.note:
+            blocks.append(_Note(report.note))
+        return blocks
 
     @_friendly_errors
     def executions(self, name: str, *, status: str | None = None, since: Any = "7d", n: Any = 25) -> None:
@@ -543,6 +699,55 @@ class StepFunctionsView(_BaseView):
             _with_story_run(detail, story)
         self._show(self._execution_blocks(detail, story))
 
+    @_friendly_errors
+    def compare(self, execution: str, other: str | None = None, *, machine: str | None = None,
+                since: Any = "30d") -> None:
+        """
+        An execution beside another, by default the newest that succeeded before it: which states each went
+        through and how (where it failed, more tries, much slower), which of its input's fields are missing, extra
+        or empty, and the likely cause when its error names a field its input lacks. Name them as execution() does;
+        other= picks the one to compare with, since= how far back to look for a success.
+
+            sfn.compare("order-pipeline/ord-7f3a")                    # with the last success before it
+            sfn.compare("order-pipeline/ord-7f3a", other="ord-25a8")
+        """
+        with self._progress("Reading both executions", unit="events"):
+            comparison = self.core.compare(execution, other=other, machine=machine, since=since)
+        self._show(self._compare_blocks(comparison))
+
+    def _compare_blocks(self, comparison: ExecutionComparison) -> list[Any]:
+        this, other = comparison.this.execution, comparison.other.execution
+        word = STATUS_WORDS.get(other.status, other.status.lower())
+        when = "before" if comparison.other_is_before else "after"
+        sub = (f"{this.machine} · {other.name} {word}, started {_fmt_dt(other.start, zone=True)} "
+               f"({human_age(other.start)}), {when} {this.name}")
+        differing, fields = len(comparison.differing_steps), len(comparison.inputs)
+        cards = [
+            (this.name, f"{STATUS_WORDS.get(this.status, this.status)} · {_seconds(this.seconds)}",
+             STATUS_TONES.get(this.status, "")),
+            (other.name, f"{word} · {_seconds(other.seconds)}", STATUS_TONES.get(other.status, "")),
+            ("States that differ", _count(differing), "warn" if differing else ""),
+            ("Input fields that differ", _count(fields), "warn" if fields else ""),
+        ]
+        blocks: list[Any] = [_Title(f"{this.name} beside {other.name}", sub), _Cards([_card(c) for c in cards]),
+                             _Findings(comparison_findings(comparison))]
+        blocks.append(_Table(["State", this.name, other.name, "Difference"], _compare_rows(comparison),
+                             title=f"Each state either went through, in the order {this.name} entered them",
+                             max_rows=0, sortable=False))
+        if comparison.inputs:
+            rows = [[d.path, d.this or "-", d.other or "-", _Tone(_INPUT_WORDS[d.kind], "warn")]
+                    for d in comparison.inputs]
+            blocks.append(_Table(["Input field", this.name, other.name, "Difference"], rows,
+                                 title="The input fields that differ (values that just differ aren't listed)",
+                                 max_rows=0, sortable=False))
+        machine = comparison.this.machine.name if comparison.this.machine is not None else this.machine
+        blocks.append(_Next([
+            (_call("execution", execution_ref(machine, this.name, this.arn)), f"{this.name} step by step"),
+            (_call("execution", execution_ref(machine, other.name, other.arn)), f"{other.name} step by step"),
+            (_call("failures", machine), "how often it fails like this"),
+        ]))
+        return blocks
+
     def _execution_blocks(self, detail: ExecutionDetail, story: ExecutionStory | None = None) -> list[Any]:
         execution, step = detail.execution, detail.failed_step
         status_word = STATUS_WORDS.get(execution.status, execution.status)
@@ -581,6 +786,8 @@ class StepFunctionsView(_BaseView):
         if step is not None and step.function:
             steps.append((f"LambdaView().{_call('errors', step.function)}", f"every error {step.function} logged"))
         if detail.execution.failed and (detail.machine is None or detail.machine.has_executions):
+            ref = execution_ref(machine_name, detail.execution.name, detail.execution.arn)
+            steps.append((_call("compare", ref), "beside the last one that succeeded: what differs"))
             steps.append((_call("failures", machine_name), "how often it fails like this"))
         steps.append((_call("executions", machine_name), "its other executions"))
         return steps[:3]
@@ -596,7 +803,7 @@ class StepFunctionsView(_BaseView):
             report = self.core.failures(name, since=since, limit=limit, progress=tick)
         self._show(self._failure_blocks(report))
 
-    def _failure_blocks(self, report: FailureReport) -> list[Any]:
+    def _failure_blocks(self, report: FailureReport, *, for_window: bool = False) -> list[Any]:
         machine, numbers = report.machine, report.numbers
         window = f"since {_fmt_dt(report.since, zone=True)}"
         unsuccessful = len(report.failed)
@@ -619,12 +826,13 @@ class StepFunctionsView(_BaseView):
         blocks: list[Any] = [
             _Title(f"Why {machine.name} fails", sub),
             _Cards([_card(c) for c in cards]),
-            _Findings(failure_findings(report, _utcnow()),
+            _Findings(failure_findings(report, _utcnow()) + retry_findings(report) + change_findings(report),
                       empty=f"No execution failed, timed out or was aborted {window}."),
         ]
         if gaps:
             blocks.insert(1, _Note(gaps))
-        if report.groups:
+        blocks += _days_blocks(numbers)
+        if report.groups and not for_window:
             rows = []
             for group in report.groups:
                 newest = group.newest
@@ -633,11 +841,59 @@ class StepFunctionsView(_BaseView):
                         if newest is not None else "-")
                 rows.append([group.state + (f" · λ {group.function}" if group.function else ""), group.error,
                              _clip(short_cause(group.cause), 120) or "-", f"{group.count:,}",
-                             human_age(newest.start) if newest is not None else "-", read])
-            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Newest", "To read next"], rows,
-                                 title="Failures by where they stopped and why, the most common first",
-                                 code_cols=(5,)))
+                             human_age(group.first_seen) if group.first_seen is not None else "-",
+                             human_age(newest.start) if newest is not None else "-",
+                             _retry_cell(report.machine, group), read])
+            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Since", "Newest",
+                                  "Would a Retry help?", "To read next"],
+                                 rows, title="Failures by where they stopped and why, the most common first",
+                                 code_cols=(7,)))
         blocks.append(_Next(self._failure_next(report)))
+        return blocks
+
+    def _failure_group_blocks(self, report: FailureReport, group: FailureGroup) -> list[Any]:
+        """
+        One kind of failure, as the explorer's Failures tab shows it when it's picked: how many executions, since
+        when, the error it returned, what to read next and the commands that redrive the ones that still can.
+        """
+        machine, newest, first = report.machine, group.newest, group.first_seen
+        share = group.count / len(report.failed) if report.failed else 0.0
+        sub = " · ".join(filter(None, [
+            f"{_plural(group.count, 'execution')} of the {len(report.failed):,} that didn't succeed",
+            f"λ {group.function}" if group.function else "",
+            f"the first {_fmt_dt(first, zone=True)}" if first is not None else "",
+        ]))
+        cards = [
+            ("Executions", _count(group.count), "bad"),
+            ("Share of failures", f"{share:.0%}"),
+            ("Since", human_age(first) if first is not None else "-"),
+            ("Newest", human_age(newest.start) if newest is not None and newest.start else "-"),
+            ("Can be redriven", _count(group.redrivable)),
+        ]
+        blocks: list[Any] = [_Title(f"{group.state} fails with {group.error}", sub), _Cards([_card(c) for c in cards])]
+        advice = retry_advice(report.machine, group)
+        retry = advice_finding(advice)
+        found = ([retry] if retry is not None else []) + group_change_findings(report, group)
+        if found:
+            blocks.append(_Findings(found))
+        if advice.suggested is not None:
+            blocks.append(_Text(rule_json(advice.suggested), title=f"A Retry rule for {group.state}, to paste into its "
+                                                                   "Retry list", code=True))
+        blocks += _changes_blocks(report, group)
+        if group.function and group.request_id:
+            blocks.append(_Note(f"Read the newest run's lines: {lambda_logs_call(group.function, group.request_id)}"))
+        elif newest is not None:
+            ref = execution_ref(machine.name, newest.name, newest.arn)
+            blocks.append(_Note(f"See the newest step by step: {_call('execution', ref)}"))
+        if group.cause:
+            blocks.append(_Text(_pretty_json(group.cause), title="The error it returned"))
+        now = _utcnow()
+        redrivable = [e for e in group.executions if can_redrive(e, now, express=machine.is_express)]
+        if redrivable:
+            commands = "\n".join(redrive_command(execution.arn) for execution in redrivable)
+            title = (f"Once the cause is fixed, redrive the {_plural(len(redrivable), 'execution')} that still can "
+                     "(from the state that failed)")
+            blocks.append(_Text(commands, title=title, code=True))
         return blocks
 
     def _failure_next(self, report: FailureReport) -> list[tuple[str, str]]:

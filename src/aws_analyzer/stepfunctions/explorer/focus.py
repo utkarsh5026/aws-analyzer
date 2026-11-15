@@ -75,16 +75,33 @@ def _list_parts(x: StepFunctionsExplorer) -> list[FocusPart]:
 
 def _graph_parts(x: StepFunctionsExplorer) -> list[FocusPart]:
     """
-    What the Graph tab colours (the execution open, or where executions stop in the time range) and the state picked.
+    What the Graph tab colours (the execution open, where executions stop in the time range, or where the time goes)
+    and the state picked.
     """
     parts = []
     if x.graph_mode == "execution" and x._selected:
         parts.append(FocusPart("execution", x._selected, f"execution {execution_name(x._selected)}"))
-    if x.graph_mode == "failures":
+    if x.graph_mode in ("failures", "timing"):
         parts.append(_range_part(x._since))
+    if x.graph_mode == "timing":
+        parts.append(FocusPart("mode", "timing", "where the time goes"))
     if x.picked_state:
         parts.append(FocusPart("state", x.picked_state, f"{x.picked_state} state"))
     return parts
+
+
+def _failure_parts(x: StepFunctionsExplorer) -> list[FocusPart]:
+    """
+    The kind of failure picked in the Failures tab: the state its executions stopped at and the error (none while
+    every failure is shown at once).
+    """
+    report, picked = x.report, x.picked_failure
+    if report is None or not picked:
+        return []
+    group = next((g for g in report.groups if f"{g.state} · {g.error}" == picked), None)
+    if group is None:
+        return []
+    return [FocusPart("failed_state", group.state, group.state), FocusPart("error", group.error, group.error)]
 
 
 class _FocusReads:
@@ -110,7 +127,8 @@ class _FocusReads:
         What the window is showing, as data: kind 'machines' (the State machines tab, or nothing open yet), 'machine'
         (a state machine's Overview), 'executions', 'execution' (one open in the Executions tab), 'graph', 'state' (a
         state picked in the Graph tab), 'failures' or 'definition', with the state machine, the tab, the time range,
-        and the execution, its outcome and error, or the state picked.
+        and the execution, its outcome and error, the state picked, or the kind of failure picked (its state and
+        error).
         """
         machine = self.machine
         region = self.core.region
@@ -125,6 +143,8 @@ class _FocusReads:
             kind = "execution"
         elif self._tab == "executions":
             parts.extend(_list_parts(self))
+        if self._tab == "failures":
+            parts.extend(_failure_parts(self))
         if self._tab == "graph":
             parts.extend(_graph_parts(self))
             kind = "state" if self.picked_state else "graph"

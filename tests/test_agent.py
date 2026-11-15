@@ -2360,6 +2360,17 @@ def test_looking_at_tells_the_model_what_the_user_has_open():
     assert looking_at(Focus("opensearch", "index")).startswith("[Looking at aws-analyzer's opensearch window (index)")
 
 
+
+def test_the_drawer_asks_why_a_picked_kind_of_failure_happens():
+    from aws_analyzer.agent.window.drawer import focus_questions
+
+    picked = Focus("stepfunctions", "failures", parts=(
+        FocusPart("state_machine", "arn:sfn", "order-pipeline"), FocusPart("failed_state", "LoadOrders", "LoadOrders"),
+        FocusPart("error", "KeyError", "KeyError")))
+    assert focus_questions(picked)[0] == "Why does LoadOrders fail with KeyError, and what should I change?"
+    every = Focus("stepfunctions", "failures", parts=(FocusPart("state_machine", "arn:sfn", "order-pipeline"),))
+    assert focus_questions(every)[0] == "Why does order-pipeline fail, and what should I change?"
+
 def test_the_drawer_offers_questions_for_a_chat_answer():
     from aws_analyzer.agent.window.drawer import focus_questions
 
@@ -2486,6 +2497,9 @@ def test_a_step_functions_answers_calls_are_places_in_its_explorer():
                                                                    {"tab": "failures"})
     assert target_for("StepFunctionsView().state_machine('kb-sync')", "stepfunctions").kwargs == {"tab": "overview"}
     assert target_for("StepFunctionsView().overview()", "stepfunctions") is None
+    compare = target_for("StepFunctionsView().compare('order-pipeline/ord-7f3a', other='ord-cfae')", "stepfunctions")
+    assert (compare.label, compare.command, compare.args, compare.kwargs) == (
+        "Compare ord-7f3a with a success", "compare", ("order-pipeline/ord-7f3a",), {"other": "ord-cfae"})
     assert target_for("StepFunctionsView().failures('x')", "lambda") is None
 
 

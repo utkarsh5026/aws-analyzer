@@ -1569,12 +1569,12 @@ window.AA_CLIPS = {
  },
  "sfn-overview": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.overview(): sfn.overview(): order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first.",
+  "summary": "sfn.overview(): sfn.overview(): order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.0,
+    "dur": 9.9,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.overview()",
@@ -1582,13 +1582,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-overview",
       "w": 1476,
-      "h": 1210
+      "h": 1334
      }
     ],
     "captions": [
      [
       2.7,
-      "Order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first."
+      "Order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first."
      ]
     ]
    }
@@ -1596,12 +1596,12 @@ window.AA_CLIPS = {
  },
  "sfn-failures": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.failures(\"order-pipeline\"): sfn.failures(\"order-pipeline\"): most failures stop at LoadOrders with KeyError: 'customer_id', and the newest run's request_id is filled in.",
+  "summary": "sfn.failures(\"order-pipeline\"): sfn.failures(\"order-pipeline\"): most failures stop at LoadOrders with KeyError: 'customer_id', and they began 4 minutes after orders-etl version 2 went out.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.0,
+    "dur": 15.1,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.failures(\"order-pipeline\")",
@@ -1609,13 +1609,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 1437
+      "h": 2584
      }
     ],
     "captions": [
      [
       3.14,
-      "Most failures stop at LoadOrders with <code>KeyError: 'customer_id'</code>, and the newest run's <code>request_id</code> is filled in."
+      "Most failures stop at LoadOrders with <code>KeyError: 'customer_id'</code>, and they began 4 minutes after orders-etl version 2 went out."
      ]
     ]
    }
@@ -1648,14 +1648,41 @@ window.AA_CLIPS = {
    }
   ]
  },
- "sfn-state-machine": {
+ "sfn-compare": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste.",
+  "summary": "sfn.compare(\"order-pipeline/ord-7f3a\"): sfn.compare(\"order-pipeline/ord-7f3a\"): the run that succeeded just before it had a customer_id; this one didn't, and that's the key LoadOrders failed on.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.2,
+    "dur": 11.3,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.compare(\"order-pipeline/ord-7f3a\")",
+    "outputs": [
+     {
+      "img": "sfn-compare",
+      "w": 1476,
+      "h": 1446
+     }
+    ],
+    "captions": [
+     [
+      3.39,
+      "The run that succeeded just before it had a <code>customer_id</code>; this one didn't, and that's the key LoadOrders failed on."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-state-machine": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.3,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.state_machine(\"order-pipeline\")",
@@ -1663,13 +1690,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 1744
+      "h": 2102
      }
     ],
     "captions": [
      [
       3.29,
-      "LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste."
+      "Its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste."
      ]
     ]
    }
@@ -1697,6 +1724,33 @@ window.AA_CLIPS = {
      [
       3.73,
       "The path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow)."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-graph-timings": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.graph(\"order-pipeline\", timings=True): sfn.graph(\"order-pipeline\", timings=True): ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.4,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.graph(\"order-pipeline\", timings=True)",
+    "outputs": [
+     {
+      "img": "sfn-graph-timings",
+      "w": 1476,
+      "h": 2580
+     }
+    ],
+    "captions": [
+     [
+      3.48,
+      "ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes."
      ]
     ]
    }
@@ -4111,6 +4165,68 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "sfn-explorer-compare": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): ⇄ Compare on ord-7f3a: the run that succeeded just before it had a customer_id, and this one didn't.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-compare",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "⇄ Compare on ord-7f3a: the run that succeeded just before it had a <code>customer_id</code>, and this one didn't."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-failures": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): The Failures tab: LoadOrders has failed with KeyError since three days ago, starting 4 minutes after orders-etl version 2 went out.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-failures",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Failures tab: LoadOrders has failed with <code>KeyError</code> since three days ago, starting 4 minutes after orders-etl version 2 went out."
+     ]
+    ]
+   }
+  ]
+ },
  "sfn-explorer-graph": {
   "notebook": "workflows.ipynb",
   "summary": "sfn.explore(): The Graph tab with ord-7f3a open: its path in green, the failure in red, and what it never reached dashed.",
@@ -4199,6 +4315,37 @@ window.AA_CLIPS = {
      [
       2.7,
       "ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with <code>KeyError</code>."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-timing": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): The Graph tab on Where time goes: ProcessItems takes most of the time, and ChargeCard retries when Lambda throttles it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-timing",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Graph tab on Where time goes: ProcessItems takes most of the time, and ChargeCard retries when Lambda throttles it."
      ]
     ]
    }

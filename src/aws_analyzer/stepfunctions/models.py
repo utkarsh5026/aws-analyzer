@@ -6,7 +6,7 @@ steps an execution took (with each Lambda step's request ID), failures grouped b
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .._kit.deps import _require
@@ -93,7 +93,8 @@ class StateMachine:
 class MachineNumbers:
     """
     A state machine's CloudWatch numbers over whole UTC days: executions by outcome, throttled starts, and the
-    average run time in ms. daily_* are per day, oldest first.
+    average run time in ms. daily_* are per day, oldest first, from first_day (a UTC date): daily_unsuccessful counts
+    the ones that failed, timed out or were aborted, daily_failed only the failed.
     """
 
     days: int
@@ -106,6 +107,8 @@ class MachineNumbers:
     avg_ms: float | None = None
     daily_started: list[int] = field(default_factory=list)
     daily_failed: list[int] = field(default_factory=list)
+    daily_unsuccessful: list[int] = field(default_factory=list)
+    first_day: date | None = None
 
     @property
     def unsuccessful(self) -> int:
@@ -266,8 +269,8 @@ class ExecutionDetail:
 @dataclass
 class FailureGroup:
     """
-    Failed executions that stopped at the same state with the same error: how many, the newest one, and for a
-    Lambda step its function and the newest run's request ID.
+    Failed executions that stopped at the same state with the same error: how many, the newest one, every one read
+    (executions, newest first), and for a Lambda step its function and the newest run's request ID.
     """
 
     state: str
@@ -278,13 +281,38 @@ class FailureGroup:
     function: str = ""
     request_id: str = ""
     redrivable: int = 0
+    executions: list[Execution] = field(default_factory=list)
+
+    @property
+    def first_seen(self) -> datetime | None:
+        """
+        When the oldest execution read in this group started: how long it has been failing this way, as far as the
+        failures read go back.
+        """
+        starts = [execution.start for execution in self.executions if execution.start is not None]
+        return min(starts) if starts else None
+
+
+@dataclass
+class Change:
+    """
+    Something that changed how a state machine runs, and when: a Lambda function it calls deployed (kind
+    'function': its code or settings changed, or a version published, detail 'version 7'), or its own definition
+    updated (kind 'definition'), as the definition an execution ran with says.
+    """
+
+    when: datetime
+    kind: str
+    name: str
+    detail: str = ""
 
 
 @dataclass
 class FailureReport:
     """
     What failures() read: the state machine, the failed executions in the window (newest first), the groups they
-    fall in, and how many histories were read.
+    fall in, how many histories were read, and what changed around them (changes, oldest first; change_errors
+    says what couldn't be read: 'lambda:<function>' or 'definition' -> error code).
     """
 
     machine: StateMachine
@@ -295,6 +323,8 @@ class FailureReport:
     truncated: bool = False
     numbers: MachineNumbers | None = None
     source: str = "history"
+    changes: list[Change] = field(default_factory=list)
+    change_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -310,3 +340,72 @@ class Overview:
     numbers: dict[str, MachineNumbers] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     metrics_read: int = 0
+
+
+@dataclass
+class StateTiming:
+    """
+    One state's time over several executions: how many times it ran and in how many executions, the median and the
+    longest of its finished runs (seconds), the time all its runs took, its share of the executions' time (top-level
+    states only: a Map's inner runs can overlap), its tries (tasks only: tried_runs is how many runs had tries,
+    retried_runs how many took more than one), the most common error a retry followed, and the executions behind its
+    longest run and a retried one.
+    """
+
+    name: str
+    type: str
+    depth: int = 0
+    runs: int = 0
+    executions: int = 0
+    median: float | None = None
+    longest: float | None = None
+    total: float = 0.0
+    share: float | None = None
+    tries: int = 0
+    tried_runs: int = 0
+    retried_runs: int = 0
+    retry_error: str = ""
+    function: str = ""
+    slowest: Execution | None = None
+    retried_in: Execution | None = None
+
+    @property
+    def retries(self) -> int:
+        return self.tries - self.tried_runs
+
+    @property
+    def tries_per_run(self) -> float | None:
+        return self.tries / self.tried_runs if self.tried_runs else None
+
+
+@dataclass
+class TimingReport:
+    """
+    What timings() read: the newest `asked` succeeded executions since `since` (executions, newest first; fewer when
+    there weren't as many), each state's StateTiming in definition order, the executions' time added up, how many
+    histories were cut at the event limit (partial), where they came from ('history' or 'logs') and what the logs
+    can't tell (note), and the state machine's CloudWatch numbers for the cost of its retries.
+    """
+
+    machine: StateMachine
+    since: datetime
+    asked: int
+    executions: list[Execution] = field(default_factory=list)
+    states: list[StateTiming] = field(default_factory=list)
+    total: float = 0.0
+    partial: int = 0
+    source: str = "history"
+    note: str = ""
+    numbers: MachineNumbers | None = None
+
+    def state(self, name: str) -> StateTiming | None:
+        return next((s for s in self.states if s.name == name), None)
+
+    def to_df(self) -> Any:
+        pd = _require("pandas", "to_df()")
+        return pd.DataFrame([
+            {"state": s.name, "type": s.type, "depth": s.depth, "runs": s.runs, "executions": s.executions,
+             "median_seconds": s.median, "longest_seconds": s.longest, "total_seconds": s.total, "share": s.share,
+             "tries_per_run": s.tries_per_run, "retried_runs": s.retried_runs}
+            for s in self.states
+        ])

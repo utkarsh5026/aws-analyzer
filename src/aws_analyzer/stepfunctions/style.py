@@ -14,6 +14,30 @@ from .._kit.render import _base_css, _Look, _report_html
 _ROOT = "sfn"
 
 _EXTRA_CSS = """\
+.sfn .chg{max-width:900px;margin:4px 0 12px;font-size:11px}
+.sfn .cht{position:relative;height:74px;border-bottom:1px solid rgba(127,127,127,.35);margin-top:4px}
+.sfn .chl{position:absolute;top:0;bottom:0;border-left:2px dashed #8b5cf6}
+.sfn .chl.sus{border-left-style:solid;border-left-color:#7c3aed}
+.sfn .chl em{position:absolute;top:0;left:6px;white-space:nowrap;font-style:normal;color:#7c3aed;font-weight:600}
+.sfn .chl.r em{left:auto;right:6px}
+.sfn .chd{position:absolute;bottom:6px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 1.5px var(--jp-layout-color0,#fff)}
+.sfn .cha{display:flex;justify-content:space-between;margin-top:3px;opacity:.65;font-variant-numeric:tabular-nums}
+.sfn .chk{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;opacity:.75}
+.sfn .chk i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+.sfn .chk i.l{width:0;border-left:2px dashed #8b5cf6;height:11px}
+.sfn .chk i.d{border-radius:50%;background:#ef4444}
+.sfn .dzs{max-width:720px;margin:4px 0 12px;font-size:11px}
+.sfn .dzb{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:max(1px,min(6px,calc(240px / var(--n))));align-items:end;height:64px;border-bottom:1px solid rgba(127,127,127,.35)}
+.sfn .dz{height:100%;display:flex;align-items:flex-end;border-radius:3px 3px 0 0}
+.sfn .dz i{display:flex;flex-direction:column;justify-content:flex-end;width:100%;min-height:1px;background:rgba(127,127,127,.32);border-radius:2px 2px 0 0;overflow:hidden}
+.sfn .dz b{display:block;min-height:2px;background:#ef4444}
+.sfn .dz.jz{box-shadow:0 0 0 1.5px #f59e0b;background:rgba(245,158,11,.08)}
+.sfn .dzl{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:max(1px,min(6px,calc(240px / var(--n))));margin-top:3px;opacity:.7;text-align:center;white-space:nowrap}
+.sfn .dzl span{overflow:visible;font-variant-numeric:tabular-nums}
+.sfn .dzl b{display:block;color:#dc2626;font-weight:600}
+.sfn .dzk{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;opacity:.75}
+.sfn .dzk i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:rgba(127,127,127,.32)}
+.sfn .dzk i.f{background:#ef4444}
 .sfn .wf{max-width:1100px;margin:4px 0 12px;font-size:12px}
 .sfn .wfr{display:grid;grid-template-columns:minmax(150px,230px) 1fr;gap:10px;align-items:center;padding:2px 0;border-top:1px solid rgba(127,127,127,.14)}
 .sfn .wfr.wfh{border-top:0;opacity:.6;font-size:11px}
@@ -35,7 +59,7 @@ _EXTRA_CSS = """\
 .sfn .wfk{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11px;opacity:.75}
 .sfn .wfk span{display:inline-flex;align-items:center;gap:5px}
 .sfn .wfk .wfs{position:static;display:inline-block;width:14px;height:9px;padding:0}
-.sfn .story{max-width:1100px;margin:4px 0 12px;border:1px solid rgba(127,127,127,.25);border-radius:8px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.sfn .story{container-type:inline-size;max-width:1100px;margin:4px 0 12px;border:1px solid rgba(127,127,127,.25);border-radius:8px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
 .sfn .story .sh{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid rgba(127,127,127,.2)}
 .sfn .story .sz{margin-left:auto;opacity:.6}
 .sfn .story .sl{display:grid;grid-template-columns:92px minmax(90px,140px) 1fr;gap:10px;padding:2px 10px;align-items:baseline}
@@ -43,6 +67,7 @@ _EXTRA_CSS = """\
 .sfn .story .sl.report{opacity:.7}
 .sfn .story .sc{opacity:.65;white-space:nowrap}
 .sfn .story .sx{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+@container (max-width:480px){.sfn .story .sl{grid-template-columns:92px minmax(0,1fr);row-gap:0}.sfn .story .sx{grid-column:1/-1;padding:0 0 4px 12px}}
 .sfn .story .sn{padding:6px 10px;border-top:1px dashed rgba(127,127,127,.25);font-family:inherit;opacity:.75}
 .sfn .src{display:inline-block;justify-self:start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:4px;padding:0 6px;font-size:10.5px;background:rgba(127,127,127,.14)}
 .sfn .src.sf{background:rgba(219,39,119,.12);color:#be185d}
@@ -91,6 +116,12 @@ body[data-jp-theme-light="false"] .sfn .story .sl.error{color:#f87171}
 .sfn .fgk i.m-h1{background:rgba(245,158,11,.10);border-color:#f59e0b}
 .sfn .fgk i.m-h2{background:rgba(249,115,22,.16);border-color:#f97316}
 .sfn .fgk i.m-h3{background:rgba(239,68,68,.18);border-color:#ef4444}
+.sfn .fn.m-t1 rect{fill:rgba(217,119,6,.06);stroke:rgba(217,119,6,.55)}
+.sfn .fn.m-t2 rect{fill:rgba(217,119,6,.18);stroke:#d97706}
+.sfn .fn.m-t3 rect{fill:rgba(217,119,6,.34);stroke:#b45309;stroke-width:2}
+.sfn .fgk i.m-t1{background:rgba(217,119,6,.06);border-color:rgba(217,119,6,.55)}
+.sfn .fgk i.m-t2{background:rgba(217,119,6,.18);border-color:#d97706}
+.sfn .fgk i.m-t3{background:rgba(217,119,6,.34);border-color:#b45309}
 .sfn .fn.sel rect{stroke:#2563eb;stroke-width:3}
 .sfn .fstart{fill:currentColor;opacity:.75}
 .sfn .fend{fill:none;stroke:currentColor;stroke-width:2;opacity:.75}

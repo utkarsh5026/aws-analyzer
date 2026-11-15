@@ -625,6 +625,8 @@ class _Explorer(_AskSlot, _Window):
         """
         The window, in root: its stylesheet (in a hidden HTML widget), the head and the tab bar over the tabs'
         pages (only the open one shows; each is height= tall when that's set), the status line and the backdrop.
+        The tab bar and pages sit in a box of class <prefix>-main beside the ✦ Ask drawer, so a window's stylesheet
+        can lay its pages out by the width that box gets (a container query) rather than the browser's.
         """
         w, layout, prefix = self._w, self._w.Layout, self._PREFIX
         style = w.HTML(css + _drawer_css(prefix), layout=layout(display="none"))
@@ -642,6 +644,7 @@ class _Explorer(_AskSlot, _Window):
         tabs.children = (*tabs.children, self._make_ask_button())
         self._make_drawer_box()
         main = w.VBox([tabs, *pages.values()], layout=layout(flex="1 1 auto", width="auto", min_width="0"))
+        main.add_class(f"{prefix}-main")
         body = w.HBox([main, self.drawer_box], layout=layout(width="100%", align_items="stretch"))
         self.root = w.VBox([style, head, body, self.status, self.backdrop], layout=layout(width="100%"))
         self.root.add_class(f"{prefix}-app")

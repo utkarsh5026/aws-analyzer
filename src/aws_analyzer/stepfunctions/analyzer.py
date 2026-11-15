@@ -20,12 +20,15 @@ from .._kit.fmt import _as_count, _utcnow, parse_time
 from .helpers import EXECUTION_ARN_RE, FAILED_STATUSES, STATE_MACHINE_ARN_RE, execution_arn, parse_execution_ref
 from .models import (
     Attempt, Execution, ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine,
-    StepRun,
+    StepRun, TimingReport,
 )
 from .prices import STEPFUNCTIONS_PRICES
+from .changes import _ChangeReads
+from .comparing import _CompareReads
 from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
+from .analysis.timing import timing_report
 
 
 _METRIC_STAT_AND_FIELD = {
@@ -36,6 +39,13 @@ _METRIC_STAT_AND_FIELD = {
     "ExecutionsAborted": ("Sum", "aborted"),
     "ExecutionThrottled": ("Sum", "throttled"),
     "ExecutionTime": ("Average", "avg_ms"),
+}
+
+_DAILY_COUNTS = {
+    "started": ("daily_started",),
+    "failed": ("daily_failed", "daily_unsuccessful"),
+    "timed_out": ("daily_unsuccessful",),
+    "aborted": ("daily_unsuccessful",),
 }
 
 _DAY_SECONDS = 86_400
@@ -51,6 +61,10 @@ _LOG_PAD = timedelta(minutes=2)
 _TIME_MATCH_LINES = 2_000
 
 _STORY_STEPS = 12
+
+TIMING_SAMPLE = 20
+
+TIMING_EVENTS = 5_000
 
 
 def _lambda_module() -> Any:
@@ -87,7 +101,7 @@ def _midnight_after(now: datetime) -> datetime:
     return today + timedelta(days=1)
 
 
-class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
+class StepFunctionsAnalyzer(_ChangeReads, _CompareReads, _ExpressReads, _BaseAnalyzer):
     """
     Pure-logic Step Functions analysis: every method returns data; nothing is printed, started or changed.
 
@@ -143,12 +157,14 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
     @property
     def lambda_core(self) -> Any:
         """
-        The LambdaAnalyzer that reads Lambda steps' logs, on this analyzer's session.
+        The LambdaAnalyzer that reads Lambda steps' logs and when their functions were deployed, on this analyzer's
+        session (with clients={'lambda': ...}'s client when one was given).
         """
         if self._lambda_core is None:
             with self._lock:
                 if self._lambda_core is None:
-                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session)
+                    given = {"lambda": self._clients["lambda"]} if "lambda" in self._clients else None
+                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session, clients=given)
         return self._lambda_core
 
 
@@ -221,7 +237,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
                     "Metric": {"Namespace": "AWS/States", "MetricName": metric,
                                "Dimensions": [{"Name": "StateMachineArn", "Value": machine.arn}]},
                     "Period": _DAY_SECONDS, "Stat": stat}})
-        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days)
+        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days,
+                                         daily_unsuccessful=[0] * days, first_day=start.date())
                    for m in machines}
         for begin in range(0, len(queries), _QUERIES_PER_CALL):
             for result in self._metric_results(queries[begin: begin + _QUERIES_PER_CALL], start, end):
@@ -358,9 +375,13 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             detail.lambda_run, detail.lambda_note = self.lambda_run(step)
         return detail
 
-    def _history(self, arn: str, cap: int | None) -> tuple[list[dict[str, Any]], bool]:
+    def _history(self, arn: str, cap: int | None, *, data: bool = True) -> tuple[list[dict[str, Any]], bool]:
+        """
+        An execution's events oldest first, at most `cap`, and whether there were more. data=False leaves out each
+        event's input and output, which timings don't need.
+        """
         events: list[dict[str, Any]] = []
-        params: dict[str, Any] = {"executionArn": arn, "maxResults": 1000, "includeExecutionData": True}
+        params: dict[str, Any] = {"executionArn": arn, "maxResults": 1000, "includeExecutionData": data}
         while True:
             answer = self.client.get_execution_history(**params)
             events += answer.get("events", [])
@@ -431,6 +452,62 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         return min(started, key=lambda run: run.start) if started else None
 
 
+    def timings(
+        self,
+        ref: str,
+        *,
+        n: Any = TIMING_SAMPLE,
+        since: Any = "7d",
+        progress: Callable[..., None] | None = None,
+    ) -> TimingReport:
+        """
+        Where a state machine's time goes: the newest `n` executions that succeeded since `since`, each one's history
+        read (GetExecutionHistory: free, but rate-limited, hence a small sample), and per state how many times it ran,
+        its median and longest run, its share of the time and its tries a run. An Express workflow's are read from
+        its log group, which has them only when it logs everything.
+        """
+        machine = self.state_machine(ref)
+        start = parse_time(since) or _utcnow() - timedelta(days=7)
+        asked = _as_count(n, "n") or TIMING_SAMPLE
+        report = TimingReport(machine, start, asked)
+        if machine.is_express:
+            details, report.note = self._express_timings(machine, start, asked)
+            report.source = "logs"
+        else:
+            succeeded, _ = self._list_executions(machine, "SUCCEEDED", start, asked)
+            details = self._timed_details(machine, succeeded, progress)
+        timing_report(machine, details, report)
+        report.numbers = self._numbers_or_none(machine, start)
+        return report
+
+    def _timed_details(self, machine: StateMachine, executions: list[Execution],
+                       progress: Callable[..., None] | None) -> list[ExecutionDetail]:
+        """
+        Each execution's steps, read from its whole history without inputs and outputs, newest first.
+        """
+        def read(execution: Execution) -> ExecutionDetail:
+            detail = ExecutionDetail(execution, machine=machine)
+            events, detail.partial = self._history(execution.arn, TIMING_EVENTS, data=False)
+            return fill_detail(detail, events)
+
+        details = []
+        for detail in self._map(read, executions):
+            details.append(detail)
+            if progress is not None:
+                progress(len(details), len(executions))
+        return details
+
+    def _numbers_or_none(self, machine: StateMachine, start: datetime) -> MachineNumbers | None:
+        """
+        A state machine's CloudWatch numbers from `start` to today, or None when they can't be read.
+        """
+        try:
+            days = max(1, (_utcnow() - start).days)
+            return self.numbers([machine], days=days)[0].get(machine.arn)
+        except (ClientError, BotoCoreError):
+            return None
+
+
     def failures(
         self,
         ref: str,
@@ -442,7 +519,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         """
         Why a state machine's executions failed since `since`: the newest `limit` that failed, timed out or were
         aborted, each history's end read (one request each), grouped by the state they stopped at and the error. An
-        Express workflow's are read from its log group.
+        Express workflow's are read from its log group. It also reads what changed around them (report.changes): when
+        the Lambda functions they stopped in were deployed, and when the definition was updated.
         """
         machine = self.state_machine(ref)
         start = parse_time(since) or _utcnow() - timedelta(days=7)
@@ -457,11 +535,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             details = self._standard_failures(machine, failed, progress)
         report.read = len(details)
         report.groups = group_failures(details, _utcnow(), express=machine.is_express)
-        try:
-            days = max(1, (_utcnow() - start).days)
-            report.numbers = self.numbers([machine], days=days)[0].get(machine.arn)
-        except (ClientError, BotoCoreError):
-            report.numbers = None
+        self._read_changes(report)
+        report.numbers = self._numbers_or_none(machine, start)
         return report
 
     def _standard_failures(self, machine: StateMachine, failed: list[Execution],
@@ -493,7 +568,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
 def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any], start: datetime) -> None:
     """
     One metric's daily values into MachineNumbers: summed (an average is weighted by the day's executions, which
-    are read first), with the daily started and failed counts kept per day.
+    are read first), with the counts _DAILY_COUNTS names kept per day as well.
     """
     values = list(zip(result.get("Timestamps", []), result.get("Values", [])))
     if field_name == "avg_ms":
@@ -506,13 +581,12 @@ def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any]
             numbers.avg_ms = sum(v for _, v in values) / len(values)
         return
     setattr(numbers, field_name, getattr(numbers, field_name) + int(sum(v for _, v in values)))
-    daily = {"started": numbers.daily_started, "failed": numbers.daily_failed}.get(field_name)
-    if daily is None:
-        return
-    for ts, value in values:
-        day = _day(ts, start)
-        if 0 <= day < numbers.days:
-            daily[day] += int(value)
+    for daily_name in _DAILY_COUNTS.get(field_name, ()):
+        daily = getattr(numbers, daily_name)
+        for ts, value in values:
+            day = _day(ts, start)
+            if 0 <= day < numbers.days:
+                daily[day] += int(value)
 
 
 def _day(moment: datetime, start: datetime) -> int:

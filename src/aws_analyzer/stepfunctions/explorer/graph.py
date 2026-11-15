@@ -1,6 +1,6 @@
 """
 The explorer's Graph tab: the state machine drawn from its definition, coloured by the execution open in the
-Executions tab or by where executions stop, with a line per state to pick one (the states inside a Map or Parallel
+Executions tab, by where executions stop or by where their time goes, with a line per state to pick one (the states inside a Map or Parallel
 under it), and what's known about the state picked beside it.
 """
 
@@ -9,17 +9,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..._kit.blocks import _Note, _Table, _Title
-from ..._kit.fmt import _plural
+from ..._kit.fmt import _duration, _plural
 from ..._kit.text import _esc
 from ..._kit.window import _class_if
 
-from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine, StepRun
+from ..models import ExecutionDetail, FailureReport, StateDef, StateMachine, StepRun, TimingReport
 from ..analysis.definition import catch_label, resource_label, retry_label
 from ..analysis.layout import (
-    FlowLayout, FlowMarks, failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, owner_of,
-    path_marks,
+    FlowLayout, FlowMarks, failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states,
+    inner_timing_marks, owner_of, path_marks, timing_marks,
 )
 from ..analysis.story import ExecutionStory
+from ..analysis.timing import took_text
 from ..analyzer import _run_lines
 from ..blocks import _FlowGraph, _payload_block, _Story
 from .widgets import _Line
@@ -28,7 +29,8 @@ if TYPE_CHECKING:
     from .window import StepFunctionsExplorer
 
 
-_MODES = (("This execution", "execution"), ("Where failures stop", "failures"), ("Just the flow", "plain"))
+_MODES = (("This execution", "execution"), ("Where failures stop", "failures"), ("Where time goes", "timing"),
+          ("Just the flow", "plain"))
 
 _TRY_OUTCOMES = {"ok": "ok", "failed": "failed", "timed out": "timed out", "running": "never finished"}
 
@@ -137,6 +139,31 @@ def _failure_blocks(name: str, inner: set[str], report: FailureReport) -> list[A
                    title="The executions that stopped here", max_rows=0, sortable=False)]
 
 
+def _timing_state_blocks(name: str, report: TimingReport) -> list[Any]:
+    """
+    A state's time over the succeeded executions read: how often it ran, its median and longest run, its share of
+    the time and its tries, and the executions that show its slowest run and a retry.
+    """
+    timing = report.state(name)
+    if timing is None:
+        return [_Note(f"None of the {_plural(len(report.executions), 'succeeded execution')} read entered {name}.")]
+    per_execution = timing.runs / max(1, timing.executions)
+    rows = [["Ran", f"{_plural(timing.runs, 'time')} in {_plural(timing.executions, 'execution')}"
+                    + (f" ({per_execution:.3g} an execution)" if per_execution > 1 else "")],
+            ["Median run", took_text(timing.median)], ["Longest run", took_text(timing.longest)]]
+    if timing.share is not None:
+        rows.append(["Share of the time", f"{timing.share:.0%} of {_duration(report.total)}"])
+    if timing.tries_per_run is not None:
+        retried = f", {timing.retried_runs:,} of its runs retried" if timing.retried_runs else ", no retries"
+        error = f" (mostly after {timing.retry_error})" if timing.retry_error else ""
+        rows.append(["Tries a run", f"{timing.tries_per_run:.2f}{retried}{error}"])
+    if timing.slowest is not None:
+        rows.append(["Slowest in", timing.slowest.name])
+    if timing.retried_in is not None:
+        rows.append(["Retried in", timing.retried_in.name])
+    return [_Table(["", ""], rows, title="Its time in the succeeded executions read", max_rows=0, sortable=False)]
+
+
 def _state_face(name: str, depth: int, mark: str, note: str) -> str:
     """
     A state's line: its mark, its name (indented under the Map or Parallel it sits inside) and a short note.
@@ -150,7 +177,8 @@ def _state_face(name: str, depth: int, mark: str, note: str) -> str:
 class _GraphTab:
     """
     The Graph tab, a part of StepFunctionsExplorer: what it keeps is `layout` (the state machine drawn), `graph_mode`
-    ('execution', 'failures' or 'plain') and `picked_state`.
+    ('execution', 'failures', 'timing' or 'plain'), `picked_state`, and `timings` (where the time goes, read when the
+    mode is first picked for a state machine).
     """
 
     def _graph_page(self: StepFunctionsExplorer) -> Any:
@@ -158,10 +186,13 @@ class _GraphTab:
         self.graph_layout: FlowLayout | None = None
         self.graph_mode = "execution"
         self.picked_state = ""
+        self.timings: TimingReport | None = None
         self._state_lines: list[_Line] = []
         self.mode_pick = w.ToggleButtons(options=list(_MODES), value="execution", style={"button_width": "auto"},
                                          tooltips=["The path the execution open in the Executions tab took",
                                                    "Where executions stopped in the time range picked",
+                                                   "Which states take the time, and which retry, over the newest "
+                                                   "20 executions that succeeded in the time range picked",
                                                    "The definition, uncoloured"])
         self.mode_pick.observe(self._safely(self._mode_changed), names="value")
         self.graph_view = w.HTML(layout=layout(width="100%"))
@@ -193,8 +224,45 @@ class _GraphTab:
         self.graph_mode = change["new"]
         if self.graph_mode == "failures" and self.report is None and self.machine and self.machine.has_executions:
             self._load_failures()
+        self._load_timings_if_wanted()
         self._draw_graph()
         self._focus_moved()
+
+    def _wants_timings(self: StepFunctionsExplorer) -> bool:
+        """
+        Whether the Graph tab is open on Where time goes, with nothing read yet for a state machine that has them.
+        """
+        machine = self.machine
+        shows_timing = self._tab == "graph" and self.graph_mode == "timing"
+        return shows_timing and self.timings is None and machine is not None and machine.has_executions
+
+    def _load_timings_if_wanted(self: StepFunctionsExplorer) -> None:
+        if self._wants_timings():
+            self._load_timings()
+
+    def _load_timings(self: StepFunctionsExplorer) -> None:
+        """
+        Reads where the state machine's time goes in the background: the newest succeeded executions in the time
+        range, each one's history.
+        """
+        machine = self.machine
+        if machine is None:
+            return
+        self._status(f"Reading {machine.name}'s newest succeeded executions…", busy=True, owner="timings")
+        arn, since = machine.arn, self._since
+        self._later("timings", lambda: self.core.timings(arn, since=since), self._got_timings, self._timings_failed)
+
+    def _timings_failed(self: StepFunctionsExplorer, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._status(text, "warn")
+        self._set(self.graph_view, self._html([_Note(f"Couldn't read where the time goes: {text}", "warn")]))
+
+    def _got_timings(self: StepFunctionsExplorer, report: TimingReport) -> None:
+        self.timings = report
+        self._draw_graph()
+        read = len(report.executions)
+        self._finish("timings", f"Where the time goes, from {_plural(read, 'succeeded execution')} in the last "
+                                f"{self._since_label()}", tabs=("graph",))
 
     def _graph_marks(self: StepFunctionsExplorer) -> tuple[FlowMarks, str]:
         """
@@ -208,6 +276,10 @@ class _GraphTab:
                 return FlowMarks(selected=self.picked_state), ("Open an execution in the Executions tab to see the "
                                                                "path it took.")
             marks = path_marks(layout, self.detail)
+        elif self.graph_mode == "timing":
+            if self.timings is None:
+                return FlowMarks(selected=self.picked_state), self._timings_wait()
+            marks = timing_marks(layout, self.timings)
         elif self.report is None:
             unreadable = self.machine is not None and not self.machine.has_executions
             say = ("An Express workflow with logging off leaves no record of its failures." if unreadable
@@ -217,6 +289,11 @@ class _GraphTab:
             marks = failure_marks(layout, self.report)
         marks.selected = self._picked_box()
         return marks, ""
+
+    def _timings_wait(self: StepFunctionsExplorer) -> str:
+        if self.machine is not None and not self.machine.has_executions:
+            return "An Express workflow with logging off leaves no record of its executions' time."
+        return "Reading the newest succeeded executions, to see where the time goes…"
 
     def _picked_box(self: StepFunctionsExplorer) -> str:
         """
@@ -235,6 +312,8 @@ class _GraphTab:
             return inner_path_marks(machine, self.detail)
         if self.graph_mode == "failures" and self.report is not None:
             return inner_failure_marks(machine, self.report)
+        if self.graph_mode == "timing" and self.timings is not None:
+            return inner_timing_marks(machine, self.timings)
         return FlowMarks()
 
     def _draw_graph(self: StepFunctionsExplorer) -> None:
@@ -244,6 +323,8 @@ class _GraphTab:
         marks, note = self._graph_marks()
         blocks: list[Any] = [_Note(note)] if note else []
         blocks.append(_FlowGraph(layout, marks))
+        if self.graph_mode == "timing" and self.timings is not None:
+            blocks += self._timing_notes(self.timings)
         self._draw("graph", self.graph_view, blocks)
         inner = self._inner_marks()
         for line in self._state_lines:
@@ -252,6 +333,15 @@ class _GraphTab:
             note_text = marks.notes.get(line.key) or inner.notes.get(line.key, "")
             self._set(line.face, _state_face(line.key, self._state_depth(line.key), mark, note_text))
         self._draw_state()
+
+    def _timing_notes(self: StepFunctionsExplorer, report: TimingReport) -> list[Any]:
+        """
+        Under the graph in Where time goes: what the timings say to do, and where they come from (the table of every
+        state is in the lines beside it).
+        """
+        blocks: list[Any] = [self.ui._timing_findings(report)]
+        notes = [b for b in self.ui._timing_blocks(report) if isinstance(b, _Note)]
+        return blocks + notes
 
     def _state_depth(self: StepFunctionsExplorer, name: str) -> int:
         state = self.machine.state(name) if self.machine else None
@@ -304,4 +394,6 @@ class _GraphTab:
         elif self.graph_mode == "failures" and self.report is not None:
             inner = {s.name for s in inner_states(machine, name)}
             blocks += _failure_blocks(name, inner, self.report)
+        elif self.graph_mode == "timing" and self.timings is not None and self.timings.executions:
+            blocks += _timing_state_blocks(name, self.timings)
         self._draw("state", self.state_view, blocks)
