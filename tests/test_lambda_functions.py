@@ -37,6 +37,7 @@ from aws_analyzer.lambda_functions.analysis.word_search import runs_matching
 from aws_analyzer.lambda_functions.models import Activity
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
+from aws_analyzer._kit.window import _day_bars_html
 from aws_analyzer._kit.blocks import _Next, _Report
 from aws_analyzer._kit.fmt import _fmt_dt
 from aws_analyzer._kit.errors import _Hint
@@ -3156,10 +3157,10 @@ def test_explorer_list_draws_each_functions_last_two_weeks():
     metrics = FunctionMetrics("etl", 30, 86400, 190, 10, daily=daily)
     days = functions_tab._trend_days(metrics, now)
     assert len(days) == 14 and days[-1] == (40, 10) and days[-4] == (100, 0) and days[0] == (0.0, 0.0)
-    html = functions_tab._trend_html(days)
+    html = _day_bars_html(days)
     assert html.count("<i") == 14 and html.count('class="z"') == 12
     assert '<i style="height:100.0%"></i>' in html and '<i style="height:40.0%"><b style="height:25.0%"></b></i>' in html
-    assert functions_tab._trend_days(FunctionMetrics("etl", 1, 3600), now) == [] and functions_tab._trend_html([]) == "-"
+    assert functions_tab._trend_days(FunctionMetrics("etl", 1, 3600), now) == [] and _day_bars_html([]) == "-"
 
 
 

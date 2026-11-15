@@ -5,6 +5,9 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from aws_analyzer._kit.window import _recent_trouble
+from aws_analyzer.apigateway.explorer.frame import _api_days
 from botocore.exceptions import ClientError
 from fake_apigateway import (
     BAD_ANSWER_RUN, ORDERS_FORMAT, SEARCH_FORMAT, TIMEOUT_RUN, cloudwatch, function_uri, now_utc, seed,
@@ -443,6 +446,11 @@ def test_explorer_apis_tab_searches_filters_and_sorts(core):
     assert [line.api.name for line in x.apis_shown][0] == "chat-ws"
     x._api_rows[0].button.click()
     assert x.api.name == "chat-ws" and x._tab == "overview"
+    x.column_buttons["trend"].click()
+    recent = [_recent_trouble(_api_days(line.numbers)) for line in x.apis_shown if line.numbers]
+    assert recent == sorted(recent, reverse=True) and recent[0][0] > 0
+    face = x._api_rows[0].face.value
+    assert '<span class="tr">' in face and "<b style=" in face
 
 
 def test_explorer_routes_tab(core):

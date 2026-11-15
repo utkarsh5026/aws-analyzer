@@ -139,6 +139,52 @@ def _row_button(w: Any, classes: tuple[str, str, str], on_click: Callable[[Any],
     return box, button, face
 
 
+_SHORTEST_DAY_BAR = 12
+
+
+def _day_bars_html(days: list[tuple[float, float]]) -> str:
+    """
+    A list's trend column: a bar a day, oldest first, as tall as its total against the busiest day, the bad part of it
+    (failed calls) in red on top. A day with anything is at least _SHORTEST_DAY_BAR percent tall, so it stays visible
+    beside a busy one; '-' when there are no days.
+    """
+    if not days:
+        return "-"
+    busiest = max(total for total, _ in days) or 1.0
+    bars = []
+    for total, bad in days:
+        if not total:
+            bars.append('<i class="z"></i>')
+            continue
+        height = max(_SHORTEST_DAY_BAR, 100 * total / busiest)
+        red = f'<b style="height:{min(100.0, 100 * bad / total):.1f}%"></b>' if bad else ""
+        bars.append(f'<i style="height:{height:.1f}%">{red}</i>')
+    return f'<span class="tr">{"".join(bars)}</span>'
+
+
+_TREND_RECENT_DAYS = 2
+
+
+def _recent_trouble(days: list[tuple[float, float]]) -> tuple[float, float]:
+    """
+    What a trend column sorts by: the bad part of the last _TREND_RECENT_DAYS days, then their total, so what started
+    failing lately comes first.
+    """
+    recent = days[-_TREND_RECENT_DAYS:]
+    return (sum(bad for _, bad in recent), sum(total for total, _ in recent))
+
+
+def _day_bars_css(app: str, *, bar: str, bad: str) -> str:
+    """
+    The rules a trend column needs in a window whose root class is `app`, drawn in its own colours.
+    """
+    return (f".{app} .tr{{display:inline-flex;align-items:flex-end;gap:1px;height:22px;vertical-align:middle}}\n"
+            f".{app} .tr i{{width:5px;display:flex;flex-direction:column;background:color-mix(in srgb,{bar} 55%,"
+            "transparent);border-radius:1px 1px 0 0;overflow:hidden}\n"
+            f".{app} .tr i b{{flex:0 0 auto;min-height:1px;background:{bad}}}\n"
+            f".{app} .tr i.z{{height:1px;background:currentColor;opacity:.25;border-radius:0}}\n")
+
+
 def _class_if(widget: Any, name: str, on: bool) -> None:
     """
     Adds or removes a widget's CSS class, sending nothing when it's already as wanted.

@@ -601,7 +601,9 @@ How the View layer works:
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
 - **The windows' kit** (`_kit/window.py`) is what the four windows share, written once: `_css_height`,
-  `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_icon_url` (a line drawing as the CSS `url()` every
+  `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_day_bars_html` / `_day_bars_css` (a list's trend
+  column, a bar a day with the bad part red: the Lambda, Step Functions and API Gateway lists and Lambda's Live tab;
+  `_recent_trouble` is what it sorts by), `_icon_url` (a line drawing as the CSS `url()` every
   window masks its icons with), `_row_button` (a line whose whole width is the click target: a full-width button under
   its HTML face, in a box), `_for_window(blocks, words)` and `_terminal_theme(roots, prefix)`, the chat windows' look
   (`_MONO_FONT` and a code editor's colours, light and dark, as `--<prefix>-*` properties: the agent's window uses

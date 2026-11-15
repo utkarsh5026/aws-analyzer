@@ -14,9 +14,10 @@ from ..._kit.fmt import _plural
 from ..._kit.text import _esc, search_rank
 from ..._kit.window import _class_if
 
+from ..._kit.window import _recent_trouble
 from ..models import MachineNumbers, StateMachine
 from ..analysis import monthly_cost
-from .frame import _machine_face
+from .frame import _machine_days, _machine_face
 from .widgets import _Line
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
 _MACHINE_COLUMNS = (
     ("name", "State machine", "Sort by name"),
+    ("trend", "Last 7 days", "Executions a day, the failed part in red. Sort by the ones that failed in the last "
+     "2 days"),
     ("started", "Executions", "Sort by executions in the last 7 days"),
     ("unsuccessful", "Didn't succeed", "Sort by the share of executions that didn't succeed"),
     ("duration", "Avg run", "Sort by the average run time"),
@@ -104,6 +107,8 @@ def _column_value(line: _MachineLine, column: str) -> tuple[Any, ...]:
         return (_NO_VALUE, _NO_VALUE)
     if column == "started":
         return (float(numbers.started),)
+    if column == "trend":
+        return _recent_trouble(_machine_days(numbers))
     if column == "duration":
         return (numbers.avg_ms if numbers.avg_ms is not None else _NO_VALUE,)
     return (numbers.failure_rate, float(numbers.unsuccessful))

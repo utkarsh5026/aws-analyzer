@@ -13,10 +13,11 @@ from ..._kit.blocks import _Findings, _Note, _Title
 from ..._kit.text import _esc, search_rank
 from ..._kit.window import _class_if
 
+from ..._kit.window import _recent_trouble
 from ..models import Api, ApiNumbers
 from ..analysis import monthly_cost
 from ..view import _auth_cell
-from .frame import _api_face, _api_tone
+from .frame import _api_days, _api_face, _api_tone
 from .widgets import _Line
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 _API_COLUMNS = (
     ("name", "API", "Sort by name"),
+    ("trend", "Last 7 days", "Requests a day, the 5xx part in red. Sort by the 5xx errors in the last 2 days"),
     ("requests", "Requests", "Sort by requests in the last 7 days"),
     ("errors", "5xx", "Sort by the share of calls that got a server error"),
     ("p95", "p95", "Sort by how long the slowest 5% of calls take"),
@@ -103,6 +105,8 @@ def _column_value(line: _ApiLine, column: str) -> tuple[Any, ...]:
         return (_NO_VALUE, _NO_VALUE)
     if column == "requests":
         return (float(numbers.requests),)
+    if column == "trend":
+        return _recent_trouble(_api_days(numbers))
     if column == "p95":
         return (numbers.p95_ms if numbers.p95_ms is not None else _NO_VALUE,)
     return (numbers.rate_5xx, float(numbers.errors_5xx))

@@ -25,7 +25,7 @@ from ..analysis.live import (
     LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, ran_lately, running_for, timeout_warning,
 )
 from .frame import _run_clock
-from .functions import _trend_html
+from ..._kit.window import _day_bars_html
 from .logs import _run_body, _run_face, _run_summary
 from .widgets import _Row, _RunRow
 
@@ -161,7 +161,7 @@ def _live_face(item: LiveFunction, now: datetime, multi: bool) -> str:
         about = f"{_elapsed(running_for(newest, now))} into a run · {_last_said(newest)}"
         about_tone = "warn" if timeout_warning(newest, fn, now) else ""
     badge = (f'<span class="lvb">{len(going)} running</span>' if going else '<span class="lvb q">idle</span>')
-    spark = _trend_html(list(zip(act.calls, act.errors))) if act is not None else "-"
+    spark = _day_bars_html(list(zip(act.calls, act.errors))) if act is not None else "-"
     calls = act.total_calls if act is not None else None
     failed = act.total_errors if act is not None else None
     region = f'<span class="rg">{_esc(fn.region)}</span>' if multi else ""
