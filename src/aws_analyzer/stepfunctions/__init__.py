@@ -37,7 +37,7 @@ Quick start
 from __future__ import annotations
 
 from .prices import STEPFUNCTIONS_PRICES
-from .helpers import execution_name, lambda_name, machine_name, parse_execution_ref, short_cause
+from .helpers import console_url, execution_name, lambda_name, machine_name, parse_execution_ref, short_cause
 from .models import (
     Attempt, Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview,
     StateDef, StateMachine, StepRun,
@@ -81,6 +81,7 @@ __all__ = [
     "WaterfallRow",
     "can_redrive",
     "catch_label",
+    "console_url",
     "definition_findings",
     "execution_findings",
     "execution_name",
