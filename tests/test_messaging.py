@@ -52,6 +52,7 @@ from aws_analyzer.messaging.explorer.frame import _window_text
 from aws_analyzer.messaging.style import _render_html
 from aws_analyzer.messaging.analysis.layout import MOST_BRANCHES, map_layout
 from aws_analyzer.messaging.models import Hop
+from aws_analyzer._kit.window import _recent_trouble
 
 from fake_messaging import ACCOUNT, REGION, seed
 from aws_analyzer import set_theme
@@ -465,6 +466,14 @@ def test_explorer_everything_tab_searches_filters_and_sorts(core):
     assert x.items_shown[0].name == "email-jobs"
     x.column_buttons["name"].click()
     assert x.items_shown[0].name == "audit-events"
+    x.column_buttons["trend"].click()
+    recent = [_recent_trouble(item.days) for item in x.items_shown]
+    assert recent == sorted(recent, reverse=True) and recent[0][0] > 0
+    assert all(len(item.days) == 7 for item in x.items_shown if item.traffic)
+    dlq = next(item for item in x.items_shown if item.name == "orders-dlq")
+    assert sum(failed for _, failed in dlq.days) == sum(came for came, _ in dlq.days) == dlq.traffic
+    face = next(row for row in x._item_rows if row.key.endswith(":orders-events")).face.value
+    assert '<span class="tr">' in face and "<b style=" in face
     next(row for row in x._item_rows if row.key.endswith(":orders")).button.click()
     assert x._tab == "overview" and repr(x).startswith("MessagingExplorer(orders)")
     assert "a message not handled by then is deleted" in plain(x.item_view.value)

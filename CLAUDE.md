@@ -312,7 +312,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   "+N more" box), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3
   minutes"). `blocks.py`'s `_HopMap` draws `map_layout` as SVG in `follow()` and the Map tab (nothing in text, where
   the table of hops says it).
-  `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`.
+  `metrics.py` is the CloudWatch mixin: it reads every metric a point a day (CloudWatch bills a metric, not its
+  points), so the totals are the days added up and every queue, topic and rule has its `daily` line, which the
+  Everything tab's trend column draws. The View's tables are `view/tables.py`.
 - `messaging`'s explorer window, `MessagingExplorer` (`messaging/explorer/`: `window.py` with `explore()`, composed of
   `_EverythingTab` (`items.py`: `region_items` turns the overview into `_Item`s, a line each, with its findings;
   chips, search and columns as the OpenSearch explorer's Domains tab; a dead-letter queue holding messages sorts and
@@ -602,7 +604,8 @@ How the View layer works:
   (`_answer_lines` leaves code and tables unwrapped).
 - **The windows' kit** (`_kit/window.py`) is what the four windows share, written once: `_css_height`,
   `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_day_bars_html` / `_day_bars_css` (a list's trend
-  column, a bar a day with the bad part red: the Lambda, Step Functions and API Gateway lists and Lambda's Live tab;
+  column, a bar a day with the bad part red: the Lambda, Step Functions, API Gateway and Messaging lists and Lambda's
+  Live tab;
   `_recent_trouble` is what it sorts by), `_icon_url` (a line drawing as the CSS `url()` every
   window masks its icons with), `_row_button` (a line whose whole width is the click target: a full-width button under
   its HTML face, in a box), `_for_window(blocks, words)` and `_terminal_theme(roots, prefix)`, the chat windows' look

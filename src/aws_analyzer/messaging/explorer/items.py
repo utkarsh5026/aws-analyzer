@@ -6,12 +6,12 @@ region's cards and findings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..._kit.blocks import _Next, _Note, _Table, _Text
 from ..._kit.text import _esc, search_rank
-from ..._kit.window import _class_if
+from ..._kit.window import _class_if, _recent_trouble
 
 from ..analysis import (
     describe_pattern, queue_findings, queue_report_from, rule_findings, rule_report_from, topic_findings,
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 _ITEM_COLUMNS = (
     ("name", "Queue, topic or rule", "Sort by name"),
+    ("trend", "Last 7 days", "What came in each day, the failed part in red (a dead-letter queue's all of it). Sort "
+     "by what failed in the last 2 days"),
     ("traffic", "In", "Sort by what came in over the window: sent to a queue, published to a topic, matched by a rule"),
     ("failed", "Failed", "Sort by the deliveries that failed (topics and rules)"),
     ("waiting", "Waiting", "Sort by the messages waiting in a queue"),
@@ -67,7 +69,8 @@ Finding = tuple[str, str]
 class _Item:
     """
     A line of the Everything tab, and what the window opens: kind ('queue', 'dlq', 'topic' or 'rule'), its name as
-    reports name it, its ARN, a few words about it, its numbers and its findings (warnings counted as problems).
+    reports name it, its ARN, a few words about it, its numbers and its findings (warnings counted as problems), and
+    what came in each day with the part that failed (its trend column).
     """
 
     kind: str
@@ -78,6 +81,7 @@ class _Item:
     failed: int | None
     waiting: int | None
     findings: list[Finding]
+    days: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -101,6 +105,23 @@ class _Item:
         return "warn" if self.problems else "ok"
 
 
+def _queue_days(daily: list[tuple[Any, ...]], *, is_dlq: bool) -> list[tuple[float, float]]:
+    """
+    A queue's messages sent each day, all of them failed ones for a dead-letter queue, since only failures land there.
+    """
+    days = []
+    for _day, sent, _deleted in daily:
+        days.append((float(sent), float(sent) if is_dlq else 0.0))
+    return days
+
+
+def _failed_days(daily: list[tuple[Any, ...]]) -> list[tuple[float, float]]:
+    """
+    A topic's or rule's (day, in, failed) lines as (in, failed) per day.
+    """
+    return [(float(came_in), float(failed)) for _day, came_in, failed in daily]
+
+
 def _queue_item(overview: Overview, queue: Queue, prices: dict[str, float]) -> _Item:
     numbers = overview.queue_numbers.get(queue.arn)
     readers = ", ".join(c.function for c in queue.consumers)
@@ -110,8 +131,10 @@ def _queue_item(overview: Overview, queue: Queue, prices: dict[str, float]) -> _
     if oldest:
         note += f" · oldest {seconds_words(oldest)}"
     findings = queue_findings(queue_report_from(overview, queue), prices)
+    days = _queue_days(numbers.daily, is_dlq=queue.is_dlq) if numbers else []
     return _Item("dlq" if queue.is_dlq else "queue", queue.name, queue.arn, note,
-                 numbers.sent if numbers else None, None, queue.messages if queue.is_dlq else queue.visible, findings)
+                 numbers.sent if numbers else None, None, queue.messages if queue.is_dlq else queue.visible, findings,
+                 days)
 
 
 def _topic_item(overview: Overview, topic: Topic, prices: dict[str, float]) -> _Item:
@@ -120,7 +143,7 @@ def _topic_item(overview: Overview, topic: Topic, prices: dict[str, float]) -> _
     more = f" and {len(topic.subscriptions) - 3} more" if len(topic.subscriptions) > 3 else ""
     findings = topic_findings(topic_report_from(overview, topic), prices)
     return _Item("topic", topic.name, topic.arn, f"to {targets}{more}", numbers.published if numbers else None,
-                 numbers.failed if numbers else None, None, findings)
+                 numbers.failed if numbers else None, None, findings, _failed_days(numbers.daily) if numbers else [])
 
 
 def _rule_item(overview: Overview, rule: Rule) -> _Item:
@@ -129,7 +152,7 @@ def _rule_item(overview: Overview, rule: Rule) -> _Item:
     state = "" if rule.is_enabled else "off · "
     findings = rule_findings(rule_report_from(overview, rule))
     return _Item("rule", rule.label, rule.arn, f"{state}{matches}", numbers.matched if numbers else None,
-                 numbers.failed if numbers else None, None, findings)
+                 numbers.failed if numbers else None, None, findings, _failed_days(numbers.daily) if numbers else [])
 
 
 def region_items(overview: Overview, prices: dict[str, float]) -> list[_Item]:
@@ -159,6 +182,8 @@ def _column_value(item: _Item, column: str) -> tuple[Any, ...]:
         return (item.name.lower(),)
     if column == "problems":
         return (_TONE_RANK[item.tone], item.problems)
+    if column == "trend":
+        return _recent_trouble(item.days)
     value = getattr(item, column)
     return (_NO_VALUE if value is None else value,)
 
@@ -289,7 +314,7 @@ class _EverythingTab:
             row.key = item.key
             self._set(row.face, _item_face(kind=item.kind, name=item.name, note=item.note, tone=item.tone,
                                            traffic=item.traffic, failed=item.failed, waiting=item.waiting,
-                                           problems=item.problems, words=words))
+                                           problems=item.problems, days=item.days, words=words))
             _class_if(row.box, "mgx-on", item.key == self.item_key)
         rows = [row.box for row in self._item_rows[:len(items)]]
         self.items_box.children = [self.item_head, *rows, *self._nothing_listed(items)]

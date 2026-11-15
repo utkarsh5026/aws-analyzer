@@ -11,7 +11,7 @@ import re
 from ..._kit.fmt import _count
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
-from ..._kit.window import _icon_url, _terminal_theme
+from ..._kit.window import _day_bars_css, _day_bars_html, _icon_url, _terminal_theme
 
 from ..models import Hop
 
@@ -294,13 +294,13 @@ body[class*=vscode-] .mgx-app.mgx-app .mgx-page{height:620px}
 .mgx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .mgx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--mx-tint-2);margin-left:6px;vertical-align:1px}
 .mgx-app .tag.x{background:rgba(219,39,119,.12);color:var(--mx-accent-2)}
-.mgx-app.mgx-app .mgx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.8fr) repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--mx-line)}
+.mgx-app.mgx-app .mgx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 104px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--mx-line)}
 .mgx-app.mgx-app .mgx-lhead>*{margin:0;min-width:0}
 .mgx-app.mgx-app button.mgx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mgx-app.mgx-app button.mgx-col.mgx-c-name{text-align:left;justify-content:flex-start}
 .mgx-app.mgx-app button.mgx-col:hover:enabled{background:transparent;opacity:1;color:var(--mx-accent)}
 .mgx-app.mgx-app button.mgx-col.mgx-on{opacity:1;color:var(--mx-accent)}
-.mgx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.8fr) repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
+.mgx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 104px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .mgx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .mgx-app .mr .num.bad{color:var(--mx-ink-bad);font-weight:650}
 .mgx-app .mr .num.warn{color:var(--mx-ink-warn);font-weight:650}
@@ -342,7 +342,8 @@ _OWN_CSS = """
 .mgx-app.mgx-app button.mgx-tab.mgx-onair::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--mx-bad);flex:0 0 auto}
 """
 
-_EXPLORER_CSS = "<style>\n" + _BASE_CSS + _OWN_CSS + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
+_EXPLORER_CSS = ("<style>\n" + _BASE_CSS + _OWN_CSS + _day_bars_css("mgx-app", bar="var(--mx-accent)", bad="var(--mx-ink-bad)")
+                 + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>")
 
 
 _IN_WINDOW = {
@@ -390,17 +391,17 @@ def _number_cell(value: int | None, tone: str = "") -> str:
 
 
 def _item_face(*, kind: str, name: str, note: str, tone: str, traffic: int | None, failed: int | None,  # noqa: PLR0913
-               waiting: int | None, problems: int, words: list[str]) -> str:
+               waiting: int | None, problems: int, days: list[tuple[float, float]], words: list[str]) -> str:
     """
     A queue's, topic's or rule's line in the Everything tab: a dot for how it is, its name and kind, what it is in a
-    few words, then what came in over the window (sent, published or matched), what failed, how many messages wait,
-    and its problems.
+    few words, a bar a day of what came in (the failed part red), then what came in over the window (sent, published
+    or matched), what failed, how many messages wait, and its problems.
     """
     failed_tone = "bad" if failed else ""
     waiting_tone = "bad" if kind == "dlq" and waiting else ""
     return (f'<div class="mr"><span class="dot {tone}"></span><div class="em"><div class="en">'
             f'{_marked(name, words)}{_tag(kind)}</div><div class="ef">{_esc(note)}</div></div>'
-            f'{_number_cell(traffic)}{_number_cell(failed, failed_tone)}{_number_cell(waiting, waiting_tone)}'
+            f'<span class="num">{_day_bars_html(days)}</span>{_number_cell(traffic)}{_number_cell(failed, failed_tone)}{_number_cell(waiting, waiting_tone)}'
             f'<span class="num {"warn" if problems else ""}">{problems:,}</span></div>')
 
 
