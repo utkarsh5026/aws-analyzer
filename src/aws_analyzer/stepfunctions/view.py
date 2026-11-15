@@ -17,7 +17,10 @@ from .._kit.text import _clip
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import STATUS_TONES, STATUS_WORDS, execution_ref, short_cause
-from .models import ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine, StepRun
+from .models import (
+    ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine, StateTiming, StepRun,
+    TimingReport,
+)
 from .analysis import (
     catch_label, execution_findings, failure_findings, logging_findings, machine_findings, mermaid, monthly_cost,
     numbers_findings, overview_findings, resource_label, retry_label, transitions_per_execution,
@@ -25,9 +28,10 @@ from .analysis import (
 from .analysis.cost import free_tier_note
 from .analysis.findings import lambda_logs_call
 from .analysis.express import logging_gaps
-from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks
+from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, timing_marks
+from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
-from .analyzer import StepFunctionsAnalyzer
+from .analyzer import TIMING_EVENTS, TIMING_SAMPLE, StepFunctionsAnalyzer
 from .blocks import _FlowGraph, _Story, _Waterfall, _payload_block
 from .style import _render_html
 
@@ -83,6 +87,32 @@ def _pretty_json(text: str) -> str:
 
 def _state_label(name: str, depth: int) -> str:
     return f"{'    ' * depth}{'↳ ' if depth else ''}{name}"
+
+
+def _timing_row(timing: StateTiming) -> list[Any]:
+    """
+    A state's line in the timings table: its runs (and how many an execution, when it runs more than once in one),
+    median, longest, share of the time and tries a run, the tries toned when it retries.
+    """
+    per_execution = timing.runs / max(1, timing.executions)
+    runs = f"{timing.runs:,}" + (f" ({per_execution:.3g} an execution)" if per_execution > 1 else "")
+    tries: Any = "-"
+    if timing.tries_per_run is not None:
+        tries = _Tone(f"{timing.tries_per_run:.2f}", "warn") if timing.retried_runs else f"{timing.tries_per_run:.2f}"
+    share = f"{timing.share:.0%}" if timing.share is not None else "-"
+    return [_state_label(timing.name, timing.depth), runs, took_text(timing.median), took_text(timing.longest), share,
+            tries]
+
+
+def _timing_sample(report: TimingReport) -> str:
+    """
+    Which executions the timings come from: 'the newest 20 succeeded executions since ...', or all there were.
+    """
+    read = len(report.executions)
+    since = f"since {_fmt_dt(report.since, zone=True)}"
+    if read == report.asked:
+        return f"the newest {read:,} succeeded executions {since}"
+    return f"{_plural(read, 'succeeded execution')} {since}, all there were"
 
 
 def _offset(step: StepRun, detail: ExecutionDetail) -> str:
@@ -427,17 +457,19 @@ class StepFunctionsView(_BaseView):
                       sortable=False)
 
     @_friendly_errors
-    def graph(self, name: str, *, execution: str | None = None, failures: Any = None) -> None:
+    def graph(self, name: str, *, execution: str | None = None, failures: Any = None, timings: Any = None) -> None:
         """
         How a state machine flows, drawn as a graph: a box per state (the states inside a Map or Parallel listed
         in it), an arrow per transition, dashed where an error goes. execution='ord-7f3a' colours the path that
         execution took (green ran, red failed, dashed not reached, each with its time and tries); failures='7d'
-        shades the states where executions stopped. Then every state with where it goes next, and the flow as
-        Mermaid to paste into a Markdown cell.
+        shades the states where executions stopped; timings=True shades where the time goes over the newest 20
+        executions that succeeded (timings=50 for more), with each state's median, longest, share and tries a run,
+        and which states retry often. Then every state with where it goes next, and the flow as Mermaid to paste
+        into a Markdown cell.
         """
         machine = self.core.state_machine(name)
         layout = flow_layout(machine)
-        marks = FlowMarks()
+        marks, timing = FlowMarks(), None
         if execution is not None:
             with self._progress("Reading the execution", unit="events"):
                 detail = self.core.execution(execution, machine=machine.arn, logs=False)
@@ -446,9 +478,15 @@ class StepFunctionsView(_BaseView):
             with self._progress("Reading failed executions", unit="executions") as tick:
                 report = self.core.failures(machine.arn, since=failures, progress=tick)
             marks = failure_marks(layout, report)
-        self._show(self._graph_blocks(machine, marks))
+        elif timings is not None and timings is not False:
+            sample = TIMING_SAMPLE if timings is True else timings
+            with self._progress("Reading succeeded executions", unit="executions") as tick:
+                timing = self.core.timings(machine.arn, n=sample, progress=tick)
+            marks = timing_marks(layout, timing)
+        self._show(self._graph_blocks(machine, marks, timing))
 
-    def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None) -> list[Any]:
+    def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None,
+                      timing: TimingReport | None = None) -> list[Any]:
         top = sum(1 for s in machine.states if s.depth == 0)
         nested = len(machine.states) - top
         sub = f"starts at {machine.start_at} · {_plural(top, 'state')}" + (
@@ -457,14 +495,52 @@ class StepFunctionsView(_BaseView):
         if machine.has_executions:
             steps.append((_call("graph", machine.name, failures="7d"), "where its executions stop, in the last 7 "
                                                                        "days"))
-        return [
-            _Title(f"How {machine.name} flows", sub),
-            _FlowGraph(flow_layout(machine), marks or FlowMarks()),
+        if machine.has_executions and timing is None:
+            steps.append((_call("graph", machine.name, timings=True), "which states take the time, and which retry"))
+        blocks: list[Any] = [_Title(f"How {machine.name} flows", sub)]
+        if timing is not None:
+            blocks.append(self._timing_findings(timing))
+        blocks.append(_FlowGraph(flow_layout(machine), marks or FlowMarks()))
+        if timing is not None:
+            blocks += self._timing_blocks(timing)
+        return blocks + [
             self._states_table(machine, title="Each state, what it does, and where it goes next"),
             _Text(mermaid(machine), title="As a Mermaid flowchart: paste it into a Markdown cell (```mermaid) or "
                                           "mermaid.live", code=True, collapsed=True),
-            _Next(steps),
+            _Next(steps[:3]),
         ]
+
+    def _timing_findings(self, report: TimingReport) -> _Findings:
+        return _Findings(timing_findings(report, self.core.prices),
+                         empty="No state retries often, and none takes most of the time: there's nothing that "
+                               "stands out to speed up.")
+
+    def _timing_blocks(self, report: TimingReport) -> list[Any]:
+        """
+        Each state's time over the executions read, as a table, and where those numbers come from; or why there
+        are none.
+        """
+        machine = report.machine
+        if not report.executions:
+            why = (report.note or f"No execution of {machine.name} succeeded since "
+                                  f"{_fmt_dt(report.since, zone=True)}, and timings read the succeeded ones.")
+            return [_Note(why, "warn" if report.note else "info")]
+        rows = [_timing_row(timing) for timing in report.states]
+        blocks: list[Any] = [_Table(["State", "Runs", "Median", "Longest", "Share of time", "Tries a run"], rows,
+                                    title=f"Each state's time, from {_timing_sample(report)}", max_rows=0)]
+        how = ("one GetExecutionHistory each, which is free but rate-limited, so the sample stays small"
+               if report.source == "history" else "read from its log group")
+        blocks.append(_Note(f"From {_timing_sample(report)}: {how}. A run lasts from entering the state to leaving "
+                            f"it (a Map's or Parallel's includes everything inside it), and a share is of the "
+                            f"{_duration(report.total)} those executions took in all. "
+                            f"{_call('graph', machine.name, timings=50)} reads more."))
+        if report.partial:
+            histories = "1 history" if report.partial == 1 else f"{report.partial:,} histories"
+            blocks.append(_Note(f"{histories} had more than {TIMING_EVENTS:,} events and were read in part: their "
+                                "later states are missing.", "warn"))
+        if report.note:
+            blocks.append(_Note(report.note))
+        return blocks
 
     @_friendly_errors
     def executions(self, name: str, *, status: str | None = None, since: Any = "7d", n: Any = 25) -> None:

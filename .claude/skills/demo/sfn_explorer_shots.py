@@ -10,7 +10,7 @@ The explorer is ipywidgets, which only draw in a browser connected to a kernel, 
 notebook that opens the window on demo.py's state machines (order-pipeline, its executions, and the Lambda functions
 ord-7f3a called, in moto), then uses it the way a person would: reads the State machines tab, opens the Executions tab
 and clicks ord-7f3a (its waterfall, then its log with every Lambda run's lines), then opens the Graph tab with
-LoadOrders picked. Each
+LoadOrders picked, and colours it by where the time goes, with ChargeCard picked. Each
 figure is the window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp,
 and the height= of both its images is set in docs/stepfunctions_explorer.md, by shots.py's set_height.
 
@@ -41,7 +41,7 @@ import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-log", "sfn-explorer-graph")
+FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-log", "sfn-explorer-graph", "sfn-explorer-timing")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -131,6 +131,12 @@ def shoot_theme(page: Any, lab: Lab, theme: str, wanted: list[str], out: Path) -
     page.locator(".sfx-app .sfx-states .sfx-row", has_text="LoadOrders").locator("button.sfx-row-b").first.click()
     settled()
     shot("sfn-explorer-graph")
+    page.locator(".sfx-app .sfx-graph button", has_text="Where time goes").first.click()
+    page.wait_for_selector(".sfx-app .fgk", timeout=60_000)
+    settled()
+    page.locator(".sfx-app .sfx-states .sfx-row", has_text="ChargeCard").locator("button.sfx-row-b").first.click()
+    settled()
+    shot("sfn-explorer-timing")
     return taken
 
 

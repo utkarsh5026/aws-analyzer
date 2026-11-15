@@ -91,6 +91,12 @@ body[data-jp-theme-light="false"] .sfn .story .sl.error{color:#f87171}
 .sfn .fgk i.m-h1{background:rgba(245,158,11,.10);border-color:#f59e0b}
 .sfn .fgk i.m-h2{background:rgba(249,115,22,.16);border-color:#f97316}
 .sfn .fgk i.m-h3{background:rgba(239,68,68,.18);border-color:#ef4444}
+.sfn .fn.m-t1 rect{fill:rgba(217,119,6,.06);stroke:rgba(217,119,6,.55)}
+.sfn .fn.m-t2 rect{fill:rgba(217,119,6,.18);stroke:#d97706}
+.sfn .fn.m-t3 rect{fill:rgba(217,119,6,.34);stroke:#b45309;stroke-width:2}
+.sfn .fgk i.m-t1{background:rgba(217,119,6,.06);border-color:rgba(217,119,6,.55)}
+.sfn .fgk i.m-t2{background:rgba(217,119,6,.18);border-color:#d97706}
+.sfn .fgk i.m-t3{background:rgba(217,119,6,.34);border-color:#b45309}
 .sfn .fn.sel rect{stroke:#2563eb;stroke-width:3}
 .sfn .fstart{fill:currentColor;opacity:.75}
 .sfn .fend{fill:none;stroke:currentColor;stroke-width:2;opacity:.75}

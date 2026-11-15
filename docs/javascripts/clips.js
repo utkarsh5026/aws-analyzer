@@ -1702,6 +1702,33 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "sfn-graph-timings": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.graph(\"order-pipeline\", timings=True): sfn.graph(\"order-pipeline\", timings=True): ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.4,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.graph(\"order-pipeline\", timings=True)",
+    "outputs": [
+     {
+      "img": "sfn-graph-timings",
+      "w": 1476,
+      "h": 2580
+     }
+    ],
+    "captions": [
+     [
+      3.48,
+      "ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes."
+     ]
+    ]
+   }
+  ]
+ },
  "athena-overview": {
   "notebook": "athena.ipynb",
   "summary": "athena.overview(): athena.overview(): one dashboard query is 90% of the bill, two tables point at nothing, and two crawlers stopped.",
@@ -4199,6 +4226,37 @@ window.AA_CLIPS = {
      [
       2.7,
       "ord-7f3a: two throttled tries on ChargeCard, then LoadOrders fails with <code>KeyError</code>."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-timing": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): The Graph tab on Where time goes: ProcessItems takes most of the time, and ChargeCard retries when Lambda throttles it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-timing",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Graph tab on Where time goes: ProcessItems takes most of the time, and ChargeCard retries when Lambda throttles it."
      ]
     ]
    }

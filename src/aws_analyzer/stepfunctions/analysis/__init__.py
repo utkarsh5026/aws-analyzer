@@ -1,7 +1,7 @@
 """
 Step Functions' pure analysis, with no AWS calls: definitions read into states, histories read into the steps an
-execution took, failures grouped by cause, cost estimates and the findings. Run them on your own definitions and
-GetExecutionHistory answers.
+execution took, failures grouped by cause, where the time goes over several executions, cost estimates and the
+findings. Run them on your own definitions and GetExecutionHistory answers.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from .findings import (
     definition_findings, execution_findings, failure_findings, idle_findings, logging_findings, machine_findings,
     numbers_findings, overview_findings,
 )
-from .layout import FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks
+from .layout import FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, timing_marks
 from .history import fill_detail, request_id_of_cause, request_id_of_output
+from .timing import state_timings, timing_findings, timing_report
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
@@ -55,7 +56,11 @@ __all__ = [
     "request_id_of_output",
     "resource_label",
     "retry_label",
+    "state_timings",
     "step_lines",
+    "timing_findings",
+    "timing_marks",
+    "timing_report",
     "transitions_per_execution",
     "unbounded_waits",
     "unretried_lambda_states",

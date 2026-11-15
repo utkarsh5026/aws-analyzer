@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from .._kit.errors import _Hint
-from .._kit.fmt import _utcnow
+from .._kit.fmt import _fmt_dt, _utcnow
 
 from .helpers import FAILED_STATUSES, arn_region
 from .models import Execution, ExecutionDetail, ExecutionPage, StateMachine
@@ -165,3 +165,24 @@ class _ExpressReads:
             return fill_detail(ExecutionDetail(execution, machine=machine, source="logs"), whole.events)
 
         return self._map(read, chosen), cut
+
+    def _express_timings(self: StepFunctionsAnalyzer, machine: StateMachine, start: datetime,
+                         asked: int) -> tuple[list[ExecutionDetail], str]:
+        """
+        The newest `asked` Express executions that succeeded since `start`, each read from its lines (every event's
+        time is on its line), and what the log group can't tell: at ERROR level no succeeded execution is logged.
+        """
+        group = self._express_group(machine)
+        messages, covered_from = self._read_lines(group, start, _utcnow())
+        logs_everything = machine.log_level == "ALL"
+        details = []
+        for run in group_log_lines(messages):
+            execution = execution_of(run, logs_everything=logs_everything)
+            if execution.status != "SUCCEEDED":
+                continue
+            details.append(fill_detail(ExecutionDetail(execution, machine=machine, source="logs"), run.events))
+            if len(details) >= asked:
+                break
+        cut = (f" Its log group had more lines than are read at once, so only executions since "
+               f"{_fmt_dt(covered_from, zone=True)} were looked at.") if covered_from is not None else ""
+        return details, (logging_gaps(machine) + cut).strip()

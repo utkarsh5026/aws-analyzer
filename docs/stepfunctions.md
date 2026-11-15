@@ -66,7 +66,7 @@ Five calls in a notebook, from every state machine to the path an execution took
 
 ## Start here { #tour }
 
-Five questions people bring to a workflow, and the one line that answers each. None of them change anything.
+Six questions people bring to a workflow, and the one line that answers each. None of them change anything.
 { .gist }
 
 <div class="quick" markdown>
@@ -82,6 +82,7 @@ One workflow
 
 -   [What happened in this execution?](#execution) `sfn.execution("order-pipeline/ord-7f3a")`{ .long }
 -   [What does this workflow do, and what could go wrong?](#state-machine) `sfn.state_machine("order-pipeline")`{ .long }
+-   [Which state is slow, and which one retries?](#timings) `sfn.graph("order-pipeline", timings=True)`{ .long }
 
 Rather click?
 { .qgroup }
@@ -192,6 +193,29 @@ The findings read the definition: a Lambda task with no Retry for Lambda's own e
 `sfn.graph("order-pipeline", execution="ord-7f3a")`: the path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).
 ///
 
+## Where the time goes { #timings }
+
+`graph(timings=True)` reads the newest 20 executions that succeeded and shades each state by its share of their time, so you see which state is slow by habit and which one retries.
+{ .gist }
+
+```python
+sfn.graph("order-pipeline", timings=True)           # the newest 20 succeeded executions
+sfn.graph("order-pipeline", timings=50)             # more of them, for a steadier median
+```
+
+One execution's waterfall can be an outlier; twenty show a habit. Each state gets its median and longest run, its share of the executions' time and its tries a run. A state inside a Map gets how many times it runs an execution instead of a share, since its runs can overlap.
+
+The findings name the state that takes most of the time and where to look in it (a Map's slowest inner state, a Lambda task's function), a state whose runs vary a lot with the execution that shows the slow one, and every state that retries in one run out of ten or more. A retry waits its back-off, and on a Standard workflow it's another state transition on the bill, so that finding prices it at your pace from CloudWatch and says what to change: for a throttled Lambda, reserved concurrency or a lower `MaxConcurrency`.
+
+![graph('order-pipeline', timings=True): findings that ChargeCard retries after Lambda throttles it, priced a month, that ProcessItems takes 69% of the time and ResizeImage inside it the most, and that LoadOrders runs unevenly; the flow with each box shaded by its share of the time; and a table of every state's runs, median, longest, share and tries a run](images/sfn-graph-timings-light.webp#only-light){ width="984" height="1720" loading=lazy }
+![graph('order-pipeline', timings=True): findings that ChargeCard retries after Lambda throttles it, priced a month, that ProcessItems takes 69% of the time and ResizeImage inside it the most, and that LoadOrders runs unevenly; the flow with each box shaded by its share of the time; and a table of every state's runs, median, longest, share and tries a run](images/sfn-graph-timings-dark.webp#only-dark){ width="984" height="1720" loading=lazy }
+/// caption
+`sfn.graph("order-pipeline", timings=True)`: ChargeCard retries when Lambda throttles it, and ProcessItems, the Map of ResizeImage runs, is where the time goes.
+///
+
+!!! tip "Worth knowing"
+    Each execution's history is one `GetExecutionHistory` call. Reading it costs nothing, but AWS rate-limits it, so the sample stays small and the report says how many it read. An Express workflow's executions come from its log group, and only when it logs everything (`ALL`): at `ERROR` the succeeded ones leave no line.
+
 ## Explore by clicking { #explorer }
 
 `explore()` opens a window with every state machine; click one to read its executions, each with its waterfall and one log of what happened.
@@ -219,6 +243,7 @@ core.executions("order-pipeline", status="failed").to_df()
 detail = core.execution("order-pipeline/ord-7f3a")  # ExecutionDetail: .steps, .failed_step, .lambda_run
 detail.failed_step.request_id                       # the Lambda run behind the failure
 core.failures("order-pipeline").groups              # FailureGroup: state, error, count, newest, request_id
+core.timings("order-pipeline").to_df()              # per state: runs, median, longest, share, tries a run
 ```
 
 The analysis functions make no AWS calls, so they also work on a definition or a history you already have:
@@ -234,7 +259,7 @@ detail = fill_detail(ExecutionDetail(parse_execution(described)), history_events
 
 Costs are estimates at us-east-1 list prices (`STEPFUNCTIONS_PRICES`): $0.025 per 1,000 state transitions for Standard workflows, and for Express $1.00 per million executions plus $0.00001667 per GB-second at 64 MB, the least Express bills. A Standard execution is counted as one transition per top-level state; Map iterations add more, and the 4,000 free transitions a month aren't taken off. Pass your own prices with `StepFunctionsAnalyzer(prices={"transition": 0.0000275})`.
 
-`overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many it read. Executions, histories and Lambda logs cost nothing to read.
+`overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many it read. Executions, histories and Lambda logs cost nothing to read. A retry is a state transition too, so a state that retries often costs money as well as time: `graph(timings=True)` prices its retries.
 
 ## Permissions { #permissions }
 
@@ -303,7 +328,7 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 |---|---|
 | `overview(days=7)` | Every state machine: executions, how many didn't succeed, average run, cost, logging |
 | `state_machine(name, days=7)` | One state machine: its numbers, every state, what its definition risks, the definition |
-| `graph(name, execution=None, failures=None)` | The flow drawn as a graph, coloured by an execution's path or where executions stop, and Mermaid to paste |
+| `graph(name, execution=None, failures=None, timings=None)` | The flow drawn as a graph, coloured by an execution's path, where executions stop or where the time goes, and Mermaid to paste |
 | `executions(name, status=None, since="7d", n=25)` | Its latest executions, newest first |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | One execution step by step: its waterfall, and one log with every Lambda run's lines |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |

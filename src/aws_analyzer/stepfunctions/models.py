@@ -310,3 +310,72 @@ class Overview:
     numbers: dict[str, MachineNumbers] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     metrics_read: int = 0
+
+
+@dataclass
+class StateTiming:
+    """
+    One state's time over several executions: how many times it ran and in how many executions, the median and the
+    longest of its finished runs (seconds), the time all its runs took, its share of the executions' time (top-level
+    states only: a Map's inner runs can overlap), its tries (tasks only: tried_runs is how many runs had tries,
+    retried_runs how many took more than one), the most common error a retry followed, and the executions behind its
+    longest run and a retried one.
+    """
+
+    name: str
+    type: str
+    depth: int = 0
+    runs: int = 0
+    executions: int = 0
+    median: float | None = None
+    longest: float | None = None
+    total: float = 0.0
+    share: float | None = None
+    tries: int = 0
+    tried_runs: int = 0
+    retried_runs: int = 0
+    retry_error: str = ""
+    function: str = ""
+    slowest: Execution | None = None
+    retried_in: Execution | None = None
+
+    @property
+    def retries(self) -> int:
+        return self.tries - self.tried_runs
+
+    @property
+    def tries_per_run(self) -> float | None:
+        return self.tries / self.tried_runs if self.tried_runs else None
+
+
+@dataclass
+class TimingReport:
+    """
+    What timings() read: the newest `asked` succeeded executions since `since` (executions, newest first; fewer when
+    there weren't as many), each state's StateTiming in definition order, the executions' time added up, how many
+    histories were cut at the event limit (partial), where they came from ('history' or 'logs') and what the logs
+    can't tell (note), and the state machine's CloudWatch numbers for the cost of its retries.
+    """
+
+    machine: StateMachine
+    since: datetime
+    asked: int
+    executions: list[Execution] = field(default_factory=list)
+    states: list[StateTiming] = field(default_factory=list)
+    total: float = 0.0
+    partial: int = 0
+    source: str = "history"
+    note: str = ""
+    numbers: MachineNumbers | None = None
+
+    def state(self, name: str) -> StateTiming | None:
+        return next((s for s in self.states if s.name == name), None)
+
+    def to_df(self) -> Any:
+        pd = _require("pandas", "to_df()")
+        return pd.DataFrame([
+            {"state": s.name, "type": s.type, "depth": s.depth, "runs": s.runs, "executions": s.executions,
+             "median_seconds": s.median, "longest_seconds": s.longest, "total_seconds": s.total, "share": s.share,
+             "tries_per_run": s.tries_per_run, "retried_runs": s.retried_runs}
+            for s in self.states
+        ])
