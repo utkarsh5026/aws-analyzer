@@ -16,13 +16,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `x.focus` is the state machine, tab, time range and execution (its error, where it stopped) or state picked.
   - Answers' calls become buttons that open that execution or tab; `x.open(name, tab="failures")` does it too.
 
-- 🔀 **Step Functions: see what an execution returned** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🔀 **Step Functions: see what an execution returned** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - `execution()` and the explorer show a succeeded execution's output; inputs, outputs and errors fold out as a JSON tree.
   - The Graph tab lists the states inside a Map or Parallel to pick, with how often each ran and failed.
 
 ### Fixed
 
-- 🔀 **Step Functions explorer: the Executions list counts every failure** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🔀 **Step Functions explorer: the Executions list counts every failure** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - When a range holds more than 500 executions, the ones that didn't succeed are listed too, so the Failed chip matches the header.
   - The header's cards count the time range picked, and a line under the list says what it holds.
 
