@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Fixed
 
-- 🔀 **Step Functions explorer: room for the ✦ Ask drawer**
+- 🔀 **Step Functions explorer: room for the ✦ Ask drawer** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
   - With the drawer open, tabs show their icons and the open tab's name, and ✦ Ask stays in view.
   - The Executions and Graph tabs stack their panes instead of squeezing them; the graph stays full size.
   - The Graph tab's side pane grows with the window, so a state's Lambda lines read on one line each.
