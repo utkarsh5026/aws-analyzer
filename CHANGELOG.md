@@ -9,8 +9,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-15
+
 ### Added
 
+- 🔀 **Step Functions: which state is slow, and which retries** ([#250](https://github.com/utkarsh5026/aws-analyzer/pull/250))
+  - `graph(name, timings=True)` shades each state by its share of the time over the newest 20 succeeded executions.
+  - Findings price a state's retries (each is a state transition) and name the execution that shows one.
+  - The explorer's Graph tab has it too: pick **Where time goes** on the toggle.
 - 🔀 **Step Functions: executions a day, and when failures jumped** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
   - `state_machine()`, `failures()` and the explorer's Executions tab draw a bar a day, what didn't succeed in red.
   - A finding names the day failures jumped, with the `failures(name, since=)` call that reads just those.
@@ -41,10 +47,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🔀 **Step Functions: which state is slow, and which retries** ([#250](https://github.com/utkarsh5026/aws-analyzer/pull/250))
-  - `graph(name, timings=True)` shades each state by its share of the time over the newest 20 succeeded executions.
-  - Findings price a state's retries (each is a state transition) and name the execution that shows one.
-  - The explorer's Graph tab has it too: pick **Where time goes** on the toggle.
 - 🔀 **Step Functions explorer: ✦ Ask about the execution you have open** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
   - `sfn.explore(..., assistant=agent)` or `x.attach(agent)`: the agent's chat beside the tabs, about what's open.
   - `x.focus` is the state machine, tab, time range and execution (its error, where it stopped) or state picked.
@@ -1422,7 +1424,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...HEAD
+[0.60.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...v0.57.0
