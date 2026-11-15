@@ -315,13 +315,13 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .sfx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--sx-tint-2);margin-left:6px;vertical-align:1px}
 .sfx-app .tag.x{background:rgba(219,39,119,.12);color:var(--sx-accent-2)}
-.sfx-app.sfx-app .sfx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 104px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--sx-line)}
+.sfx-app.sfx-app .sfx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--sx-line)}
 .sfx-app.sfx-app .sfx-lhead>*{margin:0;min-width:0}
 .sfx-app.sfx-app button.sfx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sfx-app.sfx-app button.sfx-col.sfx-c-name{text-align:left;justify-content:flex-start}
 .sfx-app.sfx-app button.sfx-col:hover:enabled{background:transparent;opacity:1;color:var(--sx-accent)}
 .sfx-app.sfx-app button.sfx-col.sfx-on{opacity:1;color:var(--sx-accent)}
-.sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 104px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
+.sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .sfx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .sfx-app .mr .num.bad{color:var(--sx-ink-bad);font-weight:650}
 .sfx-app .mr .num.warn{color:var(--sx-ink-warn);font-weight:650}

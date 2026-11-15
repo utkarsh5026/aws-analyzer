@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 _ITEM_COLUMNS = (
     ("name", "Queue, topic or rule", "Sort by name"),
-    ("trend", "Last 7 days", "What came in each day, the failed part in red (a dead-letter queue's all of it). Sort "
+    ("trend", "7 days", "What came in each day, the failed part in red (a dead-letter queue's all of it). Sort "
      "by what failed in the last 2 days"),
     ("traffic", "In", "Sort by what came in over the window: sent to a queue, published to a topic, matched by a rule"),
     ("failed", "Failed", "Sort by the deliveries that failed (topics and rules)"),

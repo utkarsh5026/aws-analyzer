@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 _MACHINE_COLUMNS = (
     ("name", "State machine", "Sort by name"),
-    ("trend", "Last 7 days", "Executions a day, the failed part in red. Sort by the ones that failed in the last "
+    ("trend", "7 days", "Executions a day, the failed part in red. Sort by the ones that failed in the last "
      "2 days"),
     ("started", "Executions", "Sort by executions in the last 7 days"),
     ("unsuccessful", "Didn't succeed", "Sort by the share of executions that didn't succeed"),

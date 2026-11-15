@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 _API_COLUMNS = (
     ("name", "API", "Sort by name"),
-    ("trend", "Last 7 days", "Requests a day, the 5xx part in red. Sort by the 5xx errors in the last 2 days"),
+    ("trend", "7 days", "Requests a day, the 5xx part in red. Sort by the 5xx errors in the last 2 days"),
     ("requests", "Requests", "Sort by requests in the last 7 days"),
     ("errors", "5xx", "Sort by the share of calls that got a server error"),
     ("p95", "p95", "Sort by how long the slowest 5% of calls take"),

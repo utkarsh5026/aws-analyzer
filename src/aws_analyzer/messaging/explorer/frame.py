@@ -294,13 +294,13 @@ body[class*=vscode-] .mgx-app.mgx-app .mgx-page{height:620px}
 .mgx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .mgx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--mx-tint-2);margin-left:6px;vertical-align:1px}
 .mgx-app .tag.x{background:rgba(219,39,119,.12);color:var(--mx-accent-2)}
-.mgx-app.mgx-app .mgx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 104px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--mx-line)}
+.mgx-app.mgx-app .mgx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 64px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--mx-line)}
 .mgx-app.mgx-app .mgx-lhead>*{margin:0;min-width:0}
 .mgx-app.mgx-app button.mgx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mgx-app.mgx-app button.mgx-col.mgx-c-name{text-align:left;justify-content:flex-start}
 .mgx-app.mgx-app button.mgx-col:hover:enabled{background:transparent;opacity:1;color:var(--mx-accent)}
 .mgx-app.mgx-app button.mgx-col.mgx-on{opacity:1;color:var(--mx-accent)}
-.mgx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 104px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
+.mgx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.8fr) 64px repeat(4,minmax(80px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .mgx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .mgx-app .mr .num.bad{color:var(--mx-ink-bad);font-weight:650}
 .mgx-app .mr .num.warn{color:var(--mx-ink-warn);font-weight:650}
