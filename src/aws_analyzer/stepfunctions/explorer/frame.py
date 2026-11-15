@@ -343,7 +343,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
 .sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
 .sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
-.sfx-app.sfx-app .sfx-states{flex:0 1 44%;min-width:360px;max-width:560px;overflow:hidden auto}
+.sfx-app.sfx-app .sfx-states{flex:0 0 44%;min-width:360px;max-width:560px;overflow:hidden auto}
 @container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-graph{flex:1 1 100%!important;overflow:visible}.sfx-app.sfx-app .sfx-states{flex:1 1 100%;min-width:0;max-width:100%;height:auto;overflow:visible}}
 .sfx-app.sfx-app .sfx-states .sfx-rows{flex:0 0 auto;overflow:visible;max-height:none}
 .sfx-app.sfx-app .sfx-states .sfx-row{height:38px;margin:0}

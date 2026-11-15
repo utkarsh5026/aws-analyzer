@@ -799,7 +799,7 @@ def test_explorer_lays_out_by_the_room_its_pages_get(fakes):
     css = x.root.children[0].value
     assert ".sfx-main{container:sfx-main/inline-size}" in css
     assert "@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap" in css
-    assert ".sfx-states{flex:0 1 44%;min-width:360px;max-width:560px" in css
+    assert ".sfx-states{flex:0 0 44%;min-width:360px;max-width:560px" in css
     assert ".sfx-tabs button.sfx-assist{position:sticky;right:0" in css
     assert ".sfn .story{container-type:inline-size" in css and ".sfn .story .sx{grid-column:1/-1" in css
 
