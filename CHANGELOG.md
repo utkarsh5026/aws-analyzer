@@ -9,6 +9,22 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔎 **OpenSearch: vector memory drawn against the limit** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - `indexes()` and `index_info()` draw each index's graphs as one bar, what doesn't fit in red.
+- 🪣 **S3: what takes the space, as a treemap** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - `summary()` and the explorer's 📊 What's in here draw the folders as tiles sized by bytes.
+- 🏛️ **Athena: the bill drawn by query and by day** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - `overview()`, `expensive()` and the explorer's Costs tab show which query is most of the bill.
+  - When the costliest runs every day, it says it's likely a schedule.
+- ⚡ **Lambda: every run under the timeout, and memory against what it has** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - `performance()` and the Performance tab draw a dot per run and mark the memory size worth trying.
+- 📨 **SQS / SNS / EventBridge: the map as a diagram** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - `follow()` and the Map tab draw boxes and arrows, a problem outlined in red.
+- 🧰 **A "7 days" trend column in the explorers' lists** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
+  - The Step Functions, API Gateway and Messaging lists draw a bar a day, the failed part in red.
+
 ## [0.60.0] - 2026-11-15
 
 ### Added
