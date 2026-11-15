@@ -1596,12 +1596,12 @@ window.AA_CLIPS = {
  },
  "sfn-failures": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.failures(\"order-pipeline\"): sfn.failures(\"order-pipeline\"): most failures stop at LoadOrders with KeyError: 'customer_id', and the newest run's request_id is filled in.",
+  "summary": "sfn.failures(\"order-pipeline\"): sfn.failures(\"order-pipeline\"): most failures stop at LoadOrders with KeyError: 'customer_id', and they began 4 minutes after orders-etl version 2 went out.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.6,
+    "dur": 15.1,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.failures(\"order-pipeline\")",
@@ -1609,13 +1609,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 1671
+      "h": 2101
      }
     ],
     "captions": [
      [
       3.14,
-      "Most failures stop at LoadOrders with <code>KeyError: 'customer_id'</code>, and the newest run's <code>request_id</code> is filled in."
+      "Most failures stop at LoadOrders with <code>KeyError: 'customer_id'</code>, and they began 4 minutes after orders-etl version 2 went out."
      ]
     ]
    }
@@ -4140,7 +4140,7 @@ window.AA_CLIPS = {
  },
  "sfn-explorer-failures": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.explore(): The Failures tab: LoadOrders has failed with KeyError since three days ago. Its executions are listed under the redrive commands, each a click from its waterfall.",
+  "summary": "sfn.explore(): The Failures tab: LoadOrders has failed with KeyError since three days ago, starting 4 minutes after orders-etl version 2 went out.",
   "video": "",
   "scenes": [
    {
@@ -4163,11 +4163,7 @@ window.AA_CLIPS = {
      ],
      [
       2.7,
-      "The Failures tab: LoadOrders has failed with <code>KeyError</code> since three days ago."
-     ],
-     [
-      6.3,
-      "Its executions are listed under the redrive commands, each a click from its waterfall."
+      "The Failures tab: LoadOrders has failed with <code>KeyError</code> since three days ago, starting 4 minutes after orders-etl version 2 went out."
      ]
     ]
    }

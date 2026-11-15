@@ -294,10 +294,25 @@ class FailureGroup:
 
 
 @dataclass
+class Change:
+    """
+    Something that changed how a state machine runs, and when: a Lambda function it calls deployed (kind
+    'function': its code or settings changed, or a version published, detail 'version 7'), or its own definition
+    updated (kind 'definition'), as the definition an execution ran with says.
+    """
+
+    when: datetime
+    kind: str
+    name: str
+    detail: str = ""
+
+
+@dataclass
 class FailureReport:
     """
     What failures() read: the state machine, the failed executions in the window (newest first), the groups they
-    fall in, and how many histories were read.
+    fall in, how many histories were read, and what changed around them (changes, oldest first; change_errors
+    says what couldn't be read: 'lambda:<function>' or 'definition' -> error code).
     """
 
     machine: StateMachine
@@ -308,6 +323,8 @@ class FailureReport:
     truncated: bool = False
     numbers: MachineNumbers | None = None
     source: str = "history"
+    changes: list[Change] = field(default_factory=list)
+    change_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

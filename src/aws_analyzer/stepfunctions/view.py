@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import statistics
+from datetime import timedelta
 from typing import Any
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
@@ -33,8 +34,11 @@ from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, 
 from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
 from .analysis.trend import daily_counts, failure_jump
+from .analysis.suspects import (
+    SUSPECT_WINDOW, change_findings, change_verdict, group_change_findings, relevant_changes,
+)
 from .analyzer import TIMING_EVENTS, TIMING_SAMPLE, StepFunctionsAnalyzer
-from .blocks import _Days, _FlowGraph, _Story, _Waterfall, _payload_block
+from .blocks import _Changes, _Days, _FlowGraph, _Story, _Waterfall, _payload_block
 from .style import _render_html
 
 
@@ -96,6 +100,32 @@ def _days_blocks(numbers: MachineNumbers | None) -> list[Any]:
     if not days:
         return []
     return [_Days(days, failure_jump(days), title="Executions a day, the part that didn't succeed in red")]
+
+
+_TIMELINE_PAD = 0.06
+
+_SHORTEST_PAD = timedelta(minutes=30)
+
+
+def _changes_blocks(report: FailureReport, group: FailureGroup) -> list[Any]:
+    """
+    The changes around a kind of failure on one time axis with its failures, when anything it depends on changed
+    between SUSPECT_WINDOW before its first failure and its newest (none otherwise: its finding says so).
+    """
+    verdict = change_verdict(report, group)
+    if verdict is None:
+        return []
+    newest = group.newest.start if group.newest is not None and group.newest.start else verdict.first
+    shown = [c for c in relevant_changes(group, report.changes)
+             if verdict.first - SUSPECT_WINDOW <= c.when <= max(newest, verdict.first)]
+    if not shown:
+        return []
+    start = min([verdict.first] + [c.when for c in shown])
+    end = max([newest] + [c.when for c in shown])
+    pad = max((end - start) * _TIMELINE_PAD, _SHORTEST_PAD)
+    until = min(end + pad, max(_utcnow(), end))
+    return [_Changes(shown, group.executions, report.machine.name, start - pad, until, suspect=verdict.before,
+                     title="What changed around these failures")]
 
 
 def _state_label(name: str, depth: int) -> str:
@@ -709,7 +739,7 @@ class StepFunctionsView(_BaseView):
         blocks: list[Any] = [
             _Title(f"Why {machine.name} fails", sub),
             _Cards([_card(c) for c in cards]),
-            _Findings(failure_findings(report, _utcnow()),
+            _Findings(failure_findings(report, _utcnow()) + change_findings(report),
                       empty=f"No execution failed, timed out or was aborted {window}."),
         ]
         if gaps:
@@ -752,6 +782,10 @@ class StepFunctionsView(_BaseView):
             ("Can be redriven", _count(group.redrivable)),
         ]
         blocks: list[Any] = [_Title(f"{group.state} fails with {group.error}", sub), _Cards([_card(c) for c in cards])]
+        found = group_change_findings(report, group)
+        if found:
+            blocks.append(_Findings(found))
+        blocks += _changes_blocks(report, group)
         if group.function and group.request_id:
             blocks.append(_Note(f"Read the newest run's lines: {lambda_logs_call(group.function, group.request_id)}"))
         elif newest is not None:

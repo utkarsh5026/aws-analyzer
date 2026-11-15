@@ -11,7 +11,7 @@ import json
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -281,10 +281,12 @@ class FakeStepFunctions(_Checked):
 
     service = "stepfunctions"
 
-    def __init__(self, machines: dict[str, dict[str, Any]], runs: list[FakeRun], region: str = REGION):
+    def __init__(self, machines: dict[str, dict[str, Any]], runs: list[FakeRun], region: str = REGION, *,
+                 updated: dict[str, datetime] | None = None):
         super().__init__(region)
         self.machines = machines
         self.runs = runs
+        self.updated = dict(updated or {})
 
     def _missing(self, code: str, message: str, operation: str) -> ClientError:
         return ClientError({"Error": {"Code": code, "Message": message}}, operation)
@@ -329,6 +331,12 @@ class FakeStepFunctions(_Checked):
         if found is None:
             raise self._missing("ExecutionDoesNotExist", f"Execution Does Not Exist: '{arn}'", operation)
         return found
+
+    def _describe_state_machine_for_execution(self, executionArn: str, **params: Any) -> dict[str, Any]:
+        run = self._run(executionArn, "DescribeStateMachineForExecution")
+        answer = self._describe_state_machine(machine_arn(run.machine))
+        return {key: answer[key] for key in ("stateMachineArn", "name", "definition", "roleArn")} | {
+            "updateDate": self.updated.get(run.machine, answer["creationDate"]), "revisionId": "r3"}
 
     def _describe_execution(self, executionArn: str, **params: Any) -> dict[str, Any]:
         run = self._run(executionArn, "DescribeExecution")
@@ -386,6 +394,44 @@ class FakeCloudWatch(_Checked):
 LAMBDA_RETRY = {"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException",
                                 "Lambda.TooManyRequestsException"], "IntervalSeconds": 1, "MaxAttempts": 3,
                 "BackoffRate": 2}
+
+
+def _lambda_time(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+
+
+class FakeLambda(_Checked):
+    """
+    GetFunction and ListVersionsByFunction over `deploys`: function name -> when each published version was made,
+    oldest first (the last one is also $LATEST's LastModified). A name it doesn't hold is ResourceNotFound.
+    """
+
+    service = "lambda"
+
+    def __init__(self, deploys: dict[str, list[datetime]], region: str = REGION):
+        super().__init__(region)
+        self.deploys = deploys
+
+    def _config(self, name: str, version: str, when: datetime) -> dict[str, Any]:
+        return {"FunctionName": name, "FunctionArn": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{name}",
+                "Runtime": "python3.12", "Handler": "app.handler", "MemorySize": 512, "Timeout": 30,
+                "LastModified": _lambda_time(when), "Version": version, "CodeSize": 4_096}
+
+    def _deploys_of(self, name: str, operation: str) -> list[datetime]:
+        if name not in self.deploys:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException",
+                                         "Message": f"Function not found: {name}"}}, operation)
+        return self.deploys[name]
+
+    def _get_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
+        deploys = self._deploys_of(FunctionName, "GetFunction")
+        return {"Configuration": self._config(FunctionName, "$LATEST", deploys[-1])}
+
+    def _list_versions_by_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
+        deploys = self._deploys_of(FunctionName, "ListVersionsByFunction")
+        versions = [self._config(FunctionName, "$LATEST", deploys[-1])]
+        versions += [self._config(FunctionName, str(i), when) for i, when in enumerate(deploys, start=1)]
+        return {"Versions": versions}
 
 
 def invoke(function: str, **state: Any) -> dict[str, Any]:
@@ -589,15 +635,33 @@ def _by_day(days: list[datetime], value: float | tuple[float, ...]) -> dict[date
     return {day: float(value) for day in days}
 
 
+DEFINITION_UPDATED = timedelta(days=20)
+
+DEPLOYED_BEFORE_KEYERROR = timedelta(minutes=4)
+
+
+def deploys(now: datetime, runs: list[FakeRun]) -> dict[str, list[datetime]]:
+    """
+    When each Lambda function order-pipeline calls was deployed (a published version each), oldest first:
+    orders-etl's version 7 went out four minutes before the first KeyError (ord-3c9b), the others weeks ago.
+    """
+    first_keyerror = next(run.history.start for run in runs if run.name == "ord-3c9b")
+    return {"orders-etl": [now - timedelta(days=30), first_keyerror - DEPLOYED_BEFORE_KEYERROR],
+            "charge-card": [now - timedelta(days=40)], "validate-order": [now - timedelta(days=40)],
+            "resize-image": [now - timedelta(days=30)]}
+
+
 def clients(now: datetime) -> dict[str, Any]:
     """
-    The fake Step Functions, CloudWatch and CloudWatch Logs clients over scene(now) (the Logs one holds
-    image-resize-express's log group), for StepFunctionsAnalyzer(clients=...).
+    The fake Step Functions, CloudWatch, CloudWatch Logs and Lambda clients over scene(now) (the Logs one holds
+    image-resize-express's log group; the Lambda one when each function was deployed, deploys()), for
+    StepFunctionsAnalyzer(clients=...).
     """
     machines, runs, daily = scene(now)
     lines = [line for arn, history in express_runs(now).items() for line in express_log_lines(arn, history)]
-    return {"stepfunctions": FakeStepFunctions(machines, runs), "cloudwatch": FakeCloudWatch(daily),
-            "logs": FakeLogs({"/aws/states/resize": lines})}
+    updated = {"order-pipeline": now - DEFINITION_UPDATED}
+    return {"stepfunctions": FakeStepFunctions(machines, runs, updated=updated), "cloudwatch": FakeCloudWatch(daily),
+            "logs": FakeLogs({"/aws/states/resize": lines}), "lambda": FakeLambda(deploys(now, runs))}
 
 
 def lambda_lines(start: datetime, request_id: str = FAILED_RUN) -> list[tuple[datetime, str]]:

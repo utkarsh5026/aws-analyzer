@@ -313,3 +313,18 @@ def test_opensearch_tools_explain_vector_indexes_and_check_their_vectors(opensea
 
     nameless = tool(opensearch, "index_details")("vectors-prod")
     assert nameless["complete"] is False and "store_indexes('vectors-prod')" in nameless["message"]
+
+
+def test_the_failures_tool_says_what_changed_just_before():
+    from aws_analyzer.agent.toolkits.stepfunctions_tools import summarize_failures
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    sfn = StepFunctionsAnalyzer(region=REGION, clients=sfn_clients(now))
+    sfn.max_workers = 1
+    summary = summarize_failures(sfn.failures("order-pipeline"), now)
+    top = summary["groups"][0]
+    assert top["changed_just_before"]["what"] == "orders-etl version 2 was published"
+    assert top["changed_just_before"]["minutes_before_first_failure"] == 4 and top["first_failure"] < now
+    assert "changed_just_before" not in summary["groups"][1]
+    assert any("4 minutes after orders-etl version 2" in f["message"] for f in summary["findings"])
+    json.dumps(summary, default=str)

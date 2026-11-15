@@ -159,14 +159,14 @@ The toggle over the graph picks what colours it: **This execution** (its path, t
 The other tabs are the [Step Functions guide](stepfunctions.md)'s reports, a click away.
 { .gist }
 
-- **Failures** is [`failures()`](stepfunctions.md#failures) as a list: **All failures** first (the summary, findings and executions a day), then a line per kind of failure, the state they stopped at and the error, the most common first, with how many and since when. Click one for its error, the run to read, the commands that redrive the ones that still can, and its executions, each a click from its waterfall in the Executions tab.
+- **Failures** is [`failures()`](stepfunctions.md#failures) as a list: **All failures** first (the summary, findings and executions a day), then a line per kind of failure, the state they stopped at and the error, the most common first, with how many and since when. Click one for what changed just before it began (a deploy of its function or the definition updated, on a timeline with its failures), its error, the run to read, the commands that redrive the ones that still can, and its executions, each a click from its waterfall in the Executions tab.
 - **Overview** is [`state_machine()`](stepfunctions.md#state-machine): how it's doing, what its definition risks, and every state.
 - **Definition** is [`graph()`](stepfunctions.md#state-machine): the flow drawn as a graph, with Mermaid to paste.
 
-![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, the call that reads the newest run, the error it returned and the commands that redrive the three that still can](images/sfn-explorer-failures-light.webp#only-light){ width="984" height="866" loading=lazy }
-![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, the call that reads the newest run, the error it returned and the commands that redrive the three that still can](images/sfn-explorer-failures-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, a warning that it began failing 4 minutes after orders-etl version 2 was published, and a timeline with that deploy just before its first failure](images/sfn-explorer-failures-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, a warning that it began failing 4 minutes after orders-etl version 2 was published, and a timeline with that deploy just before its first failure](images/sfn-explorer-failures-dark.webp#only-dark){ width="984" height="866" loading=lazy }
 /// caption
-The Failures tab: LoadOrders has failed with `KeyError` since three days ago. Its executions are listed under the redrive commands, each a click from its waterfall.
+The Failures tab: LoadOrders has failed with `KeyError` since three days ago, starting 4 minutes after orders-etl version 2 went out.
 ///
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: how the window reads, and every command.</p>

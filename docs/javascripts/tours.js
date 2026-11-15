@@ -1904,7 +1904,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.6,
+    "dur": 15.1,
     "chapter": "Failures",
     "step": 2,
     "steps": 5,
@@ -1914,7 +1914,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 1671
+      "h": 2101
      }
     ],
     "captions": [
@@ -1927,7 +1927,7 @@ window.AA_TOURS = {
       "Most stop at LoadOrders with <b><code>KeyError: 'customer_id'</code></b>,"
      ],
      [
-      9.0,
+      11.5,
       "and the newest run's request ID is filled in."
      ]
     ]

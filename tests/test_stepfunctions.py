@@ -34,6 +34,10 @@ from aws_analyzer.stepfunctions.analysis.layout import (
 from aws_analyzer.stepfunctions.analysis.timing import state_timings, timing_findings, timing_report, took_text
 from aws_analyzer.stepfunctions.explorer.graph import _execution_blocks as graph_execution_blocks
 from aws_analyzer.stepfunctions.analysis.trend import daily_counts, failure_jump, trend_findings
+from aws_analyzer.stepfunctions.analysis.suspects import (
+    change_findings, change_verdict, gap_text, group_change_findings,
+)
+from aws_analyzer.stepfunctions.models import Change, FailureGroup, FailureReport
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -1285,3 +1289,101 @@ def test_a_failure_group_lists_its_executions_and_redrive_commands(core):
     assert blocks[0].text == "LoadOrders fails with KeyError"
     commands = [b for b in blocks if getattr(b, "code", False)]
     assert len(commands) == 1 and commands[0].text.count("aws stepfunctions redrive-execution") == 3
+
+
+def keyerror_report(core, *changes, since_days=7, truncated=False):
+    """
+    A FailureReport with one group, LoadOrders failing with KeyError in orders-etl: three executions, the first
+    three days ago and the newest an hour ago, and these changes.
+    """
+    machine = core.state_machine("order-pipeline")
+    starts = [NOW - timedelta(hours=1), NOW - timedelta(days=1), NOW - timedelta(days=3)]
+    executions = [Execution(f"arn:x:{i}", f"ord-{i}", "order-pipeline", "FAILED", start=start)
+                  for i, start in enumerate(starts)]
+    group = FailureGroup("LoadOrders", "KeyError", count=3, newest=executions[0], function="orders-etl",
+                         executions=executions)
+    return FailureReport(machine, NOW - timedelta(days=since_days), failed=executions, groups=[group],
+                         truncated=truncated, changes=list(changes))
+
+
+def deploy(ago, name="orders-etl", detail="version 7"):
+    return Change(NOW - ago, "function", name, detail)
+
+
+def test_a_deploy_just_before_the_first_failure_is_the_suspect(core):
+    report = keyerror_report(core, deploy(timedelta(days=30), detail="version 6"),
+                             deploy(timedelta(days=3, minutes=4)), deploy(timedelta(hours=5), name="charge-card"))
+    verdict = change_verdict(report, report.groups[0])
+    assert verdict.before.detail == "version 7" and verdict.exact
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "warn" and text.startswith(
+        "LoadOrders began failing with KeyError 4 minutes after orders-etl version 7 was published: ")
+    assert "Timing, not proof" in text and "LambdaView().function_info('orders-etl')" in text
+
+
+def test_a_change_after_it_began_that_it_failed_past(core):
+    report = keyerror_report(core, Change(NOW - timedelta(days=2), "definition", "order-pipeline"))
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "info" and text.startswith("order-pipeline's definition was updated 2d ago, after LoadOrders")
+    assert "didn't fix it" in text
+
+
+def test_nothing_changed_nearby_points_at_the_input(core):
+    report = keyerror_report(core, deploy(timedelta(days=30)))
+    level, text = group_change_findings(report, report.groups[0])[0]
+    assert level == "info" and text.startswith("Nothing changed in the 2 days before LoadOrders began failing")
+    assert "orders-etl version 7 was published 27 days before" in text and "execution('order-pipeline/ord-0')" in text
+
+
+def test_a_start_that_may_be_earlier_is_said_or_not_claimed(core):
+    early = keyerror_report(core, deploy(timedelta(days=3, minutes=4)), since_days=3, truncated=True)
+    assert "It may have begun earlier" in group_change_findings(early, early.groups[0])[0][1]
+    quiet = keyerror_report(core, deploy(timedelta(days=30)), truncated=True)
+    assert group_change_findings(quiet, quiet.groups[0]) == []
+    assert gap_text(timedelta(seconds=20)) == "1 minute" and gap_text(timedelta(hours=30)) == "30 hours"
+
+
+def test_failures_read_what_changed(core, fakes):
+    report = core.failures("order-pipeline")
+    deployed = [(c.name, c.detail) for c in report.changes if c.kind == "function"]
+    assert ("orders-etl", "version 2") in deployed and ("charge-card", "version 1") in deployed
+    assert [c.name for c in report.changes if c.kind == "definition"] == ["order-pipeline"]
+    asked = fakes["stepfunctions"].called("describe_state_machine_for_execution")
+    assert len(asked) == len(report.groups) and not report.change_errors
+    found = change_findings(report)
+    assert found[0][1].startswith("LoadOrders began failing with KeyError 4 minutes after orders-etl version 2")
+    assert sum(text.startswith("Nothing changed") for _, text in found) == 2
+
+
+def test_what_changed_degrades_to_a_note(fakes):
+    fakes["lambda"].denied.add("get_function")
+    fakes["stepfunctions"].denied.add("describe_state_machine_for_execution")
+    core = StepFunctionsAnalyzer(region="us-east-1", clients=fakes)
+    core.max_workers = 1
+    report = core.failures("order-pipeline")
+    assert report.change_errors["definition"] == "AccessDeniedException"
+    assert report.change_errors["lambda:orders-etl"] == "AccessDeniedException" and report.changes == []
+    assert "Couldn't read what changed before these failures" in change_findings(report)[-1][1]
+    asked = len(fakes["stepfunctions"].called("describe_state_machine_for_execution"))
+    express = core.failures("image-resize-express")
+    assert len(fakes["stepfunctions"].called("describe_state_machine_for_execution")) == asked
+    assert "definition" not in express.change_errors
+
+
+def test_what_changed_in_the_reports_and_the_window(core, fakes, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "LoadOrders began failing with KeyError 4 minutes after orders-etl version 2 was published" in out
+    report = core.failures("order-pipeline")
+    blocks = StepFunctionsView(core, mode="text")._failure_group_blocks(report, report.groups[0])
+    timeline = next(b for b in blocks if type(b).__name__ == "_Changes")
+    assert timeline.suspect is not None and timeline.suspect.detail == "version 2"
+    text = "\n".join(sfnmod.blocks._changes_text(timeline, None))
+    assert "◆ orders-etl version 2 was published  <- just before" in text and "✕ ord-3c9b failed" in text
+    x = explorer(fakes, "order-pipeline")
+    x.tab_buttons["failures"].click()
+    next(line for line in x._failure_lines if line.key == "LoadOrders · KeyError").button.click()
+    page = x.failures_view.value
+    assert 'class="chl sus"' in page and "4 minutes after orders-etl version 2" in plain(page)
+    other = next(line for line in x._failure_lines if line.key == "ChargeCard · Lambda.TooManyRequestsException")
+    other.button.click()
+    assert "Nothing changed in the 2 days before ChargeCard" in plain(x.failures_view.value)

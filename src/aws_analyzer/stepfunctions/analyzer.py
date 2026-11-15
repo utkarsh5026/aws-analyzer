@@ -23,6 +23,7 @@ from .models import (
     StepRun, TimingReport,
 )
 from .prices import STEPFUNCTIONS_PRICES
+from .changes import _ChangeReads
 from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
@@ -99,7 +100,7 @@ def _midnight_after(now: datetime) -> datetime:
     return today + timedelta(days=1)
 
 
-class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
+class StepFunctionsAnalyzer(_ChangeReads, _ExpressReads, _BaseAnalyzer):
     """
     Pure-logic Step Functions analysis: every method returns data; nothing is printed, started or changed.
 
@@ -155,12 +156,14 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
     @property
     def lambda_core(self) -> Any:
         """
-        The LambdaAnalyzer that reads Lambda steps' logs, on this analyzer's session.
+        The LambdaAnalyzer that reads Lambda steps' logs and when their functions were deployed, on this analyzer's
+        session (with clients={'lambda': ...}'s client when one was given).
         """
         if self._lambda_core is None:
             with self._lock:
                 if self._lambda_core is None:
-                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session)
+                    given = {"lambda": self._clients["lambda"]} if "lambda" in self._clients else None
+                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session, clients=given)
         return self._lambda_core
 
 
@@ -515,7 +518,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         """
         Why a state machine's executions failed since `since`: the newest `limit` that failed, timed out or were
         aborted, each history's end read (one request each), grouped by the state they stopped at and the error. An
-        Express workflow's are read from its log group.
+        Express workflow's are read from its log group. It also reads what changed around them (report.changes): when
+        the Lambda functions they stopped in were deployed, and when the definition was updated.
         """
         machine = self.state_machine(ref)
         start = parse_time(since) or _utcnow() - timedelta(days=7)
@@ -530,6 +534,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             details = self._standard_failures(machine, failed, progress)
         report.read = len(details)
         report.groups = group_failures(details, _utcnow(), express=machine.is_express)
+        self._read_changes(report)
         report.numbers = self._numbers_or_none(machine, start)
         return report
 

@@ -21,6 +21,8 @@ from .._kit.text import _clip, _esc
 from .analysis.layout import FlowLayout, FlowMarks
 from .analysis.story import STEP_FUNCTIONS, LogLine, Waterfall
 from .analysis.trend import DayCount, FailureJump, day_label
+from .analysis.suspects import change_text
+from .models import Change, Execution
 
 
 _TEXT_BAR = 44
@@ -397,4 +399,65 @@ def _days_text(block: _Days, report: _Report) -> list[str]:
         failures = f" · {failed:,} didn't succeed" if failed else ""
         lines.append(f"{label:{width}}{bar:{_TEXT_DAY_BAR}}  {started:,} started{failures}{mark}")
     lines.append("(UTC days)")
+    return lines
+
+
+_LABEL_FLIPS_AT = 0.6
+
+_TEXT_FAILURES = 10
+
+
+@dataclass
+class _Changes:
+    """
+    What changed around one kind of failure, on one time axis: each change a dashed line with what it was, each
+    failure a dot, the change just before the first failure (suspect) marked. Text lists them in time order.
+    """
+
+    changes: list[Change]
+    failures: list[Execution]
+    machine: str
+    start: datetime
+    end: datetime
+    suspect: Change | None = None
+    title: str = ""
+
+
+def _timeline_left(moment: datetime, start: datetime, end: datetime) -> float:
+    span = (end - start).total_seconds() or 1.0
+    return max(0.0, min(1.0, (moment - start).total_seconds() / span)) * 100
+
+
+@_draws(_Changes, "html")
+def _changes_html(block: _Changes, report: _Report) -> str:
+    marks = []
+    for change in block.changes:
+        left = _timeline_left(change.when, block.start, block.end)
+        side = " r" if left > _LABEL_FLIPS_AT * 100 else ""
+        suspect = " sus" if change is block.suspect else ""
+        label = f"{change_text(change, block.machine)} · {_fmt_dt(change.when)}"
+        marks.append(f'<i class="chl{side}{suspect}" style="left:{left:.2f}%"><em>{_esc(label)}</em></i>')
+    for execution in block.failures:
+        if execution.start is None:
+            continue
+        tip = f"{execution.name} failed, started {_fmt_dt(execution.start, seconds=True)}"
+        marks.append(f'<b class="chd" style="left:{_timeline_left(execution.start, block.start, block.end):.2f}%" '
+                     f'title="{_esc(tip)}"></b>')
+    title = f'<div class="tt">{_prose(block.title)}</div>' if block.title else ""
+    return (f'{title}<div class="chg"><div class="cht">{"".join(marks)}</div><div class="cha"><span>'
+            f"{_esc(_fmt_dt(block.start))}</span><span>{_esc(_fmt_dt(block.end))}</span></div>"
+            '<div class="chk"><span><i class="l"></i>a change</span><span><i class="d"></i>a failure of this kind'
+            f"</span><span>times in {_esc(_tz_label())}</span></div></div>")
+
+
+@_draws(_Changes, "text")
+def _changes_text(block: _Changes, report: _Report) -> list[str]:
+    events = [(c.when, f"◆ {change_text(c, block.machine)}" + ("  <- just before" if c is block.suspect else ""))
+              for c in block.changes]
+    dated = sorted((e for e in block.failures if e.start is not None), key=lambda e: e.start)
+    events += [(e.start, f"✕ {e.name} failed") for e in dated[:_TEXT_FAILURES]]
+    lines = [f"-- {block.title} --"] if block.title else []
+    lines += [f"{_fmt_dt(when)}  {what}" for when, what in sorted(events, key=lambda event: event[0])]
+    if len(dated) > _TEXT_FAILURES:
+        lines.append(f"... and {len(dated) - _TEXT_FAILURES:,} more failures")
     return lines

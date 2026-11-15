@@ -46,11 +46,12 @@ _LIST = ("states:ListStateMachines", "states:DescribeStateMachine")
 _METRICS = ("cloudwatch:GetMetricData",)
 _EXPRESS_LOGS = ("logs:FilterLogEvents",)
 _LAMBDA_RUN = ("lambda:GetFunction", "logs:DescribeLogGroups", "logs:FilterLogEvents")
+_CHANGES = ("states:DescribeStateMachineForExecution", "lambda:GetFunction", "lambda:ListVersionsByFunction")
 STEPFUNCTIONS_TOOL_READS: dict[str, tuple[str, ...]] = {
     "find_state_machines": (*_LIST, *_METRICS),
     "state_machine_details": (*_LIST, *_METRICS),
     "state_machine_failures": (*_LIST, "states:ListExecutions", "states:GetExecutionHistory", *_METRICS,
-                               *_EXPRESS_LOGS),
+                               *_EXPRESS_LOGS, *_CHANGES),
     "list_executions": (*_LIST, "states:ListExecutions", *_EXPRESS_LOGS),
     "execution_details": (*_LIST, "states:DescribeExecution", "states:GetExecutionHistory", *_EXPRESS_LOGS,
                           *_LAMBDA_RUN),
@@ -219,13 +220,29 @@ def _lambda_link(function: str, request_id: str) -> dict[str, str] | None:
     return link
 
 
-def _failure_group_row(group: FailureGroup, total: int, machine: str) -> dict[str, Any]:
+def _change_before(report: FailureReport, group: FailureGroup) -> dict[str, Any] | None:
     """
-    One group of failures: the state and error, the cause in one line, how many and their share of the failures
-    read, the newest one (to open with execution_details), how many can still be redriven, and the Lambda run
-    behind the newest when the state called Lambda.
+    The change just before a group's first failure (a deploy of its function or the definition updated, within two
+    days), with how long before it came; None when nothing changed then.
     """
     sfn = _sfn_module()
+    verdict = sfn.change_verdict(report, group)
+    if verdict is None or verdict.before is None:
+        return None
+    change = verdict.before
+    return {"what": sfn.change_text(change, report.machine.name), "at": change.when,
+            "minutes_before_first_failure": round((verdict.first - change.when).total_seconds() / 60),
+            "first_failure_is_exact": verdict.exact}
+
+
+def _failure_group_row(report: FailureReport, group: FailureGroup, total: int) -> dict[str, Any]:
+    """
+    One group of failures: the state and error, the cause in one line, how many and their share of the failures
+    read, the first and newest one (the newest to open with execution_details), how many can still be redriven,
+    the Lambda run behind the newest when the state called Lambda, and the change just before it began.
+    """
+    sfn = _sfn_module()
+    machine = report.machine.name
     newest = group.newest
     row: dict[str, Any] = {"state": group.state, "error": group.error,
                            "cause": hide_secrets(sfn.short_cause(group.cause, _CAUSE_CHARS)) or None,
@@ -234,9 +251,14 @@ def _failure_group_row(group: FailureGroup, total: int, machine: str) -> dict[st
     if newest is not None:
         row["newest"] = {"execution": sfn.helpers.execution_ref(machine, newest.name, newest.arn),
                          "start": newest.start}
+    if group.first_seen is not None:
+        row["first_failure"] = group.first_seen
     link = _lambda_link(group.function, group.request_id)
     if link:
         row["lambda_run"] = link
+    changed = _change_before(report, group)
+    if changed:
+        row["changed_just_before"] = changed
     return row
 
 
@@ -244,7 +266,8 @@ def summarize_failures(report: FailureReport, now: datetime | None = None) -> di
     """
     state_machine_failures()'s answer: how many executions failed, timed out or were aborted in the window, grouped
     by the state they stopped at and the error (the biggest first, each with its share, its newest execution and
-    the Lambda run behind it), CloudWatch's count over the same days, and the findings with what to do.
+    the Lambda run behind it, when it began and the change just before), CloudWatch's count over the same days,
+    and the findings with what to do.
     """
     sfn = _sfn_module()
     now = now or datetime.now(timezone.utc)
@@ -252,10 +275,10 @@ def summarize_failures(report: FailureReport, now: datetime | None = None) -> di
     out: dict[str, Any] = {
         "state_machine": report.machine.name, "since": report.since, "failed_executions": len(report.failed),
         "histories_read": report.read, "source": report.source,
-        "groups": [_failure_group_row(g, grouped, report.machine.name) for g in report.groups[:_FAILURE_GROUPS]],
+        "groups": [_failure_group_row(report, g, grouped) for g in report.groups[:_FAILURE_GROUPS]],
         "cloudwatch": _machine_numbers(report.numbers), "cut_short": report.truncated,
         "window": _window(report.since, now),
-        "findings": model_findings(sfn.failure_findings(report, now)),
+        "findings": model_findings(sfn.failure_findings(report, now) + sfn.change_findings(report)),
     }
     if len(report.groups) > _FAILURE_GROUPS:
         out["more_groups"] = len(report.groups) - _FAILURE_GROUPS
@@ -378,7 +401,7 @@ class StepFunctionsToolkit(Toolkit):
     reads = STEPFUNCTIONS_TOOL_READS
     service = "states"
     services = {"GetMetricData": "cloudwatch", "FilterLogEvents": "logs", "DescribeLogGroups": "logs",
-                "GetFunction": "lambda"}
+                "GetFunction": "lambda", "ListVersionsByFunction": "lambda"}
     view = "StepFunctionsView"
     privacy = ("Step Functions: an execution's input and output and its Lambda run's last lines, cut short "
                "with secrets hidden.")
@@ -503,10 +526,11 @@ AWS Step Functions
         """
         Why a state machine's executions failed in a window: the newest failed, timed-out and aborted executions
         (up to 50), grouped by the state they stopped at and the error, the biggest group first, each with its
-        cause in one line, its share, how many can still be redriven, its newest execution (to open with
-        execution_details) and, for a Lambda state, the function and request ID of the run that failed; with
-        CloudWatch's count over the same days and the findings. state_machine: its name or ARN. since: ISO UTC
-        ('2026-10-15T18:00Z') or relative ('24h', '7d').
+        cause in one line, its share, how many can still be redriven, its first and newest execution (the newest to
+        open with execution_details), for a Lambda state the function and request ID of the run that failed, and
+        what changed just before it began (a deploy of its function, or the definition updated: timing, not
+        proof); with CloudWatch's count over the same days and the findings. state_machine: its name or ARN. since:
+        ISO UTC ('2026-10-15T18:00Z') or relative ('24h', '7d').
         """
         core = self.analyzer
         report = core.failures(state_machine, since=since or "7d", limit=_FAILURES_READ)

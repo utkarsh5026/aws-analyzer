@@ -14,6 +14,18 @@ from .._kit.render import _base_css, _Look, _report_html
 _ROOT = "sfn"
 
 _EXTRA_CSS = """\
+.sfn .chg{max-width:900px;margin:4px 0 12px;font-size:11px}
+.sfn .cht{position:relative;height:74px;border-bottom:1px solid rgba(127,127,127,.35);margin-top:4px}
+.sfn .chl{position:absolute;top:0;bottom:0;border-left:2px dashed #8b5cf6}
+.sfn .chl.sus{border-left-style:solid;border-left-color:#7c3aed}
+.sfn .chl em{position:absolute;top:0;left:6px;white-space:nowrap;font-style:normal;color:#7c3aed;font-weight:600}
+.sfn .chl.r em{left:auto;right:6px}
+.sfn .chd{position:absolute;bottom:6px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 1.5px var(--jp-layout-color0,#fff)}
+.sfn .cha{display:flex;justify-content:space-between;margin-top:3px;opacity:.65;font-variant-numeric:tabular-nums}
+.sfn .chk{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;opacity:.75}
+.sfn .chk i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+.sfn .chk i.l{width:0;border-left:2px dashed #8b5cf6;height:11px}
+.sfn .chk i.d{border-radius:50%;background:#ef4444}
 .sfn .dzs{max-width:720px;margin:4px 0 12px;font-size:11px}
 .sfn .dzb{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:max(1px,min(6px,calc(240px / var(--n))));align-items:end;height:64px;border-bottom:1px solid rgba(127,127,127,.35)}
 .sfn .dz{height:100%;display:flex;align-items:flex-end;border-radius:3px 3px 0 0}

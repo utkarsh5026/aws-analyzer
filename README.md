@@ -2184,11 +2184,12 @@ The analysis functions are pure (no AWS calls), so they also work on definitions
 steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
 `flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
 `timing_report` (where the time goes over several executions' steps), `daily_counts` and `failure_jump` (its
-executions a day, and the day its failures jumped), `resource_label`, `retry_label`,
+executions a day, and the day its failures jumped), `change_verdict` and `change_text` (whether a deploy or a
+definition update came just before a kind of failure began), `resource_label`, `retry_label`,
 `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
-`failure_findings`, `timing_findings`, `trend_findings`.
+`failure_findings`, `timing_findings`, `trend_findings`, `change_findings`, `group_change_findings`.
 
 </details>
 
@@ -2217,6 +2218,7 @@ Read-only. Grant what you need:
 | `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution`, `failures` and `graph(timings=True)`  |
 | `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
 | `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
+| `states:DescribeStateMachineForExecution`, `lambda:GetFunction`, `lambda:ListVersionsByFunction` | What changed before each kind of failure in `failures`: the definition's updates and the functions' deploys |
 | `logs:FilterLogEvents` on the state machine's log group           | An Express workflow's executions, steps and failures                          |
 
 Nothing here starts, stops or redrives an execution: findings show the `aws stepfunctions redrive-execution` command
@@ -3188,7 +3190,8 @@ answering model or inference profile and `bedrock:ListFoundationModels` / `bedro
 `file_chunks` list its files' names, sizes and dates). The Step Functions tools need `states:ListStateMachines`,
 `states:DescribeStateMachine`, `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory`,
 `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (an Express workflow's log group, and the Lambda run behind a
-step, with `lambda:GetFunction` and `logs:DescribeLogGroups`). The API Gateway tools need `apigateway:GET` (IAM's one
+step, with `lambda:GetFunction` and `logs:DescribeLogGroups`; and for what changed before a failure,
+`states:DescribeStateMachineForExecution` and `lambda:ListVersionsByFunction`). The API Gateway tools need `apigateway:GET` (IAM's one
 permission for every API Gateway read), `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (the stages' access
 logs, and the Lambda run behind a call). The SageMaker tools need the [SageMaker permissions](#amazon-sagemaker)
 `running`, `training_jobs`, `training_job`, `endpoints`, `pipelines` and `pipeline_run` list, with
