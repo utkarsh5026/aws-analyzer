@@ -8,10 +8,13 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from datetime import datetime, timedelta
+
+from .._kit.charts import _Bars, _Part, _Split, _fold_parts
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from .._kit.deps import _require
 from .._kit.errors import _Hint, _why
-from .._kit.fmt import _count, _duration, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money, human_size
+from .._kit.fmt import _count, _duration, _fmt_dt, _in_zone, _plural, _tz_label, _utcnow, human_age, human_money, human_size
 from .._kit.render import _call
 from .._kit.view import _BaseView, _friendly_errors
 
@@ -23,6 +26,7 @@ from .analysis import (
 from .analysis.findings import COSTLY
 from .analyzer import AthenaAnalyzer
 from .helpers import STATE_TONES, is_columnar, one_line, schedule_period
+from .analysis.sql import normalize_sql
 from .models import Catalog, Crawler, Overview, Query, QueryDetail, QueryHistory, Table, TableReport, Workgroup
 from .style import _render_html
 
@@ -30,6 +34,10 @@ from .style import _render_html
 _SQL_WIDTH = 80
 
 _TOP_SHAPES = 5
+_BILL_PARTS = 4
+_MOST_DAYS = 45
+_SCHEDULE_SHARE = 0.8
+_FEWEST_DAYS_FOR_A_SCHEDULE = 3
 
 _COLUMNS_SHOWN = 40
 
@@ -130,6 +138,66 @@ def _pointing_here(findings: list[tuple[str, str]], table: Table) -> list[tuple[
                                                                                      "(the SQL is below)")
         here.append((level, text))
     return here
+
+
+def _day_of(moment: datetime) -> str:
+    """
+    The day a moment falls on, in the zone reports show times in.
+    """
+    return _in_zone(moment).strftime("%Y-%m-%d")
+
+
+def _schedule_note(history: QueryHistory, sql: str) -> str:
+    """
+    What to say when the kind of query `sql` is ran on most days with queries: likely a schedule, so making it
+    cheaper once saves every day.
+    """
+    shape = normalize_sql(sql)
+    days = {_day_of(q.submitted) for q in history.queries if q.submitted}
+    ran_on = {_day_of(q.submitted) for q in history.queries if q.submitted and normalize_sql(q.sql) == shape}
+    is_a_schedule = len(days) >= _FEWEST_DAYS_FOR_A_SCHEDULE and len(ran_on) >= len(days) * _SCHEDULE_SHARE
+    if not is_a_schedule:
+        return ""
+    how_often = (f"on every one of the {len(days)} days" if len(ran_on) == len(days)
+                 else f"on {len(ran_on)} of the {len(days)} days")
+    return (f"The costliest ran {how_often} with queries, so it's likely a schedule: making it cheaper once saves "
+            "every day.")
+
+
+def _bill_split(history: QueryHistory, prices: dict[str, float]) -> _Split | None:
+    """
+    The bill as one bar of the kinds of query that make it, the costliest few named and the rest folded into one.
+    """
+    shapes = [shape for shape in query_shapes(history.queries, prices) if shape.cost > 0]
+    if not shapes:
+        return None
+    parts = [_Part(one_line(shape.sql, _SQL_WIDTH), shape.cost, human_money(shape.cost)) for shape in shapes]
+    total = sum(shape.cost for shape in shapes)
+    return _Split(_fold_parts(parts, _BILL_PARTS, human_money), human_money(total),
+                  title="Where the bill goes, by kind of query", note=_schedule_note(history, shapes[0].sql))
+
+
+def _cost_by_day(history: QueryHistory, prices: dict[str, float]) -> _Bars | None:
+    """
+    What the queries cost each day of the window (in the reports' zone), so a schedule or a one-off spike shows; a
+    window too long for days is drawn by week.
+    """
+    first, last = _in_zone(history.since).date(), _in_zone(history.until).date()
+    span = (last - first).days + 1
+    if span < 2 or not history.queries:
+        return None
+    step = 7 if span > _MOST_DAYS else 1
+    starts = [first + timedelta(days=offset) for offset in range(0, span, step)]
+    totals = [0.0] * len(starts)
+    for query in history.queries:
+        if query.submitted:
+            index = (_in_zone(query.submitted).date() - first).days // step
+            totals[min(max(index, 0), len(starts) - 1)] += query_cost(query, prices)
+    if not any(totals):
+        return None
+    labels = [f"{'week of ' if step == 7 else ''}{start:%b} {start.day}" for start in starts]
+    return _Bars(labels, totals, [human_money(total) for total in totals],
+                 title=f"What queries cost {'a week' if step == 7 else 'a day'} ({_tz_label()} days)")
 
 
 class AthenaView(_BaseView):
@@ -238,6 +306,7 @@ class AthenaView(_BaseView):
         ]
         if overview.workgroups:
             blocks.append(self._workgroups_table(overview.workgroups, history))
+        blocks += self._bill_blocks(history)
         blocks += self._shapes_tables(history, top=_TOP_SHAPES, title="The queries that cost the most")
         if catalog.unchecked:
             blocks.append(_Note(f"{catalog.unchecked:,} more tables' folders weren't checked (the first "
@@ -276,6 +345,13 @@ class AthenaView(_BaseView):
         bars = [s.cost / total if total else 0.0 for s in shapes]
         return [_Table(["Runs", "Cost", "Scanned", "Last run", "SQL (the newest run)", "Query ID"], rows,
                        title=title, bars=bars, bar_label="Share of cost")]
+
+    def _bill_blocks(self, history: QueryHistory) -> list[Any]:
+        """
+        The bill drawn: one bar of the kinds of query that make it, then what it came to each day.
+        """
+        charts = [_bill_split(history, self.core.prices), _cost_by_day(history, self.core.prices)]
+        return [chart for chart in charts if chart]
 
     def _overview_next(self, history: QueryHistory, catalog: Catalog) -> list[tuple[str, str]]:
         steps: list[tuple[str, str]] = [("expensive()", "the costliest queries, and how to make them cheaper")]
@@ -379,6 +455,7 @@ class AthenaView(_BaseView):
             blocks.append(_Note("No query in that time cost anything: failed queries and DDL are free."))
             self._show(blocks)
             return
+        blocks += self._bill_blocks(history)
         blocks += self._shapes_tables(history, top=top, title="By kind of query (the same SQL with other values)")
         runs = costliest(history.queries, prices, top=top)
         rows = [[_fmt_dt(q.submitted), q.workgroup, human_size(q.scanned_bytes), human_money(query_cost(q, prices)),

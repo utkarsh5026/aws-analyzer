@@ -1709,7 +1709,7 @@ all zeros, and the documents nearest a question.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/opensearch-index-info-dark.webp">
-  <img src="docs/images/opensearch-index-info-light.webp" alt="index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on">
+  <img src="docs/images/opensearch-index-info-light.webp" alt="index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; a bar of its graphs against the k-NN memory, past the limit in red; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on">
 </picture>
 
 <p align="center"><sub><code>ui.index_info("vectors-prod/support-docs")</code>: 27,000 documents vector search can't find, and graphs that need 15.7 GB of memory where the nodes have 12 GB.</sub></p>

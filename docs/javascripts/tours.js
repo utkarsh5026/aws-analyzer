@@ -1129,7 +1129,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.0,
+    "dur": 13.5,
     "chapter": "Indexes",
     "step": 2,
     "steps": 5,
@@ -1139,7 +1139,7 @@ window.AA_TOURS = {
      {
       "img": "opensearch-indexes",
       "w": 1476,
-      "h": 1612
+      "h": 1827
      }
     ],
     "captions": [
@@ -1152,7 +1152,7 @@ window.AA_TOURS = {
       "The graphs need more memory than the nodes have, so <b>searches read them from disk</b>."
      ],
      [
-      8.4,
+      9.9,
       "One index uses a deprecated engine; another has documents search can't find."
      ]
     ]
@@ -1433,7 +1433,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2247
+      "h": 2763
      }
     ],
     "captions": [
@@ -1733,7 +1733,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.5,
+    "dur": 15.0,
     "chapter": "Follow it",
     "step": 2,
     "steps": 3,
@@ -1743,7 +1743,7 @@ window.AA_TOURS = {
      {
       "img": "msg-follow",
       "w": 1476,
-      "h": 1674
+      "h": 2339
      }
     ],
     "captions": [
@@ -1756,7 +1756,7 @@ window.AA_TOURS = {
       "Five places it delivers to, down to the Lambda that reads it,"
      ],
      [
-      8.9,
+      11.4,
       "and <b>two of them keep it out</b>, with the policy that does."
      ]
     ]
@@ -2119,7 +2119,7 @@ window.AA_TOURS = {
      {
       "img": "athena-overview",
       "w": 1476,
-      "h": 3097,
+      "h": 3657,
       "panMax": 900
      }
     ],
@@ -2140,7 +2140,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 14.5,
+    "dur": 14.9,
     "chapter": "Expensive",
     "step": 2,
     "steps": 6,
@@ -2150,7 +2150,7 @@ window.AA_TOURS = {
      {
       "img": "athena-expensive",
       "w": 1476,
-      "h": 1982
+      "h": 2530
      }
     ],
     "captions": [
@@ -2163,7 +2163,7 @@ window.AA_TOURS = {
       "The dashboard's <code>SELECT *</code> ran 21 times and cost <b>$22.56</b>,"
      ],
      [
-      10.9,
+      11.3,
       "grouped by query shape, whatever the literal values."
      ]
     ]

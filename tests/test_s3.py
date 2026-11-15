@@ -3566,6 +3566,8 @@ def test_ui_text_reports(ui, capsys, aws):
         "big/",
     ):
         assert expected in out
+    assert "What takes the space, by folder:" in out and "  of " in out
+    assert out.index("What takes the space") < out.index("-- Folders (depth 1) --")
     assert "📁 raw/" in run(capsys, ui.ls, root)
     tree = run(capsys, ui.tree, f"{root}raw/", depth=2)
     assert "2024/" in tree and "    01/" in tree

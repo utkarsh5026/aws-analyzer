@@ -15,7 +15,7 @@ from ..._kit.errors import _why
 from ..._kit.fmt import _count, _plural, _total, _utcnow, human_age, human_money
 from ..._kit.render import _split_lead
 from ..._kit.text import _esc, _marked, search_rank
-from ..._kit.window import _class_if
+from ..._kit.window import _class_if, _day_bars_html
 
 from ..helpers import _midnight, _pct, human_ms
 from ..models import Function, FunctionMetrics, ProvisionedConcurrency, RuntimeStatus, Trigger
@@ -50,7 +50,6 @@ _FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it na
 
 _TREND_DAYS = 14
 
-_SHORTEST_BAR = 12
 
 _CHIP_TIPS = {
     "": "Show every function",
@@ -142,25 +141,6 @@ def _trend_days(m: FunctionMetrics | None, now: datetime) -> list[tuple[float, f
     return days
 
 
-def _trend_html(days: list[tuple[float, float]]) -> str:
-    """
-    The trend column: a bar a day as tall as its calls against the busiest day, its failed part in red on top. A day
-    with any calls is at least _SHORTEST_BAR percent tall, so it stays visible beside a busy one.
-    """
-    if not days:
-        return "-"
-    busiest = max(calls for calls, _ in days)
-    bars = []
-    for calls, failed in days:
-        if not calls:
-            bars.append('<i class="z"></i>')
-            continue
-        height = max(_SHORTEST_BAR, 100 * calls / busiest)
-        red = f'<b style="height:{min(100.0, 100 * failed / calls):.1f}%"></b>' if failed else ""
-        bars.append(f'<i style="height:{height:.1f}%">{red}</i>')
-    return f'<span class="tr">{"".join(bars)}</span>'
-
-
 def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now: datetime) -> str:
     """
     A function's line in the list: its health dot, name, runtime and description, then its numbers in columns.
@@ -186,7 +166,7 @@ def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now:
     else:
         level = _errors_level(m, now)
         rate = _pct(m.error_rate) if m.invocations else "-"
-        cells = (f'<div class="fc c-trend">{_trend_html(_trend_days(m, now))}</div>'
+        cells = (f'<div class="fc c-trend">{_day_bars_html(_trend_days(m, now))}</div>'
                  + cell("", _count(round(m.invocations)) if m.invocations else "0")
                  + cell("" if m.invocations else "dim", rate, "bad" if level == "warn" else "warn" if level else "")
                  + cell("c-dur" + ("" if m.invocations else " dim"), human_ms(m.avg_duration) if m.invocations

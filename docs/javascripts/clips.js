@@ -122,7 +122,7 @@ window.AA_CLIPS = {
  },
  "summary": {
   "notebook": "acme-ml-data.ipynb",
-  "summary": "ui.summary(\"s3://acme-ml-data/\"): The top of ui.summary(\"s3://acme-ml-data/\"). Further down: size and age histograms and the largest objects.",
+  "summary": "ui.summary(\"s3://acme-ml-data/\"): The top of ui.summary(\"s3://acme-ml-data/\"): training/ is 80% of the 1.3 TB. Further down: size and age histograms and the largest objects.",
   "video": "",
   "scenes": [
    {
@@ -141,7 +141,7 @@ window.AA_CLIPS = {
     "captions": [
      [
       3.2,
-      "The top of <code>ui.summary(\"s3://acme-ml-data/\")</code>. Further down: size and age histograms and the largest objects."
+      "The top of <code>ui.summary(\"s3://acme-ml-data/\")</code>: training/ is 80% of the 1.3 TB. Further down: size and age histograms and the largest objects."
      ]
     ]
    }
@@ -1115,7 +1115,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.0,
+    "dur": 13.5,
     "chapter": "Amazon OpenSearch",
     "label": "Amazon OpenSearch",
     "code": "ui.indexes(\"vectors-prod\")",
@@ -1123,7 +1123,7 @@ window.AA_CLIPS = {
      {
       "img": "opensearch-indexes",
       "w": 1476,
-      "h": 1612
+      "h": 1827
      }
     ],
     "captions": [
@@ -1312,7 +1312,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2247
+      "h": 2763
      }
     ],
     "captions": [
@@ -1493,7 +1493,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.5,
+    "dur": 15.0,
     "chapter": "SQS, SNS and EventBridge",
     "label": "SQS, SNS and EventBridge",
     "code": "msg.follow(\"orders-events\")",
@@ -1501,7 +1501,7 @@ window.AA_CLIPS = {
      {
       "img": "msg-follow",
       "w": 1476,
-      "h": 1674
+      "h": 2339
      }
     ],
     "captions": [
@@ -1771,7 +1771,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-overview",
       "w": 1476,
-      "h": 3097
+      "h": 3657
      }
     ],
     "captions": [
@@ -1790,7 +1790,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 14.5,
+    "dur": 14.9,
     "chapter": "Amazon Athena",
     "label": "Amazon Athena",
     "code": "athena.expensive(top=5)",
@@ -1798,7 +1798,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-expensive",
       "w": 1476,
-      "h": 1982
+      "h": 2530
      }
     ],
     "captions": [

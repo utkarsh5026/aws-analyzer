@@ -22,6 +22,9 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
+from aws_analyzer._kit.charts import (
+    _Bars, _Dots, _Meter, _Part, _Point, _Split, _Treemap, _fold_parts, _squarified,
+)
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
@@ -494,3 +497,97 @@ def test_a_focus_reads_as_chips_and_loses_one_part_at_a_time():
     assert focus.without("no-such-part") == focus and focus.since == start
     with pytest.raises(AttributeError):
         focus.kind = "logs"
+
+
+def _memory_meter(used: float, *, mark: float | None = None) -> _Meter:
+    parts = [_Part("support-docs", used - 0.3, f"{used - 0.3:.1f} GB"), _Part("legacy-faq", 0.3, "0.3 GB")]
+    return _Meter(parts, 12.0, "12.0 GB", f"{used:.1f} GB", title="k-NN memory", mark=mark, mark_text="8 GB would do")
+
+
+def test_a_meter_past_its_limit_says_so_in_both_drawings():
+    meter = _memory_meter(16.0)
+    assert meter.is_over and meter.scale == 16.0
+    text = _render_text([meter], 0)
+    assert "-- k-NN memory --" in text and "16.0 GB of 12.0 GB (133%)" in text
+    assert "|!!!!!!!!!!]" in text and "support-docs 15.7 GB · legacy-faq 0.3 GB" in text
+    html = _report_html([meter], 0, _Look("", "zz", ""))
+    assert 'class="mtr over"' in html and 'class="mtr-over" style="left:75.00%;right:0"' in html
+    assert ".zz .mtr-bar{" in html and "<script" not in html
+
+
+def test_a_meter_under_its_limit_shows_the_mark_and_no_overflow():
+    meter = _memory_meter(3.0, mark=8.0)
+    assert not meter.is_over and meter.scale == 12.0
+    text = _render_text([meter], 0)
+    assert "3.0 GB of 12.0 GB (25%)" in text and "!" not in text.split("\n")[2] and "8 GB would do" in text
+    html = _report_html([meter], 0, _Look("", "zz", ""))
+    assert "mtr-over" not in html.split("</style>")[-1] and 'mtr-line mtr-mark" style="left:66.67%"' in html
+
+
+def test_folding_keeps_the_largest_parts_and_never_folds_just_one():
+    parts = [_Part(f"query {n}", float(n), f"${n}") for n in range(1, 8)]
+    folded = _fold_parts(parts, 3, lambda amount: f"${amount:g}")
+    assert [p.label for p in folded] == ["query 7", "query 6", "query 5", "4 others"]
+    assert folded[-1].is_rest and folded[-1].text == "$10"
+    assert len(_fold_parts(parts, 6, str)) == 7
+
+
+def test_a_split_names_its_parts_with_their_share():
+    split = _Split(_fold_parts([_Part("a", 9.0, "$9"), _Part("b", 1.0, "$1")], 4, str), "$10", title="The bill")
+    text = _render_text([split], 0)
+    assert "-- The bill --" in text and "90.0%  " in text and "of $10" in text
+    html = _report_html([split], 0, _Look("", "zz", ""))
+    assert 'class="p0" style="flex:0 1 90.00%' in html and 'class="spl-keys"' in html
+    split.with_keys = False
+    assert 'class="spl-keys"' not in _report_html([split], 0, _Look("", "zz", ""))
+
+
+def test_bars_scale_to_the_highest_and_draw_the_bad_part_in_red():
+    bars = _Bars(["Nov 9", "Nov 10"], [4.0, 2.0], ["4 calls", "2 calls"], title="Calls a day", bad=[0.0, 1.0])
+    text = _render_text([bars], 0)
+    assert "Nov 9   ████████████████████  4 calls" in text and "Nov 10  ██████████░░░░░░░░░░  2 calls" in text
+    html = _report_html([bars], 0, _Look("", "zz", ""))
+    assert '<i class="bad" style="height:25.00%">' in html and "highest 4 calls" in html
+    assert "<span>Nov 9</span><span>Nov 10</span>" in html
+
+
+def test_squarified_tiles_fill_the_map_by_share():
+    tiles = _squarified([6, 6, 4, 3, 2, 2, 1], aspect=1.5)
+    assert (tiles[0].width, tiles[0].height) == (50.0, 50.0)
+    assert round(sum(t.width * t.height for t in tiles)) == 10_000
+    assert all(t.left + t.width <= 100.0001 and t.top + t.height <= 100.0001 for t in tiles)
+    assert _squarified([0, 0]) == []
+
+
+def test_a_treemap_names_big_tiles_and_sums_up_in_one_line_of_text():
+    parts = _fold_parts([_Part(f"f{n}/", float(2 ** n), f"{2 ** n} B") for n in range(8)], 5, lambda a: f"{a:g} B")
+    treemap = _Treemap(parts, "255 B", title="What takes the space")
+    html = _report_html([treemap], 0, _Look("", "zz", ""))
+    assert "<b>f7/</b><i>128 B · 50%</i>" in html and 'class="rest"' in html
+    text = _render_text([treemap], 0)
+    assert "of 255 B: f7/ 50% · f6/ 25% · f5/ 13% · f4/ 6% · 2 more" in text
+
+
+def _runs(count: int, *, failed_every: int = 0) -> list[_Point]:
+    return [_Point(float(n), 100.0 + n % 7, "bad" if failed_every and n % failed_every == 0 else "", f"run {n}")
+            for n in range(count)]
+
+
+def test_dots_draw_a_dot_each_under_their_limit():
+    dots = _Dots(_runs(50, failed_every=10), 200.0, "200 ms", "09:00", "10:00", limit=150.0, limit_text="limit",
+                 tones={"bad": "failed"}, noun="run", title="Every run")
+    assert not dots.is_banded
+    html = _report_html([dots], 0, _Look("", "zz", ""))
+    assert html.count("<circle") == 50 and html.count('<circle class="t-bad"') == 5 and "<polygon" not in html
+    assert 'class="lim"' in html and "<title>run 3</title>" in html and "failed <b>5</b>" in html
+    assert "50 runs from 09:00 to 10:00 · 5 failed" in _render_text([dots], 0)
+
+
+def test_too_many_dots_become_a_band_that_keeps_the_ones_that_matter():
+    dots = _Dots(_runs(100_000, failed_every=1_000), 200.0, "200 ms", "a", "b", tones={"bad": "failed"},
+                 noun="run", most=300)
+    assert dots.is_banded
+    html = _report_html([dots], 0, _Look("", "zz", ""))
+    assert html.count("<polygon") == 1 and html.count("<circle") == 100
+    assert "typical run, and up to the highest, per slice of time" in html
+    assert len(html) < 60_000

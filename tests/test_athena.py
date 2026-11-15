@@ -14,6 +14,7 @@ from fake_athena import query_id, scene, seed_buckets
 from moto import mock_aws
 
 from aws_analyzer import athena as athenamod
+from aws_analyzer.athena import view as athena_view
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.athena import (
@@ -330,6 +331,19 @@ def test_expensive_adds_up_a_querys_runs(ui, capsys):
     assert "SELECT * FROM sales.events" in first and "$22.56" in first
     assert "$5.00 per TB" in out and "table_info('sales.events')" in out
 
+    bill = out.split("-- Where the bill goes, by kind of query --")[1].split("-- What queries cost a day")[0]
+    assert "89.6%" in bill and "$22.56" in bill and "of $25.16" in bill
+    assert "likely a schedule" in bill
+    days = out.split("-- What queries cost a day (UTC days) --")[1].split("-- By kind of query")[0]
+    assert len([line for line in days.splitlines() if "$" in line]) == 8
+
+
+def test_cost_by_day_draws_long_windows_by_week(core):
+    history = core.history("60d")
+    bars = athena_view._cost_by_day(history, core.prices)
+    assert bars.title.startswith("What queries cost a week") and bars.labels[0].startswith("week of ")
+    assert len(bars.labels) == 9 and round(sum(bars.values), 2) == 25.16
+
 
 def test_failures_explain_each_kind(ui, capsys):
     out = run(capsys, ui.failures)
@@ -438,6 +452,9 @@ def test_explorer_opens_on_the_overview_with_every_tab_filled(core):
     assert x._tab == "overview" and titles(x.shown["overview"]) == ["Athena in us-east-1"]
     assert len(x.query_list.keys) == len(x.history.queries)
     assert x.cost_list.keys[0] == x.cost_list.selected and titles(x.shown["costs"])[0].startswith("Query ")
+    bill = plain(x.cost_list.head.value.split("</style>")[-1])
+    assert bill.startswith("$25.16 in all, by kind of query") and "likely a schedule" in bill
+    assert 'class="spl-keys"' not in x.cost_list.head.value and "spl-bar" in x.cost_list.head.value
     assert x.failure_list.keys and titles(x.shown["failures"])[0].startswith("Query ")
     assert set(x.table_list.keys) == {t.full_name for t in x.catalog.tables}
     assert x.crawler_list.keys[0] != "orders-crawler"

@@ -36,6 +36,19 @@ def suggest_memory(max_used: float, memory: int, headroom: float = 1.3) -> int |
     return step if step is not None and step < memory else None
 
 
+def memory_to_try(max_used: float, memory: int) -> int | None:
+    """
+    The memory size worth trying when runs use much less than the function has: suggest_memory's, but at least a
+    quarter of what it has, since less memory is also less CPU; None when what it has is about right.
+    """
+    suggested = suggest_memory(max_used, memory)
+    if not suggested:
+        return None
+    at_least_a_quarter = next((s for s in MEMORY_STEPS if s >= memory / 4), suggested)
+    suggested = max(suggested, at_least_a_quarter)
+    return suggested if suggested < memory else None
+
+
 def performance_findings(perf: Performance, prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
     """
     What the run times and memory say: timeouts, runs close to the timeout or out of memory, memory that's
@@ -77,10 +90,8 @@ def performance_findings(perf: Performance, prices: dict[str, float] | None = No
             f"more: aws lambda update-function-configuration {cli} --memory-size {_next_memory(memory)}."
         )))
     elif max_used and memory:
-        suggested = suggest_memory(max_used, memory)
-        if suggested:  # a quarter of what it has at most per step: less memory is also less CPU
-            suggested = max(suggested, next((s for s in MEMORY_STEPS if s >= memory / 4), suggested))
-        if suggested and suggested < memory:
+        suggested = memory_to_try(max_used, memory)
+        if suggested:
             rate = prices["gb_second_arm" if fn.arm else "gb_second"]
             monthly = sum(r.billed for r in runs) / 1000 * memory / 1024 * rate * DAYS_PER_MONTH / perf.window_days
             saving = monthly * (1 - suggested / memory)

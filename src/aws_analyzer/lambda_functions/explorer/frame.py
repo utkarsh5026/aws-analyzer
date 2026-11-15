@@ -13,7 +13,7 @@ from typing import Any
 from ..._kit.blocks import _Cards, _Findings
 from ..._kit.fmt import _in_zone, _utcnow, parse_time
 from ..._kit.render import _CALL_RE
-from ..._kit.window import _icon_url, _terminal_theme
+from ..._kit.window import _day_bars_css, _icon_url, _terminal_theme
 
 
 # ----------------------------------------------------------------------------- the explorer window
@@ -310,10 +310,6 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .fc.dim{opacity:.55}
 .lmx-app .ff.hl{opacity:1;color:var(--lx-ink-warn)}
 .lmx-app .ff.hl.bad{color:var(--lx-ink-bad)}
-.lmx-app .tr{display:inline-flex;align-items:flex-end;gap:1px;height:22px;vertical-align:middle}
-.lmx-app .tr i{width:5px;display:flex;flex-direction:column;background:color-mix(in srgb,var(--lx-accent) 55%,transparent);border-radius:1px 1px 0 0;overflow:hidden}
-.lmx-app .tr i b{flex:0 0 auto;min-height:1px;background:var(--lx-ink-bad)}
-.lmx-app .tr i.z{height:1px;background:currentColor;opacity:.25;border-radius:0}
 .lmx-app .fc .pill{display:inline-block;padding:0 7px;border-radius:999px;font-weight:600;font-size:11.5px}
 .lmx-app .fc .pill.warn{background:rgba(245,158,11,.18);color:var(--lx-ink-warn)}
 .lmx-app .fc .pill.bad{background:rgba(239,68,68,.15);color:var(--lx-ink-bad)}
@@ -568,7 +564,8 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .lmb pre,.lmx-app .lmb .jt{border-radius:10px}
 .lmx-app .lmb .wire .wn,.lmx-app .lmb .wire .wf{border-radius:12px;background-color:var(--lx-surface)}
 @media (prefers-reduced-motion:reduce){.lmx-app *,.lmx-app *::before{transition:none!important;animation-duration:2.5s!important}}
-""" + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
+""" + _day_bars_css("lmx-app", bar="var(--lx-accent)", bad="var(--lx-ink-bad)") + _TERMINAL_CSS + "\n" + \
+    _explorer_rules() + "\n</style>"
 
 
 _IN_WINDOW = {  # a command a report names -> where the explorer window shows the same

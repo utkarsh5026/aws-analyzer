@@ -50,6 +50,9 @@ from aws_analyzer.messaging import (
 from aws_analyzer.messaging.analysis import blocks_services, dlq_too_short
 from aws_analyzer.messaging.explorer.frame import _window_text
 from aws_analyzer.messaging.style import _render_html
+from aws_analyzer.messaging.analysis.layout import MOST_BRANCHES, map_layout
+from aws_analyzer.messaging.models import Hop
+from aws_analyzer._kit.window import _recent_trouble
 
 from fake_messaging import ACCOUNT, REGION, seed
 from aws_analyzer import set_theme
@@ -463,6 +466,14 @@ def test_explorer_everything_tab_searches_filters_and_sorts(core):
     assert x.items_shown[0].name == "email-jobs"
     x.column_buttons["name"].click()
     assert x.items_shown[0].name == "audit-events"
+    x.column_buttons["trend"].click()
+    recent = [_recent_trouble(item.days) for item in x.items_shown]
+    assert recent == sorted(recent, reverse=True) and recent[0][0] > 0
+    assert all(len(item.days) == 7 for item in x.items_shown if item.traffic)
+    dlq = next(item for item in x.items_shown if item.name == "orders-dlq")
+    assert sum(failed for _, failed in dlq.days) == sum(came for came, _ in dlq.days) == dlq.traffic
+    face = next(row for row in x._item_rows if row.key.endswith(":orders-events")).face.value
+    assert '<span class="tr">' in face and "<b style=" in face
     next(row for row in x._item_rows if row.key.endswith(":orders")).button.click()
     assert x._tab == "overview" and repr(x).startswith("MessagingExplorer(orders)")
     assert "a message not handled by then is deleted" in plain(x.item_view.value)
@@ -471,6 +482,7 @@ def test_explorer_everything_tab_searches_filters_and_sorts(core):
 def test_explorer_map_follows_a_click(core):
     x = explorer(core, "orders-events", tab="map")
     assert x._tab == "map" and [h.name for h in x.hops_shown][:2] == ["orders-events", "shipping-updates"]
+    assert '<div class="hmap"><svg' in x.map_view.value and x.map_view.value.count("<rect") == 8
     blocked = next(h for h in x.hops_shown if h.name == "partner-webhooks")
     assert blocked.problem == "its policy keeps the topic out"
     next(row for row in x._hop_rows if row.key.endswith(":partner-webhooks")).button.click()
@@ -582,3 +594,34 @@ def test_explorer_draws_its_reports_in_the_theme_set(core):
     assert pages and all('<div class="msg theme-soft">' in page for page in pages)
     assert x.root.children[0].value.count(theme_rules) == 1
     assert not any(theme_rules in page for page in pages)
+
+
+def _hop(depth: int, name: str, *, tone: str = "", upstream: bool = False) -> Hop:
+    return Hop(depth, "SQS queue", name, arn=f"arn:aws:sqs:us-east-1:1:{name}", tone=tone, upstream=upstream,
+               problem="kept out" if tone else "")
+
+
+def test_map_layout_centres_each_hop_on_its_branches_and_puts_senders_first():
+    hops = [_hop(0, "rule", upstream=True), _hop(0, "orders"), _hop(1, "reader"), _hop(1, "dlq", tone="bad")]
+    layout = map_layout(hops)
+    places = {node.hop.name: (node.column, node.row) for node in layout.nodes}
+    assert places == {"reader": (2, 0.0), "dlq": (2, 1.0), "orders": (1, 0.5), "rule": (0, 0.5)}
+    assert layout.nodes[layout.start].hop.name == "orders" and (layout.columns, layout.rows) == (3, 2)
+    assert sorted(edge.tone for edge in layout.edges) == ["", "", "bad"]
+
+
+def test_map_layout_folds_a_wide_fan_out_and_keeps_problems():
+    hops = [_hop(0, "topic")] + [_hop(1, f"q{n}", tone="bad" if n == 59 else "") for n in range(60)]
+    hops.append(_hop(1, "q0"))
+    layout = map_layout(hops)
+    names = [node.hop.name if node.hop else f"+{node.folded}" for node in layout.nodes]
+    assert len(layout.nodes) == MOST_BRANCHES + 1 and "q59" in names and f"+{60 - (MOST_BRANCHES - 1)}" in names
+    assert names.count("q0") == 1
+
+
+def test_follow_draws_its_map_in_html_and_leaves_it_out_of_text(ui, capsys):
+    blocks = ui._follow_blocks(ui.core.follow("orders"))
+    html = _render_html(blocks, 0)
+    assert "<svg" in html and 'class="start"' in html and "holds 42 failed messages" in html
+    assert "<path class=\"bad\"" in html
+    assert "The map:" not in run(capsys, ui.follow, "orders")

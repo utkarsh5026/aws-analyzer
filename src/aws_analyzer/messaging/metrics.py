@@ -147,23 +147,23 @@ class _MetricReads:
             self.metrics_read += len(batch)
         return points
 
-    def _totals(self, metrics: list[_Metric], days: int, make: type) -> dict[str, Any]:
+    def _totals(self, metrics: list[_Metric], days: int, make: type, fields: tuple[str, ...]) -> dict[str, Any]:
         """
         Each owner's numbers (a QueueNumbers, TopicNumbers or RuleNumbers made by `make`) over the last `days` whole
-        UTC days.
+        UTC days, with a line per day of `fields`. CloudWatch bills a metric asked for, not its points, so reading a
+        point a day costs the same as one for the whole window, and the totals are those days added up.
         """
         end = _midnight_after(_utcnow())
         start = end - timedelta(days=days)
         numbers: dict[str, Any] = {}
-        for metric, points in zip(metrics, self._read_metrics(metrics, start, end, days * _DAY_SECONDS)):
+        series: dict[str, dict[str, list[tuple[datetime, float]]]] = {}
+        for metric, points in zip(metrics, self._read_metrics(metrics, start, end, _DAY_SECONDS)):
             _fill(numbers.setdefault(metric.owner, make()), metric, points)
+            if metric.field in fields:
+                series.setdefault(metric.owner, {})[metric.field] = points
+        for owner, points in series.items():
+            numbers[owner].daily = _days(points, fields)
         return numbers
-
-    def _daily(self, metrics: list[_Metric], days: int, fields: tuple[str, ...]) -> list[tuple[Any, ...]]:
-        end = _midnight_after(_utcnow())
-        chosen = [m for m in metrics if m.field in fields]
-        series = self._read_metrics(chosen, end - timedelta(days=days), end, _DAY_SECONDS)
-        return _days({m.field: points for m, points in zip(chosen, series)}, fields)
 
     def _oldest_now(self, queues: list[Queue]) -> dict[str, float]:
         """
@@ -181,41 +181,33 @@ class _MetricReads:
     def queue_numbers(self, queues: list[Queue], *, days: int = 7, daily: bool = False) -> dict[str, QueueNumbers]:
         """
         Each queue's numbers over the last `days` whole UTC days (by ARN), with the age of its oldest message now,
-        and a line per day when daily=True.
+        with a line per day (daily= is kept for older calls: every
+        result has its lines now).
         """
         if not queues:
             return {}
         metrics = [m for q in queues for m in _queue_metrics(q)]
-        numbers = self._totals(metrics, days, QueueNumbers)
+        numbers = self._totals(metrics, days, QueueNumbers, _DAILY_QUEUE)
         for arn, oldest in self._oldest_now(queues).items():
             numbers.setdefault(arn, QueueNumbers()).oldest_now_s = oldest
-        if daily:
-            for queue in queues:
-                numbers.setdefault(queue.arn, QueueNumbers()).daily = self._daily(
-                    _queue_metrics(queue), days, _DAILY_QUEUE)
         return {q.arn: numbers.get(q.arn, QueueNumbers()) for q in queues}
 
     def topic_numbers(self, topics: list[Topic], *, days: int = 7, daily: bool = False) -> dict[str, TopicNumbers]:
         """
-        Each topic's numbers over the last `days` whole UTC days (by ARN), and a line per day when daily=True.
+        Each topic's numbers over the last `days` whole UTC days (by ARN), with a line per day (daily= is kept for older calls: every
+        result has its lines now).
         """
         if not topics:
             return {}
-        numbers = self._totals([m for t in topics for m in _topic_metrics(t)], days, TopicNumbers)
-        if daily:
-            for topic in topics:
-                numbers.setdefault(topic.arn, TopicNumbers()).daily = self._daily(
-                    _topic_metrics(topic), days, _DAILY_TOPIC)
+        numbers = self._totals([m for t in topics for m in _topic_metrics(t)], days, TopicNumbers, _DAILY_TOPIC)
         return {t.arn: numbers.get(t.arn, TopicNumbers()) for t in topics}
 
     def rule_numbers(self, rules: list[Rule], *, days: int = 7, daily: bool = False) -> dict[str, RuleNumbers]:
         """
-        Each rule's numbers over the last `days` whole UTC days (by ARN), and a line per day when daily=True.
+        Each rule's numbers over the last `days` whole UTC days (by ARN), with a line per day (daily= is kept for older calls: every
+        result has its lines now).
         """
         if not rules:
             return {}
-        numbers = self._totals([m for r in rules for m in _rule_metrics(r)], days, RuleNumbers)
-        if daily:
-            for rule in rules:
-                numbers.setdefault(rule.arn, RuleNumbers()).daily = self._daily(_rule_metrics(rule), days, _DAILY_RULE)
+        numbers = self._totals([m for r in rules for m in _rule_metrics(r)], days, RuleNumbers, _DAILY_RULE)
         return {r.arn: numbers.get(r.arn, RuleNumbers()) for r in rules}

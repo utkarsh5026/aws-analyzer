@@ -10,7 +10,7 @@ import re
 from ..._kit.fmt import _duration, _fmt_dt, _plural, human_age, human_money
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
-from ..._kit.window import _icon_url, _terminal_theme
+from ..._kit.window import _day_bars_css, _day_bars_html, _icon_url, _terminal_theme
 
 from ..helpers import STATUS_TONES, STATUS_WORDS
 from ..models import Execution, FailureGroup, FailureReport, MachineNumbers, StateMachine
@@ -321,13 +321,13 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .sfx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--sx-tint-2);margin-left:6px;vertical-align:1px}
 .sfx-app .tag.x{background:rgba(219,39,119,.12);color:var(--sx-accent-2)}
-.sfx-app.sfx-app .sfx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--sx-line)}
+.sfx-app.sfx-app .sfx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--sx-line)}
 .sfx-app.sfx-app .sfx-lhead>*{margin:0;min-width:0}
 .sfx-app.sfx-app button.sfx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sfx-app.sfx-app button.sfx-col.sfx-c-name{text-align:left;justify-content:flex-start}
 .sfx-app.sfx-app button.sfx-col:hover:enabled{background:transparent;opacity:1;color:var(--sx-accent)}
 .sfx-app.sfx-app button.sfx-col.sfx-on{opacity:1;color:var(--sx-accent)}
-.sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
+.sfx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .sfx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .sfx-app .mr .num.bad{color:var(--sx-ink-bad);font-weight:650}
 .sfx-app .mr .num.warn{color:var(--sx-ink-warn);font-weight:650}
@@ -375,7 +375,8 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .ei.m-t3{background:rgba(217,119,6,.45)}
 .sfx-app .ei{width:14px;height:14px}
 .sfx-app .sfx-states .sfn .tt{margin-top:8px}
-""" + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
+""" + _day_bars_css("sfx-app", bar="var(--sx-accent)", bad="var(--sx-ink-bad)") + _TERMINAL_CSS + "\n" + \
+    _explorer_rules() + "\n</style>"
 
 
 _IN_WINDOW = {
@@ -469,6 +470,15 @@ def _machine_note(machine: StateMachine) -> str:
     return f"{len([s for s in machine.states if s.depth == 0])} states{calls}"
 
 
+def _machine_days(numbers: MachineNumbers | None) -> list[tuple[float, float]]:
+    """
+    A state machine's executions and failed ones per day, oldest first, for its trend column; [] without numbers.
+    """
+    if numbers is None:
+        return []
+    return [(float(started), float(failed)) for started, failed in zip(numbers.daily_started, numbers.daily_failed)]
+
+
 def _machine_face(machine: StateMachine, numbers: MachineNumbers | None, cost: float | None, words: list[str]) -> str:
     """
     A state machine's line in the State machines tab: a dot for how it's doing, its name and type, then its
@@ -481,6 +491,8 @@ def _machine_face(machine: StateMachine, numbers: MachineNumbers | None, cost: f
     unsuccessful = f"{numbers.unsuccessful:,} ({numbers.failure_rate:.1%})" if failing else ("0" if numbers else "-")
     average = _duration((numbers.avg_ms or 0) / 1000) if numbers and numbers.avg_ms is not None else "-"
     return (f'<div class="mr"><span class="dot {tone}"></span><div class="em"><div class="en">'
-            f'{_marked(machine.name, words)}{kind}</div><div class="ef">{_esc(_machine_note(machine))}</div></div><span class="num">{started}</span><span class="num {tone if failing else ""}">'
+            f'{_marked(machine.name, words)}{kind}</div><div class="ef">{_esc(_machine_note(machine))}</div></div>'
+            f'<span class="num">{_day_bars_html(_machine_days(numbers))}</span>'
+            f'<span class="num">{started}</span><span class="num {tone if failing else ""}">'
             f'{_esc(unsuccessful)}</span><span class="num">{_esc(average)}</span><span class="num">'
             f'{_esc(human_money(cost))}</span><span class="num">{_esc(machine.log_level.lower())}</span></div>')

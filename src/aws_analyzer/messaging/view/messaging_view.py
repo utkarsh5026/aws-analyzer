@@ -21,6 +21,7 @@ from ..analysis import (
 )
 from ..analysis.policy import EVENTS_PRINCIPAL, SNS_PRINCIPAL
 from ..analyzer import MessagingAnalyzer
+from ..blocks import _HopMap
 from ..helpers import seconds_words
 from ..models import Hop, MessageMap, Overview, QueueReport, RuleReport, TopicReport
 from ..style import _render_html
@@ -484,6 +485,8 @@ class MessagingView(_BaseView):
             _Findings(findings, empty="Every hop gets its messages, and nothing waits in a dead-letter queue."),
             *self._overview_notes(found.overview, costs=False),
         ]
+        if len(found.hops) > 1:
+            blocks.append(_HopMap(found.hops, title="The map: a problem is outlined, and the way into it dashed"))
         if upstream:
             sender_rows = [[h.name, h.kind, h.via, _hop_problem(h)] for h in upstream]
             blocks.append(_Table(["Sends here", "Kind", "How", "Problem"], sender_rows, title="What sends to it",

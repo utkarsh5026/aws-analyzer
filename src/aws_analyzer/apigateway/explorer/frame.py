@@ -12,7 +12,7 @@ from datetime import datetime
 from ..._kit.fmt import _fmt_dt, _plural, human_money
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
-from ..._kit.window import _icon_url, _terminal_theme
+from ..._kit.window import _day_bars_css, _day_bars_html, _icon_url, _terminal_theme
 
 from ..blocks import _ms
 from ..helpers import status_tone
@@ -312,13 +312,13 @@ body[class*=vscode-] .agx-app.agx-app .agx-page{height:620px}
 .agx-app .ez{flex:0 0 auto;text-align:right;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums;line-height:1.3;white-space:nowrap}
 .agx-app .tag{display:inline-block;font-size:10px;font-weight:650;letter-spacing:.03em;padding:0 6px;border-radius:5px;background:var(--ax-tint-2);margin-left:6px;vertical-align:1px}
 .agx-app .tag.x{background:rgba(219,39,119,.12);color:var(--ax-accent-2)}
-.agx-app.agx-app .agx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--ax-line)}
+.agx-app.agx-app .agx-lhead{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;padding:4px 10px 4px 8px;border-bottom:1px solid var(--ax-line)}
 .agx-app.agx-app .agx-lhead>*{margin:0;min-width:0}
 .agx-app.agx-app button.agx-col{width:auto;height:24px;padding:0;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agx-app.agx-app button.agx-col.agx-c-name{text-align:left;justify-content:flex-start}
 .agx-app.agx-app button.agx-col:hover:enabled{background:transparent;opacity:1;color:var(--ax-accent)}
 .agx-app.agx-app button.agx-col.agx-on{opacity:1;color:var(--ax-accent)}
-.agx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
+.agx-app .mr{display:grid;grid-template-columns:22px minmax(220px,1.6fr) 64px repeat(5,minmax(70px,.6fr));gap:10px;align-items:center;height:52px;padding:0 10px 0 8px;min-width:0}
 .agx-app .mr .num{text-align:right;font-variant-numeric:tabular-nums}
 .agx-app .mr .num.bad{color:var(--ax-ink-bad);font-weight:650}
 .agx-app .mr .num.warn{color:var(--ax-ink-warn);font-weight:650}
@@ -368,7 +368,8 @@ _OWN_CSS = """
 .agx-app .tls .warn{color:var(--ax-ink-warn)}
 """
 
-_EXPLORER_CSS = "<style>\n" + _BASE_CSS + _OWN_CSS + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>"
+_EXPLORER_CSS = ("<style>\n" + _BASE_CSS + _OWN_CSS + _day_bars_css("agx-app", bar="var(--ax-accent)", bad="var(--ax-ink-bad)")
+                 + _TERMINAL_CSS + "\n" + _explorer_rules() + "\n</style>")
 
 
 _IN_WINDOW = {
@@ -425,6 +426,15 @@ def _api_tone(numbers: ApiNumbers | None) -> str:
     return "ok" if numbers.requests else ""
 
 
+def _api_days(numbers: ApiNumbers | None) -> list[tuple[float, float]]:
+    """
+    An API's requests and 5xx errors per day, oldest first, for its trend column; [] without numbers.
+    """
+    if numbers is None:
+        return []
+    return [(float(requests), float(errors)) for requests, errors in zip(numbers.daily_requests, numbers.daily_5xx)]
+
+
 def _api_face(api: Api, numbers: ApiNumbers | None, cost: float | None, auth: str, words: list[str]) -> str:
     """
     An API's line in the APIs tab: a dot for how it's doing, its name and kind, then its requests, 5xx share, p95,
@@ -438,6 +448,7 @@ def _api_face(api: Api, numbers: ApiNumbers | None, cost: float | None, auth: st
     auth_tone = "warn" if auth.startswith("none") else ""
     return (f'<div class="mr"><span class="dot {tone}"></span><div class="em"><div class="en">'
             f'{_marked(api.name, words)}{kind}</div><div class="ef">{_esc(_api_note(api))}</div></div>'
+            f'<span class="num">{_day_bars_html(_api_days(numbers))}</span>'
             f'<span class="num">{requests}</span><span class="num {"bad" if tone == "bad" else ""}">{share}</span>'
             f'<span class="num">{_esc(p95)}</span><span class="num">{_esc(human_money(cost))}</span>'
             f'<span class="num {auth_tone}">{_esc(auth)}</span></div>')

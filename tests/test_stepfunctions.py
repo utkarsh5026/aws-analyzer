@@ -47,6 +47,7 @@ from aws_analyzer.stepfunctions.analysis.retries import (
 )
 from aws_analyzer.stepfunctions.models import StateDef
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
+from aws_analyzer.stepfunctions.explorer import frame as sfx_frame
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
 from aws_analyzer.stepfunctions.helpers import console_url
@@ -635,6 +636,11 @@ def test_explorer_state_machines_search_chips_and_sorting(fakes):
     assert names()[0] == "image-resize-express" and names()[-1] == "kb-sync"
     x.column_buttons["logging"].click()
     assert [line.machine.log_level for line in x.machines_shown] == ["OFF", "OFF", "ERROR", "ALL"]
+    x.column_buttons["trend"].click()
+    assert names()[0] == "image-resize-express"
+    face = x._machine_rows[0].face.value
+    assert face.count('<span class="tr">') == 1 and face.count("<i ") + face.count('<i class="z">') == 7
+    assert "<b style=" in face and ".sfx-app .tr i b{" in sfx_frame._EXPLORER_CSS
 
     x.machine_find.value = "charge-card"
     assert names() == ["order-pipeline"]

@@ -102,7 +102,6 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/lambda_functions/analysis/logs.py": 15,
     "src/aws_analyzer/lambda_functions/analysis/overview.py": 9,
     "src/aws_analyzer/lambda_functions/analysis/package.py": 3,
-    "src/aws_analyzer/lambda_functions/analysis/performance.py": 1,
     "src/aws_analyzer/lambda_functions/analyzer.py": 30,
     "src/aws_analyzer/lambda_functions/blocks/graph.py": 50,
     "src/aws_analyzer/lambda_functions/blocks/outline.py": 3,

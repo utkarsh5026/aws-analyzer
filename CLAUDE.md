@@ -133,7 +133,16 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file"), `highlight.py`
   (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab),
   `jsontree.py` (the `_JsonTree` block, JSON you can fold: S3's .json previews and Lambda's configuration; a service
-  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `themes.py` (how a View's reports
+  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `charts.py` (charts any report can
+  hold, each drawn in HTML and text and adding its own rules to `report.rules`, so no service's stylesheet changes:
+  `_Meter`, an amount against a limit as one bar of `_Part`s, the part past the limit in red, an optional `mark` for a
+  setting that would do; `_Split`, a whole as one bar of its parts, which `_fold_parts` cuts to the largest few and
+  "N others", so a whole of thousands draws like one of five; `_Treemap`, the same parts as tiles laid out by
+  `_squarified` (S3's summary: what takes the space by folder), one line in text; `_Bars`, an amount per day or hour,
+  the bad part red; `_Dots`, a `_Point` per event by time and amount under a limit line, which past `most` points
+  draws a band (median to highest per slice) and keeps only the toned points as dots: Lambda's performance report,
+  its runs under the timeout, beside a `_Meter` of memory marked at `memory_to_try`),
+  `themes.py` (how a View's reports
   look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
   by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its
   own; `_theme_css(root, name)` scopes every rule of a theme to `.<root>.theme-<name>`, the class `_report_html` puts
@@ -298,8 +307,14 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `commands` (the `aws sqs` / `sns` / `events` commands findings show), `access` (feeders, blocked senders and
   `access_fixes`, one SetQueueAttributes per queue since it replaces the whole policy), `queues` / `topics` / `rules`
   (findings), `world` (reports and findings built from an `Overview`) and `flow` (`follow_map`, the tree `follow()`
-  draws), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3 minutes").
-  `metrics.py` is the CloudWatch mixin. The View's tables are `view/tables.py`.
+  draws), `layout` (`map_layout`: the map as boxes in columns, each parent level with the middle of its branches,
+  a queue reached two ways drawn once, at most `MOST_BRANCHES` per parent with problems kept and the rest one
+  "+N more" box), `trend` (`backlog_trend` over `QueueSample`s, Live's "draining 40 a minute, empty in about 3
+  minutes"). `blocks.py`'s `_HopMap` draws `map_layout` as SVG in `follow()` and the Map tab (nothing in text, where
+  the table of hops says it).
+  `metrics.py` is the CloudWatch mixin: it reads every metric a point a day (CloudWatch bills a metric, not its
+  points), so the totals are the days added up and every queue, topic and rule has its `daily` line, which the
+  Everything tab's trend column draws. The View's tables are `view/tables.py`.
 - `messaging`'s explorer window, `MessagingExplorer` (`messaging/explorer/`: `window.py` with `explore()`, composed of
   `_EverythingTab` (`items.py`: `region_items` turns the overview into `_Item`s, a line each, with its findings;
   chips, search and columns as the OpenSearch explorer's Domains tab; a dead-letter queue holding messages sorts and
@@ -588,7 +603,10 @@ How the View layer works:
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
 - **The windows' kit** (`_kit/window.py`) is what the four windows share, written once: `_css_height`,
-  `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_icon_url` (a line drawing as the CSS `url()` every
+  `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_day_bars_html` / `_day_bars_css` (a list's trend
+  column, a bar a day with the bad part red: the Lambda, Step Functions, API Gateway and Messaging lists and Lambda's
+  Live tab;
+  `_recent_trouble` is what it sorts by), `_icon_url` (a line drawing as the CSS `url()` every
   window masks its icons with), `_row_button` (a line whose whole width is the click target: a full-width button under
   its HTML face, in a box), `_for_window(blocks, words)` and `_terminal_theme(roots, prefix)`, the chat windows' look
   (`_MONO_FONT` and a code editor's colours, light and dark, as `--<prefix>-*` properties: the agent's window uses
@@ -946,7 +964,7 @@ tests import and patch them there.
 `rules.py` checks what keeps the layers apart:
 
 - The core never imports the UI. That covers the package's UI modules and `_kit`'s `blocks`, `render`, `view`,
-  `window`, `progress`, `highlight` and `jsontree`; `render._call` / `_signature` are allowed.
+  `window`, `progress`, `highlight`, `jsontree` and `charts`; `render._call` / `_signature` are allowed.
 - `analysis` never imports `analyzer`.
 - No function or class is defined in two modules of a package.
 - Every `*View`, `*Explorer`, `_<Topic>Commands`, `_<Topic>Tab` and `_<Topic>Pane` class (a View or window split into
