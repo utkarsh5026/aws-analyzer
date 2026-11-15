@@ -112,9 +112,17 @@ The **Executions** tab lists them newest first. Pick a time range, filter by out
 
 - **The time range** is the last 24 hours, 7 days, 30 days or 90 days.
 - **The chips** show only the executions that **Failed**, **Timed out**, were **Aborted**, are **Running** or **Succeeded**.
+- **The bars** over the list are its executions a day in the time range (from 7 days), the part that didn't succeed in red, and the day failures jumped outlined. Point at a bar for its numbers.
 - **The search box** finds an execution by its name.
+- **⇄ Compare with the last success**, beside ↗ Console on an execution that didn't succeed, puts it beside the newest one that succeeded before it, above its page: the states and input fields that differ, and the likely cause. Click it again to hide it; `x.compare("ord-7f3a")` does the same from a cell.
 - **A busy state machine** has more executions than one read lists (500). The list then holds the newest 500 and, read on their own, every one that didn't succeed in the range, so the Failed chip counts them all. The line under the pager says so, against what CloudWatch counted. The cards over the tabs count the time range picked.
 - **↗ Console**, above the open execution, opens it in the Step Functions console, where you can redrive it or start it again. The one beside ↻ Refresh opens the state machine there.
+
+![The Executions tab with ord-7f3a open and ⇄ Compare clicked: over its page, ord-7f3a beside ord-cfae, the last execution that succeeded before it, with the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError](images/sfn-explorer-compare-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Executions tab with ord-7f3a open and ⇄ Compare clicked: over its page, ord-7f3a beside ord-cfae, the last execution that succeeded before it, with the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError](images/sfn-explorer-compare-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+⇄ Compare on ord-7f3a: the run that succeeded just before it had a `customer_id`, and this one didn't.
+///
 
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-light.webp#only-light){ width="984" height="866" loading=lazy }
 ![An execution open in the explorer: its findings and a waterfall where ChargeCard's two throttled tries and back-off come before LoadOrders fails with KeyError](images/sfn-explorer-run-dark.webp#only-dark){ width="984" height="866" loading=lazy }
@@ -158,9 +166,15 @@ The toggle over the graph picks what colours it: **This execution** (its path, t
 The other tabs are the [Step Functions guide](stepfunctions.md)'s reports, a click away.
 { .gist }
 
-- **Failures** is [`failures()`](stepfunctions.md#failures): the failed executions grouped by the state they stopped at and why, with a button per group that opens its newest execution.
+- **Failures** is [`failures()`](stepfunctions.md#failures) as a list: **All failures** first (the summary, findings and executions a day), then a line per kind of failure, the state they stopped at and the error, the most common first, with how many and since when. Click one for whether a Retry would have saved it (with the rule to paste when one would), what changed just before it began (a deploy of its function or the definition updated, on a timeline with its failures), its error, the run to read, the commands that redrive the ones that still can, and its executions, each a click from its waterfall in the Executions tab.
 - **Overview** is [`state_machine()`](stepfunctions.md#state-machine): how it's doing, what its definition risks, and every state.
 - **Definition** is [`graph()`](stepfunctions.md#state-machine): the flow drawn as a graph, with Mermaid to paste.
+
+![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, a warning that it began failing 4 minutes after orders-etl version 2 was published, and a timeline with that deploy just before its first failure](images/sfn-explorer-failures-light.webp#only-light){ width="984" height="866" loading=lazy }
+![The Failures tab: All failures and a line per kind of failure on the left, LoadOrders with KeyError in orders-etl picked, three executions since 3 days ago; on the right its numbers, a warning that it began failing 4 minutes after orders-etl version 2 was published, and a timeline with that deploy just before its first failure](images/sfn-explorer-failures-dark.webp#only-dark){ width="984" height="866" loading=lazy }
+/// caption
+The Failures tab: LoadOrders has failed with `KeyError` since three days ago, starting 4 minutes after orders-etl version 2 went out.
+///
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: how the window reads, and every command.</p>
 

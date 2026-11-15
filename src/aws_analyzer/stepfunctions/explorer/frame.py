@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import re
 
-from ..._kit.fmt import _duration, _fmt_dt, human_age, human_money
+from ..._kit.fmt import _duration, _fmt_dt, _plural, human_age, human_money
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
 from ..._kit.window import _icon_url, _terminal_theme
 
 from ..helpers import STATUS_TONES, STATUS_WORDS
-from ..models import Execution, MachineNumbers, StateMachine
+from ..models import Execution, FailureGroup, FailureReport, MachineNumbers, StateMachine
 
 
 _EXPLORER_TABS = (
@@ -220,7 +220,7 @@ body[data-jp-theme-light="false"] .sfx-app,body.vscode-dark .sfx-app,body.vscode
 .sfx-app .opf.warn{opacity:1;color:var(--sx-ink-warn)}
 .sfx-app mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
 .sfx-app.sfx-app .sfx-backdrop,.sfx-app.sfx-app .sfx-backdrop:hover:enabled,.sfx-app.sfx-app .sfx-backdrop:active:enabled,.sfx-app.sfx-app .sfx-backdrop:focus-visible{position:absolute;top:0;left:0;z-index:30;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;box-shadow:none;outline:none;transform:none;cursor:default}
-.sfx-app.sfx-app .sfx-tabs{flex-wrap:nowrap;gap:2px;padding:3px;border-radius:12px;background:var(--sx-tint-2);margin:0 0 10px;overflow:hidden;container-type:inline-size}
+.sfx-app.sfx-app .sfx-tabs{flex-wrap:nowrap;gap:2px;padding:3px;border-radius:12px;background:var(--sx-tint-2);margin:0 0 10px;overflow:auto hidden;scrollbar-width:thin;container-type:inline-size}
 .sfx-app.sfx-app button.sfx-tab{flex:1 1 0;min-width:0;height:32px;margin:0;padding:0 8px;border:0;border-radius:9px;background:transparent;opacity:.72;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;overflow:hidden}
 .sfx-app.sfx-app button.sfx-tab::before{content:"";width:15px;height:15px;flex:0 0 auto;background:currentColor;-webkit-mask:var(--sx-icon) center/contain no-repeat;mask:var(--sx-icon) center/contain no-repeat}
 .sfx-app.sfx-app button.sfx-tab:hover:enabled{background:var(--sx-tint);opacity:.95}
@@ -228,7 +228,10 @@ body[data-jp-theme-light="false"] .sfx-app,body.vscode-dark .sfx-app,body.vscode
 .sfx-app.sfx-app button.sfx-tab.sfx-on::before{background:var(--sx-accent)}
 .sfx-app.sfx-app button.sfx-tab.sfx-alert::after,.sfx-app.sfx-app button.sfx-tab.sfx-alarm::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--sx-warn);flex:0 0 auto}
 .sfx-app.sfx-app button.sfx-tab.sfx-alarm::after{background:var(--sx-bad)}
-@container (max-width:520px){.sfx-app.sfx-app button.sfx-tab::before{display:none}}
+@container (max-width:680px){.sfx-app.sfx-app button.sfx-tab::before{display:none}.sfx-app.sfx-app button.sfx-tab{flex:1 0 auto;padding:0 7px}}
+@container (max-width:600px){.sfx-app.sfx-app .sfx-tabs button.sfx-tab{flex:0 0 auto;font-size:0;gap:0;padding:0 9px}.sfx-app.sfx-app .sfx-tabs button.sfx-tab::before{display:block}.sfx-app.sfx-app .sfx-tabs button.sfx-tab.sfx-on{font-size:12px;gap:7px;padding:0 10px}}
+.sfx-app.sfx-app .sfx-tabs button.sfx-assist{position:sticky;right:0;z-index:1}
+.sfx-app.sfx-app .sfx-main{container:sfx-main/inline-size}
 .sfx-app.sfx-app .sfx-page{height:clamp(560px,calc(100vh - 330px),1400px);overflow:hidden auto;padding:2px 6px 2px 2px}
 body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app .sfx-page>*{flex:0 0 auto}
@@ -236,7 +239,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app .sfx-left{flex:0 0 390px;min-width:300px;max-width:46%;border:1px solid var(--sx-line);border-radius:14px;padding:10px 10px 6px;background:var(--sx-surface);overflow:hidden}
 .sfx-app.sfx-app .sfx-left>*{margin:0;flex:0 0 auto}
 .sfx-app.sfx-app .sfx-left,.sfx-app.sfx-app .sfx-right,.sfx-app.sfx-app .sfx-rows{min-height:0}
-@media (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap;overflow:hidden auto}.sfx-app.sfx-app .sfx-left{flex:1 1 100%;max-width:100%;height:440px}.sfx-app.sfx-app .sfx-right{flex:1 1 100%;overflow:visible}}
+@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap;overflow:hidden auto}.sfx-app.sfx-app .sfx-left{flex:1 1 100%;max-width:100%;height:440px}.sfx-app.sfx-app .sfx-right{flex:1 1 100%;overflow:visible}}
 .sfx-app.sfx-app .sfx-right{flex:1 1 300px;min-width:0;overflow:hidden auto;padding:0 6px 0 2px}
 .sfx-app.sfx-app .sfx-right>*{flex:0 0 auto;margin:0}
 .sfx-app.sfx-app .sfx-find{position:relative;align-items:center}
@@ -279,6 +282,9 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app button.sfx-ghost{background:transparent;border-color:transparent}
 .sfx-app a.sfx-console{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:6px;border:1px solid var(--sx-line-2);color:var(--sx-accent);font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;background:var(--sx-surface)}
 .sfx-app a.sfx-console:hover{background:var(--sx-tint-2)}
+.sfx-app.sfx-app .sfx-exec-row{align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.sfx-app.sfx-app .sfx-exec-row>*{margin:0}
+.sfx-app .sfx-exec-row .sfx-exec-link{margin:0}
 .sfx-app .sfx-exec-link{display:flex;justify-content:flex-end;padding:2px 0 6px}
 .sfx-app.sfx-app button.sfx-ghost:hover:enabled{background:var(--sx-tint-2)}
 .sfx-app.sfx-app button.sfx-x{padding:0;width:26px;min-width:26px;height:26px;border-radius:999px;background:transparent;border-color:transparent;opacity:.6}
@@ -327,8 +333,13 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .mr .num.warn{color:var(--sx-ink-warn);font-weight:650}
 .sfx-app.sfx-app .sfx-machines{overflow:hidden auto}
 .sfx-app.sfx-app .sfx-machines>*{flex:0 0 auto}
-.sfx-app.sfx-app .sfx-opens{flex-wrap:wrap;gap:6px;margin:0 0 10px}
-.sfx-app.sfx-app .sfx-opens>*{margin:0}
+.sfx-app .fsh{display:inline-block;width:46px;height:5px;margin-top:5px;border-radius:3px;background:var(--sx-tint-2);overflow:hidden;vertical-align:middle}
+.sfx-app .fsh i{display:block;height:100%;background:#ef4444;border-radius:3px}
+.sfx-app .sfx-subh{font-weight:600;margin:14px 0 6px}
+.sfx-app .sfx-days .dzs{margin:2px 0 8px}
+.sfx-app .sfx-days .dzb{height:38px}
+.sfx-app .sfx-days .dzk{margin-top:3px;font-size:10.5px}
+.sfx-app .sfx-subh span{font-weight:400;opacity:.65;margin-left:8px;font-size:11.5px}
 .sfx-app .sfn h3 .badge{display:none}
 .sfx-app .sfn h3{font-size:17px;margin:6px 0 2px}
 .sfx-app .sfn .card{border-radius:12px;background:var(--sx-tint);border-color:var(--sx-line)}
@@ -337,10 +348,12 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .card.ok{border-color:rgba(16,185,129,.55)}
 .sfx-app .sfn .note,.sfx-app .sfn .fi{border-radius:4px 10px 10px 4px}
 .sfx-app .sfn pre{border-radius:10px}
+.sfx-app .sfn .pre>pre{padding-top:34px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
 .sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
 .sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
-.sfx-app.sfx-app .sfx-states{flex:0 0 360px;overflow:hidden auto}
+.sfx-app.sfx-app .sfx-states{flex:0 0 44%;min-width:360px;max-width:560px;overflow:hidden auto}
+@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-graph{flex:1 1 100%!important;overflow:visible}.sfx-app.sfx-app .sfx-states{flex:1 1 100%;min-width:0;max-width:100%;height:auto;overflow:visible}}
 .sfx-app.sfx-app .sfx-states .sfx-rows{flex:0 0 auto;overflow:visible;max-height:none}
 .sfx-app.sfx-app .sfx-states .sfx-row{height:38px;margin:0}
 .sfx-app .sfx-states .er{height:38px;gap:9px}
@@ -414,6 +427,36 @@ def _execution_face(execution: Execution, words: list[str]) -> str:
             f'<div class="en">{_marked(execution.name, words)}</div><div class="ef">{_esc(word)} · started '
             f'{_esc(_fmt_dt(execution.start, seconds=True))}{_esc(redriven)}</div></div><div class="ez">'
             f'{_esc(took)}<br>{_esc(human_age(execution.start))}</div></div>')
+
+
+_FAILURE_ICONS = {"TIMED_OUT": ("⏱", "warn"), "ABORTED": ("⊘", "warn")}
+
+
+def _all_failures_face(report: FailureReport) -> str:
+    """
+    The first line of the Failures tab's list: every failure at once, the report's summary.
+    """
+    groups = _plural(len(report.groups), "kind")
+    return (f'<div class="er"><span class="ei bad">≡</span><div class="em"><div class="en">All failures</div>'
+            f'<div class="ef">{_esc(_plural(len(report.failed), "execution"))} that didn\'t succeed, {_esc(groups)} of '
+            "failure</div></div></div>")
+
+
+def _failure_face(group: FailureGroup, failed: int) -> str:
+    """
+    A kind of failure's line in the Failures tab: where it stopped and the error, how many and since when, and its
+    share of the failures as a bar.
+    """
+    status = group.newest.status if group.newest is not None else "FAILED"
+    icon, tone = _FAILURE_ICONS.get(status, ("✕", "bad"))
+    share = group.count / failed if failed else 0.0
+    since = f" · since {human_age(group.first_seen)}" if group.first_seen is not None else ""
+    newest = f" · newest {human_age(group.newest.start)}" if group.newest is not None and group.newest.start else ""
+    where = f"{group.state} · λ {group.function}" if group.function else group.state
+    return (f'<div class="er"><span class="ei {tone}">{icon}</span><div class="em"><div class="en">'
+            f'{_esc(where)}</div><div class="ef">{_esc(group.error)}{_esc(since)}{_esc(newest)}</div></div>'
+            f'<div class="ez">×{group.count:,}<br><span class="fsh"><i style="width:{max(share * 100, 3):.0f}%"></i>'
+            "</span></div></div>")
 
 
 def _machine_note(machine: StateMachine) -> str:

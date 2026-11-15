@@ -11,7 +11,7 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.blocks import _Note
-from ..._kit.errors import _error_name, _why
+from ..._kit.errors import _Hint, _error_name, _why
 from ..._kit.fmt import _duration, _plural, human_money
 from ..._kit.text import _clip, _esc, search_rank
 from ..._kit.themes import _theme_css, _theme_name
@@ -21,6 +21,8 @@ from ..helpers import EXECUTION_ARN_RE, STATUS_WORDS, console_url, execution_nam
 from ..models import ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine
 from ..analysis import monthly_cost
 from ..analysis.story import ExecutionStory, lambda_steps
+from ..analysis.trend import daily_counts, failure_jump
+from ..blocks import _Days
 from ..analyzer import StepFunctionsAnalyzer
 from ..style import _CSS, _ROOT, _render_html
 from ..view import StepFunctionsView, _with_story_run
@@ -29,6 +31,8 @@ from .frame import (
     _EXECUTION_PAGE, _EXPLORER_CSS, _EXPLORER_TABS, _LOGO, _MACHINE_TABS, _SINCE_CHOICES, _STATUS_CHIPS,
     _execution_face, _window_text,
 )
+from .compare import _CompareSlot
+from .failures import _FailuresTab
 from .graph import _GraphTab
 from .machines import _MachinesTab
 from .widgets import _Line, _MachineField
@@ -46,12 +50,13 @@ _EXECUTIONS_READ = 500
 
 _OVERVIEW_DAYS = 7
 
+_DAYS_SHOWN = 3
+
 _SINCE_DAYS = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
 
-_FAILURE_BUTTONS = 6
 
 
-class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
+class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _CompareSlot, _FocusReads, _Explorer):
     """
     The Step Functions explorer: a window to look through your state machines by clicking. The state machine field at
     the top switches to another one; the cards beside it say how it's doing.
@@ -59,15 +64,17 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         State machines  every state machine in the region: its executions and how many didn't succeed (7 days), its
                         average run, its cost and its logging, the failing ones first; click one to open it
         Overview        how the state machine is doing, what its definition risks, and every state
-        Executions      its executions, newest first: pick a time range, filter by outcome, search by name, and click
-                        one for its waterfall (each state on one time axis, with its tries and back-off) and one log
+        Executions      its executions a day (a bar each, the part that didn't succeed in red), then the executions,
+                        newest first: pick a time range, filter by outcome, search by name, and click one for its
+                        waterfall (each state on one time axis, with its tries and back-off) and one log
                         of what happened, Step Functions' events and every Lambda run's lines merged by time
         Graph           the state machine drawn as a graph: the path the execution open took (green ran, red
                         failed, dashed never reached), where executions stop in the time range, or where the time
                         goes over the newest 20 that succeeded, shaded; pick a state beside it for its tries, its
                         Lambda run's lines, the failures that stopped there, or its median, longest and retries
-        Failures        where and why its executions fail, grouped by the state they stopped at and the error, each
-                        group's newest execution a click away
+        Failures        where and why its executions fail: a line per kind of failure (the state they stopped at
+                        and the error), the most common first; click one for its error, what to read next, the
+                        commands that redrive it and its executions, each a click from its waterfall
         Definition      each state, what it does and where it goes next, and the flow as Mermaid to paste
 
     machine: the state machine to open (a name or ARN); without it, the one failing most, else the first.
@@ -178,6 +185,24 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._open_execution(arn)
 
     @_window_errors
+    def compare(self, ref: str | None = None, *, other: str | None = None) -> None:
+        """
+        Shows an execution beside the newest one that succeeded before it (or other=), above its page in the
+        Executions tab, as ⇄ Compare does: the states and input fields that differ, and the likely cause. Without
+        ref, the execution open.
+        """
+        machine = self.machine.arn if self.machine else None
+        if self._w is None:
+            self.ui.compare(ref or self._selected, other=other, machine=machine)
+            return
+        if ref is not None:
+            self._show_tab("executions")
+            self._open_execution(self.core.execution_arn(ref, machine=machine))
+        elif not self._selected:
+            raise _Hint("Open an execution in the Executions tab first, or name one: x.compare('ord-7f3a').")
+        self._start_compare(self._selected, other)
+
+    @_window_errors
     def refresh(self) -> None:
         """
         Reads everything again: the state machines, and the one shown (the ↻ button).
@@ -233,9 +258,6 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         head.add_class("sfx-head")
         tabs = self._tab_bar(_EXPLORER_TABS)
         self.overview_view = w.HTML(layout=layout(width="100%"))
-        self.failure_opens = w.HBox(layout=layout(width="100%"))
-        self.failure_opens.add_class("sfx-opens")
-        self.failures_view = w.HTML(layout=layout(width="100%"))
         self.definition_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
@@ -244,7 +266,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
             "overview": w.VBox([self.overview_view]),
             "executions": self._executions_page(),
             "graph": self._graph_page(),
-            "failures": w.VBox([self.failure_opens, self.failures_view]),
+            "failures": self._failures_page(),
             "definition": w.VBox([self.definition_view]),
         })
         self._show_tab(self._tab)
@@ -277,11 +299,14 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         pager.add_class("sfx-pager")
         self.cut_note = w.HTML(layout=layout(width="100%"))
         self.cut_note.add_class("sfx-cut")
-        self.left = w.VBox([finder, self.chips, self.rows_box, pager, self.cut_note])
+        self.days_view = w.HTML(layout=layout(width="100%"))
+        self.days_view.add_class("sfx-days")
+        self.left = w.VBox([finder, self.days_view, self.chips, self.rows_box, pager, self.cut_note])
         self.left.add_class("sfx-left")
         self.execution_view = w.HTML(layout=layout(width="100%"))
-        self.execution_link = w.HTML(layout=layout(width="100%"))
-        self.right = w.VBox([self.execution_link, self.execution_view])
+        self.execution_link = w.HTML(layout=layout(width="auto"))
+        self._compare_widgets()
+        self.right = w.VBox([self._compare_row(), self.compare_view, self.execution_view])
         self.right.add_class("sfx-right")
         self.split = w.HBox([self.left, self.right])
         self.split.add_class("sfx-split")
@@ -421,6 +446,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         html_cards = "".join(f'<div class="sfx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b>'
                              "</div>" for label, value, tone in cards)
         self._set(self.stats, f'<div class="sfx-stats">{html_cards}</div>')
+        self._draw_days()
 
     def _machine_numbers(self) -> MachineNumbers | None:
         """
@@ -429,6 +455,17 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         if self.machine is None:
             return None
         return self.range_numbers or self.numbers.get(self.machine.arn)
+
+    def _draw_days(self) -> None:
+        """
+        The Executions tab's strip of executions a day over the time range picked (or the 7 days read with the state
+        machines until the range's are in), the day failures jumped outlined; nothing for a range under _DAYS_SHOWN.
+        """
+        days = daily_counts(self._machine_numbers())
+        if len(days) < _DAYS_SHOWN:
+            self._set(self.days_view, "")
+            return
+        self._set(self.days_view, self._html([_Days(days, failure_jump(days))]))
 
     def _region_cards(self) -> list[tuple[str, str, str]]:
         if self.overview is None:
@@ -454,12 +491,11 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._draw_machines()
         name = arn.rsplit(":", 1)[-1]
         for widget, text in ((self.overview_view, f"Reading {name}…"), (self.definition_view, "Reading its definition…"),
-                             (self.failures_view, "The Failures tab reads when it's opened."),
                              (self.execution_view, "Listing its executions…"),
                              (self.graph_view, "Drawing its graph…")):
             self._set(widget, _skeleton(text))
         self._set(self.execution_link, "")
-        self.failure_opens.children = []
+        self._clear_failures("The Failures tab reads when it's opened.")
         self.rows_box.children, self.chips.children = [], []
         self._draw_pager()
         self._draw_cut_note()
@@ -688,8 +724,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         """
         w = self._w
         self.execution_view = w.HTML(layout=w.Layout(width="100%"))
-        self.execution_link = w.HTML(layout=w.Layout(width="100%"))
-        self.right = w.VBox([self.execution_link, self.execution_view])
+        self.execution_link = w.HTML(layout=w.Layout(width="auto"))
+        self.right = w.VBox([self._compare_row(), self.compare_view, self.execution_view])
         self.right.add_class("sfx-right")
         self.split.children = [self.left, self.right]
 
@@ -701,6 +737,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         self._selected = arn
         self.detail = self.story = None
         self._drop("story")
+        self._reset_compare()
         for line in self._rows:
             _class_if(line.box, "sfx-on", line.key == arn)
         self._renew_pane()
@@ -730,6 +767,7 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
 
     def _got_execution(self, detail: ExecutionDetail) -> None:
         self.detail = detail
+        self._show_compare_button(detail)
         self._draw_graph()
         steps, _ = lambda_steps(detail, 1)
         reading = [_Note("Reading the Lambda runs it called, for its log…")] if steps else []
@@ -753,48 +791,6 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FocusReads, _Explorer):
         execution = detail.execution
         self._status(f"{execution.name}: {STATUS_WORDS.get(execution.status, execution.status)} · "
                      f"{_plural(read, 'Lambda run')} in its log", owner="execution")
-
-    def _load_failures(self) -> None:
-        machine = self.machine
-        if machine is None or not machine.has_executions:
-            return
-        self._set(self.failures_view, _skeleton(f"Reading why {machine.name}'s executions fail…"))
-        self.failure_opens.children = []
-        self._status(f"Reading {machine.name}'s failed executions…", busy=True, owner="failures")
-        arn, since = machine.arn, self._since
-        self._later("failures", lambda: self.core.failures(arn, since=since), self._got_failures,
-                    self._failures_failed)
-
-    def _failures_failed(self, exc: BaseException) -> None:
-        text = self._error_text(exc)
-        self._status(text, "warn")
-        self._set(self.failures_view, self._html([_Note(f"Couldn't read the failures: {text}", "warn")]))
-
-    def _got_failures(self, report: FailureReport) -> None:
-        self.report = report
-        self._draw_graph()
-        self._draw("failures", self.failures_view, self.ui._failure_blocks(report))
-        w, layout = self._w, self._w.Layout
-        buttons = []
-        for group in report.groups[:_FAILURE_BUTTONS]:
-            if group.newest is None:
-                continue
-            newest = group.newest
-            button = w.Button(description=f"Open {newest.name} ({group.state}: {_clip(group.error, 30)})",
-                              tooltip=f"The newest execution that stopped at {group.state} with {group.error}",
-                              layout=layout(width="auto"))
-            button.add_class("sfx-small")
-            button.on_click(self._safely(lambda _button, arn=newest.arn: self._open_from_failures(arn)))
-            buttons.append(button)
-        self.failure_opens.children = buttons
-        _class_if(self.tab_buttons["failures"], "sfx-alarm", bool(report.groups))
-        self._finish("failures", f"{_plural(len(report.failed), 'execution')} didn't succeed in the last "
-                                 f"{self._since_label()}, in {_plural(len(report.groups), 'group')}",
-                     tabs=("failures",))
-
-    def _open_from_failures(self, arn: str) -> None:
-        self._show_tab("executions")
-        self._open_execution(arn)
 
 
 def explore(  # noqa: PLR0913

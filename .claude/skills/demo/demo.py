@@ -2307,7 +2307,8 @@ def seed_stepfunctions() -> dict:
     """
     acme's state machines from tests/fake_stepfunctions.py (fake Step Functions and CloudWatch clients, since moto's
     execution histories are canned), and orders-etl in moto with the log lines of the run that broke ord-7f3a, so
-    execution() shows them through the Lambda analyzer.
+    execution() shows them through the Lambda analyzer, whose Lambda client is the fake one that knows when each
+    function was deployed (orders-etl just before its KeyError began), so failures() can say what changed.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -2351,7 +2352,7 @@ def seed_stepfunctions() -> dict:
     logs.create_log_stream(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize")
     logs.put_log_events(logGroupName="/aws/lambda/resize-image", logStreamName="2026/11/01/[$LATEST]resize",
                         logEvents=[{"timestamp": int(m.timestamp() * 1000), "message": text} for m, text in oom])
-    return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION)}
+    return {"clients": fakes, "lambda_core": LambdaAnalyzer(region=REGION, clients={"lambda": fakes["lambda"]})}
 
 
 def seed_apigateway() -> dict:

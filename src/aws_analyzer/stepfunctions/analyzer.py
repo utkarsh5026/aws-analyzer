@@ -23,6 +23,8 @@ from .models import (
     StepRun, TimingReport,
 )
 from .prices import STEPFUNCTIONS_PRICES
+from .changes import _ChangeReads
+from .comparing import _CompareReads
 from .express import _ExpressReads
 from .analysis import fill_detail, group_failures, parse_execution, parse_state_machine
 from .analysis.story import ExecutionStory, LogLine, StoryRun, lambda_steps, merge_log, step_lines
@@ -37,6 +39,13 @@ _METRIC_STAT_AND_FIELD = {
     "ExecutionsAborted": ("Sum", "aborted"),
     "ExecutionThrottled": ("Sum", "throttled"),
     "ExecutionTime": ("Average", "avg_ms"),
+}
+
+_DAILY_COUNTS = {
+    "started": ("daily_started",),
+    "failed": ("daily_failed", "daily_unsuccessful"),
+    "timed_out": ("daily_unsuccessful",),
+    "aborted": ("daily_unsuccessful",),
 }
 
 _DAY_SECONDS = 86_400
@@ -92,7 +101,7 @@ def _midnight_after(now: datetime) -> datetime:
     return today + timedelta(days=1)
 
 
-class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
+class StepFunctionsAnalyzer(_ChangeReads, _CompareReads, _ExpressReads, _BaseAnalyzer):
     """
     Pure-logic Step Functions analysis: every method returns data; nothing is printed, started or changed.
 
@@ -148,12 +157,14 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
     @property
     def lambda_core(self) -> Any:
         """
-        The LambdaAnalyzer that reads Lambda steps' logs, on this analyzer's session.
+        The LambdaAnalyzer that reads Lambda steps' logs and when their functions were deployed, on this analyzer's
+        session (with clients={'lambda': ...}'s client when one was given).
         """
         if self._lambda_core is None:
             with self._lock:
                 if self._lambda_core is None:
-                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session)
+                    given = {"lambda": self._clients["lambda"]} if "lambda" in self._clients else None
+                    self._lambda_core = _lambda_module().LambdaAnalyzer(self.session, clients=given)
         return self._lambda_core
 
 
@@ -226,7 +237,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
                     "Metric": {"Namespace": "AWS/States", "MetricName": metric,
                                "Dimensions": [{"Name": "StateMachineArn", "Value": machine.arn}]},
                     "Period": _DAY_SECONDS, "Stat": stat}})
-        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days)
+        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days,
+                                         daily_unsuccessful=[0] * days, first_day=start.date())
                    for m in machines}
         for begin in range(0, len(queries), _QUERIES_PER_CALL):
             for result in self._metric_results(queries[begin: begin + _QUERIES_PER_CALL], start, end):
@@ -507,7 +519,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
         """
         Why a state machine's executions failed since `since`: the newest `limit` that failed, timed out or were
         aborted, each history's end read (one request each), grouped by the state they stopped at and the error. An
-        Express workflow's are read from its log group.
+        Express workflow's are read from its log group. It also reads what changed around them (report.changes): when
+        the Lambda functions they stopped in were deployed, and when the definition was updated.
         """
         machine = self.state_machine(ref)
         start = parse_time(since) or _utcnow() - timedelta(days=7)
@@ -522,6 +535,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
             details = self._standard_failures(machine, failed, progress)
         report.read = len(details)
         report.groups = group_failures(details, _utcnow(), express=machine.is_express)
+        self._read_changes(report)
         report.numbers = self._numbers_or_none(machine, start)
         return report
 
@@ -554,7 +568,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
 def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any], start: datetime) -> None:
     """
     One metric's daily values into MachineNumbers: summed (an average is weighted by the day's executions, which
-    are read first), with the daily started and failed counts kept per day.
+    are read first), with the counts _DAILY_COUNTS names kept per day as well.
     """
     values = list(zip(result.get("Timestamps", []), result.get("Values", [])))
     if field_name == "avg_ms":
@@ -567,13 +581,12 @@ def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any]
             numbers.avg_ms = sum(v for _, v in values) / len(values)
         return
     setattr(numbers, field_name, getattr(numbers, field_name) + int(sum(v for _, v in values)))
-    daily = {"started": numbers.daily_started, "failed": numbers.daily_failed}.get(field_name)
-    if daily is None:
-        return
-    for ts, value in values:
-        day = _day(ts, start)
-        if 0 <= day < numbers.days:
-            daily[day] += int(value)
+    for daily_name in _DAILY_COUNTS.get(field_name, ()):
+        daily = getattr(numbers, daily_name)
+        for ts, value in values:
+            day = _day(ts, start)
+            if 0 <= day < numbers.days:
+                daily[day] += int(value)
 
 
 def _day(moment: datetime, start: datetime) -> int:

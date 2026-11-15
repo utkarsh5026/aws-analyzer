@@ -54,6 +54,8 @@ _TOOL_WORDS = {
     "state_machine_failures": _ToolWords("finding why {t} fails", "found why {t} fails", "the state machine"),
     "list_executions": _ToolWords("listing {t}'s executions", "listed {t}'s executions", "the state machine"),
     "execution_details": _ToolWords("following {t} step by step", "followed {t} step by step", "an execution"),
+    "compare_with_success": _ToolWords("comparing {t} with a success", "compared {t} with a success",
+                                       "an execution"),
     "find_apis": _ToolWords("finding APIs", "found APIs"),
     "api_details": _ToolWords("reading {t}'s routes and stages", "read {t}'s routes and stages", "the API"),
     "api_errors": _ToolWords("finding why {t}'s calls fail", "found why {t}'s calls fail", "the API"),

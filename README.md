@@ -2110,6 +2110,7 @@ sfn.help()                                   # every command, grouped by task
 sfn.overview()                               # every state machine: executions, failures, cost, logging
 sfn.failures("order-pipeline")               # where and why its executions fail, with the Lambda run to read
 sfn.execution("order-pipeline/ord-7f3a")     # one execution step by step, and the Lambda lines that broke it
+sfn.compare("order-pipeline/ord-7f3a")       # beside the last one that succeeded: the states and inputs that differ
 sfn.state_machine("order-pipeline")          # its numbers, what its definition risks, every state
 ```
 
@@ -2155,6 +2156,7 @@ Grouped the way `sfn.help()` lists them.
 | :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `executions(name, status=None, since="7d", n=25)`         | A state machine's latest executions (an Express workflow's from its log group), newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
 | `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: a **waterfall** of each state on one time axis (a task's tries and the back-off between them, a Map's iterations in place), each state with what it called, how long it took and how many tries, and where it failed and why. Then **one log of what happened**: Step Functions' events and **the log lines of every Lambda run it called** (each found by its request ID, or by time when the history has none), merged by time. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run). What it returned, its input and the failed step's input and error, folded, JSON as a tree |
+| `compare(execution, other=None, since="30d")`              | **A failed execution beside the last one that succeeded before it** (or `other=`): each state's runs in both, the input fields missing, extra or empty, and **the likely cause** when its error names a field its input lacks |
 | `failures(name, since="7d", limit=50)`                    | Why a state machine fails (an Express workflow's read from its log group): the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
 
 ### Reference
@@ -2183,11 +2185,16 @@ The analysis functions are pure (no AWS calls), so they also work on definitions
 `parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
 steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
 `flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
-`timing_report` (where the time goes over several executions' steps), `resource_label`, `retry_label`,
+`timing_report` (where the time goes over several executions' steps), `daily_counts` and `failure_jump` (its
+executions a day, and the day its failures jumped), `compare_executions`, `compare_steps` and `compare_inputs` (two
+executions side by side), `error_kind`, `matching_retry` and `retry_advice` (whether a Retry would have saved a kind
+of failure), `change_verdict` and `change_text` (whether a deploy or a
+definition update came just before a kind of failure began), `resource_label`, `retry_label`,
 `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
-`failure_findings`, `timing_findings`.
+`failure_findings`, `timing_findings`, `trend_findings`, `change_findings`, `group_change_findings`,
+`comparison_findings`, `retry_findings`.
 
 </details>
 
@@ -2216,6 +2223,7 @@ Read-only. Grant what you need:
 | `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution`, `failures` and `graph(timings=True)`  |
 | `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
 | `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
+| `states:DescribeStateMachineForExecution`, `lambda:GetFunction`, `lambda:ListVersionsByFunction` | What changed before each kind of failure in `failures`: the definition's updates and the functions' deploys |
 | `logs:FilterLogEvents` on the state machine's log group           | An Express workflow's executions, steps and failures                          |
 
 Nothing here starts, stops or redrives an execution: findings show the `aws stepfunctions redrive-execution` command
@@ -2816,6 +2824,7 @@ run's lines through the Lambda toolkit's `LambdaAnalyzer`, so `function_logs`, `
 | `state_machine_failures(state_machine, since)`        | The failed, timed-out and aborted executions grouped by the state they stopped at and the error, each with its share, its newest execution, how many can still be redriven, and the Lambda run's function and request ID |
 | `list_executions(state_machine, status, since, limit)` | Its executions in a window, newest first, with how many ended each way (an Express workflow's from its log group)                                  |
 | `execution_details(execution, state_machine)`         | One execution step by step: every state with how it went, its retries, the step that ended it, and the failed Lambda step's run: its last lines and the file and line its traceback names |
+| `compare_with_success(execution, other, state_machine)` | The execution beside the newest that succeeded before it: the states that differ, the input fields missing, extra or empty, and the likely cause when the error names one |
 | `find_apis(match, days)`                              | Every REST, HTTP and WebSocket API's requests, 4xx and 5xx errors and latency from CloudWatch, its routes (and how many anyone can call), the functions it calls, whether it keeps an access log, its estimated cost |
 | `api_details(api, stage, days)`                       | Its URL and stages (throttling, logging, access log, cache), each route with who may call it, what it calls and how long API Gateway waits, and the findings |
 | `api_errors(api, stage, since)`                       | CloudWatch's counts over the window, the failed calls in the stage's access log grouped by status, error and route, and the Lambda run behind the newest one |
@@ -3187,7 +3196,8 @@ answering model or inference profile and `bedrock:ListFoundationModels` / `bedro
 `file_chunks` list its files' names, sizes and dates). The Step Functions tools need `states:ListStateMachines`,
 `states:DescribeStateMachine`, `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory`,
 `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (an Express workflow's log group, and the Lambda run behind a
-step, with `lambda:GetFunction` and `logs:DescribeLogGroups`). The API Gateway tools need `apigateway:GET` (IAM's one
+step, with `lambda:GetFunction` and `logs:DescribeLogGroups`; and for what changed before a failure,
+`states:DescribeStateMachineForExecution` and `lambda:ListVersionsByFunction`). The API Gateway tools need `apigateway:GET` (IAM's one
 permission for every API Gateway read), `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (the stages' access
 logs, and the Lambda run behind a call). The SageMaker tools need the [SageMaker permissions](#amazon-sagemaker)
 `running`, `training_jobs`, `training_job`, `endpoints`, `pipelines` and `pipeline_run` list, with

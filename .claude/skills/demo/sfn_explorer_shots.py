@@ -9,8 +9,9 @@ and dark.
 The explorer is ipywidgets, which only draw in a browser connected to a kernel, so this starts JupyterLab on a
 notebook that opens the window on demo.py's state machines (order-pipeline, its executions, and the Lambda functions
 ord-7f3a called, in moto), then uses it the way a person would: reads the State machines tab, opens the Executions tab
-and clicks ord-7f3a (its waterfall, then its log with every Lambda run's lines), then opens the Graph tab with
-LoadOrders picked, and colours it by where the time goes, with ChargeCard picked. Each
+and clicks ord-7f3a (its waterfall, then beside the last success, then its log with every Lambda run's lines), then
+opens the Graph tab with LoadOrders picked, and colours it by where the time goes, with ChargeCard picked, and last
+opens the Failures tab with LoadOrders' KeyError picked. Each
 figure is the window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp,
 and the height= of both its images is set in docs/stepfunctions_explorer.md, by shots.py's set_height.
 
@@ -41,7 +42,8 @@ import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-log", "sfn-explorer-graph", "sfn-explorer-timing")
+FIGURES = ("sfn-explorer", "sfn-explorer-run", "sfn-explorer-compare", "sfn-explorer-log", "sfn-explorer-graph",
+           "sfn-explorer-timing", "sfn-explorer-failures")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
@@ -120,6 +122,12 @@ def shoot_theme(page: Any, lab: Lab, theme: str, wanted: list[str], out: Path) -
     page.locator(".sfx-app .sfx-row", has_text="ord-7f3a").locator("button.sfx-row-b").first.click()
     settled()
     shot("sfn-explorer-run")
+    page.locator(".sfx-app .sfx-right button", has_text="Compare with the last success").first.click()
+    page.wait_for_selector(".sfx-app .sfx-right .sfn .fi", timeout=60_000)
+    settled()
+    shot("sfn-explorer-compare")
+    page.locator(".sfx-app .sfx-right button", has_text="Hide the comparison").first.click()
+    settled()
     page.wait_for_selector(".sfx-app .sfx-right .story", timeout=60_000)
     page.evaluate("""() => {
         const pane = document.querySelector('.sfx-app .sfx-right');
@@ -137,6 +145,11 @@ def shoot_theme(page: Any, lab: Lab, theme: str, wanted: list[str], out: Path) -
     page.locator(".sfx-app .sfx-states .sfx-row", has_text="ChargeCard").locator("button.sfx-row-b").first.click()
     settled()
     shot("sfn-explorer-timing")
+    tab("Failures")
+    settled()
+    page.locator(".sfx-app .sfx-row:visible", has_text="LoadOrders").locator("button.sfx-row-b").first.click()
+    settled()
+    shot("sfn-explorer-failures")
     return taken
 
 

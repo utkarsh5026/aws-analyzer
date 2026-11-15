@@ -9,6 +9,34 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔀 **Step Functions: executions a day, and when failures jumped** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `state_machine()`, `failures()` and the explorer's Executions tab draw a bar a day, what didn't succeed in red.
+  - A finding names the day failures jumped, with the `failures(name, since=)` call that reads just those.
+- 🔀 **Step Functions: would a Retry have helped?** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `failures()` says it per kind of failure: yes for a throttle, no for a code error, not first for a timeout.
+  - Where one would help, the Retry rule to paste; where a Retry only repeats a code error, it says so.
+- 🔀 **Step Functions: a failed execution beside the last success** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `compare("order-pipeline/ord-7f3a")`: the states and input fields that differ, the likely cause first.
+  - In the explorer, ⇄ Compare with the last success beside ↗ Console; the agent has `compare_with_success`.
+- 🔀 **Step Functions: what changed just before failures began** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `failures()` puts each kind of failure's first run beside the Lambda deploys and definition updates before it.
+  - "LoadOrders began failing with KeyError 4 minutes after orders-etl version 2 was published", or "Nothing changed".
+  - Needs `states:DescribeStateMachineForExecution` and `lambda:ListVersionsByFunction`; the agent's tool says it too.
+- 🔀 **Step Functions explorer: the Failures tab is a list to click** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - A line per kind of failure (state and error) with how many and since when; `failures()` has a Since column too.
+  - Click one for its error, the run to read, the commands that redrive it and its executions to open.
+
+### Fixed
+
+- 🤖 **Agent: `tools()` lists every tool** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - Its table stopped at 50 rows, so the last tools (the investigator's among them) went unlisted.
+- 🔀 **Step Functions explorer: room for the ✦ Ask drawer** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - With the drawer open, tabs show their icons and the open tab's name, and ✦ Ask stays in view.
+  - The Executions and Graph tabs stack their panes instead of squeezing them; the graph stays full size.
+  - The Graph tab's side pane grows with the window, so a state's Lambda lines read on one line each.
+
 ## [0.59.0] - 2026-11-15
 
 ### Added
