@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-11-15
+
 ### Added
 
 - 🔀 **Step Functions explorer: ✦ Ask about the execution you have open** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
@@ -19,7 +21,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - ↗ Console beside ↻ Refresh opens the state machine in the Step Functions console.
   - Above an open execution, ↗ Console opens that execution there, to redrive or start it again.
   - `console_url(arn)` gives the same link from code.
-
 - 🔀 **Step Functions: see what an execution returned** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - `execution()` and the explorer show a succeeded execution's output; inputs, outputs and errors fold out as a JSON tree.
   - The Graph tab lists the states inside a Map or Parallel to pick, with how often each ran and failed.
@@ -29,7 +30,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🔀 **Step Functions explorer: the Executions list counts every failure** ([#248](https://github.com/utkarsh5026/aws-analyzer/pull/248))
   - When a range holds more than 500 executions, the ones that didn't succeed are listed too, so the Failed chip matches the header.
   - The header's cards count the time range picked, and a line under the list says what it holds.
-
 - 🔀 **Step Functions explorer: ✦ Ask no longer stops with a TypeError** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
   - With `set_assistant(agent)`, clicking ✦ Ask on this window said `focus= takes an explorer window`; it opens the chat now.
 
@@ -1390,7 +1390,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.55.0...v0.56.0
