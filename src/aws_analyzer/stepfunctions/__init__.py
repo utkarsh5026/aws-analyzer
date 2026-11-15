@@ -50,6 +50,7 @@ from .analysis import (
     request_id_of_cause, request_id_of_output, resource_label, retry_label, transitions_per_execution,
     unbounded_waits, unretried_lambda_states, ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines,
     waterfall, FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, state_timings, timing_findings,
+    DayCount, FailureJump, daily_counts, failure_jump, trend_findings,
     timing_marks, timing_report,
 )
 from .analyzer import StepFunctionsAnalyzer
@@ -57,6 +58,11 @@ from .view import StepFunctionsView
 from .explorer.window import StepFunctionsExplorer, explore
 
 __all__ = [
+    "DayCount",
+    "FailureJump",
+    "daily_counts",
+    "failure_jump",
+    "trend_findings",
     "LAMBDA_SERVICE_ERRORS",
     "REDRIVE_DAYS",
     "STEPFUNCTIONS_PRICES",

@@ -1569,12 +1569,12 @@ window.AA_CLIPS = {
  },
  "sfn-overview": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.overview(): sfn.overview(): order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first.",
+  "summary": "sfn.overview(): sfn.overview(): order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.0,
+    "dur": 9.9,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.overview()",
@@ -1582,13 +1582,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-overview",
       "w": 1476,
-      "h": 1210
+      "h": 1334
      }
     ],
     "captions": [
      [
       2.7,
-      "Order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first."
+      "Order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first."
      ]
     ]
    }
@@ -1601,7 +1601,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.0,
+    "dur": 12.6,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.failures(\"order-pipeline\")",
@@ -1609,7 +1609,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 1437
+      "h": 1671
      }
     ],
     "captions": [
@@ -1650,12 +1650,12 @@ window.AA_CLIPS = {
  },
  "sfn-state-machine": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste.",
+  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.2,
+    "dur": 15.3,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.state_machine(\"order-pipeline\")",
@@ -1663,13 +1663,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 1744
+      "h": 2102
      }
     ],
     "captions": [
      [
       3.29,
-      "LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste."
+      "Its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste."
      ]
     ]
    }
@@ -4133,6 +4133,41 @@ window.AA_CLIPS = {
      [
       6.3,
       "The cards say how the one picked is doing."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-explorer-failures": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.explore(): The Failures tab: LoadOrders has failed with KeyError since three days ago. Its executions are listed under the redrive commands, each a click from its waterfall.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "Step Functions explorer",
+    "label": "Step Functions explorer",
+    "code": "sfn.explore()",
+    "outputs": [
+     {
+      "img": "sfn-explorer-failures",
+      "w": 1476,
+      "h": 1299
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Failures tab: LoadOrders has failed with <code>KeyError</code> since three days ago."
+     ],
+     [
+      6.3,
+      "Its executions are listed under the redrive commands, each a click from its waterfall."
      ]
     ]
    }

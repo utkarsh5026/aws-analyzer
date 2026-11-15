@@ -18,21 +18,23 @@ from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import STATUS_TONES, STATUS_WORDS, execution_ref, short_cause
 from .models import (
-    ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine, StateTiming, StepRun,
-    TimingReport,
+    ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview, StateMachine, StateTiming,
+    StepRun, TimingReport,
 )
 from .analysis import (
     catch_label, execution_findings, failure_findings, logging_findings, machine_findings, mermaid, monthly_cost,
     numbers_findings, overview_findings, resource_label, retry_label, transitions_per_execution,
 )
 from .analysis.cost import free_tier_note
-from .analysis.findings import lambda_logs_call
+from .analysis.failures import can_redrive
+from .analysis.findings import lambda_logs_call, redrive_command
 from .analysis.express import logging_gaps
 from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, timing_marks
 from .analysis.timing import timing_findings, took_text
 from .analysis.story import ExecutionStory, waterfall
+from .analysis.trend import daily_counts, failure_jump
 from .analyzer import TIMING_EVENTS, TIMING_SAMPLE, StepFunctionsAnalyzer
-from .blocks import _FlowGraph, _Story, _Waterfall, _payload_block
+from .blocks import _Days, _FlowGraph, _Story, _Waterfall, _payload_block
 from .style import _render_html
 
 
@@ -83,6 +85,17 @@ def _pretty_json(text: str) -> str:
     if len(shown) > _INPUT_CHARS:
         return shown[:_INPUT_CHARS] + f"\n… ({len(shown) - _INPUT_CHARS:,} more characters)"
     return shown
+
+
+def _days_blocks(numbers: MachineNumbers | None) -> list[Any]:
+    """
+    The executions a day as a strip of bars, the day failures jumped outlined, when CloudWatch's daily numbers were
+    read (none otherwise).
+    """
+    days = daily_counts(numbers)
+    if not days:
+        return []
+    return [_Days(days, failure_jump(days), title="Executions a day, the part that didn't succeed in red")]
 
 
 def _state_label(name: str, depth: int) -> str:
@@ -413,6 +426,7 @@ class StepFunctionsView(_BaseView):
                                                        "task retries Lambda's own errors.")]
         if machine.description:
             blocks.append(_Note(machine.description))
+        blocks += _days_blocks(numbers)
         blocks.append(self._states_table(machine, title="Its states, in the order the definition lists them"))
         if machine.functions:
             blocks.append(_Note(f"It calls {_plural(len(machine.functions), 'Lambda function')}: "
@@ -672,7 +686,7 @@ class StepFunctionsView(_BaseView):
             report = self.core.failures(name, since=since, limit=limit, progress=tick)
         self._show(self._failure_blocks(report))
 
-    def _failure_blocks(self, report: FailureReport) -> list[Any]:
+    def _failure_blocks(self, report: FailureReport, *, for_window: bool = False) -> list[Any]:
         machine, numbers = report.machine, report.numbers
         window = f"since {_fmt_dt(report.since, zone=True)}"
         unsuccessful = len(report.failed)
@@ -700,7 +714,8 @@ class StepFunctionsView(_BaseView):
         ]
         if gaps:
             blocks.insert(1, _Note(gaps))
-        if report.groups:
+        blocks += _days_blocks(numbers)
+        if report.groups and not for_window:
             rows = []
             for group in report.groups:
                 newest = group.newest
@@ -709,11 +724,48 @@ class StepFunctionsView(_BaseView):
                         if newest is not None else "-")
                 rows.append([group.state + (f" · λ {group.function}" if group.function else ""), group.error,
                              _clip(short_cause(group.cause), 120) or "-", f"{group.count:,}",
+                             human_age(group.first_seen) if group.first_seen is not None else "-",
                              human_age(newest.start) if newest is not None else "-", read])
-            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Newest", "To read next"], rows,
-                                 title="Failures by where they stopped and why, the most common first",
-                                 code_cols=(5,)))
+            blocks.append(_Table(["Stopped at", "Error", "Cause", "Executions", "Since", "Newest", "To read next"],
+                                 rows, title="Failures by where they stopped and why, the most common first",
+                                 code_cols=(6,)))
         blocks.append(_Next(self._failure_next(report)))
+        return blocks
+
+    def _failure_group_blocks(self, report: FailureReport, group: FailureGroup) -> list[Any]:
+        """
+        One kind of failure, as the explorer's Failures tab shows it when it's picked: how many executions, since
+        when, the error it returned, what to read next and the commands that redrive the ones that still can.
+        """
+        machine, newest, first = report.machine, group.newest, group.first_seen
+        share = group.count / len(report.failed) if report.failed else 0.0
+        sub = " · ".join(filter(None, [
+            f"{_plural(group.count, 'execution')} of the {len(report.failed):,} that didn't succeed",
+            f"λ {group.function}" if group.function else "",
+            f"the first {_fmt_dt(first, zone=True)}" if first is not None else "",
+        ]))
+        cards = [
+            ("Executions", _count(group.count), "bad"),
+            ("Share of failures", f"{share:.0%}"),
+            ("Since", human_age(first) if first is not None else "-"),
+            ("Newest", human_age(newest.start) if newest is not None and newest.start else "-"),
+            ("Can be redriven", _count(group.redrivable)),
+        ]
+        blocks: list[Any] = [_Title(f"{group.state} fails with {group.error}", sub), _Cards([_card(c) for c in cards])]
+        if group.function and group.request_id:
+            blocks.append(_Note(f"Read the newest run's lines: {lambda_logs_call(group.function, group.request_id)}"))
+        elif newest is not None:
+            ref = execution_ref(machine.name, newest.name, newest.arn)
+            blocks.append(_Note(f"See the newest step by step: {_call('execution', ref)}"))
+        if group.cause:
+            blocks.append(_Text(_pretty_json(group.cause), title="The error it returned"))
+        now = _utcnow()
+        redrivable = [e for e in group.executions if can_redrive(e, now, express=machine.is_express)]
+        if redrivable:
+            commands = "\n".join(redrive_command(execution.arn) for execution in redrivable)
+            title = (f"Once the cause is fixed, redrive the {_plural(len(redrivable), 'execution')} that still can "
+                     "(from the state that failed)")
+            blocks.append(_Text(commands, title=title, code=True))
         return blocks
 
     def _failure_next(self, report: FailureReport) -> list[tuple[str, str]]:

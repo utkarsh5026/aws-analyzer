@@ -9,6 +9,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🔀 **Step Functions: executions a day, and when failures jumped** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - `state_machine()`, `failures()` and the explorer's Executions tab draw a bar a day, what didn't succeed in red.
+  - A finding names the day failures jumped, with the `failures(name, since=)` call that reads just those.
+- 🔀 **Step Functions explorer: the Failures tab is a list to click** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))
+  - A line per kind of failure (state and error) with how many and since when; `failures()` has a Since column too.
+  - Click one for its error, the run to read, the commands that redrive it and its executions to open.
+
 ### Fixed
 
 - 🔀 **Step Functions explorer: room for the ✦ Ask drawer** ([#251](https://github.com/utkarsh5026/aws-analyzer/pull/251))

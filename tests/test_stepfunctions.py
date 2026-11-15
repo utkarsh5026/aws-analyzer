@@ -33,6 +33,7 @@ from aws_analyzer.stepfunctions.analysis.layout import (
 )
 from aws_analyzer.stepfunctions.analysis.timing import state_timings, timing_findings, timing_report, took_text
 from aws_analyzer.stepfunctions.explorer.graph import _execution_blocks as graph_execution_blocks
+from aws_analyzer.stepfunctions.analysis.trend import daily_counts, failure_jump, trend_findings
 from aws_analyzer.stepfunctions.analysis.story import LogLine, merge_log, step_lines, waterfall
 from aws_analyzer.stepfunctions.explorer.frame import _window_text as window_text
 from aws_analyzer.stepfunctions.explorer.window import StepFunctionsExplorer
@@ -547,15 +548,38 @@ def test_explorer_filters_searches_and_reads_another_range(fakes):
     assert len(x.page.executions) == 10 and x.report is None
 
 
-def test_explorer_failures_tab_opens_the_newest_of_each_group(fakes):
+def test_explorer_failures_tab_lists_each_kind_of_failure(fakes):
+    """
+    The Failures tab is a list: every failure at once first (the report's summary and days, without the table the
+    list replaces), then a line per kind, the most common first; a kind opens its error, what to read, its redrive
+    commands and its executions, each a line into the Executions tab.
+    """
     x = explorer(fakes, "order-pipeline")
     x.tab_buttons["failures"].click()
-    assert x.report is not None and "Why order-pipeline fails" in plain(x.failures_view.value)
-    assert "ord-0b17 in the Executions tab" in plain(x.failures_view.value)
-    labels = [b.description for b in x.failure_opens.children]
-    assert labels[0] == "Open ord-7f3a (LoadOrders: KeyError)" and len(labels) == 3
-    x.failure_opens.children[1].click()
-    assert x._tab == "executions" and x.detail.execution.name == "ord-0b17"
+    assert x.report is not None and x.picked_failure == ""
+    summary = plain(x.failures_view.value)
+    assert "Why order-pipeline fails" in summary and "Executions a day" in summary
+    assert "Failures by where they stopped" not in summary
+    lines = [line for line in x._failure_lines if line.box in x.failure_list.children]
+    assert [line.key for line in lines] == ["", "LoadOrders · KeyError", "ResizeImage · States.Timeout",
+                                            "ChargeCard · Lambda.TooManyRequestsException"]
+    assert "All failures" in plain(lines[0].face.value) and "×3" in plain(lines[1].face.value)
+    assert "since 3d ago" in plain(lines[1].face.value)
+    lines[1].button.click()
+    assert x.picked_failure == "LoadOrders · KeyError" and "sfx-on" in lines[1].box._dom_classes
+    group = plain(x.failures_view.value)
+    assert "LoadOrders fails with KeyError" in group and "The error it returned" in group
+    assert "LambdaView().logs('orders-etl'" in group and "aws stepfunctions redrive-execution" in group
+    runs = [line for line in x._failure_runs if line.box in x.failure_runs_box.children]
+    assert [line.key.rsplit(":", 1)[-1] for line in runs] == ["ord-7f3a", "ord-5d21", "ord-3c9b"]
+    assert "3 executions that failed this way" in plain(x.failure_runs_head.value)
+    assert x.focus.value("failed_state") == "LoadOrders" and x.focus.value("error") == "KeyError"
+    runs[1].button.click()
+    assert x._tab == "executions" and x.detail.execution.name == "ord-5d21"
+    x.tab_buttons["failures"].click()
+    assert x.picked_failure == "LoadOrders · KeyError"
+    lines[0].button.click()
+    assert x.picked_failure == "" and not x.failure_runs_box.children and not x.focus.value("error")
 
 
 def test_explorer_express_and_picking(fakes):
@@ -959,7 +983,7 @@ def test_explorer_list_counts_agree_with_the_header(fakes, monkeypatch):
     assert "(the newest 6 and every one that didn't succeed)" in plain(x.status.value)
     assert "Executions · 7d 1,239" in plain(x.stats.value)
     x.since_pick.value = "24h"
-    assert x.range_numbers.days == 1 and "Executions · 1d 177 Didn't succeed 7 (4.0%)" in plain(x.stats.value)
+    assert x.range_numbers.days == 1 and "Executions · 1d 177 Didn't succeed 10 (5.6%)" in plain(x.stats.value)
     assert {e.name for e in x.page.executions if e.failed} == {"ord-7f3a", "ord-0b17", "ord-5d21"}
     assert plain(x.cut_note.value) == "The newest 6 of about 177, and every one that didn't succeed."
     x.since_pick.value = "7d"
@@ -1190,3 +1214,74 @@ def test_explorer_reads_timings_in_the_background(fakes):
         assert "Where the time goes, from 3 succeeded executions in the last 7 days" in plain(x.status.value)
 
     asyncio.run(main())
+
+
+BARS = re.compile(r'class="dz( jz)?"')
+
+
+def week(*unsuccessful, started=100):
+    """
+    MachineNumbers for a week ending on 15 Nov 2026 with these failures a day, oldest first.
+    """
+    return MachineNumbers(days=len(unsuccessful), started=started * len(unsuccessful),
+                          failed=sum(unsuccessful), daily_started=[started] * len(unsuccessful),
+                          daily_failed=list(unsuccessful), daily_unsuccessful=list(unsuccessful),
+                          first_day=datetime(2026, 11, 9).date())
+
+
+def test_failures_jump_on_the_day_they_rose_most():
+    days = daily_counts(week(3, 2, 4, 3, 2, 21, 14))
+    assert [d.unsuccessful for d in days] == [3, 2, 4, 3, 2, 21, 14] and days[0].day.day == 9
+    jump = failure_jump(days)
+    assert jump.day.day == 14 and jump.after == 35 and jump.total == 49 and jump.days_after == 2
+    assert jump.per_day_before == pytest.approx(2.8)
+
+
+def test_no_jump_without_enough_failures_or_a_real_rise():
+    assert failure_jump(daily_counts(week(3, 3, 3, 3, 3, 3, 3))) is None
+    assert failure_jump(daily_counts(week(0, 0, 0, 0, 0, 1, 2))) is None
+    assert failure_jump(daily_counts(week(9, 9, 9, 9, 9, 12, 12))) is None
+    assert failure_jump(daily_counts(week(0, 9))) is None
+    assert daily_counts(MachineNumbers(days=7)) == [] and daily_counts(None) == []
+
+
+def test_a_jump_is_a_finding_that_reads_just_those_failures(core):
+    machine = core.state_machine("order-pipeline")
+    found = trend_findings(machine, week(3, 2, 4, 3, 2, 21, 14))
+    assert found[0][0] == "warn" and found[0][1].startswith("Failures jumped on 14 Nov: 35 of the 49 in the last 7 days")
+    assert "failures('order-pipeline', since='2d')" in found[0][1]
+    assert trend_findings(machine, week(3, 3, 3, 3, 3, 3, 3)) == []
+
+
+def test_reports_draw_executions_a_day(core, capsys):
+    out = run(capsys, StepFunctionsView(core, mode="text").state_machine, "order-pipeline")
+    assert "-- Executions a day, the part that didn't succeed in red --" in out
+    assert "177 started · 10 didn't succeed  <- failures jumped" in out and "Failures jumped on" in out
+    out = run(capsys, StepFunctionsView(core, mode="text").failures, "order-pipeline")
+    assert "Executions a day" in out and "Since" in out and "3d ago" in out
+    view = StepFunctionsView(core, mode="html")
+    shown = []
+    view._show = shown.append
+    view.state_machine("order-pipeline")
+    page = sfnmod.view._render_html(shown[0], 50)
+    assert len(BARS.findall(page)) == 7 and page.count('class="dz jz"') == 1 and "UTC days" in page
+
+
+def test_explorer_shows_executions_a_day_over_the_range(fakes):
+    x = explorer(fakes, "order-pipeline")
+    assert plain(x.days_view.value).count("Nov") == 7 and 'class="dz jz"' in x.days_view.value
+    x.since_pick.value = "24h"
+    assert x.days_view.value == ""
+    x.since_pick.value = "30d"
+    assert x.range_numbers.days == 30 and len(BARS.findall(x.days_view.value)) == 30
+
+
+def test_a_failure_group_lists_its_executions_and_redrive_commands(core):
+    report = core.failures("order-pipeline")
+    group = report.groups[0]
+    assert [e.name for e in group.executions] == ["ord-7f3a", "ord-5d21", "ord-3c9b"]
+    assert group.first_seen == group.executions[-1].start
+    blocks = StepFunctionsView(core, mode="text")._failure_group_blocks(report, group)
+    assert blocks[0].text == "LoadOrders fails with KeyError"
+    commands = [b for b in blocks if getattr(b, "code", False)]
+    assert len(commands) == 1 and commands[0].text.count("aws stepfunctions redrive-execution") == 3

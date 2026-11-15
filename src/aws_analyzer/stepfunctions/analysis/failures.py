@@ -41,6 +41,7 @@ def group_failures(details: list[ExecutionDetail], now: datetime, *, express: bo
                                  request_id=step.request_id if step is not None else "")
             groups[(state, error)] = group
         group.count += 1
+        group.executions.append(detail.execution)
         if can_redrive(detail.execution, now, express=express):
             group.redrivable += 1
     return sorted(groups.values(), key=lambda g: -g.count)

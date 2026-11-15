@@ -2183,11 +2183,12 @@ The analysis functions are pure (no AWS calls), so they also work on definitions
 `parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
 steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
 `flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
-`timing_report` (where the time goes over several executions' steps), `resource_label`, `retry_label`,
+`timing_report` (where the time goes over several executions' steps), `daily_counts` and `failure_jump` (its
+executions a day, and the day its failures jumped), `resource_label`, `retry_label`,
 `catch_label`, `unretried_lambda_states`, `unbounded_waits`,
 `request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
 `idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
-`failure_findings`, `timing_findings`.
+`failure_findings`, `timing_findings`, `trend_findings`.
 
 </details>
 

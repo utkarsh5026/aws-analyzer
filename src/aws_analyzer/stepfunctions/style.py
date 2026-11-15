@@ -14,6 +14,18 @@ from .._kit.render import _base_css, _Look, _report_html
 _ROOT = "sfn"
 
 _EXTRA_CSS = """\
+.sfn .dzs{max-width:720px;margin:4px 0 12px;font-size:11px}
+.sfn .dzb{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:max(1px,min(6px,calc(240px / var(--n))));align-items:end;height:64px;border-bottom:1px solid rgba(127,127,127,.35)}
+.sfn .dz{height:100%;display:flex;align-items:flex-end;border-radius:3px 3px 0 0}
+.sfn .dz i{display:flex;flex-direction:column;justify-content:flex-end;width:100%;min-height:1px;background:rgba(127,127,127,.32);border-radius:2px 2px 0 0;overflow:hidden}
+.sfn .dz b{display:block;min-height:2px;background:#ef4444}
+.sfn .dz.jz{box-shadow:0 0 0 1.5px #f59e0b;background:rgba(245,158,11,.08)}
+.sfn .dzl{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:max(1px,min(6px,calc(240px / var(--n))));margin-top:3px;opacity:.7;text-align:center;white-space:nowrap}
+.sfn .dzl span{overflow:visible;font-variant-numeric:tabular-nums}
+.sfn .dzl b{display:block;color:#dc2626;font-weight:600}
+.sfn .dzk{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;opacity:.75}
+.sfn .dzk i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:rgba(127,127,127,.32)}
+.sfn .dzk i.f{background:#ef4444}
 .sfn .wf{max-width:1100px;margin:4px 0 12px;font-size:12px}
 .sfn .wfr{display:grid;grid-template-columns:minmax(150px,230px) 1fr;gap:10px;align-items:center;padding:2px 0;border-top:1px solid rgba(127,127,127,.14)}
 .sfn .wfr.wfh{border-top:0;opacity:.6;font-size:11px}

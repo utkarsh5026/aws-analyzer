@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import re
 
-from ..._kit.fmt import _duration, _fmt_dt, human_age, human_money
+from ..._kit.fmt import _duration, _fmt_dt, _plural, human_age, human_money
 from ..._kit.render import _CALL_RE
 from ..._kit.text import _esc, _marked
 from ..._kit.window import _icon_url, _terminal_theme
 
 from ..helpers import STATUS_TONES, STATUS_WORDS
-from ..models import Execution, MachineNumbers, StateMachine
+from ..models import Execution, FailureGroup, FailureReport, MachineNumbers, StateMachine
 
 
 _EXPLORER_TABS = (
@@ -330,8 +330,13 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .mr .num.warn{color:var(--sx-ink-warn);font-weight:650}
 .sfx-app.sfx-app .sfx-machines{overflow:hidden auto}
 .sfx-app.sfx-app .sfx-machines>*{flex:0 0 auto}
-.sfx-app.sfx-app .sfx-opens{flex-wrap:wrap;gap:6px;margin:0 0 10px}
-.sfx-app.sfx-app .sfx-opens>*{margin:0}
+.sfx-app .fsh{display:inline-block;width:46px;height:5px;margin-top:5px;border-radius:3px;background:var(--sx-tint-2);overflow:hidden;vertical-align:middle}
+.sfx-app .fsh i{display:block;height:100%;background:#ef4444;border-radius:3px}
+.sfx-app .sfx-subh{font-weight:600;margin:14px 0 6px}
+.sfx-app .sfx-days .dzs{margin:2px 0 8px}
+.sfx-app .sfx-days .dzb{height:38px}
+.sfx-app .sfx-days .dzk{margin-top:3px;font-size:10.5px}
+.sfx-app .sfx-subh span{font-weight:400;opacity:.65;margin-left:8px;font-size:11.5px}
 .sfx-app .sfn h3 .badge{display:none}
 .sfx-app .sfn h3{font-size:17px;margin:6px 0 2px}
 .sfx-app .sfn .card{border-radius:12px;background:var(--sx-tint);border-color:var(--sx-line)}
@@ -340,6 +345,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .card.ok{border-color:rgba(16,185,129,.55)}
 .sfx-app .sfn .note,.sfx-app .sfn .fi{border-radius:4px 10px 10px 4px}
 .sfx-app .sfn pre{border-radius:10px}
+.sfx-app .sfn .pre>pre{padding-top:34px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
 .sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
 .sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
@@ -418,6 +424,36 @@ def _execution_face(execution: Execution, words: list[str]) -> str:
             f'<div class="en">{_marked(execution.name, words)}</div><div class="ef">{_esc(word)} · started '
             f'{_esc(_fmt_dt(execution.start, seconds=True))}{_esc(redriven)}</div></div><div class="ez">'
             f'{_esc(took)}<br>{_esc(human_age(execution.start))}</div></div>')
+
+
+_FAILURE_ICONS = {"TIMED_OUT": ("⏱", "warn"), "ABORTED": ("⊘", "warn")}
+
+
+def _all_failures_face(report: FailureReport) -> str:
+    """
+    The first line of the Failures tab's list: every failure at once, the report's summary.
+    """
+    groups = _plural(len(report.groups), "kind")
+    return (f'<div class="er"><span class="ei bad">≡</span><div class="em"><div class="en">All failures</div>'
+            f'<div class="ef">{_esc(_plural(len(report.failed), "execution"))} that didn\'t succeed, {_esc(groups)} of '
+            "failure</div></div></div>")
+
+
+def _failure_face(group: FailureGroup, failed: int) -> str:
+    """
+    A kind of failure's line in the Failures tab: where it stopped and the error, how many and since when, and its
+    share of the failures as a bar.
+    """
+    status = group.newest.status if group.newest is not None else "FAILED"
+    icon, tone = _FAILURE_ICONS.get(status, ("✕", "bad"))
+    share = group.count / failed if failed else 0.0
+    since = f" · since {human_age(group.first_seen)}" if group.first_seen is not None else ""
+    newest = f" · newest {human_age(group.newest.start)}" if group.newest is not None and group.newest.start else ""
+    where = f"{group.state} · λ {group.function}" if group.function else group.state
+    return (f'<div class="er"><span class="ei {tone}">{icon}</span><div class="em"><div class="en">'
+            f'{_esc(where)}</div><div class="ef">{_esc(group.error)}{_esc(since)}{_esc(newest)}</div></div>'
+            f'<div class="ez">×{group.count:,}<br><span class="fsh"><i style="width:{max(share * 100, 3):.0f}%"></i>'
+            "</span></div></div>")
 
 
 def _machine_note(machine: StateMachine) -> str:

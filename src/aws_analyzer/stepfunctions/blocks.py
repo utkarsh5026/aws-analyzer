@@ -20,6 +20,7 @@ from .._kit.text import _clip, _esc
 
 from .analysis.layout import FlowLayout, FlowMarks
 from .analysis.story import STEP_FUNCTIONS, LogLine, Waterfall
+from .analysis.trend import DayCount, FailureJump, day_label
 
 
 _TEXT_BAR = 44
@@ -305,4 +306,95 @@ def _flow_text(block: _FlowGraph, report: _Report) -> list[str]:
                    for e in layout.edges if e.source == node.name]
         arrow = f" -> {', '.join(targets)}" if targets else (" -> end" if node.ends else "")
         lines.append(f"{'  ' * node.layer}{node.name} ({node.type}){word}{' · ' + note if note else ''}{arrow}")
+    return lines
+
+
+_DAY_LABELS = 8
+
+_DAYS_SHOWN_ONE_BY_ONE = 14
+
+_DAYS_A_WEEK = 7
+
+_TEXT_DAY_BAR = 24
+
+
+@dataclass
+class _Days:
+    """
+    Executions a day, a bar each, the part that didn't succeed in red, the day failures jumped (a FailureJump)
+    outlined, over CloudWatch's whole UTC days. Text draws a line a day, or a week when there are more than two weeks.
+    """
+
+    days: list[DayCount]
+    jump: FailureJump | None = None
+    title: str = ""
+
+
+def _day_tip(day: DayCount) -> str:
+    return f"{day_label(day.day)}: {day.started:,} started, {day.unsuccessful:,} didn't succeed (UTC day)"
+
+
+def _labelled(index: int, count: int) -> bool:
+    """
+    Whether the index-th of count bars gets its date under it: every one up to _DAY_LABELS, else about _DAY_LABELS
+    of them, the last always.
+    """
+    step = max(1, -(-count // _DAY_LABELS))
+    return index == count - 1 or (count - 1 - index) % step == 0
+
+
+@_draws(_Days, "html")
+def _days_html(block: _Days, report: _Report) -> str:
+    if not block.days:
+        return ""
+    busiest = max(max(d.started for d in block.days), 1)
+    jump_day = block.jump.day if block.jump is not None else None
+    bars, labels = [], []
+    for i, day in enumerate(block.days):
+        height = day.started / busiest * 100
+        failed = min(day.unsuccessful, day.started) / day.started * 100 if day.started else 0
+        red = f'<b style="height:{failed:.1f}%"></b>' if day.unsuccessful else ""
+        jumped = " jz" if day.day == jump_day else ""
+        bars.append(f'<div class="dz{jumped}" title="{_esc(_day_tip(day))}"><i style="height:{height:.1f}%">{red}'
+                    "</i></div>")
+        failures = f"<b>{day.unsuccessful:,}</b>" if day.unsuccessful and len(block.days) <= _DAY_LABELS else ""
+        text = _esc(day_label(day.day)) if _labelled(i, len(block.days)) else ""
+        labels.append(f"<span>{text}{failures}</span>")
+    legend = (f'<span><i></i>started</span><span><i class="f"></i>didn\'t succeed</span>'
+              f"<span>UTC days · the busiest {busiest:,}</span>")
+    title = f'<div class="tt">{_prose(block.title)}</div>' if block.title else ""
+    return (f'{title}<div class="dzs" style="--n:{len(block.days)}"><div class="dzb">{"".join(bars)}</div>'
+            f'<div class="dzl">{"".join(labels)}</div><div class="dzk">{legend}</div></div>')
+
+
+def _weeks(days: list[DayCount]) -> list[tuple[str, int, int]]:
+    """
+    Days summed into weeks counted back from the newest: (label, started, didn't succeed), oldest first.
+    """
+    weeks = []
+    for end in range(len(days), 0, -_DAYS_A_WEEK):
+        week = days[max(0, end - _DAYS_A_WEEK):end]
+        label = f"{day_label(week[0].day)} to {day_label(week[-1].day)}"
+        weeks.append((label, sum(d.started for d in week), sum(d.unsuccessful for d in week)))
+    return weeks[::-1]
+
+
+@_draws(_Days, "text")
+def _days_text(block: _Days, report: _Report) -> list[str]:
+    if not block.days:
+        return []
+    if len(block.days) <= _DAYS_SHOWN_ONE_BY_ONE:
+        rows = [(day_label(d.day), d.started, d.unsuccessful) for d in block.days]
+    else:
+        rows = _weeks(block.days)
+    busiest = max(max(started for _, started, _ in rows), 1)
+    width = max(len(label) for label, _, _ in rows) + 2
+    jump_label = day_label(block.jump.day) if block.jump is not None else ""
+    lines = [f"-- {block.title} --"] if block.title else []
+    for label, started, failed in rows:
+        bar = "█" * round(started / busiest * _TEXT_DAY_BAR)
+        mark = "  <- failures jumped" if label == jump_label else ""
+        failures = f" · {failed:,} didn't succeed" if failed else ""
+        lines.append(f"{label:{width}}{bar:{_TEXT_DAY_BAR}}  {started:,} started{failures}{mark}")
+    lines.append("(UTC days)")
     return lines

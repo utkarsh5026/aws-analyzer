@@ -522,6 +522,13 @@ def _approval(start: datetime) -> History:
     return history
 
 
+ORDER_PIPELINE_FAILED = (2, 2, 2, 9, 9, 9, 9)
+"""
+order-pipeline's failed executions a day, oldest first: a few a day, then more from three days ago, when LoadOrders
+began failing with KeyError (42 in the week, as before).
+"""
+
+
 def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict[tuple[str, str], dict[datetime,
                                                                                                     float]]]:
     """
@@ -562,15 +569,24 @@ def scene(now: datetime) -> tuple[dict[str, dict[str, Any]], list[FakeRun], dict
     end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     days = [end - timedelta(days=d) for d in range(7, 0, -1)]
     per_day = {
-        "order-pipeline": {"ExecutionsStarted": 177, "ExecutionsSucceeded": 168, "ExecutionsFailed": 6,
-                           "ExecutionsTimedOut": 1, "ExecutionTime": 38_200},
+        "order-pipeline": {"ExecutionsStarted": 177, "ExecutionsSucceeded": 168,
+                           "ExecutionsFailed": ORDER_PIPELINE_FAILED, "ExecutionsTimedOut": 1, "ExecutionTime": 38_200},
         "image-resize-express": {"ExecutionsStarted": 26_057, "ExecutionsSucceeded": 26_000, "ExecutionsFailed": 57,
                                  "ExecutionTime": 410},
         "refund-approvals": {"ExecutionsStarted": 3, "ExecutionsSucceeded": 3, "ExecutionTime": 3 * 3_600_000},
     }
-    daily = {(machine, metric): {day: float(value) for day in days}
-             for machine, metrics in per_day.items() for metric, value in metrics.items()}
+    daily = {(machine, metric): _by_day(days, value) for machine, metrics in per_day.items()
+             for metric, value in metrics.items()}
     return machines, runs, daily
+
+
+def _by_day(days: list[datetime], value: float | tuple[float, ...]) -> dict[datetime, float]:
+    """
+    A metric's value for each day: the same every day, or a tuple of one a day, oldest first.
+    """
+    if isinstance(value, tuple):
+        return {day: float(v) for day, v in zip(days, value)}
+    return {day: float(value) for day in days}
 
 
 def clients(now: datetime) -> dict[str, Any]:

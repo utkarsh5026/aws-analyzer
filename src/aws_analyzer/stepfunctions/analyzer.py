@@ -39,6 +39,13 @@ _METRIC_STAT_AND_FIELD = {
     "ExecutionTime": ("Average", "avg_ms"),
 }
 
+_DAILY_COUNTS = {
+    "started": ("daily_started",),
+    "failed": ("daily_failed", "daily_unsuccessful"),
+    "timed_out": ("daily_unsuccessful",),
+    "aborted": ("daily_unsuccessful",),
+}
+
 _DAY_SECONDS = 86_400
 
 _QUERIES_PER_CALL = 500
@@ -226,7 +233,8 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
                     "Metric": {"Namespace": "AWS/States", "MetricName": metric,
                                "Dimensions": [{"Name": "StateMachineArn", "Value": machine.arn}]},
                     "Period": _DAY_SECONDS, "Stat": stat}})
-        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days)
+        numbers = {m.arn: MachineNumbers(days=days, daily_started=[0] * days, daily_failed=[0] * days,
+                                         daily_unsuccessful=[0] * days, first_day=start.date())
                    for m in machines}
         for begin in range(0, len(queries), _QUERIES_PER_CALL):
             for result in self._metric_results(queries[begin: begin + _QUERIES_PER_CALL], start, end):
@@ -554,7 +562,7 @@ class StepFunctionsAnalyzer(_ExpressReads, _BaseAnalyzer):
 def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any], start: datetime) -> None:
     """
     One metric's daily values into MachineNumbers: summed (an average is weighted by the day's executions, which
-    are read first), with the daily started and failed counts kept per day.
+    are read first), with the counts _DAILY_COUNTS names kept per day as well.
     """
     values = list(zip(result.get("Timestamps", []), result.get("Values", [])))
     if field_name == "avg_ms":
@@ -567,13 +575,12 @@ def _add_metric(numbers: MachineNumbers, field_name: str, result: dict[str, Any]
             numbers.avg_ms = sum(v for _, v in values) / len(values)
         return
     setattr(numbers, field_name, getattr(numbers, field_name) + int(sum(v for _, v in values)))
-    daily = {"started": numbers.daily_started, "failed": numbers.daily_failed}.get(field_name)
-    if daily is None:
-        return
-    for ts, value in values:
-        day = _day(ts, start)
-        if 0 <= day < numbers.days:
-            daily[day] += int(value)
+    for daily_name in _DAILY_COUNTS.get(field_name, ()):
+        daily = getattr(numbers, daily_name)
+        for ts, value in values:
+            day = _day(ts, start)
+            if 0 <= day < numbers.days:
+                daily[day] += int(value)
 
 
 def _day(moment: datetime, start: datetime) -> int:

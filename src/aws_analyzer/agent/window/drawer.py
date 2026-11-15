@@ -72,6 +72,7 @@ _UNNAMED = {"function": "this function", "file": "this file", "folder": "this fo
 _FIRST_INSTEAD = {
     ("lambda", "run", "error"): "Why did this run fail, and what should I change?",
     ("stepfunctions", "execution", "error"): "Why did {execution} fail, and what should I change?",
+    ("stepfunctions", "failures", "error"): "Why does {failed_state} fail with {error}, and what should I change?",
     ("bedrock_kb", "file", "indexed"): "What questions does {file} answer?",
 }
 

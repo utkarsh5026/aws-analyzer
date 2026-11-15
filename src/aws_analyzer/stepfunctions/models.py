@@ -6,7 +6,7 @@ steps an execution took (with each Lambda step's request ID), failures grouped b
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from .._kit.deps import _require
@@ -93,7 +93,8 @@ class StateMachine:
 class MachineNumbers:
     """
     A state machine's CloudWatch numbers over whole UTC days: executions by outcome, throttled starts, and the
-    average run time in ms. daily_* are per day, oldest first.
+    average run time in ms. daily_* are per day, oldest first, from first_day (a UTC date): daily_unsuccessful counts
+    the ones that failed, timed out or were aborted, daily_failed only the failed.
     """
 
     days: int
@@ -106,6 +107,8 @@ class MachineNumbers:
     avg_ms: float | None = None
     daily_started: list[int] = field(default_factory=list)
     daily_failed: list[int] = field(default_factory=list)
+    daily_unsuccessful: list[int] = field(default_factory=list)
+    first_day: date | None = None
 
     @property
     def unsuccessful(self) -> int:
@@ -266,8 +269,8 @@ class ExecutionDetail:
 @dataclass
 class FailureGroup:
     """
-    Failed executions that stopped at the same state with the same error: how many, the newest one, and for a
-    Lambda step its function and the newest run's request ID.
+    Failed executions that stopped at the same state with the same error: how many, the newest one, every one read
+    (executions, newest first), and for a Lambda step its function and the newest run's request ID.
     """
 
     state: str
@@ -278,6 +281,16 @@ class FailureGroup:
     function: str = ""
     request_id: str = ""
     redrivable: int = 0
+    executions: list[Execution] = field(default_factory=list)
+
+    @property
+    def first_seen(self) -> datetime | None:
+        """
+        When the oldest execution read in this group started: how long it has been failing this way, as far as the
+        failures read go back.
+        """
+        starts = [execution.start for execution in self.executions if execution.start is not None]
+        return min(starts) if starts else None
 
 
 @dataclass

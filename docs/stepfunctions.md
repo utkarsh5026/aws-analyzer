@@ -108,10 +108,10 @@ sfn.overview()            # or overview(days=30)
 
 The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command, such as `failures('order-pipeline')`.
 
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="807" loading=lazy }
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="807" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="889" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="889" loading=lazy }
 /// caption
-`sfn.overview()`: order-pipeline's 4.0% failure rate is the one warning, and the table puts the failing state machines first.
+`sfn.overview()`: order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first.
 ///
 
 !!! tip "Worth knowing"
@@ -132,10 +132,12 @@ sfn.failures("order-pipeline")                  # the last 7 days, the newest 50
 sfn.failures("order-pipeline", since="30d", limit=200)
 ```
 
-For each failure it reads only the end of the execution's history (one request, whatever the history's length), which is where the failure is. When the failing state called Lambda, the group names the function and the newest run's request ID, ready for `LambdaView().logs('orders-etl', request_id='c0ffee00-…')`. It also says how many of the failed executions can still be **redriven**, started again from the state that failed, and shows the command; it never runs it.
+For each failure it reads only the end of the execution's history (one request, whatever the history's length), which is where the failure is. When the failing state called Lambda, the group names the function and the newest run's request ID, ready for `LambdaView().logs('orders-etl', request_id='c0ffee00-…')`. Each group says since when it has failed that way, as far back as the failures read go. It also says how many of the failed executions can still be **redriven**, started again from the state that failed, and shows the command; it never runs it.
 
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-light.webp#only-light){ width="984" height="958" loading=lazy }
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with the Lambda logs call or execution to read next, and a note that 5 can be redriven](images/sfn-failures-dark.webp#only-dark){ width="984" height="958" loading=lazy }
+A strip of bars shows the executions a day, the part that didn't succeed in red, from CloudWatch's whole UTC days. When most of the failures came in the last few days, the day they jumped is outlined and a finding says so: "Failures jumped on 12 Nov: 40 of the 49 in the last 7 days came since then", with the `failures(..., since=)` call that reads just those. `state_machine()` shows the same strip.
+
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when and the Lambda logs call or execution to read next, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-light.webp#only-light){ width="984" height="1114" loading=lazy }
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when and the Lambda logs call or execution to read next, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-dark.webp#only-dark){ width="984" height="1114" loading=lazy }
 /// caption
 `sfn.failures("order-pipeline")`: most failures stop at LoadOrders with `KeyError: 'customer_id'`, and the newest run's `request_id` is filled in.
 ///
@@ -181,10 +183,10 @@ sfn.graph("order-pipeline", failures="7d")          # shaded by where executions
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
 
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1163" loading=lazy }
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that LoadOrders has no Retry for Lambda's errors with the rule to paste, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1163" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1401" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1401" loading=lazy }
 /// caption
-`sfn.state_machine("order-pipeline")`: LoadOrders has no Retry for Lambda's own errors, and the finding gives the rule to paste.
+`sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.
 ///
 
 ![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="850" loading=lazy }

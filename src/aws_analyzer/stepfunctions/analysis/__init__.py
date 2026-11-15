@@ -19,9 +19,12 @@ from .findings import (
 from .layout import FlowLayout, FlowMarks, FlowNode, failure_marks, flow_layout, path_marks, timing_marks
 from .history import fill_detail, request_id_of_cause, request_id_of_output
 from .timing import state_timings, timing_findings, timing_report
+from .trend import DayCount, FailureJump, daily_counts, failure_jump, trend_findings
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
 
 __all__ = [
+    "DayCount",
+    "FailureJump",
     "FlowLayout",
     "FlowMarks",
     "FlowNode",
@@ -33,9 +36,11 @@ __all__ = [
     "REDRIVE_DAYS",
     "can_redrive",
     "catch_label",
+    "daily_counts",
     "definition_findings",
     "execution_findings",
     "failure_findings",
+    "failure_jump",
     "failure_marks",
     "fill_detail",
     "flow_layout",
@@ -62,6 +67,7 @@ __all__ = [
     "timing_marks",
     "timing_report",
     "transitions_per_execution",
+    "trend_findings",
     "unbounded_waits",
     "unretried_lambda_states",
     "waterfall",
