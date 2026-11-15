@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Fixed
+
+- 🔀 **Step Functions explorer: room for the ✦ Ask drawer**
+  - With the drawer open, tabs show their icons and the open tab's name, and ✦ Ask stays in view.
+  - The Executions and Graph tabs stack their panes instead of squeezing them; the graph stays full size.
+  - The Graph tab's side pane grows with the window, so a state's Lambda lines read on one line each.
+
 ## [0.59.0] - 2026-11-15
 
 ### Added

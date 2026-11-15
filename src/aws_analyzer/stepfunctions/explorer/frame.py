@@ -220,7 +220,7 @@ body[data-jp-theme-light="false"] .sfx-app,body.vscode-dark .sfx-app,body.vscode
 .sfx-app .opf.warn{opacity:1;color:var(--sx-ink-warn)}
 .sfx-app mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
 .sfx-app.sfx-app .sfx-backdrop,.sfx-app.sfx-app .sfx-backdrop:hover:enabled,.sfx-app.sfx-app .sfx-backdrop:active:enabled,.sfx-app.sfx-app .sfx-backdrop:focus-visible{position:absolute;top:0;left:0;z-index:30;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;box-shadow:none;outline:none;transform:none;cursor:default}
-.sfx-app.sfx-app .sfx-tabs{flex-wrap:nowrap;gap:2px;padding:3px;border-radius:12px;background:var(--sx-tint-2);margin:0 0 10px;overflow:hidden;container-type:inline-size}
+.sfx-app.sfx-app .sfx-tabs{flex-wrap:nowrap;gap:2px;padding:3px;border-radius:12px;background:var(--sx-tint-2);margin:0 0 10px;overflow:auto hidden;scrollbar-width:thin;container-type:inline-size}
 .sfx-app.sfx-app button.sfx-tab{flex:1 1 0;min-width:0;height:32px;margin:0;padding:0 8px;border:0;border-radius:9px;background:transparent;opacity:.72;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;overflow:hidden}
 .sfx-app.sfx-app button.sfx-tab::before{content:"";width:15px;height:15px;flex:0 0 auto;background:currentColor;-webkit-mask:var(--sx-icon) center/contain no-repeat;mask:var(--sx-icon) center/contain no-repeat}
 .sfx-app.sfx-app button.sfx-tab:hover:enabled{background:var(--sx-tint);opacity:.95}
@@ -228,7 +228,10 @@ body[data-jp-theme-light="false"] .sfx-app,body.vscode-dark .sfx-app,body.vscode
 .sfx-app.sfx-app button.sfx-tab.sfx-on::before{background:var(--sx-accent)}
 .sfx-app.sfx-app button.sfx-tab.sfx-alert::after,.sfx-app.sfx-app button.sfx-tab.sfx-alarm::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--sx-warn);flex:0 0 auto}
 .sfx-app.sfx-app button.sfx-tab.sfx-alarm::after{background:var(--sx-bad)}
-@container (max-width:520px){.sfx-app.sfx-app button.sfx-tab::before{display:none}}
+@container (max-width:680px){.sfx-app.sfx-app button.sfx-tab::before{display:none}.sfx-app.sfx-app button.sfx-tab{flex:1 0 auto;padding:0 7px}}
+@container (max-width:600px){.sfx-app.sfx-app .sfx-tabs button.sfx-tab{flex:0 0 auto;font-size:0;gap:0;padding:0 9px}.sfx-app.sfx-app .sfx-tabs button.sfx-tab::before{display:block}.sfx-app.sfx-app .sfx-tabs button.sfx-tab.sfx-on{font-size:12px;gap:7px;padding:0 10px}}
+.sfx-app.sfx-app .sfx-tabs button.sfx-assist{position:sticky;right:0;z-index:1}
+.sfx-app.sfx-app .sfx-main{container:sfx-main/inline-size}
 .sfx-app.sfx-app .sfx-page{height:clamp(560px,calc(100vh - 330px),1400px);overflow:hidden auto;padding:2px 6px 2px 2px}
 body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app .sfx-page>*{flex:0 0 auto}
@@ -236,7 +239,7 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app.sfx-app .sfx-left{flex:0 0 390px;min-width:300px;max-width:46%;border:1px solid var(--sx-line);border-radius:14px;padding:10px 10px 6px;background:var(--sx-surface);overflow:hidden}
 .sfx-app.sfx-app .sfx-left>*{margin:0;flex:0 0 auto}
 .sfx-app.sfx-app .sfx-left,.sfx-app.sfx-app .sfx-right,.sfx-app.sfx-app .sfx-rows{min-height:0}
-@media (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap;overflow:hidden auto}.sfx-app.sfx-app .sfx-left{flex:1 1 100%;max-width:100%;height:440px}.sfx-app.sfx-app .sfx-right{flex:1 1 100%;overflow:visible}}
+@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap;overflow:hidden auto}.sfx-app.sfx-app .sfx-left{flex:1 1 100%;max-width:100%;height:440px}.sfx-app.sfx-app .sfx-right{flex:1 1 100%;overflow:visible}}
 .sfx-app.sfx-app .sfx-right{flex:1 1 300px;min-width:0;overflow:hidden auto;padding:0 6px 0 2px}
 .sfx-app.sfx-app .sfx-right>*{flex:0 0 auto;margin:0}
 .sfx-app.sfx-app .sfx-find{position:relative;align-items:center}
@@ -340,7 +343,8 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
 .sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
 .sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
-.sfx-app.sfx-app .sfx-states{flex:0 0 360px;overflow:hidden auto}
+.sfx-app.sfx-app .sfx-states{flex:0 1 44%;min-width:360px;max-width:560px;overflow:hidden auto}
+@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-graph{flex:1 1 100%!important;overflow:visible}.sfx-app.sfx-app .sfx-states{flex:1 1 100%;min-width:0;max-width:100%;height:auto;overflow:visible}}
 .sfx-app.sfx-app .sfx-states .sfx-rows{flex:0 0 auto;overflow:visible;max-height:none}
 .sfx-app.sfx-app .sfx-states .sfx-row{height:38px;margin:0}
 .sfx-app .sfx-states .er{height:38px;gap:9px}

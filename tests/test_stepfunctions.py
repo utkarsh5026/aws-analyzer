@@ -784,6 +784,23 @@ def test_explorer_graph_tab(fakes):
     assert "Where 1 execution stopped" in plain(x.graph_view.value)
 
 
+
+def test_explorer_lays_out_by_the_room_its_pages_get(fakes):
+    """
+    The pages sit in a box the stylesheet measures (.sfx-main), so opening the ✦ Ask drawer stacks the Executions and
+    Graph tabs' panes, the tab bar keeps its names (or icons) whole with ✦ Ask in view, and a narrow log puts each
+    message on its own line.
+    """
+    x = explorer(fakes, "order-pipeline")
+    main = x.root.children[2].children[0]
+    assert "sfx-main" in main._dom_classes
+    css = x.root.children[0].value
+    assert ".sfx-main{container:sfx-main/inline-size}" in css
+    assert "@container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-page.sfx-split{flex-wrap:wrap" in css
+    assert ".sfx-states{flex:0 1 44%;min-width:360px;max-width:560px" in css
+    assert ".sfx-tabs button.sfx-assist{position:sticky;right:0" in css
+    assert ".sfn .story{container-type:inline-size" in css and ".sfn .story .sx{grid-column:1/-1" in css
+
 def test_log_lines_read_back_as_history_events():
     runs = express_runs(NOW)
     arn = express_arn("rsz-0099")

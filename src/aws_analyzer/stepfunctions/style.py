@@ -35,7 +35,7 @@ _EXTRA_CSS = """\
 .sfn .wfk{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11px;opacity:.75}
 .sfn .wfk span{display:inline-flex;align-items:center;gap:5px}
 .sfn .wfk .wfs{position:static;display:inline-block;width:14px;height:9px;padding:0}
-.sfn .story{max-width:1100px;margin:4px 0 12px;border:1px solid rgba(127,127,127,.25);border-radius:8px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.sfn .story{container-type:inline-size;max-width:1100px;margin:4px 0 12px;border:1px solid rgba(127,127,127,.25);border-radius:8px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
 .sfn .story .sh{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid rgba(127,127,127,.2)}
 .sfn .story .sz{margin-left:auto;opacity:.6}
 .sfn .story .sl{display:grid;grid-template-columns:92px minmax(90px,140px) 1fr;gap:10px;padding:2px 10px;align-items:baseline}
@@ -43,6 +43,7 @@ _EXTRA_CSS = """\
 .sfn .story .sl.report{opacity:.7}
 .sfn .story .sc{opacity:.65;white-space:nowrap}
 .sfn .story .sx{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+@container (max-width:480px){.sfn .story .sl{grid-template-columns:92px minmax(0,1fr);row-gap:0}.sfn .story .sx{grid-column:1/-1;padding:0 0 4px 12px}}
 .sfn .story .sn{padding:6px 10px;border-top:1px dashed rgba(127,127,127,.25);font-family:inherit;opacity:.75}
 .sfn .src{display:inline-block;justify-self:start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:4px;padding:0 6px;font-size:10.5px;background:rgba(127,127,127,.14)}
 .sfn .src.sf{background:rgba(219,39,119,.12);color:#be185d}
