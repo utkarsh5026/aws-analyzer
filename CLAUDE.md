@@ -133,7 +133,10 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file"), `highlight.py`
   (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab),
   `jsontree.py` (the `_JsonTree` block, JSON you can fold: S3's .json previews and Lambda's configuration; a service
-  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `themes.py` (how a View's reports
+  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `charts.py` (charts any report can
+  hold, each drawn in HTML and text and adding its own rules to `report.rules`, so no service's stylesheet changes:
+  `_Meter`, an amount against a limit as one bar of `_Part`s, the part past the limit in red, an optional `mark` for a
+  setting that would do), `themes.py` (how a View's reports
   look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
   by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its
   own; `_theme_css(root, name)` scopes every rule of a theme to `.<root>.theme-<name>`, the class `_report_html` puts
@@ -946,7 +949,7 @@ tests import and patch them there.
 `rules.py` checks what keeps the layers apart:
 
 - The core never imports the UI. That covers the package's UI modules and `_kit`'s `blocks`, `render`, `view`,
-  `window`, `progress`, `highlight` and `jsontree`; `render._call` / `_signature` are allowed.
+  `window`, `progress`, `highlight`, `jsontree` and `charts`; `render._call` / `_signature` are allowed.
 - `analysis` never imports `analyzer`.
 - No function or class is defined in two modules of a package.
 - Every `*View`, `*Explorer`, `_<Topic>Commands`, `_<Topic>Tab` and `_<Topic>Pane` class (a View or window split into

@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from .._kit.charts import _Meter, _Part
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from .._kit.deps import _require
 from .._kit.errors import _Hint, _error_code, _why
@@ -231,6 +232,27 @@ def _filter_rows(info: IndexInfo) -> list[list[str]]:
             example, kind = "'<exact value>'", f"{kind} (+ keyword)"
         rows.append([path, kind, f"where={{{path!r}: {example}}}"])
     return rows
+
+
+
+def _knn_meter(indexes: list[IndexInfo], knn_memory: float, *, title: str) -> _Meter | None:
+    """
+    The vector graphs that live in the k-NN plugin's memory (faiss and nmslib, every copy), index by index, against
+    what the domain's data nodes give it; None when no index has such graphs.
+    """
+    parts = []
+    for info in indexes:
+        native = index_vector_memory(info, native=True)
+        if native:
+            parts.append(_Part(info.name, float(native), human_size(native)))
+    if not parts:
+        return None
+    parts.sort(key=lambda part: part.amount, reverse=True)
+    meter = _Meter(parts, knn_memory, human_size(knn_memory), human_size(sum(p.amount for p in parts)), title=title)
+    if meter.is_over:
+        meter.note = (f"{human_size(meter.total - knn_memory)} of graphs don't fit, so searches load graphs from "
+                      "disk and drop others: slow and uneven. The findings say what to change.")
+    return meter
 
 
 class OpenSearchView(_BaseView):
@@ -739,6 +761,10 @@ class OpenSearchView(_BaseView):
             + "vector memory: the HNSW / IVF graphs of all copies, estimated by OpenSearch's sizing rule"
         )
         blocks: list[Any] = [_Title(f"Indexes in {store.label}", subtitle), _Cards(cards)]
+        meter = _knn_meter(report.vector_indexes, knn_memory, title="Vector graphs in the k-NN plugin's memory, "
+                           "index by index") if knn_memory else None
+        if meter:
+            blocks.append(meter)
         notes = {
             "_cat/indices": "document counts and sizes",
             "_mapping": "some mappings",
@@ -851,6 +877,10 @@ class OpenSearchView(_BaseView):
         if info.created:
             cards.append(("Created", _fmt_dt(info.created)))
         blocks.append(_Cards(cards))
+        meter = _knn_meter([info], knn_memory, title="Its vector graphs in the k-NN plugin's memory (every copy, "
+                           "against all data nodes)") if knn_memory else None
+        if meter:
+            blocks.append(meter)
         found = index_findings(info, store, knn_memory=knn_memory, stats=knn, version=version, data_nodes=data_nodes)
         found += knn_findings(knn)
         blocks.append(_Findings(found, empty="No issues found by these checks."))

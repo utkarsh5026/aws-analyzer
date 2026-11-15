@@ -949,9 +949,12 @@ def test_ui_indexes(ui, capsys):
         "59 (97%)",
         "2 of 61 documents (3.3%) have no 'embedding'",
         "index_info('vectors-prod/docs')",
+        "-- Vector graphs in the k-NN plugin's memory, index by index --",
+        "of 12.0 GB (0%)",
     ):
         assert expected in out, expected
     assert ".kibana_1" not in out
+    assert "don't fit" not in out
 
 
 def test_ui_indexes_shows_the_domains_own_findings(aws, capsys):

@@ -22,6 +22,7 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
+from aws_analyzer._kit.charts import _Meter, _Part
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
@@ -494,3 +495,28 @@ def test_a_focus_reads_as_chips_and_loses_one_part_at_a_time():
     assert focus.without("no-such-part") == focus and focus.since == start
     with pytest.raises(AttributeError):
         focus.kind = "logs"
+
+
+def _memory_meter(used: float, *, mark: float | None = None) -> _Meter:
+    parts = [_Part("support-docs", used - 0.3, f"{used - 0.3:.1f} GB"), _Part("legacy-faq", 0.3, "0.3 GB")]
+    return _Meter(parts, 12.0, "12.0 GB", f"{used:.1f} GB", title="k-NN memory", mark=mark, mark_text="8 GB would do")
+
+
+def test_a_meter_past_its_limit_says_so_in_both_drawings():
+    meter = _memory_meter(16.0)
+    assert meter.is_over and meter.scale == 16.0
+    text = _render_text([meter], 0)
+    assert "-- k-NN memory --" in text and "16.0 GB of 12.0 GB (133%)" in text
+    assert "|!!!!!!!!!!]" in text and "support-docs 15.7 GB · legacy-faq 0.3 GB" in text
+    html = _report_html([meter], 0, _Look("", "zz", ""))
+    assert 'class="mtr over"' in html and 'class="mtr-over" style="left:75.00%;right:0"' in html
+    assert ".zz .mtr-bar{" in html and "<script" not in html
+
+
+def test_a_meter_under_its_limit_shows_the_mark_and_no_overflow():
+    meter = _memory_meter(3.0, mark=8.0)
+    assert not meter.is_over and meter.scale == 12.0
+    text = _render_text([meter], 0)
+    assert "3.0 GB of 12.0 GB (25%)" in text and "!" not in text.split("\n")[2] and "8 GB would do" in text
+    html = _report_html([meter], 0, _Look("", "zz", ""))
+    assert "mtr-over" not in html.split("</style>")[-1] and 'mtr-line mtr-mark" style="left:66.67%"' in html
