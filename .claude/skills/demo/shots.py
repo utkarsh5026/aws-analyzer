@@ -176,6 +176,7 @@ FIGURES = [
     Figure("sfn-execution", "stepfunctions", 'ui.execution("order-pipeline/ord-7f3a")'),
     Figure("sfn-state-machine", "stepfunctions", 'ui.state_machine("order-pipeline")'),
     Figure("sfn-graph", "stepfunctions", 'ui.graph("order-pipeline", execution="ord-7f3a")', crop=850),
+    Figure("sfn-graph-timings", "stepfunctions", 'ui.graph("order-pipeline", timings=True)', crop=1720),
     Figure("athena-overview", "athena", "ui.overview()"),
     Figure("athena-expensive", "athena", "ui.expensive(top=5)"),
     Figure("athena-failures", "athena", "ui.failures()"),
