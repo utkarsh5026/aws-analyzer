@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🔀 **Step Functions: which state is slow, and which retries** ([#250](https://github.com/utkarsh5026/aws-analyzer/pull/250))
+  - `graph(name, timings=True)` shades each state by its share of the time over the newest 20 succeeded executions.
+  - Findings price a state's retries (each is a state transition) and name the execution that shows one.
+  - The explorer's Graph tab has it too: pick **Where time goes** on the toggle.
 - 🔀 **Step Functions explorer: ✦ Ask about the execution you have open** ([#247](https://github.com/utkarsh5026/aws-analyzer/pull/247))
   - `sfn.explore(..., assistant=agent)` or `x.attach(agent)`: the agent's chat beside the tabs, about what's open.
   - `x.focus` is the state machine, tab, time range and execution (its error, where it stopped) or state picked.
