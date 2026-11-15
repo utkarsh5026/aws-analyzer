@@ -4,6 +4,7 @@ AthenaExplorer, the Athena explorer window, and explore() to open it.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from ..._kit.blocks import _Note
@@ -226,6 +227,14 @@ class AthenaExplorer(_QueriesTab, _CostsTab, _FailuresTab, _CatalogTab, _Crawler
         """
         queries = self.history.queries if self.history else []
         return [q for q in queries if not self.workgroup or q.workgroup == self.workgroup]
+
+    def _history_shown(self) -> QueryHistory | None:
+        """
+        The history read, with only the queries of the workgroup picked; None before it's read.
+        """
+        if self.history is None:
+            return None
+        return replace(self.history, queries=self._queries_shown())
 
     def _begin(self) -> None:
         """

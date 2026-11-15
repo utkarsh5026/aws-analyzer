@@ -10,10 +10,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..._kit.blocks import _Note
+from ..._kit.fmt import human_money
 from ..._kit.text import search_rank
 
 from ..models import FailureGroup, QueryShape
 from ..analysis import group_failures, query_shapes, total_cost
+from ..view import _bill_split
 from .frame import _failure_face, _shape_face
 from .widgets import _Chip, _Line, _ListPage, _Shown
 
@@ -72,7 +74,21 @@ class _CostsTab:
         empty = "No query matches the search." if page.query or page.chip else (
             "No query in this time cost anything: failed queries and DDL are free.")
         page.fill(lines, total=len(shapes), empty=empty, noun="kinds of query")
+        self._draw_bill(total)
         self._open_first("costs", page)
+
+    def _draw_bill(self: AthenaExplorer, total: float) -> None:
+        """
+        Over the list, the bill as one bar of its kinds of query (pointing at a part names it), what it came to, and
+        whether the costliest looks like a schedule.
+        """
+        history = self._history_shown()
+        split = _bill_split(history, self.core.prices) if history else None
+        if split is None:
+            self._set(self.cost_list.head, "")
+            return
+        split.title, split.with_keys = f"{human_money(total)} in all, by kind of query", False
+        self._set(self.cost_list.head, self._html([split]))
 
     def _clicked_shape(self: AthenaExplorer, line: _Line) -> None:
         if line.key:

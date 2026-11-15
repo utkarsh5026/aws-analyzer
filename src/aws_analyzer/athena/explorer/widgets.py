@@ -55,8 +55,8 @@ class _Shown:
 
 class _ListPage:
     """
-    A tab's page: a search box and chips over the lines on the left, and the picked line's report on the right
-    (view). query is the search box's text and chip the chip picked; redraw draws the lines again (the tab sets it),
+    A tab's page: a search box and chips over the lines on the left, under what the lines add up to (head, empty
+    unless the tab draws there), and the picked line's report on the right (view). query is the search box's text and chip the chip picked; redraw draws the lines again (the tab sets it),
     and on_click is what a click on a line does.
     """
 
@@ -80,7 +80,9 @@ class _ListPage:
         self.count = w.HTML(layout=layout(width="100%"))
         count = w.HBox([self.count], layout=layout(width="100%"))
         count.add_class("atx-pager")
-        left = w.VBox([finder, self.chips_box, self.rows_box, count])
+        self.head = w.HTML(layout=layout(width="100%"))
+        self.head.add_class("atx-head")
+        left = w.VBox([self.head, finder, self.chips_box, self.rows_box, count])
         left.add_class("atx-left")
         self.view = w.HTML(layout=layout(width="100%"))
         self.right = w.VBox([self.view])

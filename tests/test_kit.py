@@ -22,7 +22,7 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
-from aws_analyzer._kit.charts import _Meter, _Part
+from aws_analyzer._kit.charts import _Bars, _Meter, _Part, _Split, _fold_parts
 from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
@@ -520,3 +520,30 @@ def test_a_meter_under_its_limit_shows_the_mark_and_no_overflow():
     assert "3.0 GB of 12.0 GB (25%)" in text and "!" not in text.split("\n")[2] and "8 GB would do" in text
     html = _report_html([meter], 0, _Look("", "zz", ""))
     assert "mtr-over" not in html.split("</style>")[-1] and 'mtr-line mtr-mark" style="left:66.67%"' in html
+
+
+def test_folding_keeps_the_largest_parts_and_never_folds_just_one():
+    parts = [_Part(f"query {n}", float(n), f"${n}") for n in range(1, 8)]
+    folded = _fold_parts(parts, 3, lambda amount: f"${amount:g}")
+    assert [p.label for p in folded] == ["query 7", "query 6", "query 5", "4 others"]
+    assert folded[-1].is_rest and folded[-1].text == "$10"
+    assert len(_fold_parts(parts, 6, str)) == 7
+
+
+def test_a_split_names_its_parts_with_their_share():
+    split = _Split(_fold_parts([_Part("a", 9.0, "$9"), _Part("b", 1.0, "$1")], 4, str), "$10", title="The bill")
+    text = _render_text([split], 0)
+    assert "-- The bill --" in text and "90.0%  " in text and "of $10" in text
+    html = _report_html([split], 0, _Look("", "zz", ""))
+    assert 'class="p0" style="flex:0 1 90.00%' in html and 'class="spl-keys"' in html
+    split.with_keys = False
+    assert 'class="spl-keys"' not in _report_html([split], 0, _Look("", "zz", ""))
+
+
+def test_bars_scale_to_the_highest_and_draw_the_bad_part_in_red():
+    bars = _Bars(["Nov 9", "Nov 10"], [4.0, 2.0], ["4 calls", "2 calls"], title="Calls a day", bad=[0.0, 1.0])
+    text = _render_text([bars], 0)
+    assert "Nov 9   ████████████████████  4 calls" in text and "Nov 10  ██████████░░░░░░░░░░  2 calls" in text
+    html = _report_html([bars], 0, _Look("", "zz", ""))
+    assert '<i class="bad" style="height:25.00%">' in html and "highest 4 calls" in html
+    assert "<span>Nov 9</span><span>Nov 10</span>" in html

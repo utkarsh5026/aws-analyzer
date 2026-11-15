@@ -136,7 +136,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `charts.py` (charts any report can
   hold, each drawn in HTML and text and adding its own rules to `report.rules`, so no service's stylesheet changes:
   `_Meter`, an amount against a limit as one bar of `_Part`s, the part past the limit in red, an optional `mark` for a
-  setting that would do), `themes.py` (how a View's reports
+  setting that would do; `_Split`, a whole as one bar of its parts, which `_fold_parts` cuts to the largest few and
+  "N others", so a whole of thousands draws like one of five; `_Bars`, an amount per day or hour, the bad part red),
+  `themes.py` (how a View's reports
   look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
   by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its
   own; `_theme_css(root, name)` scopes every rule of a theme to `.<root>.theme-<name>`, the class `_report_html` puts
