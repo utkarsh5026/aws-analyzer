@@ -53,7 +53,83 @@ def _next_states(body: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(t for t in targets if isinstance(t, str)))
 
 
-def _state(name: str, body: dict[str, Any], path: str, depth: int) -> StateDef:
+_COMPARISONS = (("GreaterThanEquals", ">="), ("LessThanEquals", "<="), ("GreaterThan", ">"), ("LessThan", "<"),
+                ("Equals", "="), ("Matches", "matches"))
+
+_CHECKS = {"IsPresent": ("is present", "is missing"), "IsNull": ("is null", "isn't null"),
+           "IsString": ("is a string", "isn't a string"), "IsNumeric": ("is a number", "isn't a number"),
+           "IsBoolean": ("is true or false", "isn't true or false"),
+           "IsTimestamp": ("is a timestamp", "isn't a timestamp")}
+
+_VALUE_TYPES = ("String", "Numeric", "Boolean", "Timestamp")
+
+_ANY_ERROR = "any error"
+
+
+def _comparison(variable: str, key: str, value: Any) -> str:
+    """
+    One JSONPath comparison in words: ('$.total', 'NumericGreaterThanPath', '$.limit') -> '$.total > $.limit'.
+    """
+    if key in _CHECKS:
+        is_word, not_word = _CHECKS[key]
+        return f"{variable} {is_word if value else not_word}"
+    operator = key.removesuffix("Path")
+    for prefix in _VALUE_TYPES:
+        operator = operator.removeprefix(prefix)
+    symbol = dict(_COMPARISONS).get(operator, key)
+    shown = value if key.endswith("Path") else json.dumps(value)
+    return f"{variable} {symbol} {shown}"
+
+
+def describe_rule(rule: dict[str, Any]) -> str:
+    """
+    A Choice rule's condition in words, as the graph labels its arrow: its Comment when it has one, a JSONata
+    Condition as written, '$.priority = true', 'not ($.total > 100)', or 'a and b' for an And of two.
+    """
+    if isinstance(rule.get("Comment"), str) and rule["Comment"]:
+        return rule["Comment"]
+    if isinstance(rule.get("Condition"), str):
+        return rule["Condition"].removeprefix("{%").removesuffix("%}").strip()
+    if isinstance(rule.get("Not"), dict):
+        return f"not ({describe_rule(rule['Not'])})"
+    for joiner in ("And", "Or"):
+        parts = rule.get(joiner)
+        if isinstance(parts, list):
+            return f" {joiner.lower()} ".join(describe_rule(p) for p in parts if isinstance(p, dict))
+    variable = str(rule.get("Variable") or "")
+    keys = [key for key in rule if key not in ("Variable", "Next", "Comment", "Assign", "Output")]
+    return _comparison(variable, keys[0], rule[keys[0]]) if keys else variable
+
+
+def describe_errors(errors: list[str]) -> str:
+    """
+    A Catch's errors in words, as the graph labels its arrow: 'any error' for States.ALL, else their names.
+    """
+    return _ANY_ERROR if "States.ALL" in errors else ", ".join(errors)
+
+
+def _labels(body: dict[str, Any]) -> dict[str, str]:
+    """
+    What sends a state to each target that needs saying: each Choice rule's condition (two rules to one target
+    joined with 'or'), 'Default', and each Catch's errors.
+    """
+    labels: dict[str, str] = {}
+
+    def add(target: Any, words: str) -> None:
+        if isinstance(target, str):
+            labels[target] = f"{labels[target]} or {words}" if target in labels else words
+
+    for rule in body.get("Choices") or []:
+        if isinstance(rule, dict):
+            add(rule.get("Next"), describe_rule(rule))
+    add(body.get("Default"), "Default")
+    for catch in body.get("Catch") or []:
+        if isinstance(catch, dict):
+            add(catch.get("Next"), describe_errors(list(catch.get("ErrorEquals") or ["?"])))
+    return labels
+
+
+def _state(name: str, body: dict[str, Any], path: str, depth: int, branch: int = 0) -> StateDef:
     resource = str(body.get("Resource") or "")
     parameters = body.get("Parameters") or body.get("Arguments") or {}
     return StateDef(
@@ -70,6 +146,9 @@ def _state(name: str, body: dict[str, Any], path: str, depth: int) -> StateDef:
         heartbeat=body.get("HeartbeatSeconds") if isinstance(body.get("HeartbeatSeconds"), int) else None,
         comment=str(body.get("Comment") or ""),
         depth=depth,
+        labels=_labels(body),
+        branch=branch,
+        starts=[str(inner.get("StartAt") or "") for inner in _inner_machines(body)],
     )
 
 
@@ -81,14 +160,14 @@ def _inner_machines(body: dict[str, Any]) -> list[dict[str, Any]]:
     return [machine for machine in inner if isinstance(machine, dict)]
 
 
-def _walk(machine: dict[str, Any], path: str, depth: int, out: list[StateDef]) -> None:
+def _walk(machine: dict[str, Any], path: str, depth: int, out: list[StateDef], branch: int = 0) -> None:
     for name, body in (machine.get("States") or {}).items():
         if not isinstance(body, dict):
             continue
-        state = _state(name, body, path, depth)
+        state = _state(name, body, path, depth, branch)
         out.append(state)
-        for inner in _inner_machines(body):
-            _walk(inner, state.path, depth + 1, out)
+        for number, inner in enumerate(_inner_machines(body)):
+            _walk(inner, state.path, depth + 1, out, number)
 
 
 def parse_definition(definition: str | dict[str, Any]) -> tuple[str, list[StateDef]]:

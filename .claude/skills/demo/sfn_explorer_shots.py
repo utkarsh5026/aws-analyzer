@@ -10,7 +10,7 @@ The explorer is ipywidgets, which only draw in a browser connected to a kernel, 
 notebook that opens the window on demo.py's state machines (order-pipeline, its executions, and the Lambda functions
 ord-7f3a called, in moto), then uses it the way a person would: reads the State machines tab, opens the Executions tab
 and clicks ord-7f3a (its waterfall, then beside the last success, then its log with every Lambda run's lines), then
-opens the Graph tab with LoadOrders picked, and colours it by where the time goes, with ChargeCard picked, and last
+opens the Graph tab and clicks LoadOrders' box, and colours it by where the time goes, with ChargeCard picked, and last
 opens the Failures tab with LoadOrders' KeyError picked. Each
 figure is the window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp,
 and the height= of both its images is set in docs/stepfunctions_explorer.md, by shots.py's set_height.
@@ -136,7 +136,7 @@ def shoot_theme(page: Any, lab: Lab, theme: str, wanted: list[str], out: Path) -
     }""")
     shot("sfn-explorer-log")
     tab("Graph")
-    page.locator(".sfx-app .sfx-states .sfx-row", has_text="LoadOrders").locator("button.sfx-row-b").first.click()
+    page.locator('.sfx-app .sfx-hit[title^="LoadOrders:"]').first.click()
     settled()
     shot("sfn-explorer-graph")
     page.locator(".sfx-app .sfx-graph button", has_text="Where time goes").first.click()

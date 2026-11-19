@@ -1995,7 +1995,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 10.9,
+    "dur": 14.2,
     "chapter": "Graph",
     "step": 5,
     "steps": 5,
@@ -2005,7 +2005,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-graph",
       "w": 1476,
-      "h": 1275
+      "h": 1822
      }
     ],
     "captions": [
@@ -2018,7 +2018,7 @@ window.AA_TOURS = {
       "The path ord-7f3a took, <b>where it failed</b>,"
      ],
      [
-      7.3,
+      10.6,
       "and the states it never reached."
      ]
     ]

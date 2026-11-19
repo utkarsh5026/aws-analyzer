@@ -539,12 +539,14 @@ class StepFunctionsView(_BaseView):
     @_friendly_errors
     def graph(self, name: str, *, execution: str | None = None, failures: Any = None, timings: Any = None) -> None:
         """
-        How a state machine flows, drawn as a graph: a box per state (the states inside a Map or Parallel listed
-        in it), an arrow per transition, dashed where an error goes. execution='ord-7f3a' colours the path that
-        execution took (green ran, red failed, dashed not reached, each with its time and tries); failures='7d'
-        shades the states where executions stopped; timings=True shades where the time goes over the newest 20
-        executions that succeeded (timings=50 for more), with each state's median, longest, share and tries a run,
-        and which states retry often. Then every state with where it goes next, and the flow as Mermaid to paste
+        How a state machine flows, drawn as a graph the way the console draws it: Start and End, a box per state
+        with its service's icon and what it calls, the states inside a Map or Parallel drawn in its box (a Parallel's
+        branches side by side), and arrows labelled with each Choice rule and the errors a Catch takes (dashed). Point
+        at a box to light up its arrows; zoom with Fit, 1.5× and 2×. execution='ord-7f3a' colours the path that
+        execution took (green ran, red failed, dashed not reached, each with its time and tries, the arrows it took
+        flowing); failures='7d' shades the states where executions stopped; timings=True shades where the time goes
+        over the newest 20 executions that succeeded (timings=50 for more), with each state's median, longest, share
+        and tries a run, and which states retry often. Then every state with where it goes next, and the flow as Mermaid to paste
         into a Markdown cell.
         """
         machine = self.core.state_machine(name)

@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🔀 **Step Functions: the graph drawn like the console's** ([#259](https://github.com/utkarsh5026/aws-analyzer/pull/259))
+  - `graph()` and the Graph tab draw Start and End, each service's icon, and a Map's or Parallel's states inside its box.
+  - Arrows are labelled with the Choice rule or the errors a Catch takes; the path an execution took flows along them.
+  - Point at a box to light up its arrows; in the explorer, click a box to pick its state.
 - 🔎 **OpenSearch: vector memory drawn against the limit** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
   - `indexes()` and `index_info()` draw each index's graphs as one bar, what doesn't fit in red.
 - 🪣 **S3: what takes the space, as a treemap** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))

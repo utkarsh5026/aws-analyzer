@@ -8,6 +8,7 @@ output or an error's cause.
 from __future__ import annotations
 
 import json
+import zlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -18,7 +19,7 @@ from .._kit.fmt import _duration, _fmt_dt, _in_zone, _tz_label
 from .._kit.render import _prose
 from .._kit.text import _clip, _esc
 
-from .analysis.layout import FlowLayout, FlowMarks
+from .analysis.layout import END, LABEL_CHAR_WIDTH, LABEL_CHARS, FlowEdge, FlowLayout, FlowMarks, FlowNode
 from .analysis.story import STEP_FUNCTIONS, LogLine, Waterfall
 from .analysis.trend import DayCount, FailureJump, day_label
 from .analysis.suspects import change_text
@@ -178,136 +179,408 @@ def _story_text(block: _Story, report: _Report) -> list[str]:
     return lines
 
 
-_ARROW = 6
+_ARROW = 7
 
-_LABEL_CHARS = 26
+_CORNER = 9
+
+_NAME_CHARS = 26
+
+_KIND_CHARS = 32
+
+_NOTE_CHARS = 34
+
+_ZOOMS = (("fit", "Fit"), ("z15", "1.5×"), ("z2", "2×"))
 
 _MARK_WORDS = {"ok": "ran", "failed": "failed", "running": "never finished", "skip": "not reached",
                "h1": "some stopped here", "h2": "many stopped here", "h3": "most stopped here",
                "t1": "under 15% of the time", "t2": "15% of the time or more", "t3": "half the time or more"}
 
+_ICON_PATHS = {
+    "database": "M2 4c0-2 12-2 12 0v8c0 2-12 2-12 0zM2 4c0 2 12 2 12 0M2 8c0 2 12 2 12 0",
+    "messaging": "M2 4h12v8H2zM2 4l6 5 6-5",
+    "storage": "M2 4h12l-1.6 9H3.6zM2 4c0 1.6 12 1.6 12 0",
+    "compute": "M3 3h10v10H3zM6 6h4v4H6zM6 1v2M10 1v2M6 13v2M10 13v2",
+    "ml": "M8 2v12M2 8h12M4 4l8 8M12 4l-8 8",
+    "analytics": "M3 13V8M8 13V3M13 13V6",
+    "security": "M8 2l5 2v4c0 3-2.4 5-5 6-2.6-1-5-3-5-6V4z",
+    "management": "M2 12l3-4 3 2 3-5 3 3",
+    "service": "M8 2l6 3v6l-6 3-6-3V5zM2 5l6 3 6-3M8 8v6",
+    "choice": "M8 1.5l6.5 6.5L8 14.5 1.5 8z",
+    "wait": "M8 2a6 6 0 1 0 .01 0M8 5v3.4l2.4 1.6",
+    "pass": "M2 8h11M9.5 4.5 13 8l-3.5 3.5",
+    "map": "M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z",
+    "parallel": "M4 2v12M8 2v12M12 2v12",
+    "succeed": "M3 8.5l3 3 7-7",
+    "fail": "M4 4l8 8M12 4l-8 8",
+}
+
+_STATUS_PATHS = {"ok": "M-3.2 0.2l2.1 2.1 4-4.4", "failed": "M-2.6-2.6l5.2 5.2M2.6-2.6l-5.2 5.2",
+                 "running": "M0-3.6a3.6 3.6 0 1 1-3.6 3.6"}
+
 
 @dataclass
 class _FlowGraph:
     """
-    A state machine as a graph: a box per top-level state (a Map's or Parallel's inner states written in it), an
-    arrow per transition (dashed for a Catch, round the side for a loop), coloured by `marks` (one execution's path,
-    or where failures happen). An inline SVG in HTML, with a legend; a list of states and arrows in text.
+    A state machine as a graph, the way the console draws it: Start and End, a box per state with its service's
+    icon and what it calls, a Map's or Parallel's inner states drawn inside its box, right-angled arrows labelled
+    with the Choice rule or the errors a Catch takes them on (dashed), coloured by `marks` (one execution's path,
+    flowing along the arrows it took; where failures happen; where the time goes). Pointing at a box lights up its
+    arrows and the boxes next to it. An inline SVG in HTML, with a legend and a zoom; a list of states and arrows in
+    text. `bare` draws the SVG alone, for a window that shows the legend itself and puts its click targets over it.
     """
 
     layout: FlowLayout
     marks: FlowMarks = field(default_factory=FlowMarks)
     title: str = ""
+    bare: bool = False
 
 
-def _arrowhead(x: float, y: float, pointing: str) -> str:
-    if pointing == "left":
-        return f"M{x:.1f} {y:.1f} l{_ARROW + 2} {-_ARROW / 1.4:.1f} v{_ARROW * 1.43:.1f} z"
-    return f"M{x:.1f} {y:.1f} l{-_ARROW / 1.4:.1f} {-_ARROW - 2} h{_ARROW * 1.43:.1f} z"
-
-
-def _edge_svg(edge: Any, source: Any, target: Any, offset: float, taken: bool) -> str:
+@dataclass
+class _FlowKey:
     """
-    One arrow: down from the source's bottom to the target's top (a loop round the right side, back up to the
-    target's side), with its head as a path.
+    What a graph's colours mean: its legend's words, then a swatch per mark it uses.
     """
-    classes = " ".join(filter(None, ["fe", edge.kind, "on" if taken else ""]))
-    if edge.kind == "loop":
-        x1, y1 = source.x + source.width, source.y + source.height / 2
-        x2, y2 = target.x + target.width, target.y + target.height / 2
-        bulge = max(x1, x2) + 46
-        path = f"M{x1:.1f} {y1:.1f} C{bulge:.1f} {y1:.1f} {bulge:.1f} {y2:.1f} {x2 + _ARROW + 2:.1f} {y2:.1f}"
-        head = _arrowhead(x2, y2, "left")
-    else:
-        x1, y1 = source.middle + offset, source.y + source.height
-        x2, y2 = target.middle, target.y
-        bend = max(18.0, (y2 - y1) / 2)
-        path = f"M{x1:.1f} {y1:.1f} C{x1:.1f} {y1 + bend:.1f} {x2:.1f} {y2 - bend:.1f} {x2:.1f} {y2 - _ARROW - 2:.1f}"
-        head = _arrowhead(x2, y2, "down")
-    label = ""
-    if edge.kind == "catch":
-        anchor, at = ("end", x1 - 8) if x2 > x1 else ("start", x1 + 8)
-        label = f'<text class="fl" x="{at:.1f}" y="{y1 + 14:.1f}" text-anchor="{anchor}">on error</text>'
-    return f'<g class="{classes}"><path d="{path}"/><path class="fh" d="{head}"/>{label}</g>'
+
+    marks: FlowMarks
 
 
-def _node_svg(node: Any, marks: FlowMarks) -> str:
+def _rounded(points: list[tuple[float, float]]) -> str:
+    """
+    A line through its corners, each corner rounded.
+    """
+    if len(points) < 2:
+        return ""
+    path = [f"M{points[0][0]:.1f} {points[0][1]:.1f}"]
+    for before, corner, after in zip(points, points[1:], points[2:]):
+        radius = min(_CORNER, _length(before, corner) / 2, _length(corner, after) / 2)
+        into = _toward(corner, before, radius)
+        out_of = _toward(corner, after, radius)
+        path.append(f"L{into[0]:.1f} {into[1]:.1f} Q{corner[0]:.1f} {corner[1]:.1f} {out_of[0]:.1f} {out_of[1]:.1f}")
+    path.append(f"L{points[-1][0]:.1f} {points[-1][1]:.1f}")
+    return " ".join(path)
+
+
+def _length(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def _toward(origin: tuple[float, float], to: tuple[float, float], distance: float) -> tuple[float, float]:
+    """
+    The point `distance` from origin on the straight line to `to` (the lines are all straight across or down).
+    """
+    length = _length(origin, to) or 1.0
+    return (origin[0] + (to[0] - origin[0]) * distance / length, origin[1] + (to[1] - origin[1]) * distance / length)
+
+
+def _arrowhead(points: list[tuple[float, float]]) -> tuple[list[tuple[float, float]], str]:
+    """
+    The line shortened by its head, and the head: a triangle pointing the way the last stretch goes.
+    """
+    (bx, by), (tx, ty) = points[-2], points[-1]
+    length = _length((bx, by), (tx, ty)) or 1.0
+    dx, dy = (tx - bx) / length, (ty - by) / length
+    base_x, base_y = tx - dx * (_ARROW + 2), ty - dy * (_ARROW + 2)
+    half_x, half_y = -dy * _ARROW * 0.62, dx * _ARROW * 0.62
+    head = (f"M{tx:.1f} {ty:.1f} L{base_x + half_x:.1f} {base_y + half_y:.1f} "
+            f"L{base_x - half_x:.1f} {base_y - half_y:.1f} Z")
+    return points[:-1] + [(base_x + dx, base_y + dy)], head
+
+
+class _GraphIds:
+    """
+    A number per box, so the rules that light a box's arrows and neighbours up can name them: n<i> on the box,
+    s<i> / t<i> on the arrows leaving and entering it, a<i> on the boxes next to it (and the Map or Parallel it sits
+    in), in<i> on the boxes inside it.
+    """
+
+    def __init__(self, layout: FlowLayout) -> None:
+        boxes = layout.pills + layout.nodes
+        self.number = {box.name: i for i, box in enumerate(boxes)}
+        self.near: dict[str, set[int]] = {box.name: set() for box in boxes}
+        for edge in layout.edges:
+            if edge.source in self.number and edge.target in self.number:
+                self.near[edge.source].add(self.number[edge.target])
+                self.near[edge.target].add(self.number[edge.source])
+        for box in layout.nodes:
+            if box.parent in self.number:
+                self.near[box.parent].add(self.number[box.name])
+
+    def classes(self, box: FlowNode) -> str:
+        own = [f"n{self.number[box.name]}"] + [f"a{i}" for i in sorted(self.near[box.name])]
+        if box.parent in self.number:
+            own.append(f"in{self.number[box.parent]}")
+        return " ".join(own)
+
+    def edge_classes(self, edge: FlowEdge) -> str:
+        return f"s{self.number.get(edge.source, -1)} t{self.number.get(edge.target, -1)}"
+
+
+def _edge_svg(edge: FlowEdge, ids: _GraphIds, *, taken: bool, delay: int) -> str:
+    """
+    One arrow: its rounded line, a dashed one flowing along it when the execution took it, and its head.
+    """
+    if len(edge.points) < 2:
+        return ""
+    line, head = _arrowhead(edge.points)
+    drawn = _rounded(line)
+    classes = " ".join(filter(None, ["fe", edge.kind, "on" if taken else "", ids.edge_classes(edge)]))
+    flow = f'<path class="fa" d="{drawn}"/>' if taken else ""
+    return (f'<g class="{classes}" style="--l:{delay}"><path class="fp" d="{drawn}"/>{flow}'
+            f'<path class="fh" d="{head}"/></g>')
+
+
+def _edge_label_svg(edge: FlowEdge, ids: _GraphIds, *, taken: bool, delay: int) -> str:
+    """
+    An arrow's label (a Choice rule, 'Default', a Catch's errors) in a pill over its line, the whole of it in the
+    tooltip.
+    """
+    if not edge.label or edge.label_at is None:
+        return ""
+    x, y = edge.label_at
+    text = _clip(edge.label, LABEL_CHARS)
+    width = len(text) * LABEL_CHAR_WIDTH + 14
+    classes = " ".join(filter(None, ["fq", edge.kind, "on" if taken else "", ids.edge_classes(edge)]))
+    return (f'<g class="{classes}" style="--l:{delay}"><title>{_esc(edge.label)}</title>'
+            f'<rect x="{x - width / 2:.1f}" y="{y - 9:.1f}" width="{width:.1f}" height="18" rx="9"/>'
+            f'<text x="{x:.1f}" y="{y + 3.6:.1f}" text-anchor="middle">{_esc(text)}</text></g>')
+
+
+def _icon_svg(icon: str, x: float, y: float, size: float) -> str:
+    """
+    A box's icon: a rounded tile in its service's colour with a white line drawing (λ for Lambda).
+    """
+    tile = f'<rect class="fi i-{icon}" x="{x:.1f}" y="{y:.1f}" width="{size:.0f}" height="{size:.0f}" rx="{size / 4:.0f}"/>'
+    if icon == "lambda":
+        glyph = (f'<text class="fgl" x="{x + size / 2:.1f}" y="{y + size * 0.72:.1f}" text-anchor="middle" '
+                 f'font-size="{size * 0.62:.1f}">λ</text>')
+        return tile + glyph
+    scale = size / 28
+    glyph = (f'<path class="fgl" transform="translate({x + 6 * scale:.1f} {y + 6 * scale:.1f}) scale({scale:.2f})" '
+             f'd="{_ICON_PATHS.get(icon, _ICON_PATHS["service"])}"/>')
+    return tile + glyph
+
+
+def _status_svg(mark: str, x: float, y: float) -> str:
+    """
+    The badge in a box's corner: a tick for ran, a cross for failed, a turning arc for never finished.
+    """
+    if mark not in _STATUS_PATHS:
+        return ""
+    return (f'<g class="fst s-{mark}" transform="translate({x:.1f} {y:.1f})"><circle r="8"/>'
+            f'<path d="{_STATUS_PATHS[mark]}"/></g>')
+
+
+def _tip(node: FlowNode, marks: FlowMarks) -> str:
     mark = marks.states.get(node.name, "")
-    classes = " ".join(filter(None, ["fn", f"t-{node.type.lower()}", f"m-{mark}" if mark else "",
-                                     "sel" if node.name == marks.selected else ""]))
-    radius = node.height / 2 if node.type == "Choice" else 9
-    note = " · ".join(filter(None, [node.does, marks.notes.get(node.name, "")])) or node.type
-    tip = " · ".join(filter(None, [node.name, node.type, node.does, marks.notes.get(node.name, ""),
-                                   _MARK_WORDS.get(mark, "")]))
-    lines = [f'<rect x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.0f}" height="{node.height:.0f}" '
-             f'rx="{radius:.0f}"/>',
-             f'<text class="fnm" x="{node.x + 12:.1f}" y="{node.y + 19:.1f}">{_esc(_clip(node.name, _LABEL_CHARS))}'
+    return " · ".join(filter(None, [node.name, node.kind, node.does, marks.notes.get(node.name, ""),
+                                    _MARK_WORDS.get(mark, "")]))
+
+
+def _box_classes(node: FlowNode, marks: FlowMarks, ids: _GraphIds) -> str:
+    mark = marks.states.get(node.name, "")
+    return " ".join(filter(None, ["fn", "fc" if node.is_container else "", f"t-{node.type.lower()}",
+                                  f"m-{mark}" if mark else "", "sel" if node.name == marks.selected else "",
+                                  ids.classes(node)]))
+
+
+def _second_line(node: FlowNode) -> str:
+    """
+    What a box says under its name: the Lambda function it calls, else what the console says ('DynamoDB:
+    UpdateItem', 'Wait state').
+    """
+    if node.icon == "lambda" and node.does.startswith("λ "):
+        return node.does.removeprefix("λ ")
+    return node.kind
+
+
+def _halo_svg(node: FlowNode, mark: str) -> str:
+    if mark not in ("failed", "running"):
+        return ""
+    return (f'<rect class="fhalo" x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
+            f'height="{node.height:.1f}" rx="10"/>')
+
+
+def _leaf_svg(node: FlowNode, marks: FlowMarks, ids: _GraphIds) -> str:
+    """
+    A state's box: its icon, its name, what it does, and the mark's note (its time, tries, share) in the mark's
+    colour, with a badge for how it went.
+    """
+    mark = marks.states.get(node.name, "")
+    note = marks.notes.get(node.name, "")
+    text_x = node.x + 52
+    name_y, kind_y = (node.y + 22, node.y + 38) if note else (node.y + 27, node.y + 44)
+    parts = [_halo_svg(node, mark),
+             f'<rect class="fb" x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
+             f'height="{node.height:.1f}" rx="10"/>',
+             _icon_svg(node.icon, node.x + 12, node.y + (node.height - 30) / 2, 30),
+             f'<text class="fnm" x="{text_x:.1f}" y="{name_y:.1f}">{_esc(_clip(node.name, _NAME_CHARS))}</text>',
+             f'<text class="fns" x="{text_x:.1f}" y="{kind_y:.1f}">'
+             f"{_esc(_clip(_second_line(node), _KIND_CHARS))}</text>"]
+    if note:
+        parts.append(f'<text class="fnt" x="{text_x:.1f}" y="{node.y + 53:.1f}">{_esc(_clip(note, _NOTE_CHARS))}'
+                     "</text>")
+    parts.append(_status_svg(mark, node.right - 2, node.y + 2))
+    return (f'<g class="{_box_classes(node, marks, ids)}" style="--l:{node.layer + node.depth}">'
+            f'<title>{_esc(_tip(node, marks))}</title>{"".join(parts)}</g>')
+
+
+def _container_svg(node: FlowNode, marks: FlowMarks, ids: _GraphIds) -> str:
+    """
+    A Map's or Parallel's box: dashed round the graph drawn in it, its name and kind in the header, its note at the
+    header's right, and a dashed line between a Parallel's branches.
+    """
+    mark = marks.states.get(node.name, "")
+    note = marks.notes.get(node.name, "")
+    parts = [_halo_svg(node, mark),
+             f'<rect class="fb" x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
+             f'height="{node.height:.1f}" rx="12"/>',
+             _icon_svg(node.icon, node.x + 12, node.y + 11, 24),
+             f'<text class="fnm" x="{node.x + 44:.1f}" y="{node.y + 22:.1f}">{_esc(_clip(node.name, _NAME_CHARS))}'
              "</text>",
-             f'<text class="fns" x="{node.x + 12:.1f}" y="{node.y + 35:.1f}">{_esc(_clip(note, _LABEL_CHARS + 6))}'
-             "</text>"]
-    for i, inner in enumerate(node.inner):
-        lines.append(f'<text class="fni" x="{node.x + 20:.1f}" y="{node.y + 52 + i * 15:.1f}">↳ '
-                     f"{_esc(_clip(inner, _LABEL_CHARS))}</text>")
-    if node.ends:
-        cx, cy = node.middle, node.y + node.height + 16
-        lines.append(f'<path class="fe" d="M{cx:.1f} {node.y + node.height:.1f} V{cy - 7:.1f}"/>'
-                     f'<circle class="fend" cx="{cx:.1f}" cy="{cy:.1f}" r="6"/>')
-    return f'<g class="{classes}"><title>{_esc(tip)}</title>{"".join(lines)}</g>'
+             f'<text class="fns" x="{node.x + 44:.1f}" y="{node.y + 36:.1f}">{_esc(node.kind)}</text>']
+    if note:
+        parts.append(f'<text class="fnt" x="{node.right - 16:.1f}" y="{node.y + 36:.1f}" text-anchor="end">'
+                     f"{_esc(_clip(note, _NOTE_CHARS))}</text>")
+    for x in node.dividers:
+        parts.append(f'<path class="fdv" d="M{x:.1f} {node.y + 44:.1f} V{node.bottom - 10:.1f}"/>')
+    parts.append(_status_svg(mark, node.right - 2, node.y + 2))
+    return (f'<g class="{_box_classes(node, marks, ids)}" style="--l:{node.layer + node.depth}">'
+            f'<title>{_esc(_tip(node, marks))}</title>{"".join(parts)}</g>')
 
 
-def _offsets(layout: FlowLayout) -> dict[tuple[str, str], float]:
+def _pill_svg(pill: FlowNode, ids: _GraphIds) -> str:
+    return (f'<g class="fpl {ids.classes(pill)}" style="--l:{pill.layer}"><rect x="{pill.x:.1f}" y="{pill.y:.1f}" '
+            f'width="{pill.width:.0f}" height="{pill.height:.0f}" rx="{pill.height / 2:.0f}"/>'
+            f'<text x="{pill.middle:.1f}" y="{pill.y + pill.height / 2 + 4:.1f}" text-anchor="middle">'
+            f"{pill.type}</text></g>")
+
+
+def _hover_rules(layout: FlowLayout, ids: _GraphIds, root: str) -> list[str]:
     """
-    Where each arrow leaves its box's bottom: spread side by side when a box has several, so they don't overlap.
+    The rules that light a box up while it's pointed at (in the report, or through a window's click target over it,
+    .fgh<i> in a .fgc): its arrows and their labels bold, the boxes next to it and inside it as they were, the rest
+    faded.
     """
-    offsets = {}
-    for node in layout.nodes:
-        down = [e for e in layout.edges if e.source == node.name and e.kind != "loop"]
-        for i, edge in enumerate(down):
-            offsets[(edge.source, edge.target)] = (i - (len(down) - 1) / 2) * 22
-    return offsets
+    rules = []
+    for box in layout.pills + layout.nodes:
+        i = ids.number[box.name]
+        scopes = [f".{root} .fg:has(.n{i}:hover)", f".fgc:has(.fgh{i}:hover) .{root} .fg"]
+        faded_lines = ",".join(f"{scope} :is(.fe,.fq):not(.s{i}):not(.t{i})" for scope in scopes)
+        faded_boxes = ",".join(f"{scope} :is(.fn,.fpl):not(.n{i}):not(.a{i}):not(.in{i})" for scope in scopes)
+        bold = ",".join(f"{scope} .fe:is(.s{i},.t{i}) .fp" for scope in scopes)
+        lifted = ",".join(f"{scope} .n{i} .fb" for scope in scopes)
+        rules += [f"{faded_lines}{{opacity:.14}}", f"{faded_boxes}{{opacity:.32}}",
+                  f"{bold}{{stroke:var(--fg-hot);stroke-width:2.6}}", f"{lifted}{{stroke:var(--fg-hot);stroke-width:2}}"]
+    return rules
+
+
+def _graph_id(block: _FlowGraph) -> str:
+    """
+    A name for the graph's zoom buttons, the same each time it's drawn (so a window doesn't redraw it for nothing)
+    and different for another graph in the notebook.
+    """
+    names = ",".join(n.name for n in block.layout.nodes)
+    return f"fz{zlib.crc32(f'{block.title}|{block.marks.legend}|{names}'.encode()):x}"
+
+
+def _zoom_html(block: _FlowGraph) -> str:
+    """
+    The zoom buttons: radio buttons under labels, hidden so a notebook without its style shows none, that rules in
+    the stylesheet read to size the drawing.
+    """
+    name = _graph_id(block)
+    choices = "".join(f'<label><input type="radio" name="{name}" class="{key}" hidden="hidden"'
+                      f'{" checked" if key == "fit" else ""}>{words}</label>' for key, words in _ZOOMS)
+    return f'<span class="fgz" hidden="hidden">{choices}</span>'
+
+
+def _key_html(marks: FlowMarks) -> str:
+    used = sorted(set(marks.states.values()) & set(_MARK_WORDS), key=list(_MARK_WORDS).index)
+    swatches = "".join(f'<span><i class="m-{m}"></i>{_esc(_MARK_WORDS[m])}</span>' for m in used)
+    flowing = '<span><i class="m-flow"></i>the way it went</span>' if marks.taken else ""
+    return f"<b>{_esc(marks.legend)}</b>{swatches}{flowing}" if marks.legend else ""
+
+
+@_draws(_FlowKey, "html")
+def _flow_key_html(block: _FlowKey, report: _Report) -> str:
+    key = _key_html(block.marks)
+    return f'<div class="fgk">{key}</div>' if key else ""
+
+
+@_draws(_FlowKey, "text")
+def _flow_key_text(block: _FlowKey, report: _Report) -> list[str]:
+    return [block.marks.legend] if block.marks.legend else []
+
+
+def _graph_svg(block: _FlowGraph, ids: _GraphIds) -> str:
+    """
+    The drawing, back to front: the Map and Parallel boxes, the arrows, the states, the arrows' labels, Start and
+    End.
+    """
+    layout, marks = block.layout, block.marks
+    layers = {box.name: box.layer + box.depth for box in layout.nodes + layout.pills}
+    containers = sorted((n for n in layout.nodes if n.is_container), key=lambda n: n.depth)
+    edges = [(edge, (edge.source, edge.target) in marks.taken, layers.get(edge.source, 0)) for edge in layout.edges]
+    return "".join([
+        "".join(_container_svg(n, marks, ids) for n in containers),
+        "".join(_edge_svg(edge, ids, taken=taken, delay=delay) for edge, taken, delay in edges),
+        "".join(_leaf_svg(n, marks, ids) for n in layout.nodes if not n.is_container),
+        "".join(_edge_label_svg(edge, ids, taken=taken, delay=delay) for edge, taken, delay in edges),
+        "".join(_pill_svg(pill, ids) for pill in layout.pills),
+    ])
 
 
 @_draws(_FlowGraph, "html")
 def _flow_html(block: _FlowGraph, report: _Report) -> str:
-    layout, marks = block.layout, block.marks
+    layout = block.layout
     if not layout.nodes:
         return ""
-    nodes = {n.name: n for n in layout.nodes}
-    offsets = _offsets(layout)
-    edges = "".join(_edge_svg(e, nodes[e.source], nodes[e.target], offsets.get((e.source, e.target), 0.0),
-                              (e.source, e.target) in marks.taken)
-                    for e in layout.edges if e.source in nodes and e.target in nodes)
-    first = nodes.get(layout.start)
-    start = ""
-    if first is not None:
-        start = (f'<circle class="fstart" cx="{first.middle:.1f}" cy="{first.y - 22:.1f}" r="7"/>'
-                 f'<path class="fe{" on" if marks.taken else ""}" d="M{first.middle:.1f} '
-                 f'{first.y - 15:.1f} V{first.y - _ARROW - 2:.1f}"/><path class="fh" '
-                 f'd="{_arrowhead(first.middle, first.y, "down")}"/>')
-    body = "".join(_node_svg(n, marks) for n in layout.nodes)
-    used = sorted(set(marks.states.values()), key=list(_MARK_WORDS).index)
-    legend = "".join(f'<span><i class="m-{m}"></i>{_esc(_MARK_WORDS[m])}</span>' for m in used)
-    caption = f'<div class="fgk"><b>{_esc(marks.legend)}</b>{legend}</div>' if marks.legend else ""
+    ids = _GraphIds(layout)
+    report.rules.update(_hover_rules(layout, ids, report.root))
+    svg = (f'<svg class="fgs" viewBox="0 0 {layout.width:.0f} {layout.height:.0f}" width="{layout.width:.0f}" '
+           f'height="{layout.height:.0f}" role="img" aria-label="{_esc(block.title or "state machine graph")}">'
+           f"{_graph_svg(block, ids)}</svg>")
+    if block.bare:
+        return f'<div class="fg bare">{svg}</div>'
     title = f'<div class="tt">{_prose(block.title)}</div>' if block.title else ""
-    return (f'{title}<div class="fg">{caption}<svg viewBox="0 0 {layout.width:.0f} {layout.height:.0f}" '
-            f'width="{layout.width:.0f}" role="img" aria-label="{_esc(block.title or "state machine graph")}">'
-            f"{edges}{start}{body}</svg></div>")
+    head = f'<div class="fgk">{_key_html(block.marks)}{_zoom_html(block)}</div>'
+    return f'{title}<div class="fg" style="--w:{layout.width:.0f}px">{head}<div class="fgv">{svg}</div></div>'
+
+
+def _edge_word(edge: FlowEdge) -> str:
+    if edge.kind == "catch":
+        return " (on error)" if edge.label == "any error" else f" (on {edge.label})"
+    if edge.kind == "loop":
+        return f" ({edge.label}, loop)" if edge.label else " (loop)"
+    return f" ({edge.label})" if edge.label else ""
+
+
+def _text_line(node: FlowNode, layout: FlowLayout, marks: FlowMarks, indent: str) -> str:
+    mark = marks.states.get(node.name, "")
+    word = f" [{_MARK_WORDS.get(mark, mark)}]" if mark else ""
+    note = marks.notes.get(node.name) or node.does
+    targets = [f"{e.target}{_edge_word(e)}" for e in layout.edges if e.source == node.name and e.target != END]
+    arrow = f" -> {', '.join(targets)}" if targets else (" -> end" if node.ends else "")
+    return f"{indent}{node.name} ({node.type}){word}{' · ' + note if note else ''}{arrow}"
 
 
 @_draws(_FlowGraph, "text")
 def _flow_text(block: _FlowGraph, report: _Report) -> list[str]:
     layout, marks = block.layout, block.marks
     lines = [f"-- {block.title} --"] if block.title else []
-    if marks.legend:
+    if marks.legend and not block.bare:
         lines.append(marks.legend)
-    for node in sorted(layout.nodes, key=lambda n: (n.layer, n.column)):
-        mark = marks.states.get(node.name, "")
-        word = f" [{_MARK_WORDS.get(mark, mark)}]" if mark else ""
-        note = marks.notes.get(node.name) or node.does
-        targets = [f"{e.target}{' (on error)' if e.kind == 'catch' else ' (loop)' if e.kind == 'loop' else ''}"
-                   for e in layout.edges if e.source == node.name]
-        arrow = f" -> {', '.join(targets)}" if targets else (" -> end" if node.ends else "")
-        lines.append(f"{'  ' * node.layer}{node.name} ({node.type}){word}{' · ' + note if note else ''}{arrow}")
+    inside: dict[str, list[FlowNode]] = {}
+    for node in layout.nodes:
+        inside.setdefault(node.parent, []).append(node)
+
+    def add(parent: str, base: str) -> None:
+        for node in sorted(inside.get(parent, []), key=lambda n: (n.branch, n.layer, n.column)):
+            indent = base + "  " * node.layer
+            lines.append(_text_line(node, layout, marks, indent))
+            add(node.name, indent + "    ")
+
+    add("", "")
     return lines
 
 

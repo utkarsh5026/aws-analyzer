@@ -144,7 +144,7 @@ Lower on the same page: Step Functions' events and each function's lines, one lo
 
 ## The graph { #graph }
 
-The **Graph** tab draws the state machine from its definition, coloured by the path the open execution took, or by where executions stopped.
+The **Graph** tab draws the state machine from its definition the way the console does, coloured by the path the open execution took, or by where executions stopped. Click a box to pick its state.
 { .gist }
 
 ![The Graph tab: order-pipeline drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, the states it never reached dashed, and LoadOrders picked on the right](images/sfn-explorer-graph-light.webp#only-light){ width="984" height="866" loading=lazy }
@@ -159,7 +159,7 @@ The Graph tab with ord-7f3a open: its path in green, the failure in red, and wha
 The Graph tab on Where time goes: ProcessItems takes most of the time, and ChargeCard retries when Lambda throttles it.
 ///
 
-The toggle over the graph picks what colours it: **This execution** (its path, the failure in red, the states it never reached dashed), **Where failures stop** (the failures in the time range, by the state they stopped at), **Where time goes** (the newest 20 executions that succeeded in the time range, each state shaded by its share of their time, with what retries and what to do about it under the graph) or **Just the flow**. Pick a state in the list beside the graph to see its definition, its tries, its Lambda run's lines, what it was given and gave back, the failures that stopped there, or its median, longest and the executions that show its slowest run and a retry. The states inside a Map or Parallel are listed under it, indented: one inside a Map ran once per item, so its page says how many times it ran and failed, and shows a failed run first.
+The toggle over the graph picks what colours it: **This execution** (its path, the failure in red, the states it never reached dashed), **Where failures stop** (the failures in the time range, by the state they stopped at), **Where time goes** (the newest 20 executions that succeeded in the time range, each state shaded by its share of their time, with what retries and what to do about it under the graph) or **Just the flow**. Each box shows its service's icon and what it calls, a Map's or Parallel's states are drawn inside its box, and each arrow out of a Choice or a Catch is labelled with its rule or errors. Point at a box to light up its arrows; 75%, 100% and 125% size the drawing. Click a box, or a state in the list beside the graph, to see its definition, its tries, its Lambda run's lines, what it was given and gave back, the failures that stopped there, or its median, longest and the executions that show its slowest run and a retry. The states inside a Map or Parallel are also listed under it, indented: one inside a Map ran once per item, so its page says how many times it ran and failed, and shows a failed run first.
 
 ## Failures, overview and definition { #failures }
 

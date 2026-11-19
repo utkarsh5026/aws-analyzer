@@ -176,7 +176,7 @@ FIGURES = [
     Figure("sfn-execution", "stepfunctions", 'ui.execution("order-pipeline/ord-7f3a")'),
     Figure("sfn-compare", "stepfunctions", 'ui.compare("order-pipeline/ord-7f3a")'),
     Figure("sfn-state-machine", "stepfunctions", 'ui.state_machine("order-pipeline")'),
-    Figure("sfn-graph", "stepfunctions", 'ui.graph("order-pipeline", execution="ord-7f3a")', crop=850),
+    Figure("sfn-graph", "stepfunctions", 'ui.graph("order-pipeline", execution="ord-7f3a")', crop=1215),
     Figure("sfn-graph-timings", "stepfunctions", 'ui.graph("order-pipeline", timings=True)', crop=1720),
     Figure("athena-overview", "athena", "ui.overview()"),
     Figure("athena-expensive", "athena", "ui.expensive(top=5)"),
@@ -1084,7 +1084,7 @@ def chrome() -> str:
 
 def shoot(html_path: Path, png_path: Path, browser: str) -> None:
     subprocess.run([browser, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-                    f"--window-size={WIDTH},6000", f"--force-device-scale-factor={SCALE}",
+                    "--force-prefers-reduced-motion", f"--window-size={WIDTH},6000", f"--force-device-scale-factor={SCALE}",
                     f"--screenshot={png_path}", html_path.as_uri()], check=True, capture_output=True, timeout=120)
 
 

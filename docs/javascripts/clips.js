@@ -1704,12 +1704,12 @@ window.AA_CLIPS = {
  },
  "sfn-graph": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\"): sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\"): the path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).",
+  "summary": "sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\"): sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\"): drawn the way the console draws it, the path the execution took flowing along its arrows, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).",
   "video": "",
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.5,
+    "dur": 14.2,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.graph(\"order-pipeline\", execution=\"ord-7f3a\")",
@@ -1717,13 +1717,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-graph",
       "w": 1476,
-      "h": 1275
+      "h": 1822
      }
     ],
     "captions": [
      [
       3.73,
-      "The path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow)."
+      "Drawn the way the console draws it, the path the execution took flowing along its arrows, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow)."
      ]
     ]
    }
