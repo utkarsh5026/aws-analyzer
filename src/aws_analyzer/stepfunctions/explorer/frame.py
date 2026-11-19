@@ -352,6 +352,17 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfn .story,.sfx-app .sfn .wf{max-width:none}
 .sfx-app.sfx-app .sfx-graph{overflow:hidden auto;padding:0 6px 0 2px;min-height:0}
 .sfx-app.sfx-app .sfx-graph>*{flex:0 0 auto;margin:0 0 6px}
+.sfx-app.sfx-app .sfx-graph-scroll{overflow:auto;max-height:640px;border:1px solid var(--sx-line);border-radius:12px;background:radial-gradient(rgba(127,127,127,.16) 1px,transparent 1px) 0 0/18px 18px}
+.sfx-app.sfx-app .sfx-canvas{position:relative;flex:0 0 auto;margin:0 auto;overflow:visible}
+.sfx-app.sfx-app .sfx-canvas.z75{zoom:.75}
+.sfx-app.sfx-app .sfx-canvas.z125{zoom:1.25}
+.sfx-app.sfx-app .sfx-graph-controls{flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:space-between}
+.sfx-app.sfx-app .sfx-zoom{margin-left:auto}
+.sfx-app.sfx-app .sfx-canvas>.widget-html,.sfx-app .sfx-canvas .widget-html-content{margin:0;padding:0;line-height:0;height:auto}
+.sfx-app .sfx-canvas .sfn{padding:0;margin:0}
+.sfx-app.sfx-app .sfx-hit{position:absolute;margin:0;padding:0;min-width:0;border:0;border-radius:10px;background:transparent;box-shadow:none;cursor:pointer;outline:none}
+.sfx-app.sfx-app .sfx-hit:hover,.sfx-app.sfx-app .sfx-hit:focus{background:transparent;box-shadow:none}
+.sfx-app.sfx-app .sfx-hit.sfx-hit-on,.sfx-app.sfx-app .sfx-hit.sfx-hit-on:hover,.sfx-app.sfx-app .sfx-hit.sfx-hit-on:focus{box-shadow:0 0 0 3px #0972d3,0 0 0 7px rgba(9,114,211,.18)}
 .sfx-app.sfx-app .sfx-states{flex:0 0 44%;min-width:360px;max-width:560px;overflow:hidden auto}
 @container sfx-main (max-width:900px){.sfx-app.sfx-app .sfx-graph{flex:1 1 100%!important;overflow:visible}.sfx-app.sfx-app .sfx-states{flex:1 1 100%;min-width:0;max-width:100%;height:auto;overflow:visible}}
 .sfx-app.sfx-app .sfx-states .sfx-rows{flex:0 0 auto;overflow:visible;max-height:none}
@@ -363,16 +374,16 @@ body[class*=vscode-] .sfx-app.sfx-app .sfx-page{height:620px}
 .sfx-app .sfx-states .er.d2{padding-left:44px}
 .sfx-app .sfx-states .er.d3{padding-left:62px}
 .sfx-app .sfx-states .er.d1 .en,.sfx-app .sfx-states .er.d2 .en,.sfx-app .sfx-states .er.d3 .en{font-weight:500}
-.sfx-app .ei.m-ok{background:rgba(16,185,129,.18)}
-.sfx-app .ei.m-failed{background:rgba(239,68,68,.2)}
-.sfx-app .ei.m-running{background:rgba(59,130,246,.2)}
+.sfx-app .ei.m-ok{background:rgba(3,127,12,.16);box-shadow:inset 0 0 0 1.5px #037f0c}
+.sfx-app .ei.m-failed{background:rgba(217,21,21,.16);box-shadow:inset 0 0 0 1.5px #d91515}
+.sfx-app .ei.m-running{background:rgba(9,114,211,.16);box-shadow:inset 0 0 0 1.5px #0972d3}
 .sfx-app .ei.m-skip{background:transparent;border:1.5px dashed rgba(127,127,127,.5)}
-.sfx-app .ei.m-h1{background:rgba(245,158,11,.2)}
-.sfx-app .ei.m-h2{background:rgba(249,115,22,.28)}
-.sfx-app .ei.m-h3{background:rgba(239,68,68,.32)}
-.sfx-app .ei.m-t1{background:rgba(217,119,6,.1)}
-.sfx-app .ei.m-t2{background:rgba(217,119,6,.26)}
-.sfx-app .ei.m-t3{background:rgba(217,119,6,.45)}
+.sfx-app .ei.m-h1{background:rgba(224,161,0,.22);box-shadow:inset 0 0 0 1.5px #e0a100}
+.sfx-app .ei.m-h2{background:rgba(236,114,17,.28);box-shadow:inset 0 0 0 1.5px #ec7211}
+.sfx-app .ei.m-h3{background:rgba(217,21,21,.3);box-shadow:inset 0 0 0 1.5px #d91515}
+.sfx-app .ei.m-t1{background:rgba(126,180,234,.18);box-shadow:inset 0 0 0 1.5px #7eb4ea}
+.sfx-app .ei.m-t2{background:rgba(47,132,216,.3);box-shadow:inset 0 0 0 1.5px #2f84d8}
+.sfx-app .ei.m-t3{background:rgba(10,74,144,.45);box-shadow:inset 0 0 0 1.5px #0a4a90}
 .sfx-app .ei{width:14px;height:14px}
 .sfx-app .sfx-states .sfn .tt{margin-top:8px}
 """ + _day_bars_css("sfx-app", bar="var(--sx-accent)", bad="var(--sx-ink-bad)") + _TERMINAL_CSS + "\n" + \

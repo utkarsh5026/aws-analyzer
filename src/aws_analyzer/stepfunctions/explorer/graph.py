@@ -22,7 +22,7 @@ from ..analysis.layout import (
 from ..analysis.story import ExecutionStory
 from ..analysis.timing import took_text
 from ..analyzer import _run_lines
-from ..blocks import _FlowGraph, _payload_block, _Story
+from ..blocks import _FlowGraph, _FlowKey, _GraphIds, _payload_block, _Story
 from .widgets import _Line
 
 if TYPE_CHECKING:
@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 
 _MODES = (("This execution", "execution"), ("Where failures stop", "failures"), ("Where time goes", "timing"),
           ("Just the flow", "plain"))
+
+_ZOOMS = (("75%", "z75"), ("100%", "z100"), ("125%", "z125"))
+
+_ZOOM_OUT_WIDER_THAN = 480
 
 _TRY_OUTCOMES = {"ok": "ok", "failed": "failed", "timed out": "timed out", "running": "never finished"}
 
@@ -195,8 +199,23 @@ class _GraphTab:
                                                    "20 executions that succeeded in the time range picked",
                                                    "The definition, uncoloured"])
         self.mode_pick.observe(self._safely(self._mode_changed), names="value")
+        self.zoom_pick = w.ToggleButtons(options=list(_ZOOMS), value="z100", style={"button_width": "auto"},
+                                         tooltips=["Smaller, to see more of it", "As drawn", "Larger"])
+        self.zoom_pick.add_class("sfx-zoom")
+        self.zoom_pick.observe(self._safely(self._zoom_changed), names="value")
         self.graph_view = w.HTML(layout=layout(width="100%"))
-        graph_side = w.VBox([self.mode_pick, self.graph_view], layout=layout(flex="1 1 auto", min_width="0"))
+        self.graph_svg = w.HTML()
+        self._hits: list[Any] = []
+        self.graph_canvas = w.Box([self.graph_svg])
+        self.graph_canvas.add_class("sfx-canvas")
+        self.graph_canvas.add_class("fgc")
+        self.graph_scroll = w.Box([self.graph_canvas], layout=layout(width="100%"))
+        self.graph_scroll.add_class("sfx-graph-scroll")
+        self.graph_foot = w.HTML(layout=layout(width="100%"))
+        controls = w.HBox([self.mode_pick, self.zoom_pick], layout=layout(width="100%"))
+        controls.add_class("sfx-graph-controls")
+        graph_side = w.VBox([controls, self.graph_view, self.graph_scroll, self.graph_foot],
+                            layout=layout(flex="1 1 auto", min_width="0"))
         graph_side.add_class("sfx-graph")
         self.state_box = w.VBox(layout=layout(width="100%"))
         self.state_box.add_class("sfx-rows")
@@ -217,8 +236,18 @@ class _GraphTab:
             return
         self.graph_layout = flow_layout(machine)
         self.picked_state = machine.start_at
+        self._quietly(self.zoom_pick, value="z75" if self.graph_layout.width > _ZOOM_OUT_WIDER_THAN else "z100")
+        self._zoom_changed({"new": self.zoom_pick.value})
         self._draw_state_lines()
         self._draw_graph()
+
+    def _zoom_changed(self: StepFunctionsExplorer, change: dict[str, Any]) -> None:
+        """
+        Sizes the drawing and its click targets together (CSS zoom on the canvas), so a click still lands on its box.
+        """
+        others = [key for _, key in _ZOOMS if key != change["new"]]
+        self.graph_canvas._dom_classes = tuple(c for c in self.graph_canvas._dom_classes if c not in others)
+        self.graph_canvas.add_class(change["new"])
 
     def _mode_changed(self: StepFunctionsExplorer, change: dict[str, Any]) -> None:
         self.graph_mode = change["new"]
@@ -297,8 +326,12 @@ class _GraphTab:
 
     def _picked_box(self: StepFunctionsExplorer) -> str:
         """
-        The box the graph rings for the state picked: its own, or the Map's or Parallel's it sits inside.
+        The box the graph rings for the state picked: its own, a state inside a Map or Parallel too, since the graph
+        draws those; its Map's or Parallel's when it isn't drawn.
         """
+        layout = self.graph_layout
+        if layout is not None and layout.node(self.picked_state) is not None:
+            return self.picked_state
         return owner_of(self.machine, self.picked_state) if self.machine else self.picked_state
 
     def _inner_marks(self: StepFunctionsExplorer) -> FlowMarks:
@@ -317,15 +350,22 @@ class _GraphTab:
         return FlowMarks()
 
     def _draw_graph(self: StepFunctionsExplorer) -> None:
+        """
+        The graph in the mode picked: what it's coloured by above it, the drawing with a click target over each box
+        (the state picked ringed by its own, so picking another doesn't draw the graph again), what the timings say
+        under it, and the state lines beside it.
+        """
         layout = self.graph_layout
         if layout is None:
             return
         marks, note = self._graph_marks()
-        blocks: list[Any] = [_Note(note)] if note else []
-        blocks.append(_FlowGraph(layout, marks))
-        if self.graph_mode == "timing" and self.timings is not None:
-            blocks += self._timing_notes(self.timings)
-        self._draw("graph", self.graph_view, blocks)
+        head: list[Any] = [_Note(note)] if note else []
+        self._draw("graph", self.graph_view, head + [_FlowKey(marks)])
+        drawn = FlowMarks(marks.states, marks.taken, marks.notes, legend=marks.legend)
+        self._set(self.graph_svg, self._html([_FlowGraph(layout, drawn, bare=True)]))
+        self._place_hits(layout)
+        foot = self._timing_notes(self.timings) if self.graph_mode == "timing" and self.timings is not None else []
+        self._draw("graph-notes", self.graph_foot, foot)
         inner = self._inner_marks()
         for line in self._state_lines:
             _class_if(line.box, "sfx-on", line.key == self.picked_state)
@@ -333,6 +373,36 @@ class _GraphTab:
             note_text = marks.notes.get(line.key) or inner.notes.get(line.key, "")
             self._set(line.face, _state_face(line.key, self._state_depth(line.key), mark, note_text))
         self._draw_state()
+
+    def _place_hits(self: StepFunctionsExplorer, layout: FlowLayout) -> None:
+        """
+        A see-through button over each box of the drawing, the size of the canvas, so a click on a box picks its
+        state and pointing at one lights its arrows up (the .fgh<i> rules the graph carries): a Map's or Parallel's
+        first, so the boxes inside it sit on top.
+        """
+        self.graph_canvas.layout.width = f"{layout.width:.0f}px"
+        self.graph_canvas.layout.height = f"{layout.height:.0f}px"
+        ids = _GraphIds(layout)
+        boxes = sorted(layout.nodes, key=lambda n: (not n.is_container, n.depth))
+        while len(self._hits) < len(boxes):
+            button = self._w.Button()
+            button.on_click(self._safely(self._clicked_box))
+            self._hits.append(button)
+        for button, box in zip(self._hits, boxes):
+            button.box_name = box.name
+            button.tooltip = f"{box.name}: what it does, and what happened there"
+            button.layout.left, button.layout.top = f"{box.x:.0f}px", f"{box.y:.0f}px"
+            button.layout.width, button.layout.height = f"{box.width:.0f}px", f"{box.height:.0f}px"
+            picked = ("sfx-hit-on",) if box.name == self._picked_box() else ()
+            button._dom_classes = ("sfx-hit", f"fgh{ids.number[box.name]}") + picked
+        self.graph_canvas.children = [self.graph_svg] + self._hits[:len(boxes)]
+
+    def _clicked_box(self: StepFunctionsExplorer, button: Any) -> None:
+        name = getattr(button, "box_name", "")
+        if name:
+            self.picked_state = name
+            self._draw_graph()
+            self._focus_moved()
 
     def _timing_notes(self: StepFunctionsExplorer, report: TimingReport) -> list[Any]:
         """
@@ -356,7 +426,7 @@ class _GraphTab:
         if layout is None or machine is None:
             return []
         names = []
-        for node in sorted(layout.nodes, key=lambda n: (n.layer, n.column)):
+        for node in sorted(layout.top, key=lambda n: (n.layer, n.column)):
             names.append(node.name)
             names += [state.name for state in inner_states(machine, node.name)]
         return names

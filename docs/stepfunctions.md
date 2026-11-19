@@ -214,10 +214,10 @@ The findings read the definition: a Lambda task with no Retry for Lambda's own e
 `sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.
 ///
 
-![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="850" loading=lazy }
-![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-dark.webp#only-dark){ width="984" height="850" loading=lazy }
+![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="1215" loading=lazy }
+![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-dark.webp#only-dark){ width="984" height="1215" loading=lazy }
 /// caption
-`sfn.graph("order-pipeline", execution="ord-7f3a")`: the path the execution took, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).
+`sfn.graph("order-pipeline", execution="ord-7f3a")`: drawn the way the console draws it, the path the execution took flowing along its arrows, where it failed, and what it never reached (the top of the report; a table of the states and the Mermaid source follow).
 ///
 
 ## Where the time goes { #timings }

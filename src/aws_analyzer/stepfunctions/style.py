@@ -78,53 +78,108 @@ _EXTRA_CSS = """\
 .sfn .src.l4{background:rgba(2,132,199,.13);color:#0369a1}
 .sfn .src.l5{background:rgba(161,98,7,.13);color:#a16207}
 body[data-jp-theme-light="false"] .sfn .story .sl.error{color:#f87171}
-.sfn .fg{max-width:100%;overflow-x:auto;margin:4px 0 12px}
-.sfn .fg svg{display:block;max-width:100%;height:auto;font-family:inherit}
+.sfn{--fg-node:var(--jp-layout-color0,#fff);--fg-ink:#16191f;--fg-sub:#5f6b7a;--fg-edge:#8d99a8;--fg-hot:#0972d3;--fg-ok:#037f0c;--fg-ok-bg:#effaf0;--fg-bad:#d91515;--fg-bad-bg:#fff2f2;--fg-run:#0972d3;--fg-run-bg:#eef6ff;--fg-pill:#232f3e;--fg-pill-ink:#fff;--fg-box:#c6ccd5;--fg-shell:rgba(9,114,211,.035);--fg-shell-line:#9ba7b6;--fg-label:#f4f4f6;--fg-heat1:#fff7e0;--fg-heat1-line:#e0a100;--fg-heat2:#ffe9d6;--fg-heat2-line:#ec7211;--fg-heat3:#ffe1e1;--fg-heat3-line:#d91515;--fg-time1:#f2f7ff;--fg-time1-line:#7eb4ea;--fg-time2:#dcebff;--fg-time2-line:#2f84d8;--fg-time3:#b9d7fb;--fg-time3-line:#0a4a90}
+.sfn .fg{max-width:100%;margin:4px 0 12px}
+body[data-jp-theme-light="false"] .sfn,body.vscode-dark .sfn,body.vscode-high-contrast .sfn{--fg-node:#1b2129;--fg-ink:#e9ebed;--fg-sub:#a4aeb9;--fg-edge:#6b7684;--fg-hot:#5cb2ff;--fg-ok:#2bb534;--fg-ok-bg:#132a17;--fg-bad:#ff6b6b;--fg-bad-bg:#3a1718;--fg-run:#5cb2ff;--fg-run-bg:#10263e;--fg-pill:#e9ebed;--fg-pill-ink:#16191f;--fg-box:#414d5c;--fg-shell:rgba(92,178,255,.05);--fg-shell-line:#56616f;--fg-label:#262d36;--fg-heat1:#3a2f12;--fg-heat1-line:#ffd34d;--fg-heat2:#3d2410;--fg-heat2-line:#ff9a3c;--fg-heat3:#3a1718;--fg-heat3-line:#ff6b6b;--fg-time1:#14243a;--fg-time1-line:#4f8fd0;--fg-time2:#173659;--fg-time2-line:#5cb2ff;--fg-time3:#1d4f87;--fg-time3-line:#a9d4ff}
+.sfn .fgv{overflow:auto;border:1px solid rgba(127,127,127,.18);border-radius:10px;background:radial-gradient(rgba(127,127,127,.16) 1px,transparent 1px) 0 0/18px 18px}
+.sfn .fg.bare{margin:0}
+.sfn .fg svg{display:block;font-family:inherit;color:var(--fg-ink)}
+.sfn .fgv svg{max-width:100%;height:auto;margin:0 auto}
+.sfn .fg:has(.z15:checked) .fgv svg{max-width:none;width:calc(var(--w) * 1.5)}
+.sfn .fg:has(.z2:checked) .fgv svg{max-width:none;width:calc(var(--w) * 2)}
 .sfn .fgk{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11.5px;margin:0 0 6px}
 .sfn .fgk b{font-weight:650}
-.sfn .fgk span{display:inline-flex;align-items:center;gap:5px;opacity:.8}
-.sfn .fgk i{display:inline-block;width:12px;height:9px;border-radius:3px;border:1.5px solid rgba(127,127,127,.55)}
-.sfn .fe path{fill:none;stroke:rgba(127,127,127,.55);stroke-width:1.6}
-.sfn path.fe{fill:none;stroke:rgba(127,127,127,.55);stroke-width:1.6}
-.sfn .fe path.fh,.sfn path.fh{fill:rgba(127,127,127,.65);stroke:none}
-.sfn .fe.catch path:first-child{stroke-dasharray:5 4}
-.sfn .fe.loop path:first-child{stroke-dasharray:2 3}
-.sfn .fe.on path:first-child,.sfn path.fe.on{stroke:#10b981;stroke-width:2.4}
-.sfn .fe.on path.fh{fill:#10b981}
-.sfn .fe.catch.on path:first-child{stroke:#ef4444}
-.sfn .fe.catch.on path.fh{fill:#ef4444}
-.sfn .fl{font-size:10px;fill:currentColor;opacity:.6}
-.sfn .fn rect{fill:var(--jp-layout-color0,#fff);stroke:rgba(127,127,127,.5);stroke-width:1.3}
+.sfn .fgk span{display:inline-flex;align-items:center;gap:5px;opacity:.85}
+.sfn .fgk i{display:inline-block;width:13px;height:10px;border-radius:3px;border:1.5px solid var(--fg-box,#c6ccd5)}
+.sfn .fgz{display:inline-flex!important;margin-left:auto;gap:2px;padding:2px;border-radius:7px;background:rgba(127,127,127,.12)}
+.sfn .fgz label{cursor:pointer;padding:1px 9px;border-radius:5px;opacity:.7;font-variant-numeric:tabular-nums}
+.sfn .fgz label:has(input:checked){background:var(--fg-node);opacity:1;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.sfn .fe .fp{fill:none;stroke:var(--fg-edge);stroke-width:1.5}
+.sfn .fe .fh{fill:var(--fg-edge);stroke:none}
+.sfn .fe.catch .fp{stroke-dasharray:6 4}
+.sfn .fe.loop .fp{stroke-dasharray:2 4;stroke-linecap:round}
+.sfn .fe.on .fp{stroke:var(--fg-ok);stroke-width:2.6}
+.sfn .fe.on .fh{fill:var(--fg-ok)}
+.sfn .fe.on .fa{fill:none;stroke:var(--fg-node);stroke-width:1.4;stroke-dasharray:3 11;stroke-linecap:round;animation:sfnflow .9s linear infinite}
+.sfn .fe.catch.on .fp{stroke:var(--fg-bad)}
+.sfn .fe.catch.on .fh{fill:var(--fg-bad)}
+.sfn .fq rect{fill:var(--fg-label);stroke:var(--fg-box);stroke-width:1}
+.sfn .fq text{font-size:10.5px;fill:var(--fg-sub)}
+.sfn .fq.catch rect{stroke:rgba(217,21,21,.45)}
+.sfn .fq.catch text{fill:var(--fg-bad)}
+.sfn .fq.on rect{stroke:var(--fg-ok)}
+.sfn .fq.on text{fill:var(--fg-ok);font-weight:600}
+.sfn .fq.catch.on rect{stroke:var(--fg-bad)}
+.sfn .fq.catch.on text{fill:var(--fg-bad);font-weight:600}
+.sfn .fn .fb{fill:var(--fg-node);stroke:var(--fg-box);stroke-width:1.2;filter:drop-shadow(0 1px 2px rgba(0,16,40,.10))}
+.sfn .fn.fc .fb{fill:var(--fg-shell);stroke:var(--fg-shell-line);stroke-dasharray:6 4;filter:none}
 .sfn .fn text{fill:currentColor}
 .sfn .fnm{font-size:12.5px;font-weight:650}
-.sfn .fns{font-size:10.5px;opacity:.65}
-.sfn .fni{font-size:10.5px;opacity:.75}
-.sfn .fn.t-choice rect{stroke-dasharray:0}
-.sfn .fn.t-fail rect{stroke:rgba(239,68,68,.55)}
-.sfn .fn.m-ok rect{fill:rgba(16,185,129,.12);stroke:#10b981}
-.sfn .fn.m-failed rect{fill:rgba(239,68,68,.12);stroke:#ef4444}
-.sfn .fn.m-running rect{fill:rgba(59,130,246,.12);stroke:#3b82f6}
-.sfn .fn.m-skip rect{stroke-dasharray:4 3;fill:transparent}
-.sfn .fn.m-skip text{opacity:.5}
-.sfn .fn.m-h1 rect{fill:rgba(245,158,11,.10);stroke:#f59e0b}
-.sfn .fn.m-h2 rect{fill:rgba(249,115,22,.16);stroke:#f97316}
-.sfn .fn.m-h3 rect{fill:rgba(239,68,68,.18);stroke:#ef4444}
-.sfn .fgk i.m-ok{background:rgba(16,185,129,.12);border-color:#10b981}
-.sfn .fgk i.m-failed{background:rgba(239,68,68,.12);border-color:#ef4444}
-.sfn .fgk i.m-running{background:rgba(59,130,246,.12);border-color:#3b82f6}
-.sfn .fgk i.m-skip{border-style:dashed}
-.sfn .fgk i.m-h1{background:rgba(245,158,11,.10);border-color:#f59e0b}
-.sfn .fgk i.m-h2{background:rgba(249,115,22,.16);border-color:#f97316}
-.sfn .fgk i.m-h3{background:rgba(239,68,68,.18);border-color:#ef4444}
-.sfn .fn.m-t1 rect{fill:rgba(217,119,6,.06);stroke:rgba(217,119,6,.55)}
-.sfn .fn.m-t2 rect{fill:rgba(217,119,6,.18);stroke:#d97706}
-.sfn .fn.m-t3 rect{fill:rgba(217,119,6,.34);stroke:#b45309;stroke-width:2}
-.sfn .fgk i.m-t1{background:rgba(217,119,6,.06);border-color:rgba(217,119,6,.55)}
-.sfn .fgk i.m-t2{background:rgba(217,119,6,.18);border-color:#d97706}
-.sfn .fgk i.m-t3{background:rgba(217,119,6,.34);border-color:#b45309}
-.sfn .fn.sel rect{stroke:#2563eb;stroke-width:3}
-.sfn .fstart{fill:currentColor;opacity:.75}
-.sfn .fend{fill:none;stroke:currentColor;stroke-width:2;opacity:.75}
+.sfn .fns{font-size:10.5px;fill:var(--fg-sub)!important}
+.sfn .fnt{font-size:10.5px;font-weight:650;fill:var(--fg-sub)!important;font-variant-numeric:tabular-nums}
+.sfn .fdv{stroke:var(--fg-shell-line);stroke-dasharray:3 4;stroke-width:1}
+.sfn .fi{fill:#5f6b7a}
+.sfn .fi.i-lambda,.sfn .fi.i-compute{fill:#ed7100}
+.sfn .fi.i-database{fill:#c925d1}
+.sfn .fi.i-messaging,.sfn .fi.i-management{fill:#e7157b}
+.sfn .fi.i-storage{fill:#7aa116}
+.sfn .fi.i-ml{fill:#01a88d}
+.sfn .fi.i-analytics{fill:#8c4fff}
+.sfn .fi.i-security{fill:#dd344c}
+.sfn .fi.i-choice,.sfn .fi.i-wait,.sfn .fi.i-pass{fill:#545b64}
+.sfn .fi.i-map,.sfn .fi.i-parallel{fill:#0972d3}
+.sfn .fi.i-succeed{fill:#037f0c}
+.sfn .fi.i-fail{fill:#d91515}
+.sfn .fgl{fill:none;stroke:#fff;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sfn text.fgl{fill:#fff!important;stroke:none;font-weight:700}
+.sfn .fpl rect{fill:var(--fg-pill)}
+.sfn .fpl text{fill:var(--fg-pill-ink);font-size:11.5px;font-weight:650;letter-spacing:.02em}
+.sfn .fst circle{stroke:var(--fg-node);stroke-width:2}
+.sfn .fst path{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sfn .fst.s-ok circle{fill:var(--fg-ok)}
+.sfn .fst.s-failed circle{fill:var(--fg-bad)}
+.sfn .fst.s-running circle{fill:var(--fg-run)}
+.sfn .fst.s-running path{transform-box:fill-box;transform-origin:100% 100%;animation:sfnspin 1s linear infinite}
+.sfn .fn.m-ok .fb{fill:var(--fg-ok-bg);stroke:var(--fg-ok);stroke-width:1.6}
+.sfn .fn.m-failed .fb{fill:var(--fg-bad-bg);stroke:var(--fg-bad);stroke-width:1.8}
+.sfn .fn.m-running .fb{fill:var(--fg-run-bg);stroke:var(--fg-run);stroke-width:1.8}
+.sfn .fn.fc.m-ok .fb,.sfn .fn.fc.m-failed .fb,.sfn .fn.fc.m-running .fb{fill-opacity:.55}
+.sfn .fn.m-ok .fnt{fill:var(--fg-ok)!important}
+.sfn .fn.m-failed .fnt{fill:var(--fg-bad)!important}
+.sfn .fn.m-running .fnt{fill:var(--fg-run)!important}
+.sfn .fn.m-skip{opacity:.5}
+.sfn .fn.m-skip .fb{stroke-dasharray:4 3;filter:none}
+.sfn .fhalo{fill:none;stroke-width:2;transform-box:fill-box;transform-origin:center;animation:sfnhalo 1.8s ease-out infinite}
+.sfn .fn.m-failed .fhalo{stroke:var(--fg-bad);animation-iteration-count:3}
+.sfn .fn.m-running .fhalo{stroke:var(--fg-run)}
+.sfn .fn.m-h1 .fb{fill:var(--fg-heat1);stroke:var(--fg-heat1-line);stroke-width:1.6}
+.sfn .fn.m-h2 .fb{fill:var(--fg-heat2);stroke:var(--fg-heat2-line);stroke-width:1.8}
+.sfn .fn.m-h3 .fb{fill:var(--fg-heat3);stroke:var(--fg-heat3-line);stroke-width:2.2}
+.sfn .fn.m-h2 .fnt,.sfn .fn.m-h3 .fnt{fill:var(--fg-heat3-line)!important}
+.sfn .fn.m-t1 .fb{fill:var(--fg-time1);stroke:var(--fg-time1-line);stroke-width:1.4}
+.sfn .fn.m-t2 .fb{fill:var(--fg-time2);stroke:var(--fg-time2-line);stroke-width:1.8}
+.sfn .fn.m-t3 .fb{fill:var(--fg-time3);stroke:var(--fg-time3-line);stroke-width:2.2}
+.sfn .fn.m-t2 .fnt,.sfn .fn.m-t3 .fnt{fill:var(--fg-time3-line)!important}
+.sfn .fn.sel .fb{stroke:var(--fg-hot);stroke-width:3}
+.sfn .fgk i.m-ok{background:var(--fg-ok-bg);border-color:var(--fg-ok)}
+.sfn .fgk i.m-failed{background:var(--fg-bad-bg);border-color:var(--fg-bad)}
+.sfn .fgk i.m-running{background:var(--fg-run-bg);border-color:var(--fg-run)}
+.sfn .fgk i.m-skip{border-style:dashed;opacity:.6}
+.sfn .fgk i.m-h1{background:var(--fg-heat1);border-color:var(--fg-heat1-line)}
+.sfn .fgk i.m-h2{background:var(--fg-heat2);border-color:var(--fg-heat2-line)}
+.sfn .fgk i.m-h3{background:var(--fg-heat3);border-color:var(--fg-heat3-line)}
+.sfn .fgk i.m-t1{background:var(--fg-time1);border-color:var(--fg-time1-line)}
+.sfn .fgk i.m-t2{background:var(--fg-time2);border-color:var(--fg-time2-line)}
+.sfn .fgk i.m-t3{background:var(--fg-time3);border-color:var(--fg-time3-line)}
+.sfn .fgk i.m-flow{height:0;border:0;border-top:2.6px dashed var(--fg-ok);border-radius:0;width:18px}
+.sfn .fn,.sfn .fpl,.sfn .fe,.sfn .fq{transition:opacity .18s ease;animation:sfnrise .5s cubic-bezier(.2,.7,.3,1) both;animation-delay:calc(var(--l,0) * 60ms)}
+.sfn .fn .fb{transition:stroke .15s ease,stroke-width .15s ease}
+.sfn .fn:hover,.sfn .fpl:hover{cursor:default}
+@keyframes sfnrise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes sfnflow{to{stroke-dashoffset:-14}}
+@keyframes sfnspin{to{transform:rotate(360deg)}}
+@keyframes sfnhalo{0%{opacity:.75;transform:scale(1)}100%{opacity:0;transform:scale(1.08,1.3)}}
+@media (prefers-reduced-motion:reduce){.sfn .fg *{animation:none!important;transition:none!important}}
 """
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))

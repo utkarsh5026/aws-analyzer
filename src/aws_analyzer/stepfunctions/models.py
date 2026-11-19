@@ -18,7 +18,9 @@ from .helpers import FAILED_STATUSES
 class StateDef:
     """
     One state of a definition: its type, what it calls (resource, and the Lambda function for a Lambda task), where
-    it goes next, and its error handling. path is where it sits ('ProcessItems > ResizeImage' inside a Map).
+    it goes next (labels: what sends it to a target, a Choice rule's condition, 'Default' or a Catch's errors), and its
+    error handling. path is where it sits ('ProcessItems > ResizeImage' inside a Map), branch which of its Parallel's
+    branches, and starts the StartAt of each state machine nested in it (a Map's one, a Parallel's per branch).
     """
 
     name: str
@@ -34,6 +36,9 @@ class StateDef:
     heartbeat: int | None = None
     comment: str = ""
     depth: int = 0
+    labels: dict[str, str] = field(default_factory=dict)
+    branch: int = 0
+    starts: list[str] = field(default_factory=list)
 
     @property
     def waits_for_callback(self) -> bool:

@@ -28,7 +28,7 @@ from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
 )
 from aws_analyzer.stepfunctions.analysis.layout import (
-    failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, inner_timing_marks, owner_of,
+    END, START, failure_marks, flow_layout, inner_failure_marks, inner_path_marks, inner_states, inner_timing_marks, owner_of,
     path_marks, timing_marks,
 )
 from aws_analyzer.stepfunctions.analysis.timing import state_timings, timing_findings, timing_report, took_text
@@ -718,19 +718,42 @@ def test_explorer_shows_its_window_once_per_cell(fakes, monkeypatch):
 
 def test_flow_layout_puts_states_in_layers_under_their_parents():
     layout = flow_layout(order_pipeline())
-    layer = {n.name: n.layer for n in layout.nodes}
-    assert layer["ValidateOrder"] == 0 and layer["IsPriority"] == 1
-    assert layer["BackorderWait"] == layer["ReserveStock"] == 2 and layer["ChargeCard"] == 3
-    assert layer["ProcessItems"] == layer["OrderFailed"] == 5 and layer["NotifyCustomer"] == 6
-    process, notify = layout.node("ProcessItems"), layout.node("NotifyCustomer")
+    layer = {n.name: n.layer for n in layout.top}
+    assert [p.type for p in layout.pills] == ["Start", "End"] and layout.node(START).layer == 0
+    assert layer["ValidateOrder"] == 1 and layer["IsPriority"] == 2
+    assert layer["BackorderWait"] == layer["ReserveStock"] == 3 and layer["ChargeCard"] == 4
+    assert layer["ProcessItems"] == layer["OrderFailed"] == 6 and layer["NotifyCustomer"] == 7
+    assert layout.node(END).layer == 8
+    process, notify, resize = layout.node("ProcessItems"), layout.node("NotifyCustomer"), layout.node("ResizeImage")
     assert process.inner == ["ResizeImage"] and process.height > layout.node("LoadOrders").height
-    assert notify.x == process.x and notify.ends and not layout.node("OrderFailed").ends
-    kinds = {(e.source, e.target): e.kind for e in layout.edges}
-    assert kinds[("LoadOrders", "OrderFailed")] == "catch" and kinds[("IsPriority", "ReserveStock")] == "choice"
-    boxes = [(n.x, n.y, n.x + n.width, n.y + n.height) for n in layout.nodes]
+    assert resize.parent == "ProcessItems" and resize.depth == 1 and resize.kind == "Lambda: Invoke"
+    assert process.x < resize.x and resize.right < process.right and process.y < resize.y < process.bottom
+    assert notify.middle == process.middle and notify.ends and not layout.node("OrderFailed").ends
+    assert layout.node("ReserveStock").kind == "DynamoDB: UpdateItem" and layout.node("IsPriority").icon == "choice"
+    edges = {(e.source, e.target): e for e in layout.edges}
+    assert edges[("LoadOrders", "OrderFailed")].kind == "catch" and edges[("LoadOrders", "OrderFailed")].label == "any error"
+    assert edges[("IsPriority", "ReserveStock")].label == "Default"
+    assert edges[("IsPriority", "BackorderWait")].label == "$.priority = true"
+    assert (START, "ValidateOrder") in edges and {("NotifyCustomer", END), ("OrderFailed", END)} <= set(edges)
+    for edge in layout.edges:
+        corners = edge.points
+        assert all(a[0] == b[0] or a[1] == b[1] for a, b in zip(corners, corners[1:]))
+    boxes = [(n.x, n.y, n.right, n.bottom) for n in layout.top + layout.pills]
     assert all(not (a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3])
                for i, a in enumerate(boxes) for b in boxes[i + 1:])
-    assert all(0 <= n.x and n.x + n.width <= layout.width for n in layout.nodes)
+    assert all(0 <= n.x and n.right <= layout.width and n.bottom <= layout.height for n in layout.nodes)
+
+
+def test_flow_layout_draws_a_parallel_s_branches_side_by_side():
+    branch = {"Type": "Task", "Resource": "arn:aws:states:::sns:publish", "End": True}
+    definition = {"StartAt": "Fan", "States": {"Fan": {"Type": "Parallel", "End": True, "Branches": [
+        {"StartAt": "A", "States": {"A": {**branch, "End": False, "Next": "A2"}, "A2": branch}},
+        {"StartAt": "B", "States": {"B": branch}}]}}}
+    layout = flow_layout(parse_state_machine(described("fan", json.dumps(definition))))
+    fan, a, a2, b = (layout.node(n) for n in ("Fan", "A", "A2", "B"))
+    assert (a.branch, a2.branch, b.branch) == (0, 0, 1) and a.right < b.x and a.y == b.y < a2.y
+    assert len(fan.dividers) == 1 and a.right < fan.dividers[0] < b.x
+    assert [(e.source, e.target) for e in layout.edges if e.source in ("A", "B")] == [("A", "A2")]
 
 
 def test_flow_layout_draws_a_loop_beside_it():
@@ -742,8 +765,11 @@ def test_flow_layout_draws_a_loop_beside_it():
         "Wait": {"Type": "Wait", "Seconds": 30, "Next": "Check"},
         "Finish": {"Type": "Succeed"}}}
     layout = flow_layout(parse_state_machine(described("poller", json.dumps(definition))))
-    loops = [(e.source, e.target) for e in layout.edges if e.kind == "loop"]
-    assert loops == [("Wait", "Check")] and layout.node("Wait").layer > layout.node("Check").layer
+    loops = [e for e in layout.edges if e.kind == "loop"]
+    assert [(e.source, e.target) for e in loops] == [("Wait", "Check")]
+    assert layout.node("Wait").layer > layout.node("Check").layer
+    lane = loops[0].points[2][0]
+    assert all(lane < n.x or lane > n.right for n in layout.nodes) and loops[0].points[-1][1] == layout.node("Check").y
 
 
 def test_path_and_failure_marks():
@@ -759,7 +785,7 @@ def test_path_and_failure_marks():
                                                                   ("ord-7f3a", "ord-5d21", "ord-3c9b", "ord-0b17")])
     report.groups = group_failures([detail_of(n) for n in ("ord-7f3a", "ord-5d21", "ord-3c9b", "ord-0b17")], NOW)
     heat = failure_marks(layout, report)
-    assert heat.states == {"LoadOrders": "h3", "ProcessItems": "h2"}
+    assert heat.states == {"LoadOrders": "h3", "ProcessItems": "h2", "ResizeImage": "h2"}
     assert heat.notes["ProcessItems"] == "1 stopped here (25%)"
 
 
@@ -774,7 +800,8 @@ def test_graph_report_colours_a_path_or_failures(ui, capsys):
     view._show = shown.append
     view.graph("order-pipeline", execution="ord-7f3a")
     html = sfnmod.view._render_html(shown[0], 50)
-    assert "<svg" in html and 'class="fn t-task m-failed"' in html and 'class="fe catch on"' in html
+    assert "<svg" in html and 'class="fn t-task m-failed n' in html and 'class="fe catch on s' in html
+    assert 'class="fe next on s0 t' in html and "any error</text>" in html and ".fg:has(.n1:hover)" in html
     assert "<script" not in html
 
 
@@ -826,6 +853,24 @@ def test_explorer_graph_tab(fakes):
     x.open("image-resize-express")
     x.mode_pick.value = "failures"
     assert "Where 1 execution stopped" in plain(x.graph_view.value)
+
+
+def test_explorer_graph_boxes_can_be_clicked(fakes):
+    x = explorer(fakes, "order-pipeline")
+    x.execution("ord-7f3a")
+    x.tab_buttons["graph"].click()
+    layout = x.graph_layout
+    assert x.graph_canvas.layout.width == f"{layout.width:.0f}px" and len(x._hits) == len(layout.nodes)
+    process = next(button for button in x._hits if button.box_name == "ProcessItems")
+    resize = next(button for button in x._hits if button.box_name == "ResizeImage")
+    assert x._hits.index(process) < x._hits.index(resize) and resize.layout.left == f"{layout.node('ResizeImage').x:.0f}px"
+    drawn = x.graph_svg.value
+    charge = next(button for button in x._hits if button.box_name == "ChargeCard")
+    charge.click()
+    assert x.picked_state == "ChargeCard" and "sfx-hit-on" in charge._dom_classes
+    assert x.graph_svg.value == drawn and "Its tries in ord-7f3a" in plain(x.state_view.value)
+    number = next(c for c in charge._dom_classes if c.startswith("fgh"))[3:]
+    assert f".fgc:has(.fgh{number}:hover) .sfn .fg" in drawn
 
 
 
@@ -1042,7 +1087,9 @@ def test_states_inside_a_map_can_be_picked(fakes):
     inspector = plain(x.state_view.value)
     assert "Inside ProcessItems, a Map: it runs once for each item" in inspector
     assert "It ran 3 times in ord-25a8: the last one is shown." in inspector
-    assert 'class="fn t-map m-ok sel"' in x.graph_view.value
+    assert 'class="fn t-task m-ok n' in x.graph_svg.value and "ran 3 times" in x.graph_svg.value
+    hit = next(button for button in x._hits if button.box_name == "ResizeImage")
+    assert "sfx-hit-on" in hit._dom_classes
     x.execution("ord-0b17")
     assert "m-running" in line.face.value and "ran 1 time" in plain(line.face.value)
 
@@ -1177,7 +1224,7 @@ def test_graph_report_shows_where_the_time_goes(ui, capsys):
     view._show = shown.append
     view.graph("order-pipeline", timings=True)
     html = sfnmod.view._render_html(shown[0], 50)
-    assert 'class="fn t-map m-t3"' in html and 'class="m-t3"' in html and "half the time or more" in html
+    assert 'class="fn fc t-map m-t3' in html and 'class="m-t3"' in html and "half the time or more" in html
 
 
 def test_explorer_graph_tab_shows_where_the_time_goes(fakes):
@@ -1187,7 +1234,7 @@ def test_explorer_graph_tab_shows_where_the_time_goes(fakes):
     assert x.timings is None
     x.mode_pick.value = "timing"
     assert x.timings is not None and len(x.timings.executions) == 3
-    graph = plain(x.graph_view.value)
+    graph = plain(x.graph_view.value + x.graph_foot.value)
     assert "Where the time goes in 3 succeeded executions" in graph and "ChargeCard retries in 1 of its 3 runs" in graph
     assert "ord-cfae in the Executions tab shows one" in graph and "Each state's time" not in graph
     assert "From 3 succeeded executions since" in graph
