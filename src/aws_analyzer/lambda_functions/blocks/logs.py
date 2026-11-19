@@ -21,7 +21,7 @@ from ..._kit.text import _clip, _esc, _marked
 from ..helpers import human_ms
 from ..models import LogEvent
 from ..analysis.logs import LogRun, _line_parts, _marker, line_level, readable_line, split_runs
-from ..analysis.word_search import WordSearch
+from ..analysis.word_search import SearchError, WordSearch, word_search
 from ..analysis.runs import LoggedEvent, logged_event
 
 _RUN_STATES = {
@@ -110,6 +110,31 @@ def _opened_runs(runs: list[LogRun], *, request_id: str | None, search: str | No
         return {run.key for run in runs[:_OPEN_SEARCHED_RUNS]}
     troubled = next((run for run in runs if run.failures or run.status in ("failed", "timeout")), None)
     return {troubled.key} if troubled is not None else set()
+
+
+def _runs_found(runs: list[LogRun], text: str) -> tuple[list[LogRun], list[str]]:
+    """
+    The runs with a line holding `text`, in any case, and the words to mark: words joined with AND, OR and NOT
+    ('KeyError OR Timeout') hold across a run's lines, anything else is one phrase. An empty search keeps every run.
+    """
+    text = text.strip()
+    if not text:
+        return runs, []
+    try:
+        words = word_search(text)
+    except SearchError:
+        words = None
+    if words is not None:
+        kept = [run for run in runs if words.matches((e.message for e in run.events), ignore_case=True)]
+        return kept, words.wanted
+    needle = text.lower()
+    kept = [run for run in runs if any(needle in event.message.lower() for event in run.events)]
+    return kept, [text]
+
+
+def _line_mentions(message: str, words: list[str]) -> bool:
+    lowered = message.lower()
+    return any(word.lower() in lowered for word in words)
 
 
 def _short_day(moment: datetime) -> str:

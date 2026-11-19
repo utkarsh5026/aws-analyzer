@@ -257,7 +257,7 @@ Each error is matched to its run, so `logs("orders-etl", request_id="...")` show
 `logs()` shows the newest runs a function logged, each a line that opens to its log lines, and `request_id=` one whole run.
 { .gist }
 
-The runs that hold the newest 50 lines of the last hour, newest first, like a log viewer: each run's status, start, run time against the timeout, memory used, cold start and what failed. Click one for its lines, oldest first, with their time, level and text (a JSON line's other fields a click away, a traceback laid out). Chips keep the failed runs, the ones that logged an error or the cold starts, and switches keep only errors and warnings, only the lines a search found, or open every run. A search reads whole runs, with what it found marked; the browser's Find (Ctrl+F) also opens the run it finds text in.
+The runs that hold the newest 50 lines of the last hour, newest first, like a log viewer: each run's status, start, run time against the timeout, memory used, cold start and what failed. Click one for its lines, oldest first, with their time, level and text (a JSON line's other fields a click away, a traceback laid out). Chips keep the failed runs, the ones that logged an error or the cold starts, and switches keep only errors and warnings, only the lines a search found, or open every run. In Jupyter with ipywidgets, a search box sits over the report: typing keeps the runs already read that hold the text (no AWS call, any case, `KeyError OR Timeout` works too), and Enter searches every line of the time range in CloudWatch and draws the report again. `search=` does the same from code. The browser's Find (Ctrl+F) also opens the run it finds text in.
 
 ```python
 ui.logs("orders-etl")

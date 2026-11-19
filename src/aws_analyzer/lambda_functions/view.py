@@ -5,6 +5,7 @@ LambdaView: the notebook UI, which renders what LambdaAnalyzer returns as cards 
 from __future__ import annotations
 
 import difflib
+import importlib.util
 import math
 import os
 from collections import Counter, defaultdict
@@ -16,7 +17,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.charts import _Dots, _Meter, _Part, _Point
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
-from .._kit.deps import _require
+from .._kit.deps import _in_notebook, _require
 from .._kit.errors import _Hint, _error_code, _why
 from .._kit.fmt import (
     _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _tz_label, _utcnow, human_age, human_money,
@@ -229,6 +230,13 @@ def _lines_found(events: list[LogEvent], phrase: str | None, words: WordSearch |
 
 
 _SEARCH_RUN_LINES = 3_000
+
+
+def _can_search_here(draws_html: bool) -> bool:
+    """
+    Whether logs() can put a search box over its report: in Jupyter, with ipywidgets installed.
+    """
+    return draws_html and _in_notebook() and importlib.util.find_spec("ipywidgets") is not None
 
 
 def _search_said(search: str, phrase: str | None, words: WordSearch | None) -> str:
@@ -904,8 +912,8 @@ class LambdaView(_BaseView):
         if request_id:
             return ""
         example = search or "KeyError OR Timeout"
-        return (f"Search every line in CloudWatch: {self._call_for('logs', fn, search=example)}. To filter as you "
-                f"type, open {self._call_for('explore', fn, tab='logs')}.")
+        return (f"Search every line in CloudWatch: {self._call_for('logs', fn, search=example)}. With ipywidgets "
+                "installed, a search box over this report filters as you type.")
 
     @_friendly_errors
     def logs(
@@ -924,11 +932,25 @@ class LambdaView(_BaseView):
         chips that keep the failed runs, errors or cold starts. search='KeyError' keeps the runs with that text,
         whole, the words marked (case-sensitive; join words with AND, OR and NOT, 'KeyError OR Timeout', or pass a
         CloudWatch Logs filter pattern), request_id= shows one run from start to end (from the last 24 hours), and
-        since='24h' or '2026-10-01' looks further back.
+        since='24h' or '2026-10-01' looks further back. In Jupyter with ipywidgets, a search box sits over the
+        report: typing keeps the runs read that hold the text, and Enter searches every line in CloudWatch.
         """
         n = _as_int(n, "n")
         if n < 1:
             raise ValueError("n= is how many lines to show: 1 or more")
+        blocks = self._logs_blocks(name, since=since, search=search, request_id=request_id, n=n, region=region)
+        if request_id or not _can_search_here(self.use_html):
+            self._show(blocks)
+            return
+        from .explorer.log_search import _LogsAsked, _LogSearch
+
+        _LogSearch(self, blocks, _LogsAsked(name, since, n, region), search or "").show()
+
+    def _logs_blocks(self, name: str, *, since: Any, search: str | None, request_id: str | None, n: int,
+                     region: str | None) -> list[Any]:
+        """
+        logs()' report, as blocks: the search box above it in a notebook draws it again for each search.
+        """
         chosen = since  # next steps carry over a since= the user picked, not this command's default
         since = since if since is not None else ("24h" if request_id else "1h")
         words = word_search(search)
@@ -1014,7 +1036,7 @@ class LambdaView(_BaseView):
             steps.append((self._call_for("logs", fn, since="24h"), "the last 24 hours"))
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def runs(

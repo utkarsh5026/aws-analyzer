@@ -2481,7 +2481,7 @@ def test_logs_report(ui, capsys):
     assert "REPORT: run 102 ms (billed 103 ms), 88 of 1,024 MB used, cold start 300 ms" in out
     assert "Runs: 1" in out and "Failed: 1 (!)" in out and "Error lines: 1" in out
     assert re.search(r"✕ Failed +\d\d:\d\d:\d\d +102 ms +88 / 1,024 MB +cold +KeyError: 'customer_id' +8f5ce35b", out)
-    assert "search='KeyError OR Timeout'" in out and "explore('etl-nightly', tab='logs')" in out
+    assert "search='KeyError OR Timeout'" in out and "a search box over this report" in out
     assert "errors('etl-nightly')" in out and "logs('etl-nightly', since='24h')" in out
     found = run(capsys, ui.logs, "etl-nightly", search="orders")
     assert "lines containing 'orders'" in found and "Lines shown: 1" in found
@@ -2504,6 +2504,32 @@ def test_logs_report_in_html(ui, monkeypatch):
     assert 'class="lg-hits"' in page and 'class="lg-only"' in page and 'class="lg-open"' in page
     assert "loading 1,204 <mark>orders</mark>" in page and "Started (UTC)" in page
     assert 'hidden="hidden"' in page and "<script" not in page
+
+
+def test_logs_search_box_filters_the_runs_read_and_enter_asks_cloudwatch(ui, monkeypatch):
+    from aws_analyzer.lambda_functions.explorer.log_search import _LogSearch
+
+    shown = []
+    monkeypatch.setattr(viewmod, "_can_search_here", lambda draws_html: True)
+    monkeypatch.setattr(_LogSearch, "show", lambda self: shown.append(self))
+    ui.logs("etl-nightly")
+    box = shown[0]
+    assert len(box.read_runs) == 1 and "1 run read" in box.said.value
+    box.box.value = "1,204 ORDERS"
+    found = box.filtered("1,204 ORDERS")
+    assert len(found.runs) == 1 and found.words == ["1,204 ORDERS"] and found.searched
+    assert any(event.matched for event in found.runs[0].events)
+    assert "1 of 1 runs read hold it" in box.said.value
+    box.box.value = "nothing like this"
+    assert "No run read holds 'nothing like this'" in box.said.value
+    assert box.filtered("KeyError OR Timeout").words == ["KeyError", "Timeout"]
+    assert box.filtered("").runs == box.read_runs
+    box.box.value = "orders"
+    box._search_cloudwatch()
+    assert "CloudWatch: 1 run with 'orders'" in box.said.value and box.base.searched
+    box.box.value = "no-such-text"
+    box._search_cloudwatch()
+    assert "no lines with 'no-such-text'" in box.said.value and box.base is None
 
 
 def test_performance_report(ui, capsys):
