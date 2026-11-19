@@ -15,7 +15,8 @@ from ..models import ErrorGroup, ErrorReport, LogEvent
 from ..analysis.errors import cause_search, classify_error, failing_frame
 from ..analysis.changes import cause_key, new_causes_finding, new_error_causes
 from ..view import _stamp
-from .frame import _run_clock, _with_findings
+from ..blocks.logs import _run_clock
+from .frame import _with_findings
 from .widgets import _Row
 
 

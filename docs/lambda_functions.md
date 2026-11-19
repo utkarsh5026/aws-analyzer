@@ -254,14 +254,14 @@ Each error is matched to its run, so `logs("orders-etl", request_id="...")` show
 
 ### Logs { #logs }
 
-`logs()` shows the newest lines a function logged, and `request_id=` one whole run.
+`logs()` shows the newest runs a function logged, each a line that opens to its log lines, and `request_id=` one whole run.
 { .gist }
 
-50 lines from the last hour by default, each run's REPORT line summed up: run time, memory used and cold start.
+The runs that hold the newest 50 lines of the last hour, newest first, like a log viewer: each run's status, start, run time against the timeout, memory used, cold start and what failed. Click one for its lines, oldest first, with their time, level and text (a JSON line's other fields a click away, a traceback laid out). Chips keep the failed runs, the ones that logged an error or the cold starts, and switches keep only errors and warnings, only the lines a search found, or open every run. A search reads whole runs, with what it found marked; the browser's Find (Ctrl+F) also opens the run it finds text in.
 
 ```python
 ui.logs("orders-etl")
-ui.logs("orders-etl", search="KeyError")                  # lines with that text (case-sensitive)
+ui.logs("orders-etl", search="KeyError")                  # the runs with that text (case-sensitive), whole
 ui.logs("orders-etl", search="KeyError OR Timeout")       # words joined with AND, OR and NOT, line by line
 ui.logs("orders-etl", search='?ERROR ?WARN')              # or any CloudWatch Logs filter pattern
 ui.logs("orders-etl", request_id="c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")   # one run, start to end

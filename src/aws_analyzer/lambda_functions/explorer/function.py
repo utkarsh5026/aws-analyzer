@@ -26,7 +26,8 @@ from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
 from ..analysis.changes import change_findings, function_changes
 from ..blocks.wiring import _Columns, _Wiring
-from .frame import _FUNCTION_TABS, _short_day, _with_findings
+from ..blocks.logs import _short_day
+from .frame import _FUNCTION_TABS, _with_findings
 from .functions import _problem_rank
 
 

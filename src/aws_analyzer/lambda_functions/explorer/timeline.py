@@ -14,7 +14,7 @@ from ..._kit.window import _class_if
 
 from ..analysis.logs import TIMELINE_BUCKETS, TimeBucket, run_timeline
 from ..view import _stamp
-from .frame import _short_day
+from ..blocks.logs import _short_day
 
 
 _SHORTEST_BAR = 12

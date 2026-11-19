@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from datetime import date, datetime
 from typing import Any
 
 from ..._kit.blocks import _Cards, _Findings
-from ..._kit.fmt import _in_zone, _utcnow, parse_time
+from ..._kit.fmt import _utcnow, parse_time
 from ..._kit.render import _CALL_RE
 from ..._kit.window import _day_bars_css, _icon_url, _terminal_theme
 
@@ -62,14 +61,6 @@ _FUNCTION_PAGE = 40  # functions on a page of the list; « ‹ › » move betwe
 _RUN_PAGE = 25  # runs on a page of the Logs tab
 
 _CODE_PAGE = 60  # lines (folders and files) on a page of the Code tab's tree
-
-
-_RUN_STATES = {  # LogRun.status -> (icon, tone, what it means)
-    "ok": ("✓", "ok", "ran"), "failed": ("✕", "bad", "failed"), "timeout": ("⏱", "bad", "timed out"),
-    "logged": ("!", "warn", "logged an error"), "running": ("•", "run", "no REPORT line yet: still running, or it "
-                                                                         "ends after the time range"),
-    "outside": ("·", "", "lines that belong to no run in the time range"),
-}
 
 
 def _explorer_rules() -> str:
@@ -619,18 +610,6 @@ def _seconds(since: str) -> float:
     """
     start = parse_time(since)
     return (_utcnow() - start).total_seconds() if start is not None else 0.0
-
-
-def _short_day(moment: datetime) -> str:
-    return f"{moment:%b} {moment.day}"
-
-
-def _run_clock(moment: datetime, today: date) -> str:
-    """
-    A run's start in the zone reports show times in: '14:02:31' today, 'Oct 5 14:02' another day.
-    """
-    moment = _in_zone(moment)
-    return moment.strftime("%H:%M:%S") if moment.date() == today else f"{_short_day(moment)} {moment:%H:%M}"
 
 
 def _with_findings(blocks: list[Any], extra: list[tuple[str, str]]) -> list[Any]:

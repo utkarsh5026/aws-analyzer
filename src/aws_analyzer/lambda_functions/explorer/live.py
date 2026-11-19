@@ -24,9 +24,9 @@ from ..analysis.logs import LogRun
 from ..analysis.live import (
     LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, ran_lately, running_for, timeout_warning,
 )
-from .frame import _run_clock
+from ..blocks.logs import _run_clock, _run_summary
 from ..._kit.window import _day_bars_html
-from .logs import _run_body, _run_face, _run_summary
+from .logs import _run_body, _run_face
 from .widgets import _Row, _RunRow
 
 
