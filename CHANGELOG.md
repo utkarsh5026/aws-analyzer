@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: `logs()` reads like a log viewer**
+- ⚡ **Lambda: `logs()` reads like a log viewer** ([#260](https://github.com/utkarsh5026/aws-analyzer/pull/260))
   - Its runs, newest first, each a line that opens to its lines: time, level, text, JSON fields and tracebacks laid out.
   - Chips keep the failed runs, errors or cold starts; switches keep errors and warnings, or the lines a search found.
   - `search=` now shows the whole runs it found, with the words marked.
