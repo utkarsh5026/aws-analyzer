@@ -9,13 +9,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
-### Changed
-
-- ⚡ **Lambda: `logs()` reads like a log viewer** ([#260](https://github.com/utkarsh5026/aws-analyzer/pull/260))
-  - Its runs, newest first, each a line that opens to its lines: time, level, text, JSON fields and tracebacks laid out.
-  - Chips keep the failed runs, errors or cold starts; switches keep errors and warnings, or the lines a search found.
-  - `search=` now shows the whole runs it found, with the words marked.
-  - A search box over the report: typing filters the runs read, Enter searches CloudWatch.
+## [0.61.0] - 2026-11-20
 
 ### Added
 
@@ -36,6 +30,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `follow()` and the Map tab draw boxes and arrows, a problem outlined in red.
 - 🧰 **A "7 days" trend column in the explorers' lists** ([#254](https://github.com/utkarsh5026/aws-analyzer/pull/254))
   - The Step Functions, API Gateway and Messaging lists draw a bar a day, the failed part in red.
+
+### Changed
+
+- ⚡ **Lambda: logs read like a log viewer** ([#260](https://github.com/utkarsh5026/aws-analyzer/pull/260))
+  - `logs()` shows runs newest first, each opening to its lines with levels, JSON fields and tracebacks laid out.
+  - Chips keep the failed runs, errors or cold starts; a search box filters as you type, Enter asks CloudWatch.
+  - `search=` now shows the whole runs it found, with the words marked.
 
 ## [0.60.0] - 2026-11-15
 
@@ -1452,7 +1453,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.61.0...HEAD
+[0.61.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.57.0...v0.58.0
