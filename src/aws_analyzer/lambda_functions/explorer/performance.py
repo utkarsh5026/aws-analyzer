@@ -13,7 +13,7 @@ from ..._kit.window import _skeleton
 
 from ..helpers import human_ms
 from ..models import Invocation, Performance
-from .frame import _run_clock
+from ..blocks.logs import _run_clock
 from .widgets import _Row
 
 

@@ -30,9 +30,10 @@ from ..analysis.query import QueryError, RunQuery, parse_query
 from ..analysis.runs import LoggedEvent, RunRow, RunTable, logged_event, run_fields
 from ..analysis.word_search import SearchError, WordSearch, word_search
 from ..analyzer import _SEARCH_HITS, LambdaAnalyzer
-from ..analysis.logs import _LINE_PREFIX_RE
 from ..view import _stamp
-from .frame import _RUN_PAGE, _RUN_STATES, _run_clock, _seconds
+from ..analysis.logs import _line_parts
+from ..blocks.logs import _RUN_STATES, _offset, _run_clock, _run_summary
+from .frame import _RUN_PAGE, _seconds
 from .widgets import _RunRow
 
 
@@ -138,89 +139,6 @@ def _span_text(start: datetime, end: datetime) -> str:
     first, last = _fmt_dt(start), _fmt_dt(end)
     same_day = first[:10] == last[:10]
     return f"{first} – {last[11:] if same_day else last}"
-
-
-def _offset(seconds: float) -> str:
-    """
-    How far into a run a line came: '+0.052s', '+12.4s', '+184s'.
-    """
-    if seconds < 10:
-        return f"+{seconds:.3f}s"
-    return f"+{seconds:.1f}s" if seconds < 100 else f"+{seconds:,.0f}s"
-
-
-def _line_parts(message: str) -> tuple[str, str]:
-    """
-    A log line as the window shows it: (its text, without what Lambda writes before it (the time, request ID and
-    level, which the window shows in its own columns), and its other fields as indented JSON when it's a JSON line).
-    """
-    text = message.rstrip()
-    if text.startswith("{"):
-        try:
-            doc = json.loads(text)
-        except ValueError:
-            doc = None
-        if isinstance(doc, dict):
-            if str(doc.get("type", "")).startswith("platform."):
-                record = doc.get("record")
-                return f"{doc['type']} {json.dumps(record, default=str)}" if record else str(doc["type"]), ""
-            inner = doc.get("message", doc.get("msg"))
-            rest = {k: v for k, v in doc.items() if k not in ("message", "msg", "level", "timestamp", "time",
-                                                                "requestId", "AWSRequestId")}
-            if isinstance(inner, dict) and (inner.get("errorType") or inner.get("errorMessage")):
-                body = _error_text_of(inner)  # an error Lambda's runtime logged: its type, message and stack
-                rest.update({k: v for k, v in inner.items() if k not in ("errorType", "errorMessage", "stack",
-                                                                         "stackTrace", "trace")})
-            elif inner is None:
-                if not (doc.get("errorType") or doc.get("errorMessage")):
-                    return text, ""
-                body = _error_text_of(doc)
-                rest = {k: v for k, v in rest.items() if k not in ("errorType", "errorMessage", "stack",
-                                                                   "stackTrace", "trace")}
-            else:
-                body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
-            for key in ("exception", "stack_trace", "stackTrace"):  # a logger's traceback (Powertools: exception)
-                if isinstance(rest.get(key), str) and rest[key].strip():
-                    body = f"{body}\n{rest.pop(key).rstrip()}"
-            return body, json.dumps(rest, indent=2, default=str, ensure_ascii=False) if rest else ""
-    text = _LINE_PREFIX_RE.sub("", text, count=1)  # '[INFO]\t<time>\t<request ID>\t', '<time>\t<request ID>\t'
-    return _LEVEL_PREFIX_RE.sub("", text, count=1), ""  # then '[ERROR] ' (Python), 'INFO\t' (Node.js)
-
-
-_LEVEL_PREFIX_RE = re.compile(r"^(?:\[(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\]\s*|"
-                              r"(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\t)")
-
-
-def _error_text_of(doc: dict[str, Any]) -> str:
-    """
-    An error as JSON logs carry it ({"errorType", "errorMessage", "stack"}) as a traceback reads: 'TypeError:
-    Cannot read ...' and then the stack's lines.
-    """
-    head = ": ".join(str(doc[k]) for k in ("errorType", "errorMessage") if doc.get(k))
-    stack = doc.get("stack") or doc.get("stackTrace") or doc.get("trace") or []
-    lines = stack.splitlines() if isinstance(stack, str) else [str(line) for line in stack]
-    if lines and head and lines[0].strip().startswith(head.split(":")[0]):
-        lines = lines[1:]  # Node.js puts the message first in its stack too
-    return "\n".join([head, *lines]) if lines else head
-
-
-def _run_summary(run: LogRun) -> tuple[str, str]:
-    """
-    (what a run's line says after its time and numbers, its tone): what made it fail, else the first thing it
-    logged.
-    """
-    error = run.error
-    if error is not None:
-        return error[1].splitlines()[0][:300], "bad" if run.status in ("failed", "timeout") else "warn"
-    logged = logged_event(run)
-    for event in run.events:
-        if _marker(event.message) is None and (logged is None or event is not logged.line):
-            text = _line_parts(event.message)[0].strip()
-            if text:
-                return text.splitlines()[0][:300], ""
-    if run.status == "outside":
-        return f"{_plural(len(run.events), 'line')} outside a run", ""
-    return "(it logged nothing of its own)", ""
 
 
 def _run_tip(run: LogRun, opened: bool) -> str:

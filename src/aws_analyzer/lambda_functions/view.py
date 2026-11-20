@@ -5,6 +5,7 @@ LambdaView: the notebook UI, which renders what LambdaAnalyzer returns as cards 
 from __future__ import annotations
 
 import difflib
+import importlib.util
 import math
 import os
 from collections import Counter, defaultdict
@@ -16,7 +17,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.charts import _Dots, _Meter, _Part, _Point
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
-from .._kit.deps import _require
+from .._kit.deps import _in_notebook, _require
 from .._kit.errors import _Hint, _error_code, _why
 from .._kit.fmt import (
     _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _tz_label, _utcnow, human_age, human_money,
@@ -42,7 +43,7 @@ from .analysis.functions import runtime_status
 from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
-from .analysis.logs import parse_report, readable_line
+from .analysis.logs import readable_line
 from .analysis.word_search import WordSearch, word_search
 from .analysis.performance import memory_to_try, percentile, performance_findings
 from .analysis.package import (
@@ -60,6 +61,7 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -225,6 +227,16 @@ def _lines_found(events: list[LogEvent], phrase: str | None, words: WordSearch |
     if words is not None:
         return [event for event in events if words.matches([event.message])]
     return [event for event in events if phrase in event.message] if phrase else events
+
+
+_SEARCH_RUN_LINES = 3_000
+
+
+def _can_search_here(draws_html: bool) -> bool:
+    """
+    Whether logs() can put a search box over its report: in Jupyter, with ipywidgets installed.
+    """
+    return draws_html and _in_notebook() and importlib.util.find_spec("ipywidgets") is not None
 
 
 def _search_said(search: str, phrase: str | None, words: WordSearch | None) -> str:
@@ -893,6 +905,16 @@ class LambdaView(_BaseView):
                 f"Couldn't read CloudWatch's numbers ({_why(errors['metrics'], 'cloudwatch:GetMetricData')}).", "warn"))
         return notes
 
+    def _search_hint(self, fn: Function, search: str | None, request_id: str | None) -> str:
+        """
+        The line over logs()' runs saying how to search every line in CloudWatch, and where to filter as you type.
+        """
+        if request_id:
+            return ""
+        example = search or "KeyError OR Timeout"
+        return (f"Search every line in CloudWatch: {self._call_for('logs', fn, search=example)}. With ipywidgets "
+                "installed, a search box over this report filters as you type.")
+
     @_friendly_errors
     def logs(
         self,
@@ -905,36 +927,59 @@ class LambdaView(_BaseView):
         region: str | None = None,
     ) -> None:
         """
-        The newest lines a function logged (50, from the last hour), with each run's REPORT line summed up: run
-        time, memory used and cold start. search='KeyError' keeps lines with that text (case-sensitive; join words
-        with AND, OR and NOT, 'KeyError OR Timeout', or pass a CloudWatch Logs filter pattern), request_id= shows one
-        run from start to end (from the last 24 hours), and since='24h' or '2026-10-01' looks further back.
+        A function's newest runs, like a log viewer: a line each (status, start, run time, memory used, cold start,
+        what failed) that opens to its log lines, for the runs holding its newest 50 lines of the last hour, with
+        chips that keep the failed runs, errors or cold starts. search='KeyError' keeps the runs with that text,
+        whole, the words marked (case-sensitive; join words with AND, OR and NOT, 'KeyError OR Timeout', or pass a
+        CloudWatch Logs filter pattern), request_id= shows one run from start to end (from the last 24 hours), and
+        since='24h' or '2026-10-01' looks further back. In Jupyter with ipywidgets, a search box sits over the
+        report: typing keeps the runs read that hold the text, and Enter searches every line in CloudWatch.
         """
         n = _as_int(n, "n")
         if n < 1:
             raise ValueError("n= is how many lines to show: 1 or more")
+        blocks = self._logs_blocks(name, since=since, search=search, request_id=request_id, n=n, region=region)
+        if request_id or not _can_search_here(self.use_html):
+            self._show(blocks)
+            return
+        from .explorer.log_search import _LogsAsked, _LogSearch
+
+        _LogSearch(self, blocks, _LogsAsked(name, since, n, region), search or "").show()
+
+    def _logs_blocks(self, name: str, *, since: Any, search: str | None, request_id: str | None, n: int,
+                     region: str | None) -> list[Any]:
+        """
+        logs()' report, as blocks: the search box above it in a notebook draws it again for each search.
+        """
         chosen = since  # next steps carry over a since= the user picked, not this command's default
         since = since if since is not None else ("24h" if request_id else "1h")
         words = word_search(search)
         pattern = words.pattern() if words is not None else _filter_pattern(search)
         limit = 10_000 if request_id else max(3 * n, 300)
+        searching = bool(search) and not request_id
         with self._progress("Reading log lines", unit="lines") as tick, self._named(name, region):
-            page = self.core.log_events(name, since=since, pattern=pattern, request_id=request_id, limit=limit,
-                                        region=region, progress=tick)
+            if searching:
+                page = self.core.log_runs(name, since=since, search=search, limit=max(limit, _SEARCH_RUN_LINES),
+                                          region=region, progress=tick)
+            else:
+                page = self.core.log_events(name, since=since, pattern=pattern, request_id=request_id, limit=limit,
+                                            region=region, progress=tick)
         fn = page.function
         window = _window((page.until - page.since).total_seconds())
         events = page.events
         phrase = _phrase(search)
-        if not request_id:
-            events = _lines_found(events, phrase, words)
+        if searching:
+            events = [e for e in events if e.matched] or _lines_found(events, phrase, words)
         if not request_id:
             events = [e for e in events if not _lifecycle(e.message)]
         shown = events[-n:]
-        runs = {e.request_id for e in shown if e.request_id and parse_report(e.message)}
+        log_runs = _runs_holding(page.events, shown, request_id)
+        failed_runs = [run for run in log_runs if run.status in ("failed", "timeout")]
         error_lines = [e for e in shown if classify_error(e.message)]
         cards: list[tuple[str, ...]] = [
+            ("Runs", _count(sum(1 for run in log_runs if run.request_id))),
+            ("Failed", _count(len(failed_runs)), "bad" if failed_runs else ""),
             ("Lines shown", _count(len(shown))),
-            ("Runs (REPORT lines)", _count(len(runs))),
             ("Error lines", _count(len(error_lines))),
             ("Newest line", human_age(shown[-1].time, page.until) if shown else "-"),
         ]
@@ -945,7 +990,7 @@ class LambdaView(_BaseView):
             f"log group {page.log_group}",
             _search_said(search, phrase, words) if search and not request_id else "",
             what,
-            "START and END lines left out" if not request_id else "",
+            "grouped into runs" if not request_id else "",
         ]))
         title = f"Run {request_id} of {fn.name}" if request_id else f"Logs of {fn.name}"
         blocks: list[Any] = [_Title(title, sub), _Cards(cards)]
@@ -975,28 +1020,23 @@ class LambdaView(_BaseView):
                 f"{_fmt_dt(page.covered_from, zone=True)}: these are the newest."
             ))
         if shown:
-            rows = []
-            for e in shown:
-                kind = classify_error(e.message)
-                rows.append([
-                    _stamp(e.time),
-                    e.request_id or "-",
-                    _Tone(kind[0], "bad") if kind else ("report" if parse_report(e.message) else ""),
-                    readable_line(e.message),
-                ])
-            blocks.append(_Table([f"Time ({_tz_label()})", "Request ID", "Kind", "Line"], rows, max_rows=0,
-                                 title="Oldest first, the newest at the bottom"))
+            blocks.append(_LogRuns(
+                log_runs, timeout=fn.timeout, words=_marked_words(phrase, words), searched=bool(search),
+                opened=_opened_runs(log_runs, request_id=request_id, search=search),
+                title="Its lines, oldest first" if request_id else "Runs, newest first: click one for its lines",
+                search_hint=self._search_hint(fn, search, request_id),
+            ))
         steps = []
         if error_lines:
             steps.append((self._call_for("errors", fn, **_since_arg(chosen, "24h")), "every error, grouped by cause"))
-            rid = next((e.request_id for e in reversed(error_lines) if e.request_id), None)
+            rid = next((run.request_id for run in log_runs if run.failures and run.request_id), None)
             if rid and not request_id:
                 steps.append((self._call_for("logs", fn, request_id=rid), "the whole run behind the newest error"))
         if not request_id and since == "1h":
             steps.append((self._call_for("logs", fn, since="24h"), "the last 24 hours"))
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def runs(

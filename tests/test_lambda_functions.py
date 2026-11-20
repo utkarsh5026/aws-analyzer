@@ -25,7 +25,7 @@ from aws_analyzer.lambda_functions.analysis import text as textmod
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
-from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, wiring as wiring_block
+from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, logs as logs_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
@@ -2476,18 +2476,60 @@ def test_error_causes_share_all_error_lines(ui, capsys, monkeypatch):
 
 def test_logs_report(ui, capsys):
     out = run(capsys, ui.logs, "etl-nightly")
-    assert "Logs of etl-nightly" in out and "START and END lines left out" in out
+    assert "Logs of etl-nightly" in out and "grouped into runs" in out
     assert "loading 1,204 orders" in out and "START RequestId" not in out
     assert "REPORT: run 102 ms (billed 103 ms), 88 of 1,024 MB used, cold start 300 ms" in out
-    assert "Runs (REPORT lines): 1" in out and "Error lines: 1" in out and "KeyError" in out
+    assert "Runs: 1" in out and "Failed: 1 (!)" in out and "Error lines: 1" in out
+    assert re.search(r"✕ Failed +\d\d:\d\d:\d\d +102 ms +88 / 1,024 MB +cold +KeyError: 'customer_id' +8f5ce35b", out)
+    assert "search='KeyError OR Timeout'" in out and "a search box over this report" in out
     assert "errors('etl-nightly')" in out and "logs('etl-nightly', since='24h')" in out
     found = run(capsys, ui.logs, "etl-nightly", search="orders")
     assert "lines containing 'orders'" in found and "Lines shown: 1" in found
     whole = run(capsys, ui.logs, "etl-nightly", request_id=RID)
-    assert f"Run {RID} of etl-nightly" in whole and "START RequestId" in whole and "Lines shown: 5" in whole
+    assert f"Run {RID} of etl-nightly" in whole and "Its lines, oldest first" in whole and "Lines shown: 5" in whole
     quiet = run(capsys, ui.logs, "etl-nightly", since="2m")
     assert "No lines in the last 2 minutes. The newest line in its log group is from" in quiet
     assert "n= is how many lines" in run(capsys, ui.logs, "etl-nightly", n=0)
+
+
+def test_logs_report_in_html(ui, monkeypatch):
+    shown = []
+    monkeypatch.setattr(ui, "_show", shown.append)
+    ui.logs("etl-nightly", search="orders")
+    log_runs = next(block for block in shown[0] if isinstance(block, logs_block._LogRuns))
+    assert log_runs.searched and log_runs.words == ["orders"] and len(log_runs.opened) == 1
+    page = stylemod._render_html(shown[0], 50)
+    assert '<form class="lgv"' in page and 'class="lgr s-failed cold err"' in page and "<details" in page
+    assert 'class="lgf-failed"' in page and 'class="lgf-cold"' in page and 'class="lgf-ok"' not in page
+    assert 'class="lg-hits"' in page and 'class="lg-only"' in page and 'class="lg-open"' in page
+    assert "loading 1,204 <mark>orders</mark>" in page and "Started (UTC)" in page
+    assert 'hidden="hidden"' in page and "<script" not in page
+
+
+def test_logs_search_box_filters_the_runs_read_and_enter_asks_cloudwatch(ui, monkeypatch):
+    from aws_analyzer.lambda_functions.explorer.log_search import _LogSearch
+
+    shown = []
+    monkeypatch.setattr(viewmod, "_can_search_here", lambda draws_html: True)
+    monkeypatch.setattr(_LogSearch, "show", lambda self: shown.append(self))
+    ui.logs("etl-nightly")
+    box = shown[0]
+    assert len(box.read_runs) == 1 and "1 run read" in box.said.value
+    box.box.value = "1,204 ORDERS"
+    found = box.filtered("1,204 ORDERS")
+    assert len(found.runs) == 1 and found.words == ["1,204 ORDERS"] and found.searched
+    assert any(event.matched for event in found.runs[0].events)
+    assert "1 of 1 runs read hold it" in box.said.value
+    box.box.value = "nothing like this"
+    assert "No run read holds 'nothing like this'" in box.said.value
+    assert box.filtered("KeyError OR Timeout").words == ["KeyError", "Timeout"]
+    assert box.filtered("").runs == box.read_runs
+    box.box.value = "orders"
+    box._search_cloudwatch()
+    assert "CloudWatch: 1 run with 'orders'" in box.said.value and box.base.searched
+    box.box.value = "no-such-text"
+    box._search_cloudwatch()
+    assert "no lines with 'no-such-text'" in box.said.value and box.base is None
 
 
 def test_performance_report(ui, capsys):
@@ -2505,12 +2547,13 @@ def test_performance_report(ui, capsys):
 
 def test_reports_show_times_in_the_zone_picked(ui, capsys):
     utc = run(capsys, ui.logs, "etl-nightly")
-    assert "Time (UTC)" in utc
-    first = datetime.strptime(re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", utc).group(0), "%Y-%m-%d %H:%M:%S")
+    assert "Started (UTC)" in utc
+    first = datetime.strptime(re.search(r"\d\d:\d\d:\d\d\.\d{3}", utc).group(0), "%H:%M:%S.%f")
     assert set_timezone("Asia/Kolkata") == "IST"
     out = run(capsys, ui.logs, "etl-nightly")
-    shown = first.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Kolkata"))
-    assert "Time (IST)" in out and f"{shown:%Y-%m-%d %H:%M:%S}" in out and "UTC" not in out
+    moment = datetime.combine(datetime.now(timezone.utc).date(), first.time(), tzinfo=timezone.utc)
+    shown = moment.astimezone(ZoneInfo("Asia/Kolkata"))
+    assert "Started (IST)" in out and f"{shown:%H:%M:%S.%f}"[:12] in out and "UTC" not in out
     errors = run(capsys, ui.errors, "etl-nightly")
     assert re.search(r"the last 24 hours \(since \d{4}-\d\d-\d\d \d\d:\d\d IST\)", errors)
     assert "Time (IST)" in errors

@@ -237,7 +237,96 @@ _EXTRA_CSS = """\
 .lmb .dif .dfa{background:rgba(22,163,74,.13)}
 .lmb .dif .dfr{background:rgba(239,68,68,.12)}
 .lmb .dif .dfh{color:#3b82f6;opacity:.8;margin-top:4px}
-.lmb .dif .dfx{padding:4px 10px 6px;font-size:12px;opacity:.7}""".replace("%CODE_FONT%", _CODE_FONT)
+.lmb .dif .dfx{padding:4px 10px 6px;font-size:12px;opacity:.7}
+.lmb form.lgv{margin:6px 0 12px;max-width:1180px;--lgcols:14px 100px 104px 128px 112px 62px minmax(0,1fr) 66px}
+.lmb .lgv h4{margin:12px 0 8px}
+.lmb .lgv .lgtools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:0 0 6px}
+.lmb .lgv .lgchips{display:inline-flex;flex-wrap:wrap;gap:6px}
+.lmb .lgv :is(.lgc,.lgtg) input{position:absolute;opacity:0;width:0;height:0;margin:0;pointer-events:none}
+.lmb .lgv .lgc span{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border:1px solid rgba(127,127,127,.35);border-radius:999px;font-size:12px;cursor:pointer;user-select:none;-webkit-user-select:none;transition:background .12s,border-color .12s}
+.lmb .lgv .lgc span b{font-weight:600;font-variant-numeric:tabular-nums;opacity:.6}
+.lmb .lgv .lgc span:hover{background:rgba(127,127,127,.09)}
+.lmb .lgv .lgc input:checked+span{background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.75);color:#2f6fdb}
+.lmb .lgv .lgc.bad input:checked+span{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.7);color:#c53030}
+.lmb .lgv .lgc.warn input:checked+span{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.8);color:#b86e04}
+.lmb .lgv .lgc.ok input:checked+span{background:rgba(22,163,74,.1);border-color:rgba(22,163,74,.6);color:#178a45}
+.lmb .lgv .lgc input:checked+span b{opacity:.9}
+.lmb .lgv :is(.lgc,.lgtg) input:focus-visible+span{outline:2px solid rgba(59,130,246,.6);outline-offset:2px}
+.lmb .lgv .lgtg span{display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.lmb .lgv .lgtg span::before{content:"";flex:0 0 26px;height:15px;border-radius:8px;background:radial-gradient(circle at 7.5px 50%,#fff 5px,transparent 5.6px),rgba(127,127,127,.4);transition:background .15s}
+.lmb .lgv .lgtg input:checked+span::before{background:radial-gradient(circle at 18.5px 50%,#fff 5px,transparent 5.6px),#3b82f6}
+.lmb .lgv .lghint{font-size:12px;opacity:.72;margin:2px 0 8px}
+.lmb .lgv .lglist{border:1px solid rgba(127,127,127,.28);border-radius:8px;overflow:hidden;container-type:inline-size}
+.lmb .lgv :is(.lghd,summary.lgf){display:grid;grid-template-columns:var(--lgcols);align-items:center;column-gap:12px;padding:0 14px 0 12px}
+.lmb .lgv .lghd{padding-top:7px;padding-bottom:7px;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.62;background:rgba(127,127,127,.07);border-bottom:1px solid rgba(127,127,127,.25)}
+.lmb .lgv details.lgr{border-bottom:1px solid rgba(127,127,127,.16)}
+.lmb .lgv details.lgr:last-child{border-bottom:0}
+.lmb .lgv summary.lgf{list-style:none;cursor:pointer;min-height:36px;font-size:12.5px}
+.lmb .lgv summary.lgf::-webkit-details-marker{display:none}
+.lmb .lgv summary.lgf:hover{background:rgba(127,127,127,.06)}
+.lmb .lgv details.lgr[open]>summary.lgf{background:rgba(59,130,246,.06)}
+.lmb .lgv details.lgr:is(.s-failed,.s-timeout)>summary.lgf{box-shadow:inset 3px 0 0 #ef4444}
+.lmb .lgv details.lgr.s-logged>summary.lgf{box-shadow:inset 3px 0 0 #f59e0b}
+.lmb .lgv .lgchev{width:6px;height:6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.55;transition:transform .15s}
+.lmb .lgv details.lgr[open] .lgchev{transform:rotate(45deg)}
+.lmb .lgv .lgst{justify-self:start;display:inline-flex;align-items:center;gap:5px;padding:1px 9px 1px 7px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;background:rgba(127,127,127,.12)}
+.lmb .lgv .lgst i{font-style:normal;font-size:11px}
+.lmb .lgv .lgst.ok{background:rgba(22,163,74,.12);color:#178a45}
+.lmb .lgv .lgst.bad{background:rgba(239,68,68,.13);color:#c53030}
+.lmb .lgv .lgst.warn{background:rgba(245,158,11,.16);color:#b86e04}
+.lmb .lgv .lgst.run{background:rgba(59,130,246,.13);color:#2f6fdb}
+.lmb .lgv :is(.lgw,.lgm,.lgq,.lgt){font-family:var(--lmb-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lmb .lgv .lgw{font-size:12px}
+.lmb .lgv .lgd{display:flex;align-items:center;gap:7px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.lmb .lgv .lgbar{flex:0 0 42px;height:5px;border-radius:3px;background:rgba(127,127,127,.2);overflow:hidden}
+.lmb .lgv .lgbar i{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.lmb .lgv .lgbar i.warn{background:#f59e0b}
+.lmb .lgv .lgbar i.bad{background:#ef4444}
+.lmb .lgv .lgm{font-size:11.5px;opacity:.78}
+.lmb .lgv .lgcold{font-size:11.5px;color:#0284c7;white-space:nowrap}
+.lmb .lgv .lgs{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmb .lgv .lgs.bad{color:#c53030;font-weight:550}
+.lmb .lgv .lgs.warn{color:#b86e04}
+.lmb .lgv .lgq{font-size:11.5px;opacity:.5;text-align:right}
+.lmb .lgv .lgdim{opacity:.5}
+.lmb .lgv .lgb{padding:6px 0 8px;background:rgba(127,127,127,.035);border-top:1px solid rgba(127,127,127,.14)}
+.lmb .lgv .lglines{font:12px/1.6 var(--lmb-mono)}
+.lmb .lgv .lgln{display:grid;grid-template-columns:92px 46px minmax(0,1fr);column-gap:12px;padding:1px 14px 1px 38px}
+.lmb .lgv .lgln:hover{background:rgba(127,127,127,.08)}
+.lmb .lgv .lgln.error{background:rgba(239,68,68,.07);box-shadow:inset 3px 0 0 rgba(239,68,68,.75)}
+.lmb .lgv .lgln.warn{background:rgba(245,158,11,.07);box-shadow:inset 3px 0 0 rgba(245,158,11,.75)}
+.lmb .lgv .lgln.hit{background:rgba(250,204,21,.12)}
+.lmb .lgv .lgt{opacity:.55;font-size:11.5px}
+.lmb .lgv .lgl{align-self:start;margin-top:3px;justify-self:start;padding:0 5px;border-radius:4px;font:700 9.5px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;letter-spacing:.05em}
+.lmb .lgv .lgl.error{color:#c53030;background:rgba(239,68,68,.14)}
+.lmb .lgv .lgl.warn{color:#b86e04;background:rgba(245,158,11,.18)}
+.lmb .lgv .lgl.info{color:#2f6fdb;background:rgba(59,130,246,.1)}
+.lmb .lgv .lgl.debug{background:rgba(127,127,127,.14);opacity:.75}
+.lmb .lgv .lgx{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+.lmb .lgv mark{background:rgba(250,204,21,.5);color:inherit;border-radius:2px;padding:0 1px}
+.lmb .lgv details.lgj{display:inline;margin-left:10px}
+.lmb .lgv details.lgj[open]{display:block;margin-left:0}
+.lmb .lgv details.lgj>summary{display:inline-block;padding:0 6px;border-radius:4px;background:rgba(127,127,127,.12);font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;opacity:.6;cursor:pointer}
+.lmb .lgv details.lgj>summary:hover{opacity:.9}
+.lmb .lgv pre.lgpre{margin:3px 0 4px;padding:7px 10px;border:0;border-radius:6px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--lmb-mono);max-height:420px;overflow:auto}
+.lmb .lgv details.lgev{margin:2px 14px 6px 38px}
+.lmb .lgv details.lgev>summary{cursor:pointer;font-size:12px;font-weight:600}
+.lmb .lgv details.lgev>summary span{font-weight:400;opacity:.6;margin-left:4px}
+.lmb .lgv .lgfoot{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 18px;margin:6px 14px 0 38px;padding-top:7px;border-top:1px dashed rgba(127,127,127,.28);font-size:12px}
+.lmb .lgv .lgfoot b{font-weight:600}
+.lmb .lgv .lgfoot .warn{color:#b86e04}
+.lmb .lgv .lgfoot .bad{color:#c53030}
+.lmb .lgv code.lgid{user-select:all;-webkit-user-select:all;font-size:11.5px;cursor:text}
+.lmb .lgv .lgempty{padding:3px 14px 3px 38px;font-size:12px;font-style:italic;opacity:.65}
+.lmb form.lgv:has(.lgf-failed:checked) details.lgr:not(.s-failed,.s-timeout){display:none}
+.lmb form.lgv:has(.lgf-err:checked) details.lgr:not(.err){display:none}
+.lmb form.lgv:has(.lgf-cold:checked) details.lgr:not(.cold){display:none}
+.lmb form.lgv:has(.lgf-ok:checked) details.lgr:not(.s-ok){display:none}
+.lmb form.lgv:has(.lg-only:checked) .lgln:not(.error,.warn){display:none}
+.lmb form.lgv:has(.lg-hits:checked) .lgln:not(.hit){display:none}
+.lmb form.lgv:has(.lg-open:checked) details.lgr::details-content{content-visibility:visible;display:block}
+.lmb form.lgv:has(.lg-open:checked) details.lgr .lgchev{transform:rotate(45deg)}
+@container (max-width:760px){.lmb .lgv :is(.lghd,summary.lgf){grid-template-columns:14px 100px 104px 116px minmax(0,1fr)}.lmb .lgv :is(.lghd,summary.lgf)>:is(:nth-child(5),:nth-child(6),:nth-child(8)){display:none}.lmb .lgv .lgln{grid-template-columns:92px 46px minmax(0,1fr);padding-left:14px}}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 

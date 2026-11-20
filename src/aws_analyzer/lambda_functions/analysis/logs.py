@@ -11,7 +11,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import quote
 
 from ..._kit.deps import _require
@@ -430,3 +430,61 @@ def readable_line(message: str) -> str:
             body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
             return f"[{doc.get('level', '-')}] {body}"
     return _LINE_PREFIX_RE.sub(r"\g<level>", text, count=1)[:2000]
+
+
+def _line_parts(message: str) -> tuple[str, str]:
+    """
+    A log line as the window shows it: (its text, without what Lambda writes before it (the time, request ID and
+    level, which the window shows in its own columns), and its other fields as indented JSON when it's a JSON line).
+    An error Lambda's runtime logged reads as its type, message and stack, and a logger's traceback (Powertools'
+    `exception`) follows the message. A text line loses Lambda's '[INFO]\t<time>\t<request ID>\t' (or
+    '<time>\t<request ID>\t') and then its level: '[ERROR] ' (Python), 'INFO\t' (Node.js).
+    """
+    text = message.rstrip()
+    if text.startswith("{"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            doc = None
+        if isinstance(doc, dict):
+            if str(doc.get("type", "")).startswith("platform."):
+                record = doc.get("record")
+                return f"{doc['type']} {json.dumps(record, default=str)}" if record else str(doc["type"]), ""
+            inner = doc.get("message", doc.get("msg"))
+            rest = {k: v for k, v in doc.items() if k not in ("message", "msg", "level", "timestamp", "time",
+                                                                "requestId", "AWSRequestId")}
+            if isinstance(inner, dict) and (inner.get("errorType") or inner.get("errorMessage")):
+                body = _error_text_of(inner)
+                rest.update({k: v for k, v in inner.items() if k not in ("errorType", "errorMessage", "stack",
+                                                                         "stackTrace", "trace")})
+            elif inner is None:
+                if not (doc.get("errorType") or doc.get("errorMessage")):
+                    return text, ""
+                body = _error_text_of(doc)
+                rest = {k: v for k, v in rest.items() if k not in ("errorType", "errorMessage", "stack",
+                                                                   "stackTrace", "trace")}
+            else:
+                body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
+            for key in ("exception", "stack_trace", "stackTrace"):
+                if isinstance(rest.get(key), str) and rest[key].strip():
+                    body = f"{body}\n{rest.pop(key).rstrip()}"
+            return body, json.dumps(rest, indent=2, default=str, ensure_ascii=False) if rest else ""
+    text = _LINE_PREFIX_RE.sub("", text, count=1)
+    return _LEVEL_PREFIX_RE.sub("", text, count=1), ""
+
+
+_LEVEL_PREFIX_RE = re.compile(r"^(?:\[(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\]\s*|"
+                              r"(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\t)")
+
+
+def _error_text_of(doc: dict[str, Any]) -> str:
+    """
+    An error as JSON logs carry it ({"errorType", "errorMessage", "stack"}) as a traceback reads: 'TypeError:
+    Cannot read ...' and then the stack's lines (Node.js puts the message first in its stack too, so that line goes).
+    """
+    head = ": ".join(str(doc[k]) for k in ("errorType", "errorMessage") if doc.get(k))
+    stack = doc.get("stack") or doc.get("stackTrace") or doc.get("trace") or []
+    lines = stack.splitlines() if isinstance(stack, str) else [str(line) for line in stack]
+    if lines and head and lines[0].strip().startswith(head.split(":")[0]):
+        lines = lines[1:]
+    return "\n".join([head, *lines]) if lines else head
