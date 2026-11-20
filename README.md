@@ -134,6 +134,11 @@ Then install it in the notebook from there:
 %pip install --no-index --find-links wheels aws-analyzer
 ```
 
+> [!TIP]
+> Rather start from a notebook? [`notebooks/aws_analyzer_commands.ipynb`](notebooks/aws_analyzer_commands.ipynb) has
+> every command of every service in a cell of its own, grouped by task: fill in your bucket, function and table names
+> once at the top, then run any cell (Lambda logs, the explorer windows, Step Functions executions, ...).
+
 **2. Import it and look around.** It uses the notebook's IAM execution role, so there's nothing to configure:
 
 ```python
