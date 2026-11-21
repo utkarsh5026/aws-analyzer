@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 📊 **DynamoDB: an explorer window** ([#TBD](https://github.com/utkarsh5026/aws-analyzer/pulls))
+- 📊 **DynamoDB: an explorer window** ([#264](https://github.com/utkarsh5026/aws-analyzer/pull/264))
   - `DynamoDBView().explore()` clicks through every table, its keys and cost, its items and what they hold.
   - Type a partition key for its items, on the table or an index; click an item for all of it.
   - The Schema tab lists every attribute's types and fill rate; click one to count its values.
