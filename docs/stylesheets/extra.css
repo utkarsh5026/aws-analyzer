@@ -269,7 +269,7 @@
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href^="https://"]::before { -webkit-mask-image: var(--aa-i-out); mask-image: var(--aa-i-out); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="agent.html"]::before { -webkit-mask-image: var(--aa-i-chat); mask-image: var(--aa-i-chat); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="s3.html"], [href="s3_explorer.html"])::before { background-image: url("../images/aws/s3.svg"); }
-  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="dynamodb.html"]::before { background-image: url("../images/aws/dynamodb.svg"); }
+  .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="dynamodb.html"], [href="dynamodb_explorer.html"])::before { background-image: url("../images/aws/dynamodb.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="bedrock_kb.html"], [href="bedrock_kb_explorer.html"], [href="bedrock_chat.html"])::before { background-image: url("../images/aws/bedrock.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link[href="sagemaker_env.html"]::before { background-image: url("../images/aws/sagemaker.svg"); }
   .md-nav--primary > .md-nav__list > .md-nav__item > a.md-nav__link:is([href="opensearch.html"], [href="opensearch_explorer.html"])::before { background-image: url("../images/aws/opensearch.svg"); }

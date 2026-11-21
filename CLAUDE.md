@@ -330,6 +330,21 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   the report read in the background (`_read_report`). `.claude/skills/demo/msg_explorer_shots.py` makes the guide's
   `msg-explorer*` figures in a real JupyterLab (its notebook drains `email-jobs` in moto from a thread, so Live has
   something to show), and `tour_shots.py`'s `play_messaging` the `msg-explorer-tour`.
+- `dynamodb`'s explorer window, `DynamoDBExplorer` (`dynamodb/explorer/`: `window.py` with `explore()`, composed of
+  `_TablesTab` (`tables.py`: `core.table_reports()` read once in the background, a line per table with chips and
+  search, the table picked drawn by the View's `_table_info_blocks` from its report, no request; picking one makes it
+  the open table, `table_name`, also the header's `table_pick`), `_ItemsTab` (`items.py`: an `ItemRead`, `sample`,
+  `scan` or, with a partition key typed, `query` with a `begins_with` sort prefix, on the table or an index,
+  `ITEMS_PER_READ` at a time, More continuing from `last_key`; the page drawn by `_page_blocks`, a click by
+  `_get_blocks`, read again with `core.get` when it came from an index), `_SchemaTab` (`schema.py`: `core.profile()` of
+  `SCHEMA_ITEMS`, a line per attribute, a click `core.value_counts()` drawn by `_value_counts_blocks`) and
+  `_FocusReads` (`focus.py`); `frame.py` its tabs, stylesheet (`.ddx-app`, derived from the Athena explorer's, on
+  `_terminal_theme`), faces and `_window_text`; `widgets.py` the `_ListPage` (with `tools=`, a tab's own controls) and
+  `_Line`; `DynamoDBView.explore()` imports it lazily and keeps it in `view.explorer`), is the tenth interactive UI,
+  built on the windows' kit like `AthenaExplorer`. The Items and Schema tabs read the open table the first time
+  they're shown for it (`loaded`). `.claude/skills/demo/ddb_explorer_shots.py` makes the guide's `ddb-explorer*`
+  figures in a real JupyterLab on shots.py's acme scene, and `tour_shots.py`'s `play_dynamodb` the
+  `ddb-explorer-tour`.
 - **Python 3.11 floor.** CI runs 3.11–3.14; ruff `target-version = "py311"`; `requires-python = ">=3.11"`. Users
   may still have pandas 2 (the `data` extra asks for `pandas>=2`), so code must work with pandas 2 and 3, though the
   dev pins test pandas 3.
@@ -1552,7 +1567,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
   what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
   section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so does each explorer window (`s3_explorer.md`, `lambda_explorer.md`, `stepfunctions_explorer.md`, `apigateway_explorer.md`, `opensearch_explorer.md`, `athena_explorer.md`, `messaging_explorer.md` and `bedrock_kb_explorer.md`, each after its service in `nav` and on the home page, with its service's icon, and its service guide's `#explorer` section a short pointer to it) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`, `stepfunctions.md`, `apigateway.md`, `athena.md`, `messaging.md`), and so does each explorer window (`s3_explorer.md`, `lambda_explorer.md`, `stepfunctions_explorer.md`, `apigateway_explorer.md`, `opensearch_explorer.md`, `athena_explorer.md`, `messaging_explorer.md`, `dynamodb_explorer.md` and `bedrock_kb_explorer.md`, each after its service in `nav` and on the home page, with its service's icon, and its service guide's `#explorer` section a short pointer to it) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
@@ -1612,7 +1627,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `*_explorer_shots.py`, each in its `<service>_explorer.md`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which
   plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
-  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
+  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`, `ddb-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model), at the top of its window's guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when

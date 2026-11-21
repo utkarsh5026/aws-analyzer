@@ -1,5 +1,9 @@
+import asyncio
+import html as html_lib
 import os
+import re
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -1034,3 +1038,157 @@ def test_ui_next_steps_are_filled_in(ui, capsys):
         and "schema('orders')" in out
         and "-- Findings: " in out
     )
+
+
+def explorer(core, what=None, *, mode="widgets", **kwargs):
+    return ddbmod.DynamoDBExplorer(what, core=core, mode=mode, **kwargs)
+
+
+def plain(html):
+    return re.sub(r"<[^>]+>", "", html_lib.unescape(html or ""))
+
+
+def titles(blocks):
+    return [b.text for b in blocks if type(b).__name__ == "_Title"]
+
+
+def test_explorer_opens_on_the_overview_with_every_table(core):
+    x = explorer(core)
+    assert x._tab == "overview" and titles(x.shown["overview"]) == ["DynamoDB tables in us-east-1 (2)"]
+    assert x.table_list.keys == ["counters", "orders"]
+    stats = plain(x.stats.value).replace(" ", "")
+    assert "Tables2" in stats and "Tofix2" in stats
+    assert "2 tables · 2 to fix" in plain(x.status.value)
+    assert x.focus.kind == "overview" and x.focus.chips() == ["Overview tab"]
+
+
+def test_explorer_tables_chips_search_and_a_click(core):
+    x = explorer(core)
+    x._show_tab("tables")
+    page = x.table_list
+    on_demand = next(b for b in page.chips_box.children if b.description.startswith("On-demand"))
+    on_demand.click()
+    assert page.keys == ["orders"]
+    on_demand.click()
+    page.find.value = "by-status"
+    assert page.keys == ["orders"]
+    page.rows[0].button.click()
+    assert x.table_name == "orders" and titles(x.shown["tables"]) == ["Table orders"]
+    assert x.table_pick.value == "orders" and "Open table" in plain(x.stats.value)
+    assert "by-status" in plain(page.view.value) and "sample('orders')" not in plain(page.view.value)
+    assert x.focus.kind == "table" and x.focus.value("table") == "orders"
+
+
+def test_explorer_items_sample_query_index_and_an_item(core):
+    x = explorer(core, TABLE, tab="items")
+    assert x.table_name == TABLE and x.item_read.how == "sample" and len(x.items_read) == 46
+    assert titles(x.shown["items"])[0] == f"Sample of {TABLE}"
+    x.item_list.find.value = "PROFILE"
+    assert len(x.item_list.keys) == 5
+    x.item_list.find.value = ""
+    x.items("USER#1", "ORDER#")
+    assert len(x.items_read) == 8 and all(item["sk"].startswith("ORDER#") for item in x.items_read)
+    assert titles(x.shown["items"])[0] == "Query orders: pk = 'USER#1', sk begins with 'ORDER#'"
+    assert x.focus.chips() == [TABLE, "Items tab", "partition key USER#1"]
+    x.item_list.rows[0].button.click()
+    assert titles(x.shown["items"]) == ["Item in orders"] and x.focus.kind == "item"
+    x.items("paid", index="by-status")
+    assert len(x.items_read) == 15 and {item["status"] for item in x.items_read} == {"paid"}
+    x.item_list.rows[0].button.click()
+    assert titles(x.shown["items"]) == ["Item in orders"]
+    x.items("nobody")
+    assert "No items with that partition key" in plain(x.item_list.view.value)
+    x.items(index="no-such-index")
+    assert "has no index 'no-such-index'" in plain(x.status.value)
+
+
+def test_explorer_items_more_reads_the_next_page(core, monkeypatch):
+    from aws_analyzer.dynamodb.explorer import items as items_tab
+
+    monkeypatch.setattr(items_tab, "ITEMS_PER_READ", 20)
+    x = explorer(core, TABLE)
+    x.how_pick.value = "scan"
+    x._show_tab("items")
+    assert len(x.items_read) == 20 and not x.more_button.disabled
+    seen = keys_of(x.items_read)
+    x.more_button.click()
+    assert len(x.items_read) == 40 and len(set(keys_of(x.items_read))) == 40 and keys_of(x.items_read)[:20] == seen
+    assert titles(x.shown["items"])[0] == f"Scan {TABLE}  (page 2)"
+
+
+def test_explorer_schema_and_value_counts(core):
+    x = explorer(core, TABLE)
+    x.schema()
+    assert x._tab == "schema" and x.profile is not None and titles(x.shown["schema"]) == [f"Schema of {TABLE}"]
+    page = x.attribute_list
+    mixed = next(b for b in page.chips_box.children if b.description.startswith("Mixed types"))
+    mixed.click()
+    assert page.keys == ["amount"]
+    mixed.click()
+    page.rows[page.keys.index("status")].button.click()
+    assert titles(x.shown["schema"]) == [f"Values of status in {TABLE}"] and "status" in x.counts
+    assert x.focus.kind == "attribute" and x.focus.value("attribute") == "status"
+
+
+def test_explorer_picking_another_table_drops_the_last_ones_items(core):
+    x = explorer(core, TABLE, tab="items")
+    assert x.items_read
+    x.table_pick.value = "counters"
+    assert x.table_name == "counters" and len(x.items_read) == 5 and x.item_read.table == "counters"
+    assert x.sort_box.disabled and x.profile is None
+
+
+def test_explorer_commands_and_mistakes(core):
+    x = explorer(core)
+    x.table("ordrs")
+    assert "Did you mean 'orders'" in plain(x.status.value)
+    x.items()
+    assert "Pick a table first" in plain(x.status.value)
+    x._show_tab("schema")
+    assert "Pick a table" in plain(x.attribute_list.view.value)
+    x.table(TABLE)
+    assert x._tab == "tables" and x.table_name == TABLE
+    x.refresh()
+    assert x.table_name == TABLE and x.table_list.selected == TABLE
+    with pytest.raises(ValueError, match="tab is one of"):
+        explorer(core, tab="graphs")
+
+
+def test_explorer_window_text_says_where_the_window_shows_it():
+    from aws_analyzer.dynamodb.explorer.frame import _window_text
+
+    assert _window_text("see table_info('orders')") == "see the Tables tab"
+    assert _window_text("schema('orders') shows it") == "The Schema tab shows it"
+    assert "largest('orders')" in _window_text("run largest('orders')")
+
+
+def test_explorer_reads_in_the_background(core, monkeypatch):
+    hold = threading.Event()
+    read = core.table_reports
+
+    def held(**kwargs):
+        hold.wait(5)
+        return read(**kwargs)
+
+    monkeypatch.setattr(core, "table_reports", held)
+
+    async def settle(x):
+        while x._tasks:
+            await asyncio.gather(*list(x._tasks.values()))
+
+    async def main():
+        x = explorer(core, TABLE, tab="items")
+        assert "tables" in x._tasks and not x.reports
+        assert "Reading DynamoDB" in plain(x.status.value)
+        hold.set()
+        await settle(x)
+        assert x.table_name == TABLE and len(x.items_read) == 46 and titles(x.shown["overview"])
+
+    asyncio.run(main())
+
+
+def test_explorer_without_widgets_shows_the_reports(core, capsys):
+    explorer(core, mode="text")
+    assert "DynamoDB tables in us-east-1 (2)" in capsys.readouterr().out
+    view = DynamoDBView(core, mode="text", progress="off")
+    assert "needs Jupyter" in run(capsys, view.explore)

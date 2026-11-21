@@ -30,6 +30,7 @@ Quick start
     ui.query("orders", "USER#42", sort=("begins_with", "ORDER#"))
     ui.scan("orders", where={"status": "failed", "total": (">", 100)})
     ui.value_counts("orders", "status")
+    ui.explore("orders")                              # a window to click through tables, items and schema (Jupyter)
 
     ddb = ui.core                                     # same analyzer, raw data
     df = ddb.scan("orders", n=5000).to_df()           # nested maps become 'address.city' columns
@@ -54,6 +55,7 @@ from .analysis import (
 )
 from .analyzer import DynamoDBAnalyzer
 from .view import DynamoDBView
+from .explorer.window import DynamoDBExplorer, explore
 
 __all__ = [
     "DISTINCT_CAP",
@@ -69,6 +71,7 @@ __all__ = [
     "TYPE_NAMES",
     "AttributeProfile",
     "DynamoDBAnalyzer",
+    "DynamoDBExplorer",
     "DynamoDBView",
     "IndexInfo",
     "ItemPage",
@@ -85,6 +88,7 @@ __all__ = [
     "describe_condition",
     "describe_filter",
     "dynamo_type",
+    "explore",
     "flatten_item",
     "format_value",
     "from_dynamo",

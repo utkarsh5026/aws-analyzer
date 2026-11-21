@@ -65,7 +65,8 @@ GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.
           "messaging": "messaging.md", "lambda_explorer": "lambda_explorer.md",
           "stepfunctions_explorer": "stepfunctions_explorer.md", "apigateway_explorer": "apigateway_explorer.md",
           "opensearch_explorer": "opensearch_explorer.md", "athena_explorer": "athena_explorer.md",
-          "messaging_explorer": "messaging_explorer.md", "bedrock_kb_explorer": "bedrock_kb_explorer.md"}
+          "messaging_explorer": "messaging_explorer.md", "bedrock_kb_explorer": "bedrock_kb_explorer.md",
+          "dynamodb_explorer": "dynamodb_explorer.md"}
 # s3_explorer's figures come from explorer_shots.py, bedrock_chat's from chat_shots.py and the knowledge base
 # explorer's from kb_explorer_shots.py, the agent's chat window's from agent_chat_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
