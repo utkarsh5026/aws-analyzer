@@ -64,9 +64,10 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Activity, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
-    ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
-    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
+    AccountLimits, Activity, Alias, AsyncConfig, AsyncCounts, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
+    ErrorReport, EventFate, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
+    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, QueueState, RuntimeStatus,
+    SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
@@ -78,6 +79,7 @@ from .analysis.findings import RECENT_DAYS, account_findings, change_effect, fun
 from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
 )
+from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
 from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
     run_timeline, slow_cutoff, split_runs,
@@ -158,6 +160,9 @@ __all__ = [
     "AccountLimits",
     "Alias",
     "AsyncConfig",
+    "AsyncCounts",
+    "EventFate",
+    "QueueState",
     "AwsCall",
     "CodeFile",
     "CodeMatch",
@@ -222,6 +227,10 @@ __all__ = [
     "diff_packages",
     "diff_settings",
     "error_findings",
+    "event_fates",
+    "fate_findings",
+    "parse_async_config",
+    "parse_redrive",
     "explore",
     "function_findings",
     "change_effect",

@@ -93,7 +93,8 @@ service is given, run a short tour:
   and the deployment packages):
   - us-east-1: `orders-etl` (python3.9, SQS and S3 triggers, errors rising for three days, a run near its 60 s
     timeout, KeyErrors, AccessDenied and timeouts in its last 24 hours of logs, logs costing more than its compute and
-    kept forever, a `.env` file and bundled boto3 in its package), `churn-scoring` (arm64, EventBridge, 4 copies of
+    kept forever, a `.env` file and bundled boto3 in its package, 8 S3 events Lambda dropped with nothing to keep
+    them, and 2 messages in orders-queue's dead-letter queue `orders-dlq`), `churn-scoring` (arm64, EventBridge, 4 copies of
     provisioned concurrency it never needs), `report-api` (nodejs20.x, a public function URL, throttled at reserved
     concurrency 10, and logging JSON for its last three hours: a WARN now and then, three unhandled TypeErrors),
     `feature-backfill` (python3.10, never called, no triggers) and `support-agent-actions` (a Bedrock agent's action

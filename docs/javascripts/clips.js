@@ -1272,7 +1272,7 @@ window.AA_CLIPS = {
  },
  "lambda-errors": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.errors(\"orders-etl\"): ui.errors(\"orders-etl\"): three different reasons to fail, each with what to do and the run to look at.",
+  "summary": "ui.errors(\"orders-etl\"): ui.errors(\"orders-etl\"): three different reasons to fail, each with what to do and the run to look at, and where the failed events went: 8 dropped, 2 kept in a dead-letter queue.",
   "video": "",
   "scenes": [
    {
@@ -1285,13 +1285,13 @@ window.AA_CLIPS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 2213
+      "h": 2964
      }
     ],
     "captions": [
      [
       2.92,
-      "Three different reasons to fail, each with what to do and the run to look at."
+      "Three different reasons to fail, each with what to do and the run to look at, and where the failed events went: 8 dropped, 2 kept in a dead-letter queue."
      ]
     ]
    }

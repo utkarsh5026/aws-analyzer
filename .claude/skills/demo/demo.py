@@ -54,7 +54,8 @@ Demo data (moto, us-east-1, everything synthetic):
             packages served from memory. us-east-1: orders-etl (python3.9, SQS and S3 triggers, errors rising for
             3 days, runs near its 60 s timeout, KeyError / AccessDenied / timeouts in the last 24 hours of logs,
             logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package,
-            and a version 1 from before the DynamoDB write behind those errors, for diff()),
+            a version 1 from before the DynamoDB write behind those errors, for diff(), 8 S3 events Lambda
+            dropped with nothing to keep them, and 2 messages in orders-queue's dead-letter queue orders-dlq),
             churn-scoring (arm64, EventBridge, 4 copies of provisioned concurrency it never needs), report-api
             (nodejs20.x, a public function URL, throttled by reserved concurrency 10, JSON logs for its last three
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
@@ -1818,6 +1819,39 @@ def _backdate_function(name: str, when: datetime) -> None:
     function.last_modified = when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
+def _seed_failed_events(now: datetime) -> None:
+    """
+    Where orders-etl's failed events went: orders-queue moves a message to orders-dlq after 5 failed reads (2 are
+    there, the oldest 6 hours old), and Lambda gave up on 8 of the events S3 sent it, with nothing to keep them.
+    """
+    import boto3
+
+    rng = random.Random(11)
+    sqs = boto3.client("sqs", region_name=REGION)
+    dead_url = sqs.create_queue(QueueName="orders-dlq", Attributes={"MessageRetentionPeriod": str(14 * 86400)})["QueueUrl"]
+    dead_arn = sqs.get_queue_attributes(QueueUrl=dead_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+    for order in ("ORD-88213", "ORD-88240"):
+        sqs.send_message(QueueUrl=dead_url, MessageBody=json.dumps({"order_id": order, "items": 3}))
+    queue_url = sqs.get_queue_url(QueueName="orders-queue")["QueueUrl"]
+    sqs.set_queue_attributes(QueueUrl=queue_url, Attributes={
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dead_arn, "maxReceiveCount": "5"})})
+    cloudwatch = boto3.client("cloudwatch", region_name=REGION)
+    cloudwatch.put_metric_data(Namespace="AWS/SQS", MetricData=[
+        {"MetricName": "ApproximateAgeOfOldestMessage", "Dimensions": [{"Name": "QueueName", "Value": "orders-dlq"}],
+         "Timestamp": now - timedelta(minutes=minutes), "Value": 6 * 3600.0 + 60 * (30 - minutes)}
+        for minutes in (5, 15, 25)])
+    dims = [{"Name": "FunctionName", "Value": "orders-etl"}]
+    data = []
+    for hour in range(1, 24):
+        when = now - timedelta(hours=hour, minutes=rng.randint(0, 40))
+        data.append({"MetricName": "AsyncEventsReceived", "Dimensions": dims, "Timestamp": when,
+                     "Value": float(rng.randint(12, 20))})
+        data.append({"MetricName": "AsyncEventsDropped", "Dimensions": dims, "Timestamp": when,
+                     "Value": 1.0 if hour in (1, 4, 7, 9, 12, 15, 18, 22) else 0.0})
+    for start in range(0, len(data), 20):
+        cloudwatch.put_metric_data(Namespace="AWS/Lambda", MetricData=data[start:start + 20])
+
+
 def seed_lambda_functions() -> dict:
     """
     moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
@@ -1921,6 +1955,7 @@ def seed_lambda_functions() -> dict:
         arn = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
         boto3.client("lambda", region_name=region).create_event_source_mapping(
             EventSourceArn=arn, FunctionName=function, BatchSize=10)
+    _seed_failed_events(NOW)
 
     # 30 days of CloudWatch numbers: (calls a day, error share, throttles a day, average ms, longest ms, most at once,
     # bytes logged a day). orders-etl's errors started three days ago.

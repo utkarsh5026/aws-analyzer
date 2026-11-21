@@ -60,6 +60,11 @@ from aws_analyzer.lambda_functions import (
     run_table,
     runs_findings,
     AsyncConfig,
+    AsyncCounts,
+    QueueState,
+    event_fates,
+    fate_findings,
+    parse_redrive,
     CodeFile,
     CodePackage,
     DailyUsage,
@@ -2472,6 +2477,133 @@ def test_error_causes_share_all_error_lines(ui, capsys, monkeypatch):
     monkeypatch.setattr(ui.core, "errors", errors)
     out = run(capsys, ui.errors, "etl-nightly")
     assert "75.0%" in out and "25.0%" in out and "100.0%" not in out
+
+
+def _fn(name="etl", **kwargs):
+    return Function(name, f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{name}", region=REGION, **kwargs)
+
+
+S3_TRIGGER = Trigger("S3 bucket", "acme-uploads", via="resource policy")
+QUEUE_ARN = f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders"
+SQS_TRIGGER = Trigger("SQS queue", "orders", arn=QUEUE_ARN)
+
+
+def test_redrive_policies_are_read_forgivingly():
+    assert parse_redrive('{"deadLetterTargetArn": "arn:aws:sqs:us-east-1:1:dlq", "maxReceiveCount": "5"}') == (
+        "arn:aws:sqs:us-east-1:1:dlq", 5)
+    assert parse_redrive('{"deadLetterTargetArn": "arn:aws:sqs:us-east-1:1:dlq"}') == ("arn:aws:sqs:us-east-1:1:dlq", None)
+    assert parse_redrive(None) == parse_redrive("not json") == parse_redrive('{"maxReceiveCount": 3}') == (None, None)
+
+
+def test_dropped_asynchronous_events_are_lost_when_nothing_keeps_them():
+    fates = event_fates(_fn(), [S3_TRIGGER], async_config=AsyncConfig(), counts=AsyncCounts(received=400, dropped=8))
+    assert [(f.outcome, f.count) for f in fates] == [("lost", 8)]
+    assert "tried each 3 times" in fates[0].says and "still in the bucket" in fates[0].says
+    assert fates[0].basis == "Lambda's count (AsyncEventsDropped)"
+    (level, text), = fate_findings(_fn(), fates)
+    assert level == "warn" and "put-function-event-invoke-config --function-name etl" in text
+    assert '"OnFailure":{"Destination":"arn:aws:sqs:us-east-1:123456789012:etl-failed"}' in text
+
+
+def test_dropped_events_are_kept_by_a_destination_unless_it_refuses_them():
+    keeper = f"arn:aws:sqs:{REGION}:{ACCOUNT}:etl-failed"
+    counts = AsyncCounts(received=400, dropped=8, destination_failures=3)
+    fates = event_fates(_fn(), [S3_TRIGGER], async_config=AsyncConfig(retries=1, on_failure=keeper), counts=counts)
+    assert [(f.outcome, f.count, f.place) for f in fates] == [("lost", 3, "etl-failed"), ("kept", 5, "etl-failed")]
+    assert "after 2 tries" in fates[1].says
+    findings = fate_findings(_fn(), fates)
+    assert "may send to it (sqs:SendMessage" in findings[0][1] and "requestPayload" in findings[1][1]
+    dead_letter = event_fates(_fn(dead_letter=keeper), [S3_TRIGGER], counts=AsyncCounts(received=10, dropped=2))
+    assert [(f.outcome, f.count) for f in dead_letter] == [("kept", 2)]
+
+
+def test_asynchronous_events_none_dropped_or_not_counted():
+    safe = event_fates(_fn(), [S3_TRIGGER], counts=AsyncCounts(received=120, dropped=0))
+    assert [f.outcome for f in safe] == ["safe"] and "none of the 120 events" in safe[0].says
+    quiet = event_fates(_fn(), [S3_TRIGGER], counts=AsyncCounts())
+    assert "counted no events" in quiet[0].says
+    unknown = event_fates(_fn(), [S3_TRIGGER], counts=None)
+    assert [f.outcome for f in unknown] == ["unknown"] and "couldn't be read" in unknown[0].says
+    assert event_fates(_fn(), [], counts=AsyncCounts()) == []
+    assert fate_findings(_fn(), safe + unknown) == []
+
+
+def test_a_queue_without_a_dead_letter_queue_puts_failing_messages_at_risk():
+    queue = QueueState("orders", QUEUE_ARN, visible=3, oldest_age=3.5 * 86400)
+    fates = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})
+    assert [(f.outcome, f.count) for f in fates] == [("at risk", 3), ("at risk", None)]
+    assert "The oldest is 4 days old, and the queue keeps them 4 days" in fates[0].says
+    findings = fate_findings(_fn(), fates)
+    assert "deleted before long" in findings[0][1]
+    assert "aws sqs set-queue-attributes --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders" in findings[1][1]
+    assert '\\"maxReceiveCount\\":\\"5\\"' in findings[1][1]
+    young = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: QueueState("orders", QUEUE_ARN, visible=3)})
+    assert [f.outcome for f in young] == ["at risk", "waiting"]
+
+
+def test_a_dead_letter_queue_keeps_messages_and_says_how_to_send_them_back():
+    dead_arn = f"{QUEUE_ARN}-dlq"
+    dead = QueueState("orders-dlq", dead_arn, visible=2, retention=14 * 86400, oldest_age=6 * 3600)
+    queue = QueueState("orders", QUEUE_ARN, dead_letter_arn=dead_arn, max_receives=5, dead_letter=dead)
+    fates = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})
+    assert [(f.outcome, f.count, f.place) for f in fates] == [("kept", 2, "orders-dlq")]
+    assert "after failing 5 reads" in fates[0].says and "6 hours old" in fates[0].says
+    (level, text), = fate_findings(_fn(), fates)
+    assert level == "info" and f"start-message-move-task --source-arn {dead_arn} --region us-east-1" in text
+    dead.oldest_age = 12 * 86400
+    assert event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})[0].outcome == "at risk"
+    dead.visible = 0
+    assert [f.outcome for f in event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})] == ["safe"]
+
+
+def test_unread_queues_streams_and_waiting_callers_are_unknown():
+    denied = QueueState("orders", QUEUE_ARN, error="AccessDenied")
+    stream = Trigger("Kinesis stream", "clicks", arn=f"arn:aws:kinesis:{REGION}:{ACCOUNT}:stream/clicks")
+    url = Trigger("Function URL", "https://abc.lambda-url.us-east-1.on.aws/", via="function URL")
+    fates = event_fates(_fn(), [SQS_TRIGGER, stream, url], queues={QUEUE_ARN: denied})
+    assert [f.outcome for f in fates] == ["unknown"] * 3
+    assert "AccessDenied; needs sqs:GetQueueAttributes" in fates[0].says
+    assert "holds up its shard" in fates[1].says and "get the error back" in fates[2].says
+
+
+def test_errors_say_what_happened_to_failed_events(core, seeded):
+    now = datetime.now(timezone.utc)
+    dims = [{"Name": "FunctionName", "Value": "etl-nightly"}]
+    boto3.client("cloudwatch", region_name=REGION).put_metric_data(Namespace="AWS/Lambda", MetricData=[
+        {"MetricName": "AsyncEventsReceived", "Dimensions": dims, "Timestamp": now - timedelta(hours=2), "Value": 90.0},
+        {"MetricName": "AsyncEventsDropped", "Dimensions": dims, "Timestamp": now - timedelta(hours=2), "Value": 4.0},
+    ])
+    report_ = core.errors("etl-nightly")
+    assert [(f.outcome, f.count) for f in report_.fates] == [("lost", 4), ("at risk", None)]
+    assert report_.fate_errors == {}
+    assert core.errors("etl-nightly", fates=False).fates == []
+
+    sqs = boto3.client("sqs", region_name=REGION)
+    dead_url = sqs.create_queue(QueueName="orders-dlq")["QueueUrl"]
+    dead_arn = sqs.get_queue_attributes(QueueUrl=dead_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+    sqs.send_message(QueueUrl=dead_url, MessageBody="{}")
+    sqs.set_queue_attributes(QueueUrl=sqs.get_queue_url(QueueName="orders")["QueueUrl"], Attributes={
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dead_arn, "maxReceiveCount": "5"})})
+    kept = core.errors("etl-nightly").fates
+    assert [(f.outcome, f.count, f.place) for f in kept] == [("lost", 4, ""), ("kept", 1, "orders-dlq")]
+
+
+def test_errors_report_shows_the_failed_events_and_what_it_couldnt_read(ui, capsys, seeded):
+    class DeniedQueues:
+        meta = None
+
+        def get_queue_url(self, **params):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetQueueUrl")
+
+    ui.core._given["sqs"] = DeniedQueues()
+    ui.core._given["lambda"] = lambda_clients(denied=("get_function_event_invoke_config",))
+    ui.core._clients.clear()
+    out = run(capsys, ui.errors, "etl-nightly")
+    assert "-- What happened to the failed events --" in out and "40 calls failed." in out
+    assert "UNKNOWN  orders: not read: The queue couldn't be read (AccessDenied; needs sqs:GetQueueAttributes)" in out
+    assert ("Couldn't read its asynchronous settings (AccessDeniedException; needs "
+            "lambda:GetFunctionEventInvokeConfig)") in out
+    assert "Events lost" not in out
 
 
 def test_logs_report(ui, capsys):

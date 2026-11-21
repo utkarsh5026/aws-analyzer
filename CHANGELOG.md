@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda: did we lose data?** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pulls))
+  - `errors()` says what happened to the failed events: dropped, kept in a dead-letter queue, or still in the queue.
+  - It counts dropped S3, SNS and EventBridge events with Lambda's own `AsyncEventsDropped`, and shows how to keep the next ones.
+  - Reading an SQS trigger's queues needs `sqs:GetQueueUrl` and `sqs:GetQueueAttributes`; nothing receives a message.
+
 ## [0.61.0] - 2026-11-20
 
 ### Added

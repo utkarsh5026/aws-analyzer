@@ -326,6 +326,20 @@ _EXTRA_CSS = """\
 .lmb form.lgv:has(.lg-hits:checked) .lgln:not(.hit){display:none}
 .lmb form.lgv:has(.lg-open:checked) details.lgr::details-content{content-visibility:visible;display:block}
 .lmb form.lgv:has(.lg-open:checked) details.lgr .lgchev{transform:rotate(45deg)}
+.lmb .ef-in{margin:2px 0 8px;font-size:13px;opacity:.85;max-width:980px}
+.lmb .efs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:0 0 12px;max-width:980px}
+.lmb .ef{display:flex;flex-direction:column;gap:3px;border:1px solid rgba(127,127,127,.3);border-top:3px solid rgba(127,127,127,.45);border-radius:8px;padding:8px 12px 9px;min-width:0}
+.lmb .ef.bad{border-top-color:#ef4444;background:rgba(239,68,68,.05)}
+.lmb .ef.warn{border-top-color:#f59e0b;background:rgba(245,158,11,.05)}
+.lmb .ef.ok{border-top-color:#10b981}
+.lmb .ef .ef-o{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.6}
+.lmb .ef .ef-n{font:700 22px/1.15 var(--lmb-mono)}
+.lmb .ef.bad .ef-n{color:#dc2626}
+.lmb .ef.warn .ef-n{color:#b45309}
+.lmb .ef.ok .ef-n{color:#059669}
+.lmb .ef .ef-h{font-weight:650;font-size:13px;overflow-wrap:anywhere}
+.lmb .ef .ef-s{font-size:12px;line-height:1.45;opacity:.75;overflow-wrap:anywhere}
+.lmb .ef .ef-b{margin-top:auto;padding-top:6px;border-top:1px dashed rgba(127,127,127,.3);font:11px var(--lmb-mono);opacity:.6}
 @container (max-width:760px){.lmb .lgv :is(.lghd,summary.lgf){grid-template-columns:14px 100px 104px 116px minmax(0,1fr)}.lmb .lgv :is(.lghd,summary.lgf)>:is(:nth-child(5),:nth-child(6),:nth-child(8)){display:none}.lmb .lgv .lgln{grid-template-columns:92px 46px minmax(0,1fr);padding-left:14px}}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))

@@ -44,6 +44,7 @@ from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
 from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
 from .analysis.logs import readable_line
+from .analysis.fates import fate_findings
 from .analysis.word_search import WordSearch, word_search
 from .analysis.performance import memory_to_try, percentile, performance_findings
 from .analysis.package import (
@@ -61,6 +62,7 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
 
 if TYPE_CHECKING:
@@ -829,7 +831,7 @@ class LambdaView(_BaseView):
         """
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
-        found = error_findings(report)
+        found = fate_findings(fn, report.fates) + error_findings(report)
         timeouts = sum(g.count for g in report.groups if g.kind == "Timeout")
         out_of_memory = sum(g.count for g in report.groups if g.kind == "Out of memory")
         last = max((g.last for g in report.groups), default=None)
@@ -845,6 +847,8 @@ class LambdaView(_BaseView):
         ]
         if m is not None and m.throttles:
             cards.insert(3, ("Throttled calls", _count(round(m.throttles)), "warn"))
+        if lost_events(report):
+            cards.insert(3, ("Events lost", _count(lost_events(report)), "bad"))
         sub = " · ".join(filter(None, [
             f"log group {report.log_group}",
             f"the last {window} (since {_fmt_dt(report.since, zone=True)})",
@@ -860,6 +864,7 @@ class LambdaView(_BaseView):
         empty = (f"No errors in the last {window}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
         blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
+        blocks += _fates_blocks(report)
         if report.groups and not for_window:
             lines = sum(g.count for g in report.groups)
             blocks.append(_Table(
