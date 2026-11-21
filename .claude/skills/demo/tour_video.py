@@ -916,6 +916,7 @@ WINDOWS = [
     Window("os-explorer", "ui.explore()", "opensearch_explorer", as_opened=("os-explorer",)),
     Window("athena-explorer", "athena.explore()", "athena_explorer"),
     Window("msg-explorer", "msg.explore()", "messaging_explorer", as_opened=("msg-explorer",)),
+    Window("ddb-explorer", "ui.explore()", "dynamodb", eyebrow="DynamoDB explorer"),
     Window("explorer", 'x = S3Explorer("s3://acme-ml-data/")', "s3", eyebrow="S3 file explorer"),
     Window("chat", 'chat("support-docs")', eyebrow="Bedrock chat", notebook="support-docs.ipynb"),
     Window("agent", "agent.chat()", eyebrow="Ask in plain English", notebook="agent.ipynb",

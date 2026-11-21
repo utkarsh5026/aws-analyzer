@@ -153,6 +153,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>What does an item in this table actually look like?</span><span>Which attributes do the items really have?</span><span>How much did that scan just cost?</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="dynamodb_explorer.html">
+<img class="aws-icon" src="images/aws/dynamodb.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">DynamoDB explorer</span><code>dynamodb/explorer/</code></span>
+<span class="asks"><span>Can I click through a table's items?</span><span>Which attributes are missing or mixed?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 <li><a href="bedrock_kb.html">
 <img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="40" height="40">
 <span class="who"><span class="name">Bedrock Knowledge Bases</span><code>bedrock_kb.py</code></span>
