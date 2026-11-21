@@ -343,7 +343,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `_Line`; `DynamoDBView.explore()` imports it lazily and keeps it in `view.explorer`), is the tenth interactive UI,
   built on the windows' kit like `AthenaExplorer`. The Items and Schema tabs read the open table the first time
   they're shown for it (`loaded`). `.claude/skills/demo/ddb_explorer_shots.py` makes the guide's `ddb-explorer*`
-  figures in a real JupyterLab on shots.py's acme scene.
+  figures in a real JupyterLab on shots.py's acme scene, and `tour_shots.py`'s `play_dynamodb` the
+  `ddb-explorer-tour`.
 - **Python 3.11 floor.** CI runs 3.11–3.14; ruff `target-version = "py311"`; `requires-python = ">=3.11"`. Users
   may still have pandas 2 (the `data` extra asks for `pandas>=2`), so code must work with pandas 2 and 3, though the
   dev pins test pandas 3.
@@ -1626,7 +1627,7 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   `*_explorer_shots.py`, each in its `<service>_explorer.md`, and the agent's chat window's
   (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which
   plays a scripted model over demo.py's Lambda functions. The agent's 🔌 mcp panel (`agent-mcp*`, in `agent.md`) comes from `agent_mcp_shots.py`, which runs `tests/fake_mcp_server.py` as a real stdio server beside the notebook. Every window also has an animated tour like
-  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`,
+  `explorer-tour` (`lambda-explorer-tour`, `kb-explorer-tour`, `sfn-explorer-tour`, `apigw-explorer-tour`, `msg-explorer-tour`, `ddb-explorer-tour`,
   `chat-tour`, `agent-chat-tour`, the last with the agent's scripted model), at the top of its window's guide
   after the intro, from `tour_shots.py`: a drawn pointer clicks and types through
   the window on the same demo data, each visit a `play_*` function. Remake the affected figures and tours when

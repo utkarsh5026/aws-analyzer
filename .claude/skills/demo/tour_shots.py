@@ -39,6 +39,7 @@ sys.path[:0] = [str(HERE)]
 import agent_chat_shots  # noqa: E402
 import apigw_explorer_shots  # noqa: E402
 import chat_shots  # noqa: E402
+import ddb_explorer_shots  # noqa: E402
 import kb_explorer_shots  # noqa: E402
 import lambda_explorer_shots  # noqa: E402
 import msg_explorer_shots  # noqa: E402
@@ -314,6 +315,24 @@ def play_messaging(page: Any, tour: Tour) -> None:
     tour.hold(2.4)
 
 
+def play_dynamodb(page: Any, tour: Tour) -> None:
+    """
+    The Overview, the Tables tab narrowed to the tables to fix and acme-sessions' unused capacity, acme-app's Items
+    tab with CUSTOMER#1042's orders read by typing its key and one opened, then the Schema tab with status counted.
+    """
+    tour.hold(2.0)
+    tour.click(tab(page, "ddx", "Tables"), hold=0.8)
+    tour.click(page.locator(".ddx-app .ddx-page:visible button.ddx-chip", has_text="To fix").first, hold=0.8)
+    tour.click(row(page, "ddx", "acme-sessions", within=".ddx-page:visible"), hold=2.8, at=0.2)
+    tour.click(row(page, "ddx", "acme-app", within=".ddx-page:visible"), hold=1.0, at=0.2)
+    tour.click(tab(page, "ddx", "Items"), hold=1.6)
+    tour.type(page.locator(".ddx-app input[placeholder^='sk starts']"), "ORDER#", enter=False, hold=0.3)
+    tour.type(page.locator(".ddx-app input[placeholder^='pk =']"), "CUSTOMER#1042", hold=1.8)
+    tour.click(row(page, "ddx", "7731", within=".ddx-page:visible"), hold=2.8, at=0.2)
+    tour.click(tab(page, "ddx", "Schema"), hold=1.8)
+    tour.click(row(page, "ddx", "status", within=".ddx-page:visible"), hold=3.2, at=0.2)
+
+
 def play_chat(page: Any, tour: Tour) -> None:
     """
     Two questions answered with their sources, the cited passages opened, six test questions run in the Test tab, then
@@ -392,6 +411,8 @@ TOURS = [
            busy_in(".agx-app", ".agx-status"), play_apigateway),
     Window("msg-explorer-tour", "messaging_explorer", msg_explorer_shots.NOTEBOOK_CODE, ".mgx-app",
            busy_in(".mgx-app", ".mgx-status"), play_messaging),
+    Window("ddb-explorer-tour", "dynamodb_explorer", ddb_explorer_shots.NOTEBOOK_CODE, ".ddx-app",
+           busy_in(".ddx-app", ".ddx-status"), play_dynamodb),
     Window("chat-tour", "bedrock_chat", chat_shots.NOTEBOOK_CODE, ".kbc-app", chat_busy(), play_chat),
     Window("agent-chat-tour", "agent", agent_chat_shots.NOTEBOOK_CODE, ".agc-app", agent_busy(), play_agent,
            loading_frames=AGENT_WORKING_FRAMES),

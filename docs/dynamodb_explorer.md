@@ -20,6 +20,12 @@ description: "How to click through Amazon DynamoDB tables in a SageMaker noteboo
 The examples use acme's tables: `acme-app` holds each customer's profile, orders and support tickets under one partition key, `pk`, with a `by-status` index, and `acme-sessions` pays for far more capacity than it uses. The screenshots are the real window in JupyterLab on demo data. For reports you run from code, see the [DynamoDB guide](dynamodb.md).
 { .muted }
 
+![The DynamoDB explorer in a notebook, animated: it opens on the Overview of every table; the pointer opens the Tables tab, picks the To fix chip and clicks acme-sessions, whose reads peaked at 5% of its provisioned capacity; it opens acme-app and the Items tab, types ORDER# as the sort key prefix and CUSTOMER#1042 as the partition key, and clicks order 7731 for all of it; then the Schema tab, where a click on status counts its six values](images/ddb-explorer-tour-light.webp#only-light){ width="984" height="863" loading=lazy }
+![The DynamoDB explorer in a notebook, animated: it opens on the Overview of every table; the pointer opens the Tables tab, picks the To fix chip and clicks acme-sessions, whose reads peaked at 5% of its provisioned capacity; it opens acme-app and the Items tab, types ORDER# as the sort key prefix and CUSTOMER#1042 as the partition key, and clicks order 7731 for all of it; then the Schema tab, where a click on status counts its six values](images/ddb-explorer-tour-dark.webp#only-dark){ width="984" height="863" loading=lazy }
+/// caption
+**`ddb.explore()`**: from the table that costs too much, to one customer's orders, to what an attribute holds.
+///
+
 ## Open it { #open }
 
 <div class="steps" markdown>
