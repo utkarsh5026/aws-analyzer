@@ -351,6 +351,68 @@ class AsyncConfig:
 
 
 @dataclass
+class AsyncCounts:
+    """
+    What CloudWatch counted of a function's asynchronous events over a window: the events it was sent
+    (AsyncEventsReceived), the ones Lambda gave up on whether or not something kept them (AsyncEventsDropped), and
+    the ones it couldn't hand to the function's dead-letter queue (DeadLetterErrors) or on-failure destination
+    (DestinationDeliveryFailures).
+    """
+
+    received: float = 0.0
+    dropped: float = 0.0
+    dead_letter_errors: float = 0.0
+    destination_failures: float = 0.0
+
+
+@dataclass
+class QueueState:
+    """
+    An SQS queue as GetQueueAttributes describes it now: `visible` messages wait to be read
+    (ApproximateNumberOfMessages) and `in_flight` ones are being read or hidden after a failed read
+    (ApproximateNumberOfMessagesNotVisible); it keeps them `retention` seconds (MessageRetentionPeriod) and moves one
+    that failed `max_receives` reads to `dead_letter_arn` (its RedrivePolicy). `oldest_age` is its oldest message's age
+    in seconds from CloudWatch, None without a recent value, and `error` the error code when it couldn't be read.
+    """
+
+    name: str
+    arn: str
+    visible: int = 0
+    in_flight: int = 0
+    retention: int = 4 * 86400
+    oldest_age: float | None = None
+    dead_letter_arn: str | None = None
+    max_receives: int | None = None
+    dead_letter: QueueState | None = None
+    error: str | None = None
+
+    @property
+    def held(self) -> int:
+        return self.visible + self.in_flight
+
+
+@dataclass
+class EventFate:
+    """
+    What happened to some of a function's failed events: `outcome` is 'lost' (nothing keeps them), 'kept' (a queue
+    holds them), 'waiting' (they'll be tried again), 'at risk' (they'll be deleted before long), 'safe' (none of
+    them were given up on) or 'unknown' (the caller had them, or the source couldn't be read). `source` is what sent
+    them ('S3 bucket acme-uploads'), `count` how many (None when it can't be counted) and `basis` where the number came
+    from; `place` names the queue that holds them and `queue` is the queue it's about, which findings read for its ARN
+    and retention.
+    """
+
+    outcome: str
+    source: str
+    headline: str
+    says: str
+    basis: str = ""
+    count: int | None = None
+    place: str = ""
+    queue: QueueState | None = None
+
+
+@dataclass
 class FunctionDetail:
     """
     Everything function_info() shows about one function. Sections that couldn't be read are in errors.
@@ -399,7 +461,8 @@ class LogEvent:
 class ErrorGroup:
     """
     Errors that share a cause: the same kind and message, once numbers and IDs are blanked out. `versions` are the
-    versions of the function that logged them, newest first, read from their log streams' names ('$LATEST', '3').
+    versions of the function that logged them, newest first, read from their log streams' names ('$LATEST', '3'), and
+    `times` when each of its lines was logged, oldest first.
     """
 
     kind: str  # 'Timeout', 'Out of memory', 'KeyError', 'Runtime.ImportModuleError', 'Logged error', ...
@@ -410,6 +473,7 @@ class ErrorGroup:
     example: str  # one full message
     request_ids: list[str] = field(default_factory=list)  # a few, newest first
     versions: list[str] = field(default_factory=list)
+    times: list[datetime] = field(default_factory=list)
 
 
 @dataclass
@@ -428,6 +492,12 @@ class CodeFrame:
 
 @dataclass
 class ErrorReport:
+    """
+    errors()' answer: the error lines found and grouped by cause, CloudWatch's numbers over the same window, and
+    `fates`, what happened to the failed events by what calls the function (event_fates), with `fate_errors` naming
+    what it couldn't read.
+    """
+
     function: Function
     log_group: str
     since: datetime
@@ -439,6 +509,8 @@ class ErrorReport:
     covered_from: datetime | None = None
     metrics: FunctionMetrics | None = None  # CloudWatch over the same window
     errors: dict[str, str] = field(default_factory=dict)
+    fates: list[EventFate] = field(default_factory=list)
+    fate_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

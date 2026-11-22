@@ -17,6 +17,7 @@ from ..models import AccountLimits, ChangeEffect, Function, FunctionDetail, Func
 from .text import _cli, _reason, _region_flag, _window
 from .functions import runtime_status
 from .cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
+from .fates import keep_failed_command
 
 
 _SECRET_NAME_RE = re.compile(r"PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL", re.I)
@@ -404,14 +405,11 @@ def function_findings(
                 )))
     asynchronous = list(dict.fromkeys(f"{t.kind} {t.source}".strip() for t in detail.triggers if t.asynchronous))
     if asynchronous and detail.async_config is not None and not (detail.async_config.on_failure or fn.dead_letter):
-        account = fn.arn.split(":")[4] if fn.arn.count(":") >= 5 else "123456789012"
-        queue = f"arn:aws:sqs:{fn.region or 'us-east-1'}:{account}:{fn.name}-failed"
         sources = ", ".join(asynchronous[:3]) + (f" and {len(asynchronous) - 3} more" if len(asynchronous) > 3 else "")
         found.append(("info", (
             f"Events from {sources} that still fail after {detail.async_config.retries} retries are "
-            "dropped: nothing keeps them. Send them to a queue to look at later (create it first): aws lambda "
-            f"put-function-event-invoke-config {cli} --destination-config "
-            f"'{{\"OnFailure\":{{\"Destination\":\"{queue}\"}}}}'."
+            "dropped: nothing keeps them. Send them to a queue to look at later (create it first): "
+            f"{keep_failed_command(fn)}."
         )))
     group = detail.log_group
     if group is not None and group.retention_days is None and (group.stored_bytes or 0) >= 100 * MB:

@@ -1272,7 +1272,7 @@ window.AA_CLIPS = {
  },
  "lambda-errors": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.errors(\"orders-etl\"): ui.errors(\"orders-etl\"): three different reasons to fail, each with what to do and the run to look at.",
+  "summary": "ui.errors(\"orders-etl\"): ui.errors(\"orders-etl\"): the answer first, when it failed hour by hour, where the failed events went, and a card per cause with what to do about it.",
   "video": "",
   "scenes": [
    {
@@ -1285,13 +1285,13 @@ window.AA_CLIPS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 2347
+      "h": 3357
      }
     ],
     "captions": [
      [
       2.92,
-      "Three different reasons to fail, each with what to do and the run to look at."
+      "The answer first, when it failed hour by hour, where the failed events went, and a card per cause with what to do about it."
      ]
     ]
    }

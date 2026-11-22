@@ -289,6 +289,7 @@ def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
         if group is None:
             group = groups[key] = ErrorGroup(kind, summary, 0, event.time, event.time, event.message.strip())
         group.count += 1
+        group.times.append(event.time)
         group.first = min(group.first, event.time)
         if event.time >= group.last:
             group.last, group.message, group.example = event.time, summary, event.message.strip()
@@ -301,7 +302,24 @@ def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
         ids = [rid for _, rid in sorted(seen[key], reverse=True)]
         group.request_ids = list(dict.fromkeys(ids))[:5]
         group.versions = list(dict.fromkeys(version for _, version in sorted(ran[key], reverse=True)))
+        group.times.sort()
     return sorted(groups.values(), key=lambda g: (-g.count, -g.last.timestamp()))
+
+
+def time_slots(times: Iterable[datetime], since: datetime, until: datetime, slots: int) -> list[int]:
+    """
+    How many of `times` fall in each of `slots` equal slices of the window from `since` to `until`, oldest first:
+    what a cause's row of dots draws. Times outside the window are left out.
+    """
+    counts = [0] * slots
+    span = (until - since).total_seconds()
+    if span <= 0 or slots <= 0:
+        return counts
+    for moment in times:
+        offset = (moment - since).total_seconds()
+        if 0 <= offset <= span:
+            counts[min(slots - 1, int(offset / span * slots))] += 1
+    return counts
 
 
 def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
@@ -369,6 +387,17 @@ def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
             f"The most common {'error' if not covered else 'other error'} happened {_times(g.count)} (the last "
             f"{human_age(g.last, report.until)}): {_clip(g.message, 160).rstrip('.')}.{see}"
         )))
+    return found + window_findings(report)
+
+
+def window_findings(report: ErrorReport) -> list[tuple[str, str]]:
+    """
+    What the window says beyond its causes: failed calls that left no error line, and calls throttled before they
+    ran.
+    """
+    fn = report.function
+    name = fn.name
+    found: list[tuple[str, str]] = []
     m = report.metrics
     window = _window((report.until - report.since).total_seconds())
     if m is not None and m.errors >= 1 and not report.groups and "logs" not in report.errors:

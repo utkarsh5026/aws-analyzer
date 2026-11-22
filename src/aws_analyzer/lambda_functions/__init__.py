@@ -64,9 +64,10 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
-    AccountLimits, Activity, Alias, AsyncConfig, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
-    ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
-    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
+    AccountLimits, Activity, Alias, AsyncConfig, AsyncCounts, ChangeEffect, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, CodeFrame, DailyUsage, ErrorGroup,
+    ErrorReport, EventFate, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
+    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, QueueState, RuntimeStatus,
+    SavedPage,
     SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
@@ -77,6 +78,12 @@ from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
 from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
+    time_slots, window_findings,
+)
+from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
+from .analysis.causes import (
+    CauseAdvice, CauseState, ChartColumns, Verdict, calls_after, cause_advice, cause_state, chart_columns,
+    column_counts, errors_verdict, failure_pattern,
 )
 from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
@@ -158,6 +165,9 @@ __all__ = [
     "AccountLimits",
     "Alias",
     "AsyncConfig",
+    "AsyncCounts",
+    "EventFate",
+    "QueueState",
     "AwsCall",
     "CodeFile",
     "CodeMatch",
@@ -222,6 +232,10 @@ __all__ = [
     "diff_packages",
     "diff_settings",
     "error_findings",
+    "event_fates",
+    "fate_findings",
+    "parse_async_config",
+    "parse_redrive",
     "explore",
     "function_findings",
     "change_effect",
@@ -229,6 +243,19 @@ __all__ = [
     "function_look",
     "function_monthly_cost",
     "failing_frame",
+    "time_slots",
+    "CauseAdvice",
+    "CauseState",
+    "ChartColumns",
+    "Verdict",
+    "calls_after",
+    "cause_advice",
+    "cause_state",
+    "chart_columns",
+    "column_counts",
+    "errors_verdict",
+    "failure_pattern",
+    "window_findings",
     "group_errors",
     "handler_file",
     "human_age",

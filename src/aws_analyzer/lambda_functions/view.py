@@ -42,8 +42,10 @@ from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
 from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
-from .analysis.errors import _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings
-from .analysis.logs import readable_line
+from .analysis.errors import (
+    _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings, window_findings,
+)
+from .analysis.fates import fate_findings
 from .analysis.word_search import WordSearch, word_search
 from .analysis.performance import memory_to_try, percentile, performance_findings
 from .analysis.package import (
@@ -61,6 +63,8 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.causes import _cause_blocks
+from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
 
 if TYPE_CHECKING:
@@ -830,28 +834,28 @@ class LambdaView(_BaseView):
         """
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
-        found = error_findings(report)
-        timeouts = sum(g.count for g in report.groups if g.kind == "Timeout")
-        out_of_memory = sum(g.count for g in report.groups if g.kind == "Out of memory")
+        has_cases = bool(report.groups) and not for_window
+        found = fate_findings(fn, report.fates) + (window_findings(report) if has_cases else error_findings(report))
         last = max((g.last for g in report.groups), default=None)
         cards: list[tuple[str, ...]] = [
             ("Failed calls (CloudWatch)", _count(round(m.errors)) if m is not None else "-"),
             ("Calls", _count(round(m.invocations)) if m is not None else "-"),
             ("Error rate", _pct(m.error_rate) if m is not None and m.invocations else "-"),
-            ("Error lines", _count(report.errors_found)),
             ("Causes", _count(len(report.groups))),
-            ("Timeouts", _count(timeouts), "warn" if timeouts else ""),
-            ("Out of memory", _count(out_of_memory), "warn" if out_of_memory else ""),
             ("Last error", human_age(last, report.until) if last else "-"),
         ]
         if m is not None and m.throttles:
             cards.insert(3, ("Throttled calls", _count(round(m.throttles)), "warn"))
+        if lost_events(report):
+            cards.insert(3, ("Events lost", _count(lost_events(report)), "bad"))
         sub = " · ".join(filter(None, [
             f"log group {report.log_group}",
             f"the last {window} (since {_fmt_dt(report.since, zone=True)})",
             fn.region if fn.region != self.core.region else "",
         ]))
-        blocks: list[Any] = [_Title(f"Errors in {fn.name}", sub), _Cards(cards)]
+        cases = _cause_blocks(report, run_call=lambda rid: self._call_for(
+            "logs", fn, request_id=rid, **_since_arg(since, "24h"))) if has_cases else []
+        blocks: list[Any] = [_Title(f"Errors in {fn.name}", sub), *cases[:1], _Cards(cards)]
         blocks += self._log_notes(report.errors, fn, report.log_group)
         if report.truncated:
             blocks.append(_Note(
@@ -860,28 +864,17 @@ class LambdaView(_BaseView):
             ))
         empty = (f"No errors in the last {window}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
-        blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
-        if report.groups and not for_window:
-            lines = sum(g.count for g in report.groups)
-            blocks.append(_Table(
-                ["Cause", "Times", "Last", "First", "Example"],
-                [[g.kind, _count(g.count), human_age(g.last, report.until), human_age(g.first, report.until),
-                  _clip(g.message, 300)] for g in report.groups],
-                bars=[_share(g.count, lines) for g in report.groups], bar_label="Share",
-                title="Errors by cause (from its log lines: a failed call can log more than one)",
-            ))
-            blocks.append(_Table(
-                [f"Time ({_tz_label()})", "Request ID", "Line"],
-                [[_stamp(e.time), e.request_id or "-", _clip(readable_line(e.message).strip().splitlines()[0], 300)]
-                 for e in report.newest],
-                title="The newest error lines", max_rows=0,
-            ))
+        blocks += cases[1:2] + _fates_blocks(report)
+        if found or not has_cases:
+            blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
+        blocks += cases[2:]
+        timeouts = any(g.kind in ("Timeout", "Out of memory") for g in report.groups)
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)
         if newest is not None:
             steps.append((self._call_for("logs", fn, request_id=newest.request_id, **_since_arg(since, "24h")),
                           "the whole run behind the newest error"))
-        if timeouts or out_of_memory:
+        if timeouts:
             steps.append((self._call_for("performance", fn, **_since_arg(since, "24h")),
                           "run times and memory: how close runs come to the limits"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))

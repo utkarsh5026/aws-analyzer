@@ -30,9 +30,10 @@ from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 
 from .prices import LAMBDA_PRICES
 from .activity import _ActivityReads
+from .fate_reads import _FateReads
 from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
+    AccountLimits, Alias, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency,
     SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
@@ -40,6 +41,7 @@ from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
 )
 from .analysis.overview import Overview
+from .analysis.fates import parse_async_config
 from .analysis.errors import _filter_pattern, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
 from .analysis.runs import RunTable, run_table
@@ -193,7 +195,7 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
+class LambdaAnalyzer(_ActivityReads, _FateReads, _BaseAnalyzer):
     """
     Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
 
@@ -201,7 +203,7 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
     regions='all'. Methods about one function take its name, 'name:alias', an ARN or a console link, and region=
     when it's in another region (an ARN or a link says so itself, and a name overview() found in one other region
     is looked for there). `prices` overrides LAMBDA_PRICES. `client` is the Lambda client and `clients` other boto3
-    clients by service name ('lambda', 'cloudwatch', 'logs', 'ec2'): a client, used in every region, or a function
+    clients by service name ('lambda', 'cloudwatch', 'logs', 'ec2', 'sqs'): a client, used in every region, or a function
     that makes one for a region (e.g. for tests). `downloads` is the folder download() saves packages in without a
     path= (DOWNLOADS, 'lambda-downloads' next to the notebook).
     """
@@ -252,6 +254,7 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
                         ),
                         "logs": lambda: self.session.client("logs", region_name=region, config=self._config),
                         "ec2": lambda: self.session.client("ec2", region_name=region, config=self._config),
+                        "sqs": lambda: self.session.client("sqs", region_name=region, config=self._config),
                     }
                     try:
                         self._clients[(name, region)] = makers[name]()
@@ -744,14 +747,7 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
         detail.triggers += policy_triggers
         config = read("async", lambda: client.get_function_event_invoke_config(FunctionName=name, **qualified),
                       missing={})
-        if config is not None:
-            destinations = config.get("DestinationConfig") or {}
-            detail.async_config = AsyncConfig(
-                int(config.get("MaximumRetryAttempts", 2)),
-                int(config.get("MaximumEventAgeInSeconds", 6 * 3600)),
-                (destinations.get("OnSuccess") or {}).get("Destination"),
-                (destinations.get("OnFailure") or {}).get("Destination"),
-            )
+        detail.async_config = parse_async_config(config)
         detail.versions = read("versions", lambda: self.versions(name, where)) or []
         aliases = read("aliases", lambda: _pages(client, "list_aliases", "Aliases", FunctionName=name))
         detail.aliases = [
@@ -1152,14 +1148,16 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
         limit: int | None = 10_000,
         region: str | None = None,
         progress: Callable[..., None] | None = None,
+        fates: bool = True,
     ) -> ErrorReport:
         """
         A function's errors from `since` to `until`, from its logs and grouped by cause (group_errors), with
-        CloudWatch's count of failed and throttled calls over the same window.
+        CloudWatch's count of failed and throttled calls over the same window, and with fates=True what happened to
+        the failed events (event_fates: dropped, kept in a queue, waiting to be tried again).
         """
         fn = self.function(ref, region=region)
         start, end = self.time_range(since, until)
-        return self._errors(fn, start, end, limit=limit, progress=progress)
+        return self._errors(fn, start, end, limit=limit, progress=progress, fates=fates)
 
     def _errors(
         self,
@@ -1169,6 +1167,7 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
         *,
         limit: int | None = 10_000,
         progress: Callable[..., None] | None = None,
+        fates: bool = True,
     ) -> ErrorReport:
         """
         errors() for a function already read (no GetFunction).
@@ -1195,6 +1194,8 @@ class LambdaAnalyzer(_ActivityReads, _BaseAnalyzer):
             report.errors["metrics"] = _error_code(exc)
         except BotoCoreError as exc:
             report.errors["metrics"] = type(exc).__name__
+        if fates:
+            report.fates, report.fate_errors = self._fates(fn, start, end)
         return report
 
     def performance(
