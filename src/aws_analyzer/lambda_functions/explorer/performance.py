@@ -43,7 +43,7 @@ class _PerformanceTab:
         self.slow_rows_box.children = []
         self._counted = 0
         self._status(f"Reading {fn.name}'s REPORT lines…", busy=True, owner="performance")
-        self._later("perf", lambda: self.core._performance(fn, start, end,
+        self._later("perf", lambda: self.core._performance(fn, start, end, compare=True,
                                                            progress=lambda n: setattr(self, "_counted", n)),
                     self._got_perf, self._perf_failed,
                     counting=f"Reading {fn.name}'s REPORT lines… {{n}} read so far", owner="performance")

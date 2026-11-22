@@ -31,10 +31,11 @@ from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 from .prices import LAMBDA_PRICES
 from .activity import _ActivityReads
 from .fate_reads import _FateReads
+from .performance_reads import _PerformanceReads
 from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
     AccountLimits, Alias, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
-    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency,
+    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, ProvisionedConcurrency,
     SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
@@ -43,7 +44,7 @@ from .analysis.functions import (
 from .analysis.overview import Overview
 from .analysis.fates import parse_async_config
 from .analysis.errors import _filter_pattern, classify_error, group_errors, request_id_of
-from .analysis.logs import LogPage, LogRun, parse_report, split_runs
+from .analysis.logs import LogPage, LogRun, split_runs
 from .analysis.runs import RunTable, run_table
 from .analysis.word_search import runs_matching, search_hits, word_search
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
@@ -63,8 +64,6 @@ _ERROR_PATTERN = (
     '?ERROR ?Error ?error ?Exception ?exception ?Traceback ?FATAL ?CRITICAL ?panic ?errorType ?"Task timed out" '
     '?timeout ?"Runtime exited" ?"signal: killed"'
 )
-
-_REPORT_PATTERN = '?"REPORT RequestId" ?"platform.report"'
 
 _PACKAGES_KEPT = 2
 
@@ -195,7 +194,7 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer(_ActivityReads, _FateReads, _BaseAnalyzer):
+class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _BaseAnalyzer):
     """
     Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
 
@@ -1197,55 +1196,6 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _BaseAnalyzer):
         if fates:
             report.fates, report.fate_errors = self._fates(fn, start, end)
         return report
-
-    def performance(
-        self,
-        ref: str,
-        *,
-        since: Any = "24h",
-        until: Any = None,
-        limit: int | None = 5_000,
-        region: str | None = None,
-        progress: Callable[..., None] | None = None,
-    ) -> Performance:
-        """
-        Every run from `since` to `until` (the newest `limit` when there are more), from the REPORT line Lambda
-        logs after each: run time, billed time, memory used, and the start-up time of cold starts.
-        """
-        fn = self.function(ref, region=region)
-        start, end = self.time_range(since, until)
-        return self._performance(fn, start, end, limit=limit, progress=progress)
-
-    def _performance(
-        self,
-        fn: Function,
-        start: datetime,
-        end: datetime,
-        *,
-        limit: int | None = 5_000,
-        progress: Callable[..., None] | None = None,
-    ) -> Performance:
-        """
-        performance() for a function already read (no GetFunction).
-        """
-        perf = Performance(fn, fn.log_group, start, end)
-        try:
-            events, perf.truncated, perf.covered_from = self._filter(
-                fn.log_group, fn.region, start, end, _REPORT_PATTERN, limit, progress=progress)
-        except ClientError as exc:
-            perf.errors["logs"] = _error_code(exc)
-            return perf
-        except BotoCoreError as exc:
-            perf.errors["logs"] = type(exc).__name__
-            return perf
-        runs = []
-        for event in events:
-            run = parse_report(event.message, event.time)
-            if run is not None:
-                run.stream = event.stream
-                runs.append(run)
-        perf.invocations = sorted(runs, key=lambda r: r.time or start, reverse=True)
-        return perf
 
     # ------------------------------------------------------------------ code
 

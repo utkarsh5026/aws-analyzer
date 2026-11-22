@@ -1424,7 +1424,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 14.3,
+    "dur": 14.8,
     "chapter": "Logs",
     "step": 4,
     "steps": 6,
@@ -1434,7 +1434,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-logs",
       "w": 1476,
-      "h": 1901
+      "h": 1974
      }
     ],
     "captions": [
@@ -1447,7 +1447,7 @@ window.AA_TOURS = {
       "A day of runs: <b>four failed</b>, one of them a timeout,"
      ],
      [
-      10.7,
+      11.2,
       "and a click opens a run to its lines and <b>its traceback</b>."
      ]
     ]
@@ -1464,21 +1464,21 @@ window.AA_TOURS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2874
+      "h": 4194
      }
     ],
     "captions": [
      [
       0,
-      "<b>How close do its runs come to the limits?</b>"
+      "<b>Did it get slower?</b> A verdict first, then every run."
      ],
      [
       3.08,
-      "They use at most 182 MB of the 1,024 MB it has,"
+      "<b>Three runs hung</b> at the 60 s timeout; the rest took under 9 s,"
      ],
      [
       11.4,
-      "and <b>three ran into the 60 s timeout</b>."
+      "runs are <b>28% slower than the day before</b>, and 256 MB would do."
      ]
     ]
    },

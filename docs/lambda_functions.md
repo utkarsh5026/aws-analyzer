@@ -92,7 +92,7 @@ What's wrong
 Cost and code
 { .qgroup }
 
--   [Is it paying for memory it never uses?](#performance) `ui.performance("orders-etl")`{ .long }
+-   [Did it get slower, or is it paying for memory it never uses?](#performance) `ui.performance("orders-etl")`{ .long }
 -   [What does its code actually do?](#how-it-works) `ui.how_it_works("orders-etl")`{ .long }
 -   [It worked last week. What changed?](#diff) `ui.diff("orders-etl")`
 
@@ -288,8 +288,8 @@ ui.logs("orders-etl", request_id="c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")   # one
 ui.logs("orders-etl", since="24h", n=200)
 ```
 
-![logs("orders-etl", since="24h"): the newest 50 lines of the last 24 hours grouped into 17 runs, 4 of them failed; cards for runs, failed runs, lines shown, error lines and the newest line; a note that reading stopped at 300 lines; then the runs, newest first, each with its status, start, run time against the 60 s timeout, memory used, cold start and first line; a failed run's KeyError: 'customer_id' with its traceback, and a run that timed out after 60.0 s](images/lambda-logs-light.webp#only-light){ width="984" height="1267" loading=lazy }
-![logs("orders-etl", since="24h"): the newest 50 lines of the last 24 hours grouped into 17 runs, 4 of them failed; cards for runs, failed runs, lines shown, error lines and the newest line; a note that reading stopped at 300 lines; then the runs, newest first, each with its status, start, run time against the 60 s timeout, memory used, cold start and first line; a failed run's KeyError: 'customer_id' with its traceback, and a run that timed out after 60.0 s](images/lambda-logs-dark.webp#only-dark){ width="984" height="1267" loading=lazy }
+![logs("orders-etl", since="24h"): the newest 50 lines of the last 24 hours grouped into 17 runs, 4 of them failed; cards for runs, failed runs, lines shown, error lines and the newest line; a note that reading stopped at 300 lines; then the runs, newest first, each with its status, start, run time against the 60 s timeout, memory used, cold start and first line; a failed run's KeyError: 'customer_id' with its traceback, and a run that timed out after 60.0 s](images/lambda-logs-light.webp#only-light){ width="984" height="1316" loading=lazy }
+![logs("orders-etl", since="24h"): the newest 50 lines of the last 24 hours grouped into 17 runs, 4 of them failed; cards for runs, failed runs, lines shown, error lines and the newest line; a note that reading stopped at 300 lines; then the runs, newest first, each with its status, start, run time against the 60 s timeout, memory used, cold start and first line; a failed run's KeyError: 'customer_id' with its traceback, and a run that timed out after 60.0 s](images/lambda-logs-dark.webp#only-dark){ width="984" height="1316" loading=lazy }
 /// caption
 `ui.logs("orders-etl", since="24h")`: a day of runs, newest first, the failed one and the timeout among them.
 ///
@@ -323,20 +323,29 @@ The report starts with how many runs match and how they went, says when one reac
 
 ### Run times, memory and cold starts { #performance }
 
-`performance()` shows how long runs take against the timeout, the memory they use against what they have, and the size that would do.
+`performance()` says how long a typical run takes, whether runs got slower, and the memory they use against what they have.
 { .gist }
 
-It reads the REPORT line Lambda logs at the end of every run: how long it ran and was billed for, the memory it used, and how long a cold start spent starting up.
+It reads the REPORT line Lambda logs at the end of every run, for the last 24 hours and the 24 hours before. It opens with a verdict, then shows every run over time, with the timeouts in a lane of their own so the other runs stay to scale.
 
 ```python
 ui.performance("orders-etl")
 ```
 
-![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; a dot per run under the timeout line, three of them on it; a memory bar marked at 256 MB; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-light.webp#only-light){ width="984" height="1916" loading=lazy }
-![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; a dot per run under the timeout line, three of them on it; a memory bar marked at 256 MB; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-dark.webp#only-dark){ width="984" height="1916" loading=lazy }
+![performance("orders-etl"): a verdict that 3 runs hung until the 60 s timeout while every other run finished within 8.66 s, and that runs are slower than the day before; cards for runs, the typical run, timeouts, memory, cold starts and cost; findings about the hung runs, the slowdown, 256 MB being enough, memory climbing in one container and cold starts; every run over the day with the timeouts in a red lane above; a table comparing the day with the one before; a histogram of run times with a gap up to the timeout; cold starts against warm runs; a memory bar marked at 256 MB; memory per container, one climbing; and the slowest runs that finished](images/lambda-performance-light.webp#only-light){ width="984" height="2796" loading=lazy }
+![performance("orders-etl"): a verdict that 3 runs hung until the 60 s timeout while every other run finished within 8.66 s, and that runs are slower than the day before; cards for runs, the typical run, timeouts, memory, cold starts and cost; findings about the hung runs, the slowdown, 256 MB being enough, memory climbing in one container and cold starts; every run over the day with the timeouts in a red lane above; a table comparing the day with the one before; a histogram of run times with a gap up to the timeout; cold starts against warm runs; a memory bar marked at 256 MB; memory per container, one climbing; and the slowest runs that finished](images/lambda-performance-dark.webp#only-dark){ width="984" height="2796" loading=lazy }
 /// caption
-`ui.performance("orders-etl")`: runs use at most 182 MB of the 1,024 MB it has, and three ran into the 60 s timeout.
+`ui.performance("orders-etl")`: three runs hung until the 60 s timeout while every other run finished within 9 s, and runs are slower than the day before.
 ///
+
+??? more "What else the report shows"
+
+    - **Compared with the 24 hours before**: runs, the typical and 1-in-10 run time, timeouts, cold starts, memory and cost, each with its change. `compare=False` skips that read.
+    - **By version**, when runs came from more than one (a function called through a version or alias), or **before and since its last change** when it changed inside the window. A version that's a fifth slower is a finding, with the `diff()` to run.
+    - **How long the runs that finished take**, with the stretch up to the timeout that no run reached: timeouts with nothing near them are stuck runs, and a longer timeout won't help.
+    - **Cold starts against warm runs**: the start-up a cold one spends first, and its share of all run time.
+    - **Memory per container**: the memory each run used, run after run, in each log stream. Memory that keeps climbing means something kept between runs grows, and the finding says about how many runs are left before Lambda kills one.
+    - The slowest runs that finished, against the typical one, and the percentiles, folded.
 
 !!! tip "Worth knowing"
 
@@ -532,7 +541,7 @@ lam.versions("orders-etl")                        # Version per published versio
 diff = lam.diff("orders-etl", 3)                  # VersionDiff: .files (FileChange: lines, definitions), .libraries, .settings
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect` (its calls and errors before and after its last change), `cause_search` (what to search the logs for to find a cause's runs), `code_frames` and `failing_frame` (the lines of the package a traceback names), `parse_report`, `split_runs` (log lines grouped into runs), `run_timeline` (runs counted by slice of time), `slow_cutoff` (the run time of the slowest 10%), `run_console_url` and `run_insights_query` (a run in the AWS console and in Logs Insights), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files), `read_sources` (`sources()`: the text of a .zip's own source files), `search_package` and `find_symbol_in` (`search_code()` and `find_symbol()` on a .zip's bytes), `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (`diff()` on two .zip files you already have), `diff_settings`, `version_before` (the version `diff()` compares with), `stream_version` (the version a log stream's name says ran), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`, `diff_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect` (its calls and errors before and after its last change), `cause_search` (what to search the logs for to find a cause's runs), `code_frames` and `failing_frame` (the lines of the package a traceback names), `parse_report`, `split_runs` (log lines grouped into runs), `run_timeline` (runs counted by slice of time), `slow_cutoff` (the run time of the slowest 10%), `run_console_url` and `run_insights_query` (a run in the AWS console and in Logs Insights), `line_level`, `percentile`, `suggest_memory`, `run_stats`, `performance_verdict`, `run_groups` and `slowdown` (runs by version or around the last change), `time_slices`, `run_time_bins`, `cold_vs_warm`, `memory_by_container` (memory run after run per container), `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files), `read_sources` (`sources()`: the text of a .zip's own source files), `search_package` and `find_symbol_in` (`search_code()` and `find_symbol()` on a .zip's bytes), `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (`diff()` on two .zip files you already have), `diff_settings`, `version_before` (the version `diff()` compares with), `stream_version` (the version a log stream's name says ran), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`, `diff_findings`.
 
 ```python
 from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory
@@ -675,7 +684,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
-| `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
+| `performance(name, since="24h", region=None, limit=5000, compare=True)` | A verdict, every run over time, how it compares with the 24 hours before and between versions, cold starts against warm runs, memory per container, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
 | `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |

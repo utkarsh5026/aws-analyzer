@@ -342,6 +342,7 @@ _EXTRA_CSS = """\
 .lmb .ef .ef-b{margin-top:auto;padding-top:6px;border-top:1px dashed rgba(127,127,127,.3);font:11px var(--lmb-mono);opacity:.6}
 .lmb .vd{margin:0 0 14px;padding:12px 16px;border:1px solid rgba(127,127,127,.3);border-left:4px solid #ef4444;border-radius:8px;background:rgba(239,68,68,.05);max-width:980px;line-height:1.5}
 .lmb .vd.ok{border-left-color:#10b981;background:rgba(16,185,129,.05)}
+.lmb .vd.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.07)}
 .lmb .vd b{display:block;font-size:15px;font-weight:650}
 .lmb .vd.bad b{color:#b91c1c}
 .lmb .vd .vd-d{display:block;font-size:12.5px;opacity:.75;margin-top:2px}

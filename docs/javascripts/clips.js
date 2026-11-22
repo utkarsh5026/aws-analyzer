@@ -1304,7 +1304,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 14.3,
+    "dur": 14.8,
     "chapter": "AWS Lambda",
     "label": "AWS Lambda",
     "code": "ui.logs(\"orders-etl\", since=\"24h\")",
@@ -1312,7 +1312,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-logs",
       "w": 1476,
-      "h": 1901
+      "h": 1974
      }
     ],
     "captions": [
@@ -1326,7 +1326,7 @@ window.AA_CLIPS = {
  },
  "lambda-performance": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.performance(\"orders-etl\"): ui.performance(\"orders-etl\"): runs use at most 182 MB of the 1,024 MB it has, and three ran into the 60 s timeout.",
+  "summary": "ui.performance(\"orders-etl\"): ui.performance(\"orders-etl\"): three runs hung until the 60 s timeout while every other run finished within 9 s, and runs are slower than the day before.",
   "video": "",
   "scenes": [
    {
@@ -1339,13 +1339,13 @@ window.AA_CLIPS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2874
+      "h": 4194
      }
     ],
     "captions": [
      [
       3.08,
-      "Runs use at most 182 MB of the 1,024 MB it has, and three ran into the 60 s timeout."
+      "Three runs hung until the 60 s timeout while every other run finished within 9 s, and runs are slower than the day before."
      ]
     ]
    }

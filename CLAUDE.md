@@ -612,6 +612,15 @@ How the View layer works:
   line) use it. In the explorer, `explorer/terms.py`'s `_SearchTerms` draws `WordSearch.terms()` (a `SearchTerms`) as
   chips under the box, pooled by place (`_TermSlot`): the joiner flips AND / OR, a chip leaves its word out, ✕ drops it,
   and each click writes `SearchTerms.text()` back into the box, the one record of the search.
+- `LambdaView.performance()` is `blocks/performance.py`'s `performance_blocks` (with a `_PerformanceSetup` from the
+  View) over `performance_reads.py`'s `_PerformanceReads` mixin, whose `compare=True` reads the same length of time
+  before into `Performance.before`. Its pure side is `analysis/performance.py`: `run_stats` (run times of the runs
+  that finished; `timed_out` also counts a run as long as the timeout), `performance_verdict` (the `Verdict` from
+  `analysis/causes.py`), `hung_timeouts` (timeouts with no finished run within a third of the timeout: stuck, not
+  slow), `run_groups` and `slowdown` (by the version a stream names, else before and since `last_modified`),
+  `time_slices`, `run_time_bins`, `cold_vs_warm` and `memory_by_container` (`ContainerMemory.is_climbing`). Its charts
+  are `blocks/run_charts.py`'s `_RunTimeline` (timeouts in a lane above runs drawn to their own scale), `_RunHistogram`,
+  `_ColdWarm` and the `_Spark` table cell, each adding its rules to `report.rules`.
 - `LambdaView.how_it_works()` (its pure side in `lambda_functions/analysis/codemap/`: `terms`, `aws_model`, `syntax`,
   `model`, `reader`, `mapping`, `findings`, `graph`) is `LambdaAnalyzer.code_map()` -> `map_package()` (the
   package's own `.py` files;
