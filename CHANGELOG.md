@@ -22,7 +22,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: runs() says how many failed and why**
+- ⚡ **Lambda: runs() says how many failed and why** ([#271](https://github.com/utkarsh5026/aws-analyzer/pull/271))
   - It opens with a verdict: "13 of 70 runs failed (19%), from 3 causes", and the cause still failing.
   - A dot per run by start and run time, zoomed in when runs take seconds of a long timeout.
   - A card per cause of the failed runs, as in `errors()`, before the table of runs.
