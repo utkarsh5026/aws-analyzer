@@ -85,6 +85,7 @@ report still renders.
 | <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3/`](src/aws_analyzer/s3/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                                     |
 | <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip<br>• The code that loads a file in your next cell | [`s3/explorer/`](src/aws_analyzer/s3/explorer/) (in `s3/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)          |
 | <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb/`](src/aws_analyzer/dynamodb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
+| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **DynamoDB explorer**              | • Every table with what it costs and what to fix, by clicking<br>• Click a table for its keys, indexes and how to query each<br>• Its items as plain values: a sample, or one partition key's<br>• Every attribute's types and fill rate; click one to count its values | [`dynamodb/`](src/aws_analyzer/dynamodb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb_explorer.html) |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb_explorer.html)              |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
@@ -714,12 +715,26 @@ ui.more()                    # ...and the next 20
 ui.schema("orders")          # what the items look like
 ui.get("orders", "USER#42", "ORDER#0017")
 ui.query("orders", "USER#42", sort=("begins_with", "ORDER#"))
+ui.explore("orders")         # all of it in a window, by clicking (below)
 ```
 
 > [!NOTE]
 > Tables are regional: `DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))` looks at another region.
 > Items are shown and returned as plain Python, not DynamoDB JSON: numbers are `int` / `float`, sets are sets,
 > binary is `bytes`. Nothing in the file writes to a table.
+
+### Explore tables and items by clicking
+
+`ui.explore()` opens a window (Jupyter and ipywidgets) with an **Overview** of every table, the **tables** (chips for
+the ones to fix, on-demand or provisioned, without backups and idle, and a search box), the open table's **items**
+and its **schema**. A click on a table shows its keys, indexes and how to query each, usage and cost; the Items tab
+reads a sample from across the table, its first items, or one partition key's (on the table or an index, the sort key
+narrowed to a prefix), and a click on an item shows all of it. The Schema tab lists every attribute with its types and
+fill rate, and a click counts its values. It reads in the background, it only reads, and each read says what it cost.
+
+```python
+ui.explore("orders", tab="items")   # or explore(), explore("orders", tab="schema")
+```
 
 ### Commands (`DynamoDBView`)
 
@@ -751,6 +766,7 @@ Grouped the way `ui.help()` lists them.
 | `value_counts(table, attribute)` | How often each value occurs, with the size of those items. On the partition key this is each item collection's size, so hot partitions stand out                                                                                                                                                                                                                           |
 | `largest(table, n=10)`           | The biggest items by DynamoDB's sizing rules, and what reading each costs                                                                                                                                                                                                                                                                                                  |
 | `count(table, where=None)`       | Exact count (a full scan), next to DynamoDB's own estimate                                                                                                                                                                                                                                                                                                                 |
+| `explore(what=None, tab=None)`   | The [explorer window](#explore-tables-and-items-by-clicking): every table, one in full, its items and its schema, by clicking. `view.explorer` is the window                                                                                                                                                                                                              |
 
 ### Filters
 

@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from .athena import AthenaAnalyzer, AthenaExplorer, AthenaView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
-    from .dynamodb import DynamoDBAnalyzer, DynamoDBView
+    from .dynamodb import DynamoDBAnalyzer, DynamoDBExplorer, DynamoDBView
     from .lambda_functions import LambdaAnalyzer, LambdaExplorer, LambdaView
     from .messaging import MessagingAnalyzer, MessagingExplorer, MessagingView
     from .opensearch import OpenSearchAnalyzer, OpenSearchExplorer, OpenSearchView
@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
     from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
-__version__ = "0.61.0"
+__version__ = "0.62.0"
 
 __all__ = [
     "__version__",
@@ -83,6 +83,7 @@ __all__ = [
     "S3Navigator",
     "DynamoDBAnalyzer",
     "DynamoDBView",
+    "DynamoDBExplorer",
     "BedrockKBAnalyzer",
     "BedrockKBView",
     "KBExplorer",
@@ -124,6 +125,7 @@ _EXPORTS = {  # name -> the module it comes from
     "S3Navigator": "s3",
     "DynamoDBAnalyzer": "dynamodb",
     "DynamoDBView": "dynamodb",
+    "DynamoDBExplorer": "dynamodb",
     "BedrockKBAnalyzer": "bedrock_kb",
     "BedrockKBView": "bedrock_kb",
     "KBExplorer": "bedrock_kb",

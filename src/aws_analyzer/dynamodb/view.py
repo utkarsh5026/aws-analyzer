@@ -12,14 +12,18 @@ from typing import Any, Callable, Iterable
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
-from .._kit.errors import _error_name, _why
+from .._kit.deps import _require
+from .._kit.errors import _Hint, _error_name, _why
 from .._kit.fmt import _as_count, _as_int, _count, _fmt_dt, _plural, _share, human_age, human_money, human_size
 from .._kit.render import _call
 from .._kit.text import _clip
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import KB, TYPE_NAMES, _units, dynamo_type, format_value, item_size, read_units, to_json, write_units
-from .models import AttributeProfile, IndexInfo, ItemPage, ReadStats, TableInfo, items_table
+from .models import (
+    AttributeProfile, IndexInfo, ItemPage, ReadStats, TableInfo, TableMetrics, TableProfile, TableReport, ValueCounts,
+    items_table,
+)
 from .analysis import (
     _LARGE_ITEM_ADVICE, describe_condition, describe_filter, profile_findings, request_cost, table_findings,
     table_monthly_cost,
@@ -192,6 +196,7 @@ class DynamoDBView(_BaseView):
         "🗂️ Tables": ("tables", "table_info"),
         "👀 Look at items": ("sample", "scan", "query", "get", "sql", "more"),
         "🔬 Understand the data": ("schema", "value_counts", "largest", "count"),
+        "🖱️ Explore by clicking": ("explore",),
         "❓ Help": ("help",),
     }
     _START = (
@@ -309,6 +314,13 @@ class DynamoDBView(_BaseView):
             if page.has_more
             else None
         )
+        self._show(self._page_blocks(page, title, sub, empty=empty, number=number))
+
+    def _page_blocks(self, page: ItemPage, title: str, sub: str, *, empty: str, number: int = 1) -> list[Any]:
+        """
+        What a page of items shows: what reading it cost, a note when the filter dropped most of what was read, the
+        items as a table, and what to run next.
+        """
         st = page.stats
         cards = [("Items", f"{len(page.items):,}")]
         if st.scanned > st.matched:
@@ -340,7 +352,7 @@ class DynamoDBView(_BaseView):
                 + self._item_steps(page)
             )
         )
-        self._show(blocks)
+        return blocks
 
     def _item_steps(self, page: ItemPage) -> list[tuple[str, str]]:
         """
@@ -377,10 +389,14 @@ class DynamoDBView(_BaseView):
         match='prod-*' checks only matching table names.
         """
         with self._progress("Checking tables", unit="tables") as tick:
-            reports = sorted(
-                self.core.table_reports(match=match, metrics=metrics, progress=tick),
-                key=lambda r: r.info.name,
-            )
+            reports = self.core.table_reports(match=match, metrics=metrics, progress=tick)
+        self._show(self._tables_blocks(reports, match=match, metrics=metrics))
+
+    def _tables_blocks(self, reports: list[TableReport], *, match: str | None, metrics: bool) -> list[Any]:
+        """
+        What tables() shows for these reports (sorted by name here): the cards, the table of tables and the warnings.
+        """
+        reports = sorted(reports, key=lambda r: r.info.name)
         rows: list[list[Any]] = []  # cells are text, or _Tone for a coloured status
         warnings: list[list[str]] = []
         unreadable: list[str] = []
@@ -455,8 +471,7 @@ class DynamoDBView(_BaseView):
                     "DynamoDBView(DynamoDBAnalyzer(region='eu-west-1'))."
                 )
             )
-            self._show(blocks)
-            return
+            return blocks
         if unreadable:
             blocks.append(_Note(f"Couldn't describe {', '.join(unreadable)}.", "warn"))
         if no_usage:
@@ -515,7 +530,7 @@ class DynamoDBView(_BaseView):
                     ]
                 )
             )
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def table_info(self, table: str, *, metrics: bool = True, hours: int = 24) -> None:
@@ -524,19 +539,30 @@ class DynamoDBView(_BaseView):
         Also TTL, stream, encryption and tags; usage is CloudWatch's last `hours`.
         """
         info = self.core.describe(table)
-        blocks: list[Any] = [_Title(f"Table {info.name}", info.arn or self.core.region)]
-        usage = None
+        usage, usage_error = None, None
         if metrics:
             try:
                 usage = self.core.table_metrics(table, hours=hours)
             except (ClientError, BotoCoreError) as exc:
-                blocks.append(
-                    _Note(
-                        f"No CloudWatch usage ({_why(_error_name(exc), 'cloudwatch:GetMetricData')}), so "
-                        "the capacity checks and the on-demand request cost are missing.",
-                        "warn",
-                    )
+                usage_error = _error_name(exc)
+        self._show(self._table_info_blocks(info, usage, hours=hours, usage_error=usage_error))
+
+    def _table_info_blocks(
+        self, info: TableInfo, usage: TableMetrics | None, *, hours: int = 24, usage_error: str | None = None
+    ) -> list[Any]:
+        """
+        What table_info() shows for a described table and its CloudWatch usage (None when not read, usage_error the
+        error code when it couldn't be).
+        """
+        blocks: list[Any] = [_Title(f"Table {info.name}", info.arn or self.core.region)]
+        if usage_error:
+            blocks.append(
+                _Note(
+                    f"No CloudWatch usage ({_why(usage_error, 'cloudwatch:GetMetricData')}), so "
+                    "the capacity checks and the on-demand request cost are missing.",
+                    "warn",
                 )
+            )
         types = info.attribute_types
         cost = table_monthly_cost(info, self.core.prices, usage)
         ttl = (
@@ -707,7 +733,7 @@ class DynamoDBView(_BaseView):
                 ]
             )
         )
-        self._show(blocks)
+        return blocks
 
     # ------------------------------------------------------------------- items
 
@@ -870,6 +896,15 @@ class DynamoDBView(_BaseView):
         """
         primary = self.core.primary_key(table, key)
         item = self.core.get(table, primary)
+        self._show(self._get_blocks(table, primary, item, as_json=as_json))
+
+    def _get_blocks(
+        self, table: str, primary: dict[str, Any], item: dict[str, Any] | None, *, as_json: bool = False
+    ) -> list[Any]:
+        """
+        What get() shows for an item read by its primary key (None when there's no such item): its size and what
+        reading and writing it costs, then every attribute with maps and lists expanded.
+        """
         blocks: list[Any] = [
             _Title(
                 f"Item in {table}",
@@ -884,8 +919,7 @@ class DynamoDBView(_BaseView):
                     "warn",
                 )
             )
-            self._show(blocks)
-            return
+            return blocks
         size = item_size(item)
         blocks.append(
             _Cards(
@@ -934,7 +968,7 @@ class DynamoDBView(_BaseView):
                     ]
                 )
             )
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def sql(self, statement: str, *parameters: Any, n: int = 50) -> None:
@@ -980,6 +1014,14 @@ class DynamoDBView(_BaseView):
                 max_depth=max_depth,
                 progress=tick,
             )
+        self._show(self._schema_blocks(p, where=where, spread=spread))
+
+    def _schema_blocks(self, p: TableProfile, *, where: Any = None, spread: bool = True) -> list[Any]:
+        """
+        What schema() shows for a profile: the cards, its findings, every attribute with its types, fill rate,
+        examples and range, the key patterns, the item sizes and the largest items.
+        """
+        table, index = p.table, p.index
         of = f" of ~{p.approx_item_count:,}" if p.approx_item_count else ""
         how = "spread across the table" if spread else "from the start of the table"
         blocks: list[Any] = [
@@ -991,8 +1033,7 @@ class DynamoDBView(_BaseView):
         ]
         if not p.items:
             blocks.append(_Note("No items to profile."))
-            self._show(blocks)
-            return
+            return blocks
         top = sum(1 for a in p.attributes.values() if a.depth == 0)
         blocks.append(
             _Cards(
@@ -1107,7 +1148,7 @@ class DynamoDBView(_BaseView):
             else []
         )
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def value_counts(
@@ -1129,6 +1170,16 @@ class DynamoDBView(_BaseView):
             vc = self.core.value_counts(
                 table, attribute, limit=limit, where=where, index=index, progress=tick
             )
+        self._show(self._value_counts_blocks(vc, index=index, limit=limit, where=where, top=top))
+
+    def _value_counts_blocks(
+        self, vc: ValueCounts, *, index: str | None = None, limit: int | None = None, where: Any = None, top: int = 30
+    ) -> list[Any]:
+        """
+        What value_counts() shows for counted values: the cards, the top values with their share and size, and what
+        to read next.
+        """
+        table, attribute = vc.table, vc.attribute
         st = vc.stats
         sub = f"{st.scanned:,} items read" + (
             f"; stopped at limit={limit:,}, pass limit=None to read the whole table"
@@ -1209,7 +1260,7 @@ class DynamoDBView(_BaseView):
                     )
                 ]
             blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
 
     @_friendly_errors
     def largest(
@@ -1295,3 +1346,20 @@ class DynamoDBView(_BaseView):
                 ),
             ]
         )
+
+    @_friendly_errors
+    def explore(self, what: str | None = None, *, tab: str | None = None, height: int | str | None = None) -> None:
+        """
+        The explorer window: every table with what it costs and what to fix, a table's keys, indexes and usage, its
+        items (a sample, or one partition key's; click one for all of it), and what its items hold (click an
+        attribute to count its values). Needs Jupyter and ipywidgets; view.explorer is the window.
+        """
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, tables() shows every "
+                "table, table_info(name) one, sample(name) its items and schema(name) what they hold."
+            )
+        _require("ipywidgets", "The explorer window")
+        from .explorer.window import DynamoDBExplorer
+
+        self.explorer = DynamoDBExplorer(what, tab=tab, view=self, height=height, mode="widgets")

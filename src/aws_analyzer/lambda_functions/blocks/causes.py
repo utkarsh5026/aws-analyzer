@@ -249,7 +249,7 @@ def _example(group: ErrorGroup) -> str:
     return _clip(example, _EXAMPLE_CHARS) if says_more else ""
 
 
-def _headline(group: ErrorGroup) -> str:
+def _cause_headline(group: ErrorGroup) -> str:
     first_line = group.message.strip().splitlines()[0] if group.message.strip() else group.kind
     return _clip(first_line, _MESSAGE_CHARS)
 
@@ -270,7 +270,7 @@ def _cause(number: int, facts: _CaseFacts, report: ErrorReport, *, lines: int,
     group = facts.group
     newest = group.request_ids[0] if group.request_ids else ""
     return _Cause(
-        number, group.kind, _headline(group), group.count, group.count / lines if lines else 0.0,
+        number, group.kind, _cause_headline(group), group.count, group.count / lines if lines else 0.0,
         facts.state.state, facts.state.says, means=facts.advice.means, steps=list(facts.advice.steps),
         where=_failed_at(group), versions=_versions(group), run_call=run_call(newest) if newest else "",
         example=_example(group), first=human_age(group.first, report.until),
@@ -362,7 +362,7 @@ def _cause_blocks(report: ErrorReport, *, run_call: Callable[[str], str]) -> lis
     verdict = errors_verdict(report, [fact.state for fact in facts])
     columns = chart_columns(report)
     lanes_by_group = {id(group): lane for group, lane in zip(report.groups, columns.lanes)}
-    lanes = [_Lane(_headline(fact.group), lanes_by_group[id(fact.group)], fact.state.state == STOPPED)
+    lanes = [_Lane(_cause_headline(fact.group), lanes_by_group[id(fact.group)], fact.state.state == STOPPED)
              for fact in facts]
     chart = _ErrorChart(failure_pattern(columns), _axis_labels(columns, report.until), columns.calls, columns.failed,
                         columns.unit, lanes, title=f"When it failed, a column per {columns.unit}")

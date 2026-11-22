@@ -96,6 +96,11 @@ Find items
 -   [Which items match a condition?](#filters) `ui.scan("acme-app", where={"status": "failed"})`{ .long }
 -   [I want them in pandas.](#python) `df = ui.core.scan("acme-app", n=5000).to_df()`{ .long }
 
+Rather click?
+{ .qgroup }
+
+-   [Can I just click through it?](#explorer) `ui.explore()`
+
 </div>
 
 Items come back as plain Python, not DynamoDB JSON: numbers are `int` or `float`, sets are sets, maps and lists are dicts and lists. A key value is converted to the key's type, so `"42"` works for a number key.
@@ -301,6 +306,17 @@ ui.count("acme-app", where={"status": "pending"})       # exact count: a full sc
 ui.count("acme-app")                                    # next to DynamoDB's own estimate
 ```
 
+## Explore by clicking { #explorer }
+
+`explore()` opens a window in the notebook to click through it all: every table, a table's keys and cost, its items, and what they hold.
+{ .gist }
+
+```python
+ui.explore()                             # or explore("acme-app"), explore("acme-app", tab="items")
+```
+
+The [DynamoDB explorer guide](dynamodb_explorer.md) covers every tab.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, large tables and cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -457,6 +473,7 @@ Every `DynamoDBView` command. `ui.help()` prints the same list grouped by task, 
 | `value_counts(table, attribute, limit=10_000, where=, index=, top=30)` | How often each value occurs, and the size of those items |
 | `largest(table, n=10, limit=10_000, where=, index=)` | The biggest items |
 | `count(table, where=, index=)` | Exact item count, next to DynamoDB's estimate |
+| `explore(what=None, tab=None, height=None)` | The explorer window: tables, items and schema by clicking ([guide](dynamodb_explorer.md)) |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

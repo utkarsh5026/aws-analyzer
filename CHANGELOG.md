@@ -23,6 +23,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Each cause is a card: new, still failing or stopped, what it means, where it fails and what to do.
   - Its advice moved into the cards, and the raw error lines are folded at the bottom.
 
+## [0.62.0] - 2026-11-22
+
+### Added
+
+- 📊 **DynamoDB: an explorer window** ([#264](https://github.com/utkarsh5026/aws-analyzer/pull/264))
+  - `DynamoDBView().explore()` clicks through every table, its keys and cost, its items and what they hold.
+  - Type a partition key for its items, on the table or an index; click an item for all of it.
+  - The Schema tab lists every attribute's types and fill rate; click one to count its values.
+
 ## [0.61.0] - 2026-11-20
 
 ### Added
@@ -1467,7 +1476,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.61.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.62.0...HEAD
+[0.62.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.58.0...v0.59.0

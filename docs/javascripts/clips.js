@@ -2906,6 +2906,99 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "ddb-explorer-items": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.explore(): The Items tab: CUSTOMER#1042's orders, read by typing its key, and one open in full.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "DynamoDB explorer",
+    "label": "DynamoDB explorer",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "ddb-explorer-items",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Items tab: <code>CUSTOMER#1042</code>'s orders, read by typing its key, and one open in full."
+     ]
+    ]
+   }
+  ]
+ },
+ "ddb-explorer-schema": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.explore(): The Schema tab: a click on status counts its values.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "DynamoDB explorer",
+    "label": "DynamoDB explorer",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "ddb-explorer-schema",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Schema tab: a click on <code>status</code> counts its values."
+     ]
+    ]
+   }
+  ]
+ },
+ "ddb-explorer-tables": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.explore(): ddb.explore(), the Tables tab, To fix: acme-sessions pays for capacity it doesn't use.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.6,
+    "chapter": "DynamoDB explorer",
+    "label": "DynamoDB explorer",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "ddb-explorer-tables",
+      "w": 1476,
+      "h": 1296
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "The Tables tab, To fix: <code>acme-sessions</code> pays for capacity it doesn't use."
+     ]
+    ]
+   }
+  ]
+ },
  "explorer": {
   "notebook": "acme-ml-data.ipynb",
   "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.",
