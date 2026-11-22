@@ -93,7 +93,11 @@ from .analysis.live import (
     LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, minute_values, ran_lately, running_for,
     timeout_warning,
 )
-from .analysis.performance import percentile, performance_findings, suggest_memory
+from .analysis.performance import (
+    ColdWarm, ContainerMemory, RunSpan, RunStats, RunTimeBin, TimeSlice, cold_vs_warm, hung_timeouts, memory_by_container,
+    memory_to_try, percentile, performance_findings, performance_verdict, run_cost, run_groups, run_stats, run_time_bins,
+    slowdown, suggest_memory, time_slices, timed_out,
+)
 from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
 from .analysis.word_search import SearchError, SearchTerms, WordSearch, word_search
 from .analysis.runs import (
@@ -303,4 +307,22 @@ __all__ = [
     "stream_version",
     "suggest_memory",
     "version_before",
+    "ColdWarm",
+    "ContainerMemory",
+    "RunSpan",
+    "RunStats",
+    "RunTimeBin",
+    "TimeSlice",
+    "cold_vs_warm",
+    "hung_timeouts",
+    "memory_by_container",
+    "memory_to_try",
+    "performance_verdict",
+    "run_cost",
+    "run_groups",
+    "run_stats",
+    "run_time_bins",
+    "slowdown",
+    "time_slices",
+    "timed_out",
 ]

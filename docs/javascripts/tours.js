@@ -1464,21 +1464,21 @@ window.AA_TOURS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2874
+      "h": 4194
      }
     ],
     "captions": [
      [
       0,
-      "<b>How close do its runs come to the limits?</b>"
+      "<b>Did it get slower?</b> A verdict first, then every run."
      ],
      [
       3.08,
-      "They use at most 182 MB of the 1,024 MB it has,"
+      "<b>Three runs hung</b> at the 60 s timeout; the rest took under 9 s,"
      ],
      [
       11.4,
-      "and <b>three ran into the 60 s timeout</b>."
+      "runs are <b>28% slower than the day before</b>, and 256 MB would do."
      ]
     ]
    },

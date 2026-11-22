@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._kit.deps import _require
 
-from .helpers import MEMORY_PER_VCPU, _ASYNC_KINDS, _SHORT_KINDS, _in_days
+from .helpers import MEMORY_PER_VCPU, _ASYNC_KINDS, _SHORT_KINDS, _in_days, stream_version
 
 if TYPE_CHECKING:
     from .analysis.codemap.model import AwsCall
@@ -531,11 +531,19 @@ class Invocation:
     error_type: str | None = None  # 'Runtime.OutOfMemory', ...
     stream: str = ""  # the log stream it ran in (performance() fills it in), where the rest of its lines are
 
+    @property
+    def version(self) -> str:
+        """
+        The version that ran it, from its log stream's name ('2026/10/06/[7]9f3c...' -> '7'); '' when unknown.
+        """
+        return stream_version(self.stream) or ""
+
 
 @dataclass
 class Performance:
     """
-    Run times and memory from the REPORT lines in a window.
+    Run times and memory from the REPORT lines in a window; `before` holds the same length of time just before it,
+    when performance(compare=True) read it.
     """
 
     function: Function
@@ -546,6 +554,7 @@ class Performance:
     truncated: bool = False
     covered_from: datetime | None = None
     errors: dict[str, str] = field(default_factory=dict)
+    before: Performance | None = None
 
     @property
     def cold_starts(self) -> list[Invocation]:

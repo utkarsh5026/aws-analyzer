@@ -94,6 +94,7 @@ import sys
 import tarfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
@@ -1809,6 +1810,36 @@ def _report_api_logs(logs) -> None:
                             logEvents=sorted(batch, key=lambda e: e["timestamp"]))
 
 
+def _orders_etl_day_before(logs: Any) -> None:
+    """
+    orders-etl's runs in the 24 hours before the last 24, a little faster and with one timeout, so performance() has a
+    day to compare with. Lines only (START, a line, END, REPORT), in streams of their own, with their own random
+    numbers, so nothing in the last 24 hours changes.
+    """
+    rng = random.Random(29)
+    streams = [f"2026/10/05/[$LATEST]{i:032x}" for i in (0xA0, 0xB0)]
+    events: dict[str, list[dict]] = {stream: [] for stream in streams}
+    for stream in streams:
+        logs.create_log_stream(logGroupName="/aws/lambda/orders-etl", logStreamName=stream)
+    for i in range(64):
+        start = NOW - timedelta(hours=24, minutes=22 * i + rng.randint(1, 6), seconds=rng.randint(0, 59))
+        rid = f"{rng.getrandbits(32):08x}-{rng.getrandbits(16):04x}-4{rng.getrandbits(12):03x}-b{rng.getrandbits(12):03x}-{rng.getrandbits(48):012x}"
+        seconds = 60.0 if i == 40 else rng.uniform(1.2, 7.0)
+        report = (f"REPORT RequestId: {rid}\tDuration: {seconds * 1000:.2f} ms\tBilled Duration: "
+                  f"{int(seconds * 1000) + 1} ms\tMemory Size: 1024 MB\tMax Memory Used: {rng.randint(135, 170)} MB")
+        if i % 9 == 4:
+            report += f"\tInit Duration: {rng.uniform(900, 1400):.2f} ms"
+        if i == 40:
+            report += "\tStatus: timeout"
+        lines = [(0, f"START RequestId: {rid} Version: $LATEST"), (seconds - 0.02, f"loaded {rng.randint(800, 1500)} orders"),
+                 (seconds, f"END RequestId: {rid}"), (seconds + 0.001, report)]
+        ms = lambda offset: _epoch_ms(start + timedelta(seconds=offset))  # noqa: E731
+        events[streams[i % 2]] += [{"timestamp": ms(offset), "message": message} for offset, message in lines]
+    for stream, batch in events.items():
+        logs.put_log_events(logGroupName="/aws/lambda/orders-etl", logStreamName=stream,
+                            logEvents=sorted(batch, key=lambda e: e["timestamp"]))
+
+
 def _backdate_function(name: str, when: datetime) -> None:
     """
     moto stamps a function with the time it's changed; orders-etl's DynamoDB copy went out 3 days ago, when its
@@ -2066,6 +2097,8 @@ def seed_lambda_functions() -> dict:
         else:
             lines.append((seconds - 0.02, f"loaded {rng.randint(800, 1500)} orders"))
         used = rng.randint(140, 182)
+        if stream == streams[0]:
+            used = 120 + (69 - i) // 3 * 2 + i % 4
         report = (f"REPORT RequestId: {rid}\tDuration: {seconds * 1000:.2f} ms\tBilled Duration: "
                   f"{int(seconds * 1000) + 1} ms\tMemory Size: 1024 MB\tMax Memory Used: {used} MB")
         if cold:
@@ -2077,6 +2110,7 @@ def seed_lambda_functions() -> dict:
     for stream, batch in events.items():
         logs.put_log_events(logGroupName="/aws/lambda/orders-etl", logStreamName=stream,
                             logEvents=sorted(batch, key=lambda e: e["timestamp"]))
+    _orders_etl_day_before(logs)
     _report_api_logs(logs)
     stored = {"/aws/lambda/orders-etl": int(24.5 * 1024**3), "/aws/lambda/report-api": int(1.2 * 1024**3),
               "/aws/lambda/churn-scoring": 40 * 1024**2, "/aws/lambda/support-agent-actions": 180 * 1024**2}
