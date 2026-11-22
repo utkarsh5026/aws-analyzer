@@ -7,21 +7,20 @@ at the end.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Sequence
 
 from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone
-from ..._kit.charts import _Dots, _Point
 from ..._kit.fmt import _count, _fmt_dt, _plural, _share, _tz_label
 
 from ..helpers import human_ms
 from ..models import ErrorGroup
 from ..analysis.causes import STOPPED, CauseState, cause_advice, cause_state, runs_verdict
 from ..analysis.logs import LogRun
-from ..analysis.performance import percentile
+from ..analysis.performance import percentile, slice_counts, time_slices
 from ..analysis.runs import DEFAULT_COLUMNS, RunGroup, RunTable, failure_groups, format_value, runs_findings
 from .causes import _CaseFacts, _Causes, _Verdict, _cause
+from .run_charts import _RunMark, _RunTimeline
 
 _STATUS_TONES = {"failed": "bad", "timeout": "bad", "logged": "warn"}
 
@@ -31,14 +30,6 @@ _HEADERS = {
     "cold": "Cold start", "init": "Start-up", "version": "Version", "error_type": "Error type", "error": "Error",
     "summary": "What it logged", "lines": "Lines", "request_id": "Request ID", "stream": "Log stream",
 }
-
-_ZOOM_BELOW = 0.4
-
-_NEAR_TIMEOUT = 0.9
-
-_ZOOM_ROOM = 1.1
-
-_ROUND_STEPS = (1, 2, 5, 10)
 
 _ORDER_WORDS = {"duration": ("longest", "shortest"), "started": ("newest", "oldest"), "memory": ("most memory",
                                                                                                  "least memory")}
@@ -96,60 +87,42 @@ def _run_cards(table: RunTable, findings: list[tuple[str, str]], *, failing: boo
     return _Cards(cards)
 
 
-def _round_up(value: float) -> float:
+def _mark_kind(run: LogRun) -> str:
+    if run.status in ("timeout", "failed"):
+        return run.status
+    return "cold" if run.cold else "run"
+
+
+def _mark_label(run: LogRun) -> str:
     """
-    The next round amount at or above `value`: 1, 2 or 5 times a power of ten (8,700 -> 10,000).
-    """
-    power = 10 ** math.floor(math.log10(value))
-    return next(step * power for step in _ROUND_STEPS if step * power >= value)
-
-
-def _dot_tone(run: LogRun) -> str:
-    if run.status in ("failed", "timeout"):
-        return "bad"
-    return "note" if run.cold else ""
-
-
-def _dot_label(run: LogRun) -> str:
-    """
-    What pointing at a run's dot says: when, how long, how it ended and what failed.
+    What pointing at a run says: when, how long, how it ended, what failed and its request ID.
     """
     parts = [_fmt_dt(run.start, seconds=True), human_ms(run.duration), run.status]
     if run.cold:
         parts.append("cold start")
     if run.error is not None:
         parts.append(run.error[1].splitlines()[0][:80])
-    return " · ".join(parts)
+    return " · ".join(parts + [run.request_id or ""])
 
 
-def _zoom_for(durations: list[float], timeout_ms: float) -> float | None:
+def _runs_timeline(table: RunTable) -> _RunTimeline | None:
     """
-    How far up to draw the scale when every run not at the timeout took a small share of it, so their run times
-    stay apart; None to draw it to the timeout.
+    Every run by when it started and how long it took, as performance() draws it: the runs that finished to their
+    own scale, the ones that timed out in a lane above, failed ones red and cold starts marked.
     """
-    under = [duration for duration in durations if duration < timeout_ms * _NEAR_TIMEOUT]
-    if not under or max(under) <= 0 or max(under) >= timeout_ms * _ZOOM_BELOW:
-        return None
-    return _round_up(max(under) * _ZOOM_ROOM)
-
-
-def _timeline(table: RunTable) -> _Dots | None:
-    """
-    Every run as a dot by when it started and how long it took, failed ones red and cold starts marked, under the
-    timeout; zoomed in when the runs take seconds of a long timeout, the runs at the timeout on a strip above.
-    """
-    timed = sorted((run for run in table.runs if run.duration is not None), key=lambda run: run.start)
+    timed = sorted((run for run in table.runs if run.report is not None), key=lambda run: run.start)
     if len(timed) < 2:
         return None
-    timeout_ms = table.function.timeout * 1000.0
-    points = [_Point(run.start.timestamp(), run.duration or 0.0, _dot_tone(run), _dot_label(run)) for run in timed]
-    zoom = _zoom_for([point.value for point in points], timeout_ms)
-    limit_text = f"at the {table.function.timeout} s timeout" if zoom else f"timeout {table.function.timeout} s"
-    return _Dots(points, max(timeout_ms, max(point.value for point in points)), human_ms(timeout_ms),
-                 _fmt_dt(timed[0].start), _fmt_dt(timed[-1].start), limit=timeout_ms, limit_text=limit_text,
-                 tones={"bad": "failed or timed out", "note": "worked after a cold start"}, noun="run",
-                 title=f"Every run, by when it started and how long it took ({_tz_label()})",
-                 zoom=zoom, zoom_text=human_ms(zoom) if zoom else "")
+    everything = table.unfiltered or table
+    start = everything.covered_from if everything.truncated and everything.covered_from else table.since
+    if table.until <= start:
+        return None
+    timeout = table.function.timeout
+    reports = [replace(run.report, time=run.report.time or run.start) for run in timed if run.report is not None]
+    marks = [_RunMark(run.start, run.duration or 0.0, _mark_kind(run), _mark_label(run)) for run in timed]
+    return _RunTimeline(marks, time_slices(reports, timeout, start, table.until),
+                        slice_counts([run.start for run in timed], start, table.until), start, table.until, timeout,
+                        title=f"Every run, by when it started and how long it took ({_tz_label()})")
 
 
 def _cause_cards(table: RunTable, facts: list[_CaseFacts], run_call: Callable[[str], str]) -> _Causes:
@@ -278,7 +251,7 @@ def _runs_blocks(table: RunTable, *, call: Callable[..., str], since_arg: dict[s
         blocks.append(_Note(f"No run of the {_count(everything.read)} read matches {table.query!r}. The fields at the "
                             "end say what each run has."))
     else:
-        timeline = _timeline(table)
+        timeline = _runs_timeline(table)
         if timeline is not None:
             blocks.append(timeline)
         if facts:

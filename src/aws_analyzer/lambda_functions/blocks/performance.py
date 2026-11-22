@@ -19,7 +19,7 @@ from ..prices import DAYS_PER_MONTH
 from ..analysis.performance import (
     MIN_CONTAINER_RUNS, MIN_FINISHED_TO_JUDGE, NEAR_MEMORY_SHARE, NEAR_TIMEOUT_SHARE, SAME_SHARE, TIME_BAND_SLICES, RunSpan, RunStats, change_share,
     cold_vs_warm, hung_timeouts, is_slower, memory_by_container, memory_to_try, percentile, performance_findings,
-    performance_verdict, run_cost, run_groups, run_stats, run_time_bins, short_stream, slowdown, time_slices,
+    performance_verdict, run_cost, run_groups, run_stats, run_time_bins, short_stream, slice_counts, slowdown, time_slices,
     timed_out,
 )
 from .causes import _Verdict
@@ -82,10 +82,7 @@ def _timeline(perf: Performance) -> _RunTimeline | None:
     if perf.until <= start:
         return None
     slices = time_slices(timed, fn.timeout, start, perf.until, slices=TIME_BAND_SLICES)
-    slice_span = (perf.until - start) / TIME_BAND_SLICES
-    counts = [0] * TIME_BAND_SLICES
-    for run in timed:
-        counts[min(max(int((run.time - start) / slice_span), 0), TIME_BAND_SLICES - 1)] += 1
+    counts = slice_counts([run.time for run in timed if run.time is not None], start, perf.until)
     marks = [_RunMark(run.time, run.duration, _run_kind(run, fn.timeout), _run_label(run, fn.timeout)) for run in timed]
     note = f"These are the newest {len(timed):,} runs: the reading stopped there." if perf.truncated else ""
     return _RunTimeline(marks, slices, counts, start, perf.until, fn.timeout,

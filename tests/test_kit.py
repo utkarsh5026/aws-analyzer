@@ -714,22 +714,6 @@ def test_dots_draw_a_dot_each_under_their_limit():
     assert "50 runs from 09:00 to 10:00 · 5 failed" in _render_text([dots], 0)
 
 
-def test_zoomed_dots_keep_short_runs_apart_and_put_the_rest_on_a_strip():
-    points = [_Point(float(n), 1_000.0 + 400 * n, "", f"run {n}") for n in range(10)]
-    points.append(_Point(10.0, 60_000.0, "bad", "timed out"))
-    dots = _Dots(points, 60_000.0, "60 s", "a", "b", limit=60_000.0, limit_text="at the 60 s timeout", zoom=5_000.0,
-                 zoom_text="5 s")
-    assert dots.is_zoomed
-    html = _report_html([dots], 0, _Look("", "zz", ""))
-    assert 'class="over"' in html and 'class="brk"' in html and "↑ at the 60 s timeout" in html and ">5 s<" in html
-    assert 'class="lim"' not in html
-    heights = [float(y) for y in re.findall(r'cy="([\d.]+)"', html)]
-    assert heights[-1] == 11 and heights[0] > heights[9] > 34
-    whole = _Dots(points, 60_000.0, "60 s", "a", "b", limit=60_000.0, limit_text="timeout")
-    assert not whole.is_zoomed and 'class="lim"' in _report_html([whole], 0, _Look("", "zz", ""))
-    assert not _Dots(points, 60_000.0, "60 s", "a", "b", zoom=90_000.0).is_zoomed
-
-
 def test_too_many_dots_become_a_band_that_keeps_the_ones_that_matter():
     dots = _Dots(_runs(100_000, failed_every=1_000), 200.0, "200 ms", "a", "b", tones={"bad": "failed"},
                  noun="run", most=300)

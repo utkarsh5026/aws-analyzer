@@ -29,7 +29,6 @@ from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_f
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, logs as logs_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
-from aws_analyzer.lambda_functions.blocks.runs import _round_up, _zoom_for
 from aws_analyzer.lambda_functions.analysis.performance import short_stream
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
@@ -1867,12 +1866,6 @@ def test_failed_runs_are_grouped_by_cause_and_the_verdict_says_it_first():
                         matching=True).headline == "3 of 3 runs that match failed (100%)."
 
 
-def test_the_runs_timeline_zooms_in_when_runs_take_a_small_share_of_the_timeout():
-    assert _round_up(8_700 * 1.1) == 10_000 and _round_up(10_005) == 20_000 and _round_up(1_800) == 2_000 and _round_up(400) == 500
-    assert _zoom_for([1_000.0, 8_700.0, 60_000.0], 60_000.0) == 10_000
-    assert _zoom_for([1_000.0, 30_000.0], 60_000.0) is None and _zoom_for([60_000.0], 60_000.0) is None
-
-
 def test_runs_findings_name_what_to_do():
     table = run_table(orders_page())
     found = runs_findings(table.where("duration > 15s"))
@@ -3263,7 +3256,7 @@ def test_runs_report_says_how_many_failed_and_why_before_the_table(ui, capsys):
     html._show = shown.append
     html.runs("etl-nightly", since="1h")
     page = stylemod._render_html(shown[0], 50)
-    assert 'class="vd bad"' in page and 'class="dts"' in page and "of failed runs" in page
+    assert 'class="vd bad"' in page and 'class="rtl"' in page and "of failed runs" in page
 
 
 def test_runs_report_filters_sorts_groups_and_lists_the_fields(ui, capsys):

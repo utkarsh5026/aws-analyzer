@@ -549,8 +549,6 @@ class _Dots:
         tones       what each tone means, for the key ('bad': 'failed', 'note': 'cold start')
         title, note a heading over the chart and a sentence under it
         noun        what one event is ('run'), for the key and text mode
-        zoom        draw the scale only up to this amount (zoom_text its label), with the points above it and the
-                    limit on a strip along the top, so runs of seconds under a 15-minute timeout don't lie flat
     """
 
     points: list[_Point]
@@ -565,8 +563,6 @@ class _Dots:
     note: str = ""
     noun: str = "event"
     most: int = 300
-    zoom: float | None = None
-    zoom_text: str = ""
 
     @property
     def is_banded(self) -> bool:
@@ -575,20 +571,11 @@ class _Dots:
         """
         return len(self.points) > self.most
 
-    @property
-    def is_zoomed(self) -> bool:
-        """
-        Whether the scale stops below the top, the higher points drawn on a strip above it.
-        """
-        return self.zoom is not None and 0 < self.zoom < self.top
-
 
 _PLOT_WIDTH = 760
 _PLOT_HEIGHT = 150
 _PLOT_PAD = 6
 _BAND_SLICES = 60
-_STRIP_Y = 11
-_ZOOM_TOP = 34
 _DOT_RADIUS = 2.6
 _TONED_RADIUS = 3.4
 
@@ -603,8 +590,6 @@ _DOTS_RULES = """\
 .{root} .dts circle.t-bad,.{root} .dts .key i.t-bad{{fill:var(--bad,#ef4444);background:var(--bad,#ef4444);fill-opacity:1}}
 .{root} .dts circle.t-warn,.{root} .dts .key i.t-warn{{fill:var(--warn,#d97706);background:var(--warn,#d97706);fill-opacity:1}}
 .{root} .dts circle.t-note,.{root} .dts .key i.t-note{{fill:#8b5cf6;background:#8b5cf6;fill-opacity:1}}
-.{root} .dts .over{{fill:var(--bad,#ef4444);fill-opacity:.08}}
-.{root} .dts .brk{{stroke:currentColor;stroke-opacity:.3;stroke-dasharray:2 3}}
 .{root} .dts .band{{fill:var(--info,#3b82f6);fill-opacity:.22}}
 .{root} .dts .mid{{fill:none;stroke:var(--info,#3b82f6);stroke-width:1.6}}
 .{root} .dts .key{{display:flex;flex-wrap:wrap;gap:2px 14px;margin-top:4px;font-size:12px;opacity:.85}}
@@ -628,19 +613,6 @@ def _plot_y(value: float, top: float) -> float:
     return _PLOT_HEIGHT - share * (_PLOT_HEIGHT - 2 * _PLOT_PAD) - _PLOT_PAD
 
 
-def _dots_y(dots: _Dots, value: float) -> float:
-    """
-    Where an amount goes up a _Dots plot: on its scale, or with a zoom, on the zoomed scale or the strip above it.
-    """
-    if not dots.is_zoomed:
-        return _plot_y(value, dots.top)
-    zoom = dots.zoom or 1.0
-    if value > zoom:
-        return _STRIP_Y
-    bottom = _PLOT_HEIGHT - _PLOT_PAD
-    return bottom - max(0.0, value) / zoom * (bottom - _ZOOM_TOP)
-
-
 def _middle(values: list[float]) -> float:
     """
     The median of some amounts.
@@ -659,8 +631,8 @@ def _band_paths(dots: _Dots, start: float, span: float) -> str:
         slices[index].append(point.value)
     filled = [(i, values) for i, values in enumerate(slices) if values]
     xs = [_plot_x(start + (i + 0.5) / _BAND_SLICES * span, start, span) for i, _ in filled]
-    highs = [_dots_y(dots, max(values)) for _, values in filled]
-    middles = [_dots_y(dots, _middle(values)) for _, values in filled]
+    highs = [_plot_y(max(values), dots.top) for _, values in filled]
+    middles = [_plot_y(_middle(values), dots.top) for _, values in filled]
     upper = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, highs))
     lower = " ".join(f"{x:.1f},{y:.1f}" for x, y in reversed(list(zip(xs, middles))))
     line = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, middles))
@@ -689,30 +661,6 @@ def _dots_key(dots: _Dots) -> str:
     return f'<div class="key">{"".join(keys)}</div>'
 
 
-def _limit_line(dots: _Dots) -> str:
-    """
-    The dashed line at the limit, with its label.
-    """
-    if dots.limit is None:
-        return ""
-    y = _plot_y(dots.limit, dots.top)
-    return (f'<line class="lim" x1="0" x2="{_PLOT_WIDTH}" y1="{y:.1f}" y2="{y:.1f}"/>'
-            f'<text class="lim-t" x="{_PLOT_WIDTH}" y="{y - 4:.1f}" text-anchor="end">{_esc(dots.limit_text)}</text>')
-
-
-def _zoom_marks(dots: _Dots) -> str:
-    """
-    A zoomed plot's strip along the top, for the points above the zoom, and the break under it, labelled with the
-    zoom's amount on the left and what the strip holds (the limit) on the right.
-    """
-    strip = (f'<rect class="over" x="0" y="{_STRIP_Y - 8}" width="{_PLOT_WIDTH}" height="16" rx="4"/>'
-             f'<text class="lim-t" x="{_PLOT_WIDTH}" y="{_ZOOM_TOP - 4}" text-anchor="end">'
-             f'↑ {_esc(dots.limit_text or "above the scale")}</text>')
-    brk = (f'<line class="brk" x1="0" x2="{_PLOT_WIDTH}" y1="{_ZOOM_TOP}" y2="{_ZOOM_TOP}"/>'
-           f'<text x="0" y="{_ZOOM_TOP - 4}">{_esc(dots.zoom_text)}</text>')
-    return strip + brk
-
-
 @_draws(_Dots, "html")
 def _dots_html(dots: _Dots, report: _Report) -> str:
     report.rules.add(_DOTS_RULES.format(root=report.root or "mtr-any"))
@@ -723,8 +671,13 @@ def _dots_html(dots: _Dots, report: _Report) -> str:
     if dots.is_banded:
         marks = _band_paths(dots, start, span)
         shown = [p for p in dots.points if p.tone][-dots.most:]
-    marks += "".join(_dot_html(p, _plot_x(p.at, start, span), _dots_y(dots, p.value)) for p in shown)
-    limit = _zoom_marks(dots) if dots.is_zoomed else _limit_line(dots)
+    marks += "".join(_dot_html(p, _plot_x(p.at, start, span), _plot_y(p.value, dots.top)) for p in shown)
+    limit = ""
+    if dots.limit is not None:
+        y = _plot_y(dots.limit, dots.top)
+        limit = (f'<line class="lim" x1="0" x2="{_PLOT_WIDTH}" y1="{y:.1f}" y2="{y:.1f}"/>'
+                 f'<text class="lim-t" x="{_PLOT_WIDTH}" y="{y - 4:.1f}" text-anchor="end">'
+                 f"{_esc(dots.limit_text)}</text>")
     axis = (f'<line class="ax" x1="0" x2="{_PLOT_WIDTH}" y1="{_PLOT_HEIGHT}" y2="{_PLOT_HEIGHT}"/>'
             f'<text x="0" y="{_PLOT_HEIGHT + 14}">{_esc(dots.start_text)}</text>'
             f'<text x="{_PLOT_WIDTH}" y="{_PLOT_HEIGHT + 14}" text-anchor="end">{_esc(dots.end_text)}</text>')
