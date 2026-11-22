@@ -22,7 +22,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: performance() says whether runs got slower, and why**
+- ⚡ **Lambda: performance() says whether runs got slower, and why** ([#270](https://github.com/utkarsh5026/aws-analyzer/pull/270))
   - It opens with a verdict, and draws the timeouts in a lane of their own so the other runs stay to scale.
   - It compares the last 24 hours with the 24 before, and versions (or before and since a change); `compare=False` skips that.
   - New findings: timeouts that were stuck runs, a version or day that got slower, and memory that climbs in a container.
