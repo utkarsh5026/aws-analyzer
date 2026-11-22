@@ -236,21 +236,41 @@ ui.errors("orders-etl")
 ui.errors("orders-etl", since="7d")            # further back
 ```
 
-![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-light.webp#only-light){ width="984" height="1475" loading=lazy }
-![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-dark.webp#only-dark){ width="984" height="1475" loading=lazy }
+![errors("orders-etl"): the verdict that 8 events were lost, 2 causes are still failing and 1 stopped; cards for 61 failed calls of 2,067, 8 events lost and 3 causes; a chart of calls and failed calls per hour over the 24 hours with a row of dots per cause under it; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied (stopped), each saying what it means, where it fails and what to do, with the command or call to copy](images/lambda-errors-light.webp#only-light){ width="984" height="2149" loading=lazy }
+![errors("orders-etl"): the verdict that 8 events were lost, 2 causes are still failing and 1 stopped; cards for 61 failed calls of 2,067, 8 events lost and 3 causes; a chart of calls and failed calls per hour over the 24 hours with a row of dots per cause under it; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied (stopped), each saying what it means, where it fails and what to do, with the command or call to copy](images/lambda-errors-dark.webp#only-dark){ width="984" height="2149" loading=lazy }
 /// caption
-`ui.errors("orders-etl")`: three different reasons to fail, each with what to do and the run to look at.
+`ui.errors("orders-etl")`: the answer first, when it failed hour by hour, where the failed events went, and a card per cause with what to do about it.
 ///
 
-Each cause gets its own advice:
+It reads in four parts:
 
-- **Timeouts**: raise the timeout, or find what's slow with `performance()`. At 900 seconds there's no more room: split the work, or run it somewhere without the limit.
-- **Out of memory**: Lambda killed the run. Give it more memory.
+- **The verdict**: one sentence that says what matters, such as "8 events were lost, 2 causes are still failing and 1 stopped", with the numbers behind it.
+- **When it failed**: calls and failed calls per hour (per day for a longer window), with a row of dots per cause under them on the same columns, and a sentence that reads it: one spike, rising, falling or spread out.
+- **What happened to the failed events**: [below](#failed-events).
+- **A card per cause**, still failing ones first. Its tag says whether it's new, still failing or stopped (stopped means no line for a while; the card says how many calls ran since). It says **what it means** in plain words, **where it fails** (the line of the function's own code its traceback names), and **what to do**, with the command or call to copy.
+
+What each kind of cause gets:
+
+- **Timeouts**: the command that raises the timeout, or `performance()` to find what's slow. At 900 seconds there's no more room: split the work, or run it somewhere without the limit.
+- **Out of memory**: the command that gives it more memory.
 - **Code that can't load** (`Runtime.ImportModuleError`): a package missing from the deployment package or a layer, or a handler setting that doesn't match a file. `code()` shows what's in the package.
-- **Access denied**: the function's role isn't allowed something its code does, named with the action and the resource.
-- **Throttled or unreachable services**, and otherwise the most common error, with an example.
+- **Access denied**: the role, the action and the resource, and the `aws iam put-role-policy` command that allows it.
+- **Throttled or unreachable services**, and the common Python errors (`KeyError`, `TypeError`, `ValueError`, ...) in plain words.
 
-Each error is matched to its run, so `logs("orders-etl", request_id="...")` shows that whole run, start to end.
+Each card ends with the `logs("orders-etl", request_id="...")` call for its newest run, start to end. The raw error lines are folded at the bottom.
+
+### Did we lose data? { #failed-events }
+
+The report also says what happened to the failed events: lost, kept in a queue, or still waiting to be tried again.
+{ .gist }
+
+A failed call isn't lost data yet. Where its event goes depends on what called the function:
+
+- **S3, SNS, EventBridge** call it asynchronously. Lambda tries an event 3 times (1 + its retries), then gives up and sends it to the function's on-failure destination or dead-letter queue, or drops it when there's neither. The report counts the events dropped with CloudWatch's `AsyncEventsDropped`, Lambda's own number. For S3, the file is still in the bucket: it was never processed.
+- **An SQS queue** gets a failed message back. After `maxReceiveCount` reads the queue moves it to its dead-letter queue; without one, the message is deleted when the queue's retention runs out. The report reads how many messages wait in each queue and how old the oldest is, and never receives one: that would hide it from the function.
+- **A function URL or API Gateway** waits for the answer, so the caller got the error and Lambda keeps nothing. Whether it tried again is up to the caller.
+
+Each number says where it came from ("Lambda's count", "the queue, now"), and a dead-letter queue's count is labelled as from any cause, since several queues can share one. The findings show the command to keep the next dropped events (`put-function-event-invoke-config`), to give a queue a dead-letter queue, or to send kept messages back once it's fixed (`start-message-move-task`).
 
 ### Logs { #logs }
 
@@ -570,6 +590,12 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Resource": "*"
     },
     {
+      "Sid": "FailedMessages",
+      "Effect": "Allow",
+      "Action": ["sqs:GetQueueUrl", "sqs:GetQueueAttributes"],
+      "Resource": "*"
+    },
+    {
       "Sid": "UsageAndLogs",
       "Effect": "Allow",
       "Action": [
@@ -587,7 +613,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. `sqs:GetQueueUrl` and `sqs:GetQueueAttributes` are only for `errors()`' failed messages in an SQS trigger's queue. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 

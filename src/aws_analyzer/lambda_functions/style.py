@@ -326,6 +326,72 @@ _EXTRA_CSS = """\
 .lmb form.lgv:has(.lg-hits:checked) .lgln:not(.hit){display:none}
 .lmb form.lgv:has(.lg-open:checked) details.lgr::details-content{content-visibility:visible;display:block}
 .lmb form.lgv:has(.lg-open:checked) details.lgr .lgchev{transform:rotate(45deg)}
+.lmb .ef-in{margin:2px 0 8px;font-size:13px;opacity:.85;max-width:980px}
+.lmb .efs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:0 0 12px;max-width:980px}
+.lmb .ef{display:flex;flex-direction:column;gap:3px;border:1px solid rgba(127,127,127,.3);border-top:3px solid rgba(127,127,127,.45);border-radius:8px;padding:8px 12px 9px;min-width:0}
+.lmb .ef.bad{border-top-color:#ef4444;background:rgba(239,68,68,.05)}
+.lmb .ef.warn{border-top-color:#f59e0b;background:rgba(245,158,11,.05)}
+.lmb .ef.ok{border-top-color:#10b981}
+.lmb .ef .ef-o{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.6}
+.lmb .ef .ef-n{font:700 22px/1.15 var(--lmb-mono)}
+.lmb .ef.bad .ef-n{color:#dc2626}
+.lmb .ef.warn .ef-n{color:#b45309}
+.lmb .ef.ok .ef-n{color:#059669}
+.lmb .ef .ef-h{font-weight:650;font-size:13px;overflow-wrap:anywhere}
+.lmb .ef .ef-s{font-size:12px;line-height:1.45;opacity:.75;overflow-wrap:anywhere}
+.lmb .ef .ef-b{margin-top:auto;padding-top:6px;border-top:1px dashed rgba(127,127,127,.3);font:11px var(--lmb-mono);opacity:.6}
+.lmb .vd{margin:0 0 14px;padding:12px 16px;border:1px solid rgba(127,127,127,.3);border-left:4px solid #ef4444;border-radius:8px;background:rgba(239,68,68,.05);max-width:980px;line-height:1.5}
+.lmb .vd.ok{border-left-color:#10b981;background:rgba(16,185,129,.05)}
+.lmb .vd b{display:block;font-size:15px;font-weight:650}
+.lmb .vd.bad b{color:#b91c1c}
+.lmb .vd .vd-d{display:block;font-size:12.5px;opacity:.75;margin-top:2px}
+.lmb .ec{border:1px solid rgba(127,127,127,.3);border-radius:10px;padding:12px 16px 10px;margin:0 0 14px;max-width:980px}
+.lmb .ec .ec-says{margin:0 0 8px;font-size:13.5px}
+.lmb .ec .ec-key{display:flex;gap:16px;font-size:11.5px;opacity:.7;margin:0 0 6px}
+.lmb .ec .ec-key i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.lmb .ec .ec-key i.g{background:rgba(127,127,127,.28)}
+.lmb .ec .ec-key i.r{background:#ef4444}
+.lmb .ec .ec-row{display:grid;grid-template-columns:170px minmax(0,1fr);align-items:center}
+.lmb .ec .ec-row>span{font-size:12px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:10px}
+.lmb .ec .ec-bars{display:flex;align-items:flex-end;gap:2px;height:96px;border-bottom:1px solid rgba(127,127,127,.35)}
+.lmb .ec .ec-bars i{flex:1 1 0;height:100%;position:relative;min-width:0}
+.lmb .ec .ec-bars s{position:absolute;left:0;right:0;bottom:0;background:rgba(127,127,127,.22);border-radius:2px 2px 0 0}
+.lmb .ec .ec-bars b{position:absolute;left:25%;right:25%;bottom:0;background:#ef4444;border-radius:2px 2px 0 0}
+.lmb .ec .ec-axis{display:flex;justify-content:space-between;font:10.5px var(--lmb-mono);opacity:.55;margin:3px 0 8px}
+.lmb .ec .ec-lane{height:20px}
+.lmb .ec .ec-dots{display:flex;height:14px;align-items:center;background:linear-gradient(rgba(127,127,127,.3),rgba(127,127,127,.3)) center/100% 1px no-repeat}
+.lmb .ec .ec-dots i{flex:1 1 0;display:flex;justify-content:center;min-width:0}
+.lmb .ec .ec-dots b{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#ef4444}
+.lmb .ec .ec-lane.stopped b{background:rgba(239,68,68,.35)}
+.lmb .ec .ec-lane.stopped>span{opacity:.5}
+.lmb .cz{display:flex;flex-direction:column;gap:12px;margin:0 0 14px;max-width:980px}
+.lmb .cz .cz-c{border:1px solid rgba(127,127,127,.3);border-radius:10px;overflow:hidden}
+.lmb .cz .cz-top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:start;padding:11px 16px;background:rgba(127,127,127,.05);box-shadow:inset 4px 0 #f59e0b}
+.lmb .cz .cz-c.bad .cz-top{box-shadow:inset 4px 0 #ef4444}
+.lmb .cz .cz-c.ok .cz-top{box-shadow:inset 4px 0 #10b981}
+.lmb .cz .cz-c.ok{opacity:.85}
+.lmb .cz .cz-n{width:22px;height:22px;border-radius:50%;background:rgba(127,127,127,.15);font:700 11.5px/22px var(--lmb-mono);text-align:center}
+.lmb .cz .cz-what{min-width:0}
+.lmb .cz .cz-what code{font-size:13.5px;font-weight:700;background:none;padding:0;overflow-wrap:anywhere}
+.lmb .cz .cz-kind{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.6;margin-right:8px}
+.lmb .cz .cz-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.lmb .cz .cz-tag{font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:rgba(127,127,127,.12)}
+.lmb .cz .cz-tag.warn{background:rgba(245,158,11,.16);color:#92400e}
+.lmb .cz .cz-tag.bad{background:rgba(239,68,68,.12);color:#b91c1c}
+.lmb .cz .cz-tag.ok{background:rgba(16,185,129,.13);color:#047857}
+.lmb .cz .cz-count{font-size:12px;text-align:right;white-space:nowrap}
+.lmb .cz .cz-count b{font:700 18px var(--lmb-mono);color:#dc2626;margin-right:3px}
+.lmb .cz .cz-count span{display:block;opacity:.6}
+.lmb .cz .cz-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;padding:12px 16px 14px;font-size:13px;line-height:1.5}
+.lmb .cz .cz-body p{margin:0 0 10px}
+.lmb .cz .cz-body ol{margin:0;padding-left:18px}
+.lmb .cz .cz-body li{margin:0 0 6px;overflow-wrap:anywhere}
+.lmb .cz .cz-k{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.55;margin:0 0 4px}
+.lmb .cz .cz-body code{overflow-wrap:anywhere}
+.lmb .cz .cz-full{margin-top:8px;font-size:12px}
+.lmb .cz .cz-full summary{cursor:pointer;opacity:.7}
+.lmb .cz .cz-full pre{margin:4px 0 0;padding:8px 10px;border:0;border-radius:6px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--lmb-mono);max-height:320px;overflow:auto}
+@container (max-width:700px){.lmb .cz .cz-body{grid-template-columns:minmax(0,1fr)}.lmb .ec .ec-row{grid-template-columns:110px minmax(0,1fr)}}
 @container (max-width:760px){.lmb .lgv :is(.lghd,summary.lgf){grid-template-columns:14px 100px 104px 116px minmax(0,1fr)}.lmb .lgv :is(.lghd,summary.lgf)>:is(:nth-child(5),:nth-child(6),:nth-child(8)){display:none}.lmb .lgv .lgln{grid-template-columns:92px 46px minmax(0,1fr);padding-left:14px}}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))

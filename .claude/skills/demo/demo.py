@@ -54,7 +54,8 @@ Demo data (moto, us-east-1, everything synthetic):
             packages served from memory. us-east-1: orders-etl (python3.9, SQS and S3 triggers, errors rising for
             3 days, runs near its 60 s timeout, KeyError / AccessDenied / timeouts in the last 24 hours of logs,
             logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package,
-            and a version 1 from before the DynamoDB write behind those errors, for diff()),
+            a version 1 from before the DynamoDB write behind those errors, for diff(), 8 S3 events Lambda
+            dropped with nothing to keep them, and 2 messages in orders-queue's dead-letter queue orders-dlq),
             churn-scoring (arm64, EventBridge, 4 copies of provisioned concurrency it never needs), report-api
             (nodejs20.x, a public function URL, throttled by reserved concurrency 10, JSON logs for its last three
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
@@ -85,6 +86,7 @@ import gzip
 import importlib
 import io
 import json
+import math
 import os
 import random
 import re
@@ -1818,6 +1820,65 @@ def _backdate_function(name: str, when: datetime) -> None:
     function.last_modified = when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
+def _share_out(total: int, weights: list[float]) -> list[int]:
+    """
+    `total` split in proportion to `weights`, whole numbers that add up to it (the largest remainders round up).
+    """
+    exact = [total * w / sum(weights) for w in weights]
+    parts = [int(x) for x in exact]
+    for i in sorted(range(len(exact)), key=lambda i: parts[i] - exact[i])[:total - sum(parts)]:
+        parts[i] += 1
+    return parts
+
+
+def _by_hour(day: datetime, dims: list[dict], calls: int, failed: int) -> list[dict]:
+    """
+    A day's calls and failed calls as a point an hour, busier in the day than at night, up to the hour now for today:
+    what CloudWatch holds, so a report over the last hours draws a column an hour. The day's totals don't change.
+    """
+    hours = [h for h in range(24) if day + timedelta(hours=h, minutes=30) <= NOW] or [0]
+    weights = [1.5 + math.sin((h - 9) / 24 * 2 * math.pi) for h in hours]
+    points = []
+    for hour, hour_calls, hour_failed in zip(hours, _share_out(calls, weights), _share_out(failed, weights)):
+        when = day + timedelta(hours=hour, minutes=30)
+        points += [{"MetricName": "Invocations", "Dimensions": dims, "Timestamp": when, "Value": hour_calls},
+                   {"MetricName": "Errors", "Dimensions": dims, "Timestamp": when, "Value": hour_failed}]
+    return points
+
+
+def _seed_failed_events(now: datetime) -> None:
+    """
+    Where orders-etl's failed events went: orders-queue moves a message to orders-dlq after 5 failed reads (2 are
+    there, the oldest 6 hours old), and Lambda gave up on 8 of the events S3 sent it, with nothing to keep them.
+    """
+    import boto3
+
+    rng = random.Random(11)
+    sqs = boto3.client("sqs", region_name=REGION)
+    dead_url = sqs.create_queue(QueueName="orders-dlq", Attributes={"MessageRetentionPeriod": str(14 * 86400)})["QueueUrl"]
+    dead_arn = sqs.get_queue_attributes(QueueUrl=dead_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+    for order in ("ORD-88213", "ORD-88240"):
+        sqs.send_message(QueueUrl=dead_url, MessageBody=json.dumps({"order_id": order, "items": 3}))
+    queue_url = sqs.get_queue_url(QueueName="orders-queue")["QueueUrl"]
+    sqs.set_queue_attributes(QueueUrl=queue_url, Attributes={
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dead_arn, "maxReceiveCount": "5"})})
+    cloudwatch = boto3.client("cloudwatch", region_name=REGION)
+    cloudwatch.put_metric_data(Namespace="AWS/SQS", MetricData=[
+        {"MetricName": "ApproximateAgeOfOldestMessage", "Dimensions": [{"Name": "QueueName", "Value": "orders-dlq"}],
+         "Timestamp": now - timedelta(minutes=minutes), "Value": 6 * 3600.0 + 60 * (30 - minutes)}
+        for minutes in (5, 15, 25)])
+    dims = [{"Name": "FunctionName", "Value": "orders-etl"}]
+    data = []
+    for hour in range(1, 24):
+        when = now - timedelta(hours=hour, minutes=rng.randint(0, 40))
+        data.append({"MetricName": "AsyncEventsReceived", "Dimensions": dims, "Timestamp": when,
+                     "Value": float(rng.randint(12, 20))})
+        data.append({"MetricName": "AsyncEventsDropped", "Dimensions": dims, "Timestamp": when,
+                     "Value": 1.0 if hour in (1, 4, 7, 9, 12, 15, 18, 22) else 0.0})
+    for start in range(0, len(data), 20):
+        cloudwatch.put_metric_data(Namespace="AWS/Lambda", MetricData=data[start:start + 20])
+
+
 def seed_lambda_functions() -> dict:
     """
     moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
@@ -1921,6 +1982,7 @@ def seed_lambda_functions() -> dict:
         arn = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
         boto3.client("lambda", region_name=region).create_event_source_mapping(
             EventSourceArn=arn, FunctionName=function, BatchSize=10)
+    _seed_failed_events(NOW)
 
     # 30 days of CloudWatch numbers: (calls a day, error share, throttles a day, average ms, longest ms, most at once,
     # bytes logged a day). orders-etl's errors started three days ago.
@@ -1941,9 +2003,11 @@ def seed_lambda_functions() -> dict:
             when = today - timedelta(days=day) + timedelta(hours=12 if day else 0, minutes=30)
             count = round(calls * rng.uniform(0.8, 1.2))
             failed = round(count * (0.03 if name == "orders-etl" and day < 3 else errors))
-            data += [
+            data += _by_hour(today - timedelta(days=day), dims, count, failed) if day < 2 else [
                 {"MetricName": "Invocations", "Dimensions": dims, "Timestamp": when, "Value": count},
                 {"MetricName": "Errors", "Dimensions": dims, "Timestamp": when, "Value": failed},
+            ]
+            data += [
                 {"MetricName": "Throttles", "Dimensions": dims, "Timestamp": when,
                  "Value": round(throttles * rng.uniform(0, 2))},
                 {"MetricName": "Duration", "Dimensions": dims, "Timestamp": when, "StatisticValues": {
