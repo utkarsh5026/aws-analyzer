@@ -461,7 +461,8 @@ class LogEvent:
 class ErrorGroup:
     """
     Errors that share a cause: the same kind and message, once numbers and IDs are blanked out. `versions` are the
-    versions of the function that logged them, newest first, read from their log streams' names ('$LATEST', '3').
+    versions of the function that logged them, newest first, read from their log streams' names ('$LATEST', '3'), and
+    `times` when each of its lines was logged, oldest first.
     """
 
     kind: str  # 'Timeout', 'Out of memory', 'KeyError', 'Runtime.ImportModuleError', 'Logged error', ...
@@ -472,6 +473,7 @@ class ErrorGroup:
     example: str  # one full message
     request_ids: list[str] = field(default_factory=list)  # a few, newest first
     versions: list[str] = field(default_factory=list)
+    times: list[datetime] = field(default_factory=list)
 
 
 @dataclass

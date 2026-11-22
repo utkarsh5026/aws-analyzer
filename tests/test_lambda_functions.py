@@ -2476,7 +2476,32 @@ def test_error_causes_share_all_error_lines(ui, capsys, monkeypatch):
 
     monkeypatch.setattr(ui.core, "errors", errors)
     out = run(capsys, ui.errors, "etl-nightly")
-    assert "75.0%" in out and "25.0%" in out and "100.0%" not in out
+    assert "3 (75%)" in out and "1 (25%)" in out and "(100%)" not in out
+
+
+def test_time_slots_count_each_slice_of_the_window():
+    since = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    until = since + timedelta(hours=4)
+    times = [since, since + timedelta(minutes=30), since + timedelta(hours=3, minutes=59), until,
+             since - timedelta(minutes=1), until + timedelta(minutes=1)]
+    assert lfmod.time_slots(times, since, until, 4) == [2, 0, 0, 2]
+    assert lfmod.time_slots(times, until, since, 4) == [0, 0, 0, 0]
+
+
+def test_errors_by_cause_are_cards_on_one_time_axis(ui, capsys):
+    out = run(capsys, ui.errors, "etl-nightly")
+    cause = out[out.index("-- Errors by cause"):out.index("-- The newest error lines")]
+    axis, line = cause.splitlines()[1:3]
+    assert axis.rstrip().endswith("now")
+    assert line.split()[:3] == ["1", "KeyError:", "'customer_id'"] and line.rstrip().endswith("1 (100%)")
+    assert "•" in line and "first 10m ago, last 10m ago · where: app.py, line 2, in handler()" in cause
+    assert f"newest run: logs('etl-nightly', request_id='{RID}')" in cause
+    blocks = ui._errors_blocks(ui.core.errors("etl-nightly"))
+    page = stylemod._render_html(blocks, 50)
+    assert 'class="cz-c"' in page and "app.py, line 2, in handler()" in page
+    assert "The whole message" in page and "Traceback (most recent call last)" in page
+    folded = next(b for b in blocks if getattr(b, "title", "") == "The newest error lines")
+    assert folded.collapsed and not folded.sortable
 
 
 def _fn(name="etl", **kwargs):

@@ -340,6 +340,29 @@ _EXTRA_CSS = """\
 .lmb .ef .ef-h{font-weight:650;font-size:13px;overflow-wrap:anywhere}
 .lmb .ef .ef-s{font-size:12px;line-height:1.45;opacity:.75;overflow-wrap:anywhere}
 .lmb .ef .ef-b{margin-top:auto;padding-top:6px;border-top:1px dashed rgba(127,127,127,.3);font:11px var(--lmb-mono);opacity:.6}
+.lmb .cz{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;max-width:980px}
+.lmb .cz :is(.cz-axis,.cz-c){display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);column-gap:20px;padding:0 14px;border:1px solid transparent}
+.lmb .cz .cz-ticks{display:flex;justify-content:space-between;font:10.5px var(--lmb-mono);opacity:.55}
+.lmb .cz .cz-c{border-color:rgba(127,127,127,.3);border-radius:8px;padding:10px 14px;box-shadow:inset 3px 0 #ef4444}
+.lmb .cz .cz-head{display:flex;gap:10px;align-items:baseline;min-width:0}
+.lmb .cz .cz-n{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:rgba(239,68,68,.12);color:#dc2626;font:700 11px/20px var(--lmb-mono);text-align:center}
+.lmb .cz .cz-what{min-width:0}
+.lmb .cz .cz-what code{font-size:13px;font-weight:650;background:none;padding:0;overflow-wrap:anywhere}
+.lmb .cz .cz-kind{font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.6;margin-right:8px}
+.lmb .cz .cz-when{font-size:12px;opacity:.65;margin:3px 0 0 30px}
+.lmb .cz .cz-row{display:flex;gap:10px;align-items:baseline;margin:6px 0 0 30px;font-size:12.5px;min-width:0}
+.lmb .cz .cz-row code{overflow-wrap:anywhere}
+.lmb .cz .cz-k{flex:0 0 78px;font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.55}
+.lmb .cz .cz-full{margin:6px 0 0 30px;font-size:12px}
+.lmb .cz .cz-full summary{cursor:pointer;opacity:.7}
+.lmb .cz .cz-full pre{margin:4px 0 0;padding:8px 10px;border:0;border-radius:6px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--lmb-mono);max-height:320px;overflow:auto}
+.lmb .cz .cz-right{display:flex;flex-direction:column;justify-content:center;gap:6px;min-width:0}
+.lmb .cz .cz-count{font-size:12px;opacity:.85}
+.lmb .cz .cz-count b{font:700 16px var(--lmb-mono);color:#dc2626;margin-right:2px}
+.lmb .cz .cz-count span{margin-left:8px;opacity:.65}
+.lmb .cz .cz-lane{display:flex;height:16px;align-items:center;background:linear-gradient(rgba(127,127,127,.3),rgba(127,127,127,.3)) center/100% 1px no-repeat}
+.lmb .cz .cz-lane i{flex:1 1 0;display:flex;align-items:center;justify-content:center;min-width:0}
+.lmb .cz .cz-lane b{flex:0 0 auto;width:var(--d);height:var(--d);border-radius:50%;background:#ef4444;opacity:.85}
 @container (max-width:760px){.lmb .lgv :is(.lghd,summary.lgf){grid-template-columns:14px 100px 104px 116px minmax(0,1fr)}.lmb .lgv :is(.lghd,summary.lgf)>:is(:nth-child(5),:nth-child(6),:nth-child(8)){display:none}.lmb .lgv .lgln{grid-template-columns:92px 46px minmax(0,1fr);padding-left:14px}}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))

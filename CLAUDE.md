@@ -571,6 +571,10 @@ How the View layer works:
   `ReceiveMessage`), and `analysis/fates.py` (pure: `event_fates` into `EventFate`s, lost / kept / waiting / at risk /
   safe / unknown, each with its `basis`; `fate_findings`) works out where they went. `blocks/fates.py`'s `_Fates`
   draws a card per fate. The agent's `function_errors` passes `fates=False`.
+  Its causes are `blocks/causes.py`'s `_Causes`: a card per `ErrorGroup` with a row of dots on one time axis
+  (`time_slots`, pure, over `ErrorGroup.times`; the axis ends at "now" when the window does), the line its traceback
+  names (`failing_frame`) and the `logs(..., request_id=...)` call for its newest run; the newest error lines are a
+  folded, unsorted table under it. The explorer's Errors tab draws its own cause lines (`for_window=True`).
 - `LambdaView.runs()` is a function's runs as rows of fields: `analysis/runs.py`'s `run_table` turns a `LogPage` into a
   `RunTable` of `RunRow`s (`run_fields`: Lambda's `BUILTIN_FIELDS`, every field its JSON lines carry by dotted path, the
   event as `event.*` when `logged_event` finds it, and `fields=` regexes on text lines), with `where()`, `sorted_by()`,

@@ -1285,7 +1285,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 2964
+      "h": 2561
      }
     ],
     "captions": [

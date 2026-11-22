@@ -16,6 +16,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - It counts dropped S3, SNS and EventBridge events with Lambda's own `AsyncEventsDropped`, and shows how to keep the next ones.
   - Reading an SQS trigger's queues needs `sqs:GetQueueUrl` and `sqs:GetQueueAttributes`; nothing receives a message.
 
+### Changed
+
+- ⚡ **Lambda: errors by cause as cards** ([#265](https://github.com/utkarsh5026/aws-analyzer/pull/265))
+  - `errors()` shows each cause as a card with a row of dots for when it happened, on one time axis.
+  - Each card names the line of code it failed on and the `logs(..., request_id=...)` call for its newest run.
+  - The newest error lines are folded under the cards.
+
 ## [0.61.0] - 2026-11-20
 
 ### Added

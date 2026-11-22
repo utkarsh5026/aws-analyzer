@@ -62,6 +62,7 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.causes import _causes_block
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
 
@@ -866,19 +867,14 @@ class LambdaView(_BaseView):
         blocks.append(_Findings(found, empty=empty if "logs" not in report.errors else ""))
         blocks += _fates_blocks(report)
         if report.groups and not for_window:
-            lines = sum(g.count for g in report.groups)
-            blocks.append(_Table(
-                ["Cause", "Times", "Last", "First", "Example"],
-                [[g.kind, _count(g.count), human_age(g.last, report.until), human_age(g.first, report.until),
-                  _clip(g.message, 300)] for g in report.groups],
-                bars=[_share(g.count, lines) for g in report.groups], bar_label="Share",
-                title="Errors by cause (from its log lines: a failed call can log more than one)",
-            ))
+            blocks.append(_causes_block(
+                report, title="Errors by cause (from its log lines: a failed call can log more than one)",
+                run_call=lambda rid: self._call_for("logs", fn, request_id=rid, **_since_arg(since, "24h"))))
             blocks.append(_Table(
                 [f"Time ({_tz_label()})", "Request ID", "Line"],
                 [[_stamp(e.time), e.request_id or "-", _clip(readable_line(e.message).strip().splitlines()[0], 300)]
                  for e in report.newest],
-                title="The newest error lines", max_rows=0,
+                title="The newest error lines", max_rows=0, collapsed=True, sortable=False,
             ))
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)

@@ -236,8 +236,8 @@ ui.errors("orders-etl")
 ui.errors("orders-etl", since="7d")            # further back
 ```
 
-![errors("orders-etl"): cards for 35 failed calls of 1,177, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-light.webp#only-light){ width="984" height="1976" loading=lazy }
-![errors("orders-etl"): cards for 35 failed calls of 1,177, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-dark.webp#only-dark){ width="984" height="1976" loading=lazy }
+![errors("orders-etl"): cards for 66 failed calls of 2,226, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied, each with a row of dots for when it happened over the 24 hours, the line of code it failed on and the call that reads its newest run](images/lambda-errors-light.webp#only-light){ width="984" height="1707" loading=lazy }
+![errors("orders-etl"): cards for 66 failed calls of 2,226, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied, each with a row of dots for when it happened over the 24 hours, the line of code it failed on and the call that reads its newest run](images/lambda-errors-dark.webp#only-dark){ width="984" height="1707" loading=lazy }
 /// caption
 `ui.errors("orders-etl")`: three different reasons to fail, each with what to do and the run to look at, and where the failed events went: 8 dropped, 2 kept in a dead-letter queue.
 ///
@@ -250,7 +250,7 @@ Each cause gets its own advice:
 - **Access denied**: the function's role isn't allowed something its code does, named with the action and the resource.
 - **Throttled or unreachable services**, and otherwise the most common error, with an example.
 
-Each error is matched to its run, so `logs("orders-etl", request_id="...")` shows that whole run, start to end.
+Each cause is a card: how often it happened and its share of the error lines, a row of dots on a time axis shared by every card (so a cause that started an hour ago, or stopped yesterday, stands out), the line of the function's own code its traceback names, and the `logs("orders-etl", request_id="...")` call that shows its newest run, start to end. The raw error lines are folded underneath.
 
 ### Did we lose data? { #failed-events }
 
