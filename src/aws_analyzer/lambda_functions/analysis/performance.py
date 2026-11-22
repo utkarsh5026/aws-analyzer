@@ -184,6 +184,20 @@ def time_slices(runs: list[Invocation], timeout_s: int, start: datetime, end: da
             for index, values in sorted(buckets.items())]
 
 
+def slice_counts(times: list[datetime], start: datetime, end: datetime, *,
+                 slices: int = TIME_BAND_SLICES) -> list[int]:
+    """
+    How many of `times` fall in each of the window's `slices` equal parts.
+    """
+    counts = [0] * slices
+    span = (end - start) / slices
+    if span.total_seconds() <= 0:
+        return counts
+    for moment in times:
+        counts[min(max(int((moment - start) / span), 0), slices - 1)] += 1
+    return counts
+
+
 def _nice_step(longest_ms: float, slots: int) -> float:
     """
     The smallest of 1, 2 or 5 times a power of ten that fits the longest run time in `slots` bins.

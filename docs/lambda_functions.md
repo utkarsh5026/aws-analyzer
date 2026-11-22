@@ -311,7 +311,7 @@ ui.runs("orders-etl", where="size > 30MB", columns=["started", "duration", "even
 ui.runs("orders-etl", fields={"written": r"wrote (\d+) orders"}, where="written > 40000")  # from text lines
 ```
 
-The report starts with how many runs match and how they went, says when one reached the timeout or used 90% of the memory (with the command to fix it), and when a field you named isn't one any run has, with the one you likely meant. The fields there are to ask about are listed, folded, at the end.
+The report answers first: how many runs failed and from how many causes, which one is still failing, and how long the runs that worked took. Then a dot per run by when it started and how long it took, drawn as `performance()` draws them (failed ones red, the runs that timed out in a lane above so the rest stay to scale), and a card per cause of the failed runs: still failing or stopped, what it means, where its code fails, what to do and the call that reads its newest run. Findings say when a run reached the timeout or used 90% of the memory (with the command to fix it), and when a field you named isn't one any run has, with the one you likely meant. The runs follow as a table, and the fields there are to ask about are listed, folded, at the end.
 
 ??? more "What a query can say"
 

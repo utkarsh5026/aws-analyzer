@@ -18,7 +18,8 @@ from ..._kit.deps import _require
 from ..._kit.fmt import _in_zone, _plural
 
 from ..helpers import human_ms, stream_version
-from ..models import Function, LogEvent
+from ..models import ErrorGroup, Function, LogEvent
+from .errors import group_errors
 from .logs import LogPage, LogRun, _marker
 from .performance import percentile
 from .query import FIELD_KINDS, QueryError, RunQuery, closest_field, parse_query, short_name_of
@@ -204,6 +205,43 @@ def run_summary(run: LogRun) -> str:
         if text:
             return text.splitlines()[0][:_SUMMARY_CHARS]
     return ""
+
+
+def _failing_line(run: LogRun) -> LogEvent | None:
+    """
+    The line that says what made a run fail: its first error that isn't only logged, else its first error.
+    """
+    serious = [event for event, kind, _ in run.failures if kind != "Logged error"]
+    every = [event for event, _, _ in run.failures]
+    return (serious or every or [None])[0]
+
+
+def _failure_text(run: LogRun, line: LogEvent) -> str:
+    """
+    What a run logged from its error to its end, so a traceback logged a line at a time reads whole.
+    """
+    lines = _own_lines(run)
+    start = next((i for i, event in enumerate(lines) if event is line), len(lines))
+    return "\n".join(event.message.strip() for event in lines[start:]) or line.message.strip()
+
+
+def failure_groups(table: RunTable) -> list[ErrorGroup]:
+    """
+    The runs that failed or timed out, grouped by what made them fail (kind and message, numbers and IDs aside), the
+    most runs first: one line per run, so a group's count is its runs, and its example is the newest run's lines from
+    its error on (the whole traceback).
+    """
+    failing: dict[str, tuple[LogEvent, LogRun]] = {}
+    for run in table.runs:
+        line = _failing_line(run) if run.status in _FAILED else None
+        if line is not None and run.request_id:
+            failing[run.request_id] = (line, run)
+    groups = group_errors(replace(line, request_id=request_id) for request_id, (line, _) in failing.items())
+    for group in groups:
+        newest = failing.get(group.request_ids[0]) if group.request_ids else None
+        if newest is not None:
+            group.example = _failure_text(newest[1], newest[0])
+    return groups
 
 
 def _percent_of(part: float | None, whole: float | None) -> float | None:
