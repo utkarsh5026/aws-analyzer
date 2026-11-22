@@ -204,6 +204,7 @@ class _Cause:
     run_call: str = ""
     example: str = ""
     first: str = ""
+    share_of: str = "error lines"
 
 
 @dataclass
@@ -265,15 +266,17 @@ class _CaseFacts:
     advice: CauseAdvice
 
 
-def _cause(number: int, facts: _CaseFacts, report: ErrorReport, *, lines: int,
-           run_call: Callable[[str], str]) -> _Cause:
+def _cause(number: int, facts: _CaseFacts, *, until: datetime, lines: int, run_call: Callable[[str], str]) -> _Cause:
+    """
+    One cause's card, its count a share of `lines` error lines.
+    """
     group = facts.group
     newest = group.request_ids[0] if group.request_ids else ""
     return _Cause(
         number, group.kind, _cause_headline(group), group.count, group.count / lines if lines else 0.0,
         facts.state.state, facts.state.says, means=facts.advice.means, steps=list(facts.advice.steps),
         where=_failed_at(group), versions=_versions(group), run_call=run_call(newest) if newest else "",
-        example=_example(group), first=human_age(group.first, report.until),
+        example=_example(group), first=human_age(group.first, until),
     )
 
 
@@ -299,7 +302,7 @@ def _cause_top_html(cause: _Cause, tone: str) -> str:
             f'<div class="cz-what">{kind}<code>{_esc(cause.message)}</code><div class="cz-tags">'
             f'<span class="cz-tag {tone}">{_esc(cause.state_says)}</span><span class="cz-tag">{_esc(meta)}</span>'
             f'</div></div><div class="cz-count"><b>{cause.count:,}</b> {times}'
-            f"<span>{cause.share:.0%} of error lines</span></div></div>")
+            f"<span>{cause.share:.0%} of {_esc(cause.share_of)}</span></div></div>")
 
 
 def _cause_html(cause: _Cause) -> str:
@@ -367,7 +370,7 @@ def _cause_blocks(report: ErrorReport, *, run_call: Callable[[str], str]) -> lis
     chart = _ErrorChart(failure_pattern(columns), _axis_labels(columns, report.until), columns.calls, columns.failed,
                         columns.unit, lanes, title=f"When it failed, a column per {columns.unit}")
     lines = sum(group.count for group in report.groups)
-    causes = [_cause(number, fact, report, lines=lines, run_call=run_call)
+    causes = [_cause(number, fact, until=report.until, lines=lines, run_call=run_call)
               for number, fact in enumerate(facts, start=1)]
     title = "Errors by cause (from its log lines: a failed call can log more than one)"
     return [_Verdict(verdict.headline, verdict.detail, verdict.tone), chart, _Causes(causes, title),

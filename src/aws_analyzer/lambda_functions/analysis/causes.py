@@ -12,10 +12,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from ..._kit.fmt import _in_zone, _plural, human_age
+from ..._kit.text import _clip
 
+from ..helpers import human_ms
 from ..models import ErrorGroup, ErrorReport, Function, FunctionMetrics
 from .errors import _ACCESS_DENIED_RE, _CONNECT_RE, _DENIED_ACTION_RE, _LOAD_ERRORS, _THROTTLED_RE
 from .fates import LOST
+from .logs import LogRun
 from .findings import _longer, _next_memory
 from .text import _cli, _window
 
@@ -37,6 +40,8 @@ _PEAK_SHARE = 0.5
 _FEWEST_FOR_A_PATTERN = 4
 
 _TREND_RATIO = 2
+
+_VERDICT_MESSAGE = 80
 
 _EXCEPTIONS = {
     "KeyError": ("The code read a key the data didn't have{detail}: some inputs don't carry it.",
@@ -308,3 +313,35 @@ def errors_verdict(report: ErrorReport, states: list[CauseState]) -> Verdict:
         detail += f"; the last error {human_age(last, report.until)}"
     tone = "bad" if lost or failing else "ok"
     return Verdict(headline, detail + ".", tone)
+
+
+def _spread(durations: list[float], timeout: int) -> str:
+    if not durations:
+        return ""
+    return f"Runs that worked took {human_ms(min(durations))} to {human_ms(max(durations))}, of a {timeout} s timeout."
+
+
+def runs_verdict(runs: list[LogRun], fn: Function, causes: list[tuple[ErrorGroup, CauseState]], *,
+                 until: datetime, matching: bool = False) -> Verdict:
+    """
+    runs()' first sentence: how many of the runs failed and from how many causes (each failed run's group and its
+    state), then the cause still failing first (or that none is) and how long the runs that worked took.
+    """
+    noun = "runs that match" if matching else "runs"
+    failed = [run for run in runs if run.status in ("failed", "timeout")]
+    worked = [run.duration for run in runs if run.status == "ok" and run.duration is not None]
+    spread = _spread(worked, fn.timeout)
+    if not failed:
+        return Verdict(f"All {len(runs):,} {noun} of {fn.name} worked." if len(runs) > 1
+                       else f"The one run of {fn.name} worked.", spread, "ok")
+    from_causes = f", from {_plural(len(causes), 'cause')}" if causes else ""
+    headline = f"{len(failed):,} of {len(runs):,} {noun} failed ({len(failed) / len(runs):.0%}){from_causes}."
+    still = [(group, state) for group, state in causes if state.state != STOPPED]
+    if still:
+        group, state = still[0]
+        others = f" ({len(still) - 1} more still failing)" if len(still) > 1 else ""
+        says = f"{_clip(group.message.splitlines()[0], _VERDICT_MESSAGE)}: {state.says}{others}."
+    else:
+        last = max((run.start for run in failed), default=None)
+        says = f"None is failing any more: the last failed run started {human_age(last, until)}." if last else ""
+    return Verdict(headline, " ".join(part for part in (says, spread) if part), "bad" if still else "ok")

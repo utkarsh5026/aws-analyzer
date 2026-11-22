@@ -83,7 +83,7 @@ from .analysis.errors import (
 from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
 from .analysis.causes import (
     CauseAdvice, CauseState, ChartColumns, Verdict, calls_after, cause_advice, cause_state, chart_columns,
-    column_counts, errors_verdict, failure_pattern,
+    column_counts, errors_verdict, failure_pattern, runs_verdict,
 )
 from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
@@ -97,8 +97,8 @@ from .analysis.performance import percentile, performance_findings, suggest_memo
 from .analysis.query import QueryError, RunQuery, looks_like_query, parse_query
 from .analysis.word_search import SearchError, SearchTerms, WordSearch, word_search
 from .analysis.runs import (
-    BUILTIN_FIELDS, FieldInfo, LoggedEvent, RunGroup, RunRow, RunTable, logged_event, run_fields, run_table,
-    runs_findings,
+    BUILTIN_FIELDS, FieldInfo, LoggedEvent, RunGroup, RunRow, RunTable, failure_groups, logged_event, run_fields,
+    run_table, runs_findings,
 )
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
@@ -129,6 +129,7 @@ __all__ = [
     "timeout_warning",
     "runs_findings",
     "run_table",
+    "failure_groups",
     "run_fields",
     "parse_query",
     "looks_like_query",
@@ -254,6 +255,7 @@ __all__ = [
     "chart_columns",
     "column_counts",
     "errors_verdict",
+    "runs_verdict",
     "failure_pattern",
     "window_findings",
     "group_errors",

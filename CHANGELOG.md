@@ -22,6 +22,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- ⚡ **Lambda: runs() says how many failed and why**
+  - It opens with a verdict: "13 of 70 runs failed (19%), from 3 causes", and the cause still failing.
+  - A dot per run by start and run time, zoomed in when runs take seconds of a long timeout.
+  - A card per cause of the failed runs, as in `errors()`, before the table of runs.
 - ⚡ **Lambda: errors() reads like a case file** ([#265](https://github.com/utkarsh5026/aws-analyzer/pull/265))
   - It opens with a verdict and a chart of failed calls per hour, a row of dots per cause under it.
   - Each cause is a card: new, still failing or stopped, what it means, where it fails and what to do.

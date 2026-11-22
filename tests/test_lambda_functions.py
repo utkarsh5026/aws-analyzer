@@ -28,6 +28,7 @@ from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_f
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, logs as logs_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
+from aws_analyzer.lambda_functions.blocks.runs import _round_up, _zoom_for
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
 from aws_analyzer.lambda_functions.explorer import plain as plain_search
@@ -60,6 +61,8 @@ from aws_analyzer.lambda_functions import (
     run_fields,
     run_table,
     runs_findings,
+    runs_verdict,
+    failure_groups,
     AsyncConfig,
     AsyncCounts,
     QueueState,
@@ -1686,6 +1689,45 @@ def test_run_table_sorts_groups_and_lists_its_fields():
         run_table(orders_page(), fields={"bad": "wrote ("})
 
 
+def failing_page():
+    traceback = ["[ERROR] KeyError: 'customer_id'", "Traceback (most recent call last):",
+                 '  File "/var/task/etl.py", line 22, in handler', "    pk = row['customer_id']"]
+    return run_page(
+        ("k1", 900.0, 120, ["[ERROR] KeyError: 'customer_id'"], False, False),
+        ("ok1", 4000.0, 150, ["reading batch"], False, False),
+        ("t1", 60000.0, 170, [], False, True),
+        ("k2", 1100.0, 130, traceback, False, False),
+        ("ok2", 8000.0, 160, ["reading batch"], True, False),
+    )
+
+
+def test_failed_runs_are_grouped_by_cause_and_the_verdict_says_it_first():
+    page = failing_page()
+    table = run_table(page)
+    groups = failure_groups(table)
+    assert [(group.kind, group.count) for group in groups] == [("KeyError", 2), ("Timeout", 1)]
+    assert groups[0].request_ids == ["k2", "k1"] and "etl.py\", line 22" in groups[0].example
+    states = [causes_mod.cause_state(group, since=page.since, until=page.until) for group in groups]
+    verdict = runs_verdict(table.runs, page.function, list(zip(groups, states)), until=page.until)
+    assert verdict.headline == "3 of 5 runs failed (60%), from 2 causes." and verdict.tone == "bad"
+    assert verdict.detail.startswith("KeyError: 'customer_id': still failing, the last")
+    assert "(1 more still failing)" in verdict.detail
+    assert verdict.detail.endswith("Runs that worked took 4.00 s to 8.00 s, of a 60 s timeout.")
+    quiet = [causes_mod.CauseState(causes_mod.STOPPED, "stopped") for _ in groups]
+    over = runs_verdict(table.runs, page.function, list(zip(groups, quiet)), until=page.until)
+    assert over.tone == "ok" and over.detail.startswith("None is failing any more: the last failed run started")
+    fine = runs_verdict([run for run in table.runs if run.status == "ok"], page.function, [], until=page.until)
+    assert (fine.headline, fine.tone) == ("All 2 runs of orders-etl worked.", "ok")
+    assert runs_verdict(table.where("failed").runs, page.function, [], until=page.until,
+                        matching=True).headline == "3 of 3 runs that match failed (100%)."
+
+
+def test_the_runs_timeline_zooms_in_when_runs_take_a_small_share_of_the_timeout():
+    assert _round_up(8_700 * 1.1) == 10_000 and _round_up(10_005) == 20_000 and _round_up(1_800) == 2_000 and _round_up(400) == 500
+    assert _zoom_for([1_000.0, 8_700.0, 60_000.0], 60_000.0) == 10_000
+    assert _zoom_for([1_000.0, 30_000.0], 60_000.0) is None and _zoom_for([60_000.0], 60_000.0) is None
+
+
 def test_runs_findings_name_what_to_do():
     table = run_table(orders_page())
     found = runs_findings(table.where("duration > 15s"))
@@ -3029,6 +3071,25 @@ def test_prices_are_list_prices():
 def test_ui_explore_needs_jupyter(ui, capsys):
     out = run(capsys, ui.explore)
     assert "The explorer window needs Jupyter" in out and "logs('name') shows what one logged" in out
+
+
+def test_runs_report_says_how_many_failed_and_why_before_the_table(ui, capsys):
+    now = datetime.now(timezone.utc)
+    seed_runs(now)
+    out = run(capsys, ui.runs, "etl-nightly", since="1h")
+    assert ">> 1 of 5 runs failed (20%), from 1 cause. (!)" in out and "Failed: 1 · 20% (!)" in out
+    assert out.index(">> 1 of 5") < out.index("Runs: 5") < out.index("-- Every run, by when it started")
+    assert out.index("-- Every run") < out.index("-- Why runs failed: a card per cause --") < out.index(
+        "-- The runs, newest first --")
+    assert "100% of failed runs" not in out and "(100%) (!)" in out
+    assert f"logs('etl-nightly', request_id='{RID}', since='1h')   the newest failed run, line by line" in out
+    assert "runs('etl-nightly', since='1h', where='failed', group_by='error_type')" in out
+    shown = []
+    html = LambdaView(ui.core, mode="html")
+    html._show = shown.append
+    html.runs("etl-nightly", since="1h")
+    page = stylemod._render_html(shown[0], 50)
+    assert 'class="vd bad"' in page and 'class="dts"' in page and "of failed runs" in page
 
 
 def test_runs_report_filters_sorts_groups_and_lists_the_fields(ui, capsys):
