@@ -1403,21 +1403,21 @@ window.AA_TOURS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 2213
+      "h": 3223
      }
     ],
     "captions": [
      [
       0,
-      "<b>Why does it fail?</b> Its errors, read from its own logs."
+      "<b>Why does it fail?</b> The answer first: <b>8 events lost</b>."
      ],
      [
       2.92,
-      "Three different reasons, <b>grouped by cause</b>,"
+      "When it failed, hour by hour, a row per cause,"
      ],
      [
       11.3,
-      "each with what to do and the run to look at."
+      "then <b>a card per cause</b> with what to do about it."
      ]
     ]
    },

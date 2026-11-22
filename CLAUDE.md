@@ -579,6 +579,24 @@ How the View layer works:
   (`_midnight`), so "last called" reads today / yesterday / 3d ago; `_errors_level` is the one rule for when failed
   calls are a warning (in findings, the Error rate card and the table's tone). Log reads go backwards in growing
   slices (`_filter`) so the newest lines are the ones kept when a window holds more than `limit`.
+- `errors()` also says what happened to the failed events (`report.fates`; `errors(fates=False)` skips the reads):
+  `fate_reads.py`'s `_FateReads` mixin reads what calls the function, its asynchronous settings, CloudWatch's
+  `AsyncEventsReceived` / `AsyncEventsDropped` / `DeadLetterErrors` / `DestinationDeliveryFailures` and each SQS
+  trigger's queue and dead-letter queue (`GetQueueUrl`, `GetQueueAttributes`, `ApproximateAgeOfOldestMessage`; never
+  `ReceiveMessage`), and `analysis/fates.py` (pure: `event_fates` into `EventFate`s, lost / kept / waiting / at risk /
+  safe / unknown, each with its `basis`; `fate_findings`) works out where they went. `blocks/fates.py`'s `_Fates`
+  draws a card per fate. The agent's `function_errors` passes `fates=False`.
+  The rest of the report is `blocks/causes.py`'s `_cause_blocks`: a `_Verdict` (`analysis/causes.py`'s pure
+  `errors_verdict`: events lost, causes still failing and stopped), an `_ErrorChart` (`chart_columns`: CloudWatch's
+  periods with calls and failed calls, each row put in the column it falls in, and each cause's `ErrorGroup.times` in the
+  same columns, `column_counts`; `failure_pattern` the sentence that reads it) and `_Causes`, a case card per cause
+  (`cause_state`: new / still failing / stopped, with `calls_after` for "about N calls since"; `cause_advice`: what it
+  means and the steps, the IAM command for a denied action, plain words for common Python exceptions; `failing_frame`
+  for where it fails), still failing first, then the newest error lines folded and unsorted. With cards, the findings
+  panel holds only `fate_findings` and `window_findings` (failed calls without an error line, throttles), the rest of
+  `error_findings` being in the cards. The explorer's Errors tab (`for_window=True`) keeps `error_findings` and draws
+  its own cause lines. A command's option may be a single-quoted string with commas in `_kit/render.py`'s `_CALL_RE`,
+  so a JSON policy stays one piece of code.
 - `LambdaView.runs()` is a function's runs as rows of fields: `analysis/runs.py`'s `run_table` turns a `LogPage` into a
   `RunTable` of `RunRow`s (`run_fields`: Lambda's `BUILTIN_FIELDS`, every field its JSON lines carry by dotted path, the
   event as `event.*` when `logged_event` finds it, and `fields=` regexes on text lines), with `where()`, `sorted_by()`,
@@ -609,8 +627,9 @@ How the View layer works:
   by name only, dropped errors, clients made per call). `code_map_findings` and `_code_summary` read it, and
   `code_graph` turns it into a `CodeGraph` (`GraphNode`s in columns: inputs, the handler and its functions by depth,
   what it reaches; `GraphEdge`s by kind; at most `_GRAPH_FUNCTIONS`, `_GRAPH_DEPTH` deep), with `.mermaid()`. Strings in
-  `_GUESSES` / `_BATCHES` are other services' operations: `rules.py` checks only the services this file makes clients
-  for (lambda, logs, cloudwatch, ec2), so a writing operation of those can't be named in a literal.
+  `_GUESSES` / `_BATCHES` are other services' operations: `rules.py` checks only the services this package makes
+  clients for (lambda, logs, cloudwatch, ec2, sqs), so a writing operation of those can't be named in a literal
+  (`_BATCHES` writes SQS's batch calls as calls: `sqs.send_message_batch(Entries=[...])`).
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
   markdown: `_Markdown` (stdlib only, in `_bedrock/markdown.py` for both) parses blocks and inline markup

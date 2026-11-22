@@ -853,7 +853,7 @@ AWS Lambda
         """
         core = self.analyzer
         start, end = self._log_window("function_errors", function, since, until, region or None)
-        report = core.errors(function, since=start, until=end, region=region or None)
+        report = core.errors(function, since=start, until=end, region=region or None, fates=False)
         out = summarize_errors(report)
         causes = out["causes"]
         kinds = Counter(c["kind"] for c in causes[:3])

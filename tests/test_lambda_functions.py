@@ -22,6 +22,7 @@ from moto import mock_aws
 from aws_analyzer import lambda_functions as lfmod
 from aws_analyzer.lambda_functions import analyzer as analyzer_mod, helpers, style as stylemod, view as viewmod
 from aws_analyzer.lambda_functions.analysis import text as textmod
+from aws_analyzer.lambda_functions.analysis import causes as causes_mod
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
@@ -60,6 +61,11 @@ from aws_analyzer.lambda_functions import (
     run_table,
     runs_findings,
     AsyncConfig,
+    AsyncCounts,
+    QueueState,
+    event_fates,
+    fate_findings,
+    parse_redrive,
     CodeFile,
     CodePackage,
     DailyUsage,
@@ -2452,7 +2458,7 @@ def test_errors_report(ui, capsys):
     out = run(capsys, ui.errors, "etl-nightly")
     assert "Errors in etl-nightly" in out and "Failed calls (CloudWatch): 40" in out
     assert "Throttled calls: 3 (!)" in out and "Causes: 1" in out
-    assert "The most common error happened once (the last" in out and "): KeyError: 'customer_id'." in out
+    assert "means: The code read a key the data didn't have ('customer_id')" in out
     assert "-- Errors by cause" in out and "-- The newest error lines --" in out
     assert "function_info('etl-nightly')" in out
     none = run(capsys, ui.errors, "api-handler")
@@ -2471,7 +2477,257 @@ def test_error_causes_share_all_error_lines(ui, capsys, monkeypatch):
 
     monkeypatch.setattr(ui.core, "errors", errors)
     out = run(capsys, ui.errors, "etl-nightly")
-    assert "75.0%" in out and "25.0%" in out and "100.0%" not in out
+    assert "3 times (75%)" in out and "1 time (25%)" in out and "(100%)" not in out
+
+
+def test_time_slots_count_each_slice_of_the_window():
+    since = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    until = since + timedelta(hours=4)
+    times = [since, since + timedelta(minutes=30), since + timedelta(hours=3, minutes=59), until,
+             since - timedelta(minutes=1), until + timedelta(minutes=1)]
+    assert lfmod.time_slots(times, since, until, 4) == [2, 0, 0, 2]
+    assert lfmod.time_slots(times, until, since, 4) == [0, 0, 0, 0]
+
+
+def test_errors_report_leads_with_a_verdict_a_chart_and_a_card_per_cause(ui, capsys):
+    out = run(capsys, ui.errors, "etl-nightly")
+    assert ">> 1 cause is still failing. (!)" in out and "In the last 24 hours, 40 of 1,000 calls failed (4.0%)" in out
+    chart = out[out.index("-- When it failed, a column per hour --"):out.index("-- What happened to the failed events")]
+    assert "failed calls" in chart and "KeyError: 'customer_i…" in chart and chart.rstrip().endswith("now")
+    cause = out[out.index("-- Errors by cause"):out.index("-- The newest error lines")]
+    assert " 1  KeyError: 'customer_id'   1 time (100%) (!)" in cause
+    assert "new: started 10m ago · first 10m ago" in cause and "where: app.py, line 2, in handler()" in cause
+    assert "do:    Read it with .get() and a default" in cause
+    assert f"run:   logs('etl-nightly', request_id='{RID}')" in cause
+    assert "-- Findings" in out and "calls were throttled" in out
+    blocks = ui._errors_blocks(ui.core.errors("etl-nightly"))
+    page = stylemod._render_html(blocks, 50)
+    assert 'class="vd bad"' in page and 'class="ec-bars"' in page and 'class="cz-c bad"' in page
+    assert "The whole message" in page and "Traceback (most recent call last)" in page
+    folded = next(b for b in blocks if getattr(b, "title", "") == "The newest error lines")
+    assert folded.collapsed and not folded.sortable
+    window = ui._errors_blocks(ui.core.errors("etl-nightly"), for_window=True)
+    assert not any(type(b).__name__ in ("_Verdict", "_ErrorChart", "_Causes") for b in window)
+    assert "KeyError" in stylemod._render_html(window, 50)
+
+
+def _group(kind, message, *, first, last, example="", times=None):
+    return ErrorGroup(kind, message, len(times or [first]), first, last, example or message, times=times or [first])
+
+
+NOW_ = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def test_cause_states_tell_new_still_failing_and_stopped():
+    since = NOW_ - timedelta(hours=24)
+    stopped = _group("KeyError", "KeyError: 'x'", first=since + timedelta(hours=1), last=NOW_ - timedelta(hours=6))
+    daily = [DailyUsage(NOW_ - timedelta(hours=h), invocations=10.0) for h in range(1, 5)]
+    metrics = FunctionMetrics("etl", 1, 3600, invocations=40.0, daily=daily)
+    state = causes_mod.cause_state(stopped, since=since, until=NOW_, metrics=metrics)
+    assert (state.state, state.says) == ("stopped", "stopped: none for 6h, about 40 calls since")
+    new = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=2), last=NOW_ - timedelta(minutes=5))
+    assert causes_mod.cause_state(new, since=since, until=NOW_).says == "new: started 2h ago"
+    going = _group("KeyError", "KeyError: 'x'", first=since, last=NOW_ - timedelta(hours=1))
+    assert causes_mod.cause_state(going, since=since, until=NOW_).says == "still failing, the last 1h ago"
+    short = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=5), last=NOW_ - timedelta(hours=2))
+    assert causes_mod.cause_state(short, since=NOW_ - timedelta(hours=6), until=NOW_).state != "stopped"
+
+
+def test_cause_advice_says_what_it_means_and_what_to_do():
+    fn = Function("etl", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl", region=REGION, timeout=60, memory=512,
+                  role=f"arn:aws:iam::{ACCOUNT}:role/etl-role", handler="app.handler")
+    at = NOW_
+    timeout = causes_mod.cause_advice(_group("Timeout", "Task timed out after 60.00 seconds", first=at, last=at), fn)
+    assert "60 s limit" in timeout.means and "--timeout 120" in timeout.steps[0] and "performance('etl')" in timeout.steps[1]
+    memory = causes_mod.cause_advice(_group("Out of memory", "Runtime.OutOfMemory", first=at, last=at), fn)
+    assert "512 MB" in memory.means and "--memory-size" in memory.steps[0]
+    denied = causes_mod.cause_advice(_group(
+        "ClientError", "ClientError: AccessDeniedException", first=at, last=at,
+        example="ClientError: User: x is not authorized to perform: s3:GetObject on resource: arn:aws:s3:::b/k"), fn)
+    assert denied.means == "Its role etl-role isn't allowed s3:GetObject on arn:aws:s3:::b/k."
+    assert ("aws iam put-role-policy --role-name etl-role --policy-name allow-s3-getobject --policy-document "
+            '\'{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject",'
+            '"Resource":"arn:aws:s3:::b/k"}]}\'') in denied.steps[0]
+    key = causes_mod.cause_advice(_group("KeyError", "KeyError: 'customer_id'", first=at, last=at), fn)
+    assert key.means == "The code read a key the data didn't have ('customer_id'): some inputs don't carry it."
+    other = causes_mod.cause_advice(_group("OrderRejected", "OrderRejected: no stock", first=at, last=at), fn)
+    assert other.means == "Its code raised OrderRejected and nothing caught it."
+    load = causes_mod.cause_advice(_group("Runtime.ImportModuleError", "Unable to import module", first=at, last=at), fn)
+    assert "app.handler" in load.steps[0] and "code('etl')" in load.steps[0]
+
+
+def _columns_report(daily, groups, *, hours=24):
+    fn = Function("etl", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl", region=REGION)
+    metrics = FunctionMetrics("etl", hours / 24, 3600, invocations=sum(r.invocations for r in daily),
+                              errors=sum(r.errors for r in daily), daily=daily) if daily is not None else None
+    return ErrorReport(fn, "/aws/lambda/etl", NOW_ - timedelta(hours=hours), NOW_, groups=groups, metrics=metrics)
+
+
+def test_chart_columns_put_cloudwatch_rows_and_error_lines_in_their_hour():
+    rows = [DailyUsage(NOW_ - timedelta(hours=3, minutes=30), invocations=50.0, errors=2.0),
+            DailyUsage(NOW_ - timedelta(minutes=30), invocations=30.0, errors=1.0)]
+    group = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=3, minutes=10), last=NOW_,
+                   times=[NOW_ - timedelta(hours=3, minutes=10), NOW_ - timedelta(minutes=20)])
+    columns = causes_mod.chart_columns(_columns_report(rows, [group], hours=4))
+    assert len(columns.starts) == 4 and columns.period == 3600 and columns.unit == "hour"
+    assert columns.calls == [50.0, 0.0, 0.0, 30.0] and columns.failed == [2.0, 0.0, 0.0, 1.0]
+    assert columns.lanes == [[1, 0, 0, 1]]
+    plain = causes_mod.chart_columns(_columns_report(None, [group], hours=4))
+    assert len(plain.starts) == 48 and plain.calls is None and sum(plain.lanes[0]) == 2
+
+
+@pytest.mark.parametrize("failed, says", [
+    ([0, 1, 0, 1], ""),
+    ([0, 9, 1, 0, 1, 0], "Most failures came at once: 9 of 11 in the hour from"),
+    ([0, 1, 0, 2, 3, 4], "Failures are rising: 1 in the first half of the window, 9 in the second."),
+    ([4, 3, 2, 1, 0, 0], "Failures are falling: 9 in the first half of the window, 1 in the second."),
+    ([2, 1, 2, 2, 1, 2], "Failures are spread across the window, at most 2 in one hour, with no spike."),
+])
+def test_failure_pattern_reads_the_chart(failed, says):
+    starts = [NOW_ - timedelta(hours=len(failed) - i) for i in range(len(failed))]
+    columns = causes_mod.ChartColumns(starts, 3600, [10.0] * len(failed), [float(f) for f in failed])
+    assert causes_mod.failure_pattern(columns).startswith(says) if says else causes_mod.failure_pattern(columns) == ""
+
+
+def test_the_verdict_counts_lost_events_and_causes():
+    report_ = _columns_report([DailyUsage(NOW_ - timedelta(hours=1), invocations=200.0, errors=6.0)], [
+        _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=20), last=NOW_ - timedelta(minutes=5))])
+    report_.fates = [lfmod.EventFate("lost", "S3 bucket b", "3 events dropped", "", count=3)]
+    states = [causes_mod.CauseState("still failing", ""), causes_mod.CauseState("stopped", "")]
+    verdict = causes_mod.errors_verdict(report_, states)
+    assert verdict.headline == "3 events were lost, 1 cause is still failing and 1 stopped."
+    assert verdict.detail == "In the last 24 hours, 6 of 200 calls failed (3.0%); the last error 5m ago."
+    assert verdict.tone == "bad"
+    calm = causes_mod.errors_verdict(_columns_report([], []), [causes_mod.CauseState("stopped", "")])
+    assert (calm.headline, calm.tone) == ("1 cause is stopped.", "ok")
+
+
+
+def _fn(name="etl", **kwargs):
+    return Function(name, f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{name}", region=REGION, **kwargs)
+
+
+S3_TRIGGER = Trigger("S3 bucket", "acme-uploads", via="resource policy")
+QUEUE_ARN = f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders"
+SQS_TRIGGER = Trigger("SQS queue", "orders", arn=QUEUE_ARN)
+
+
+def test_redrive_policies_are_read_forgivingly():
+    assert parse_redrive('{"deadLetterTargetArn": "arn:aws:sqs:us-east-1:1:dlq", "maxReceiveCount": "5"}') == (
+        "arn:aws:sqs:us-east-1:1:dlq", 5)
+    assert parse_redrive('{"deadLetterTargetArn": "arn:aws:sqs:us-east-1:1:dlq"}') == ("arn:aws:sqs:us-east-1:1:dlq", None)
+    assert parse_redrive(None) == parse_redrive("not json") == parse_redrive('{"maxReceiveCount": 3}') == (None, None)
+
+
+def test_dropped_asynchronous_events_are_lost_when_nothing_keeps_them():
+    fates = event_fates(_fn(), [S3_TRIGGER], async_config=AsyncConfig(), counts=AsyncCounts(received=400, dropped=8))
+    assert [(f.outcome, f.count) for f in fates] == [("lost", 8)]
+    assert "tried each 3 times" in fates[0].says and "still in the bucket" in fates[0].says
+    assert fates[0].basis == "Lambda's count (AsyncEventsDropped)"
+    (level, text), = fate_findings(_fn(), fates)
+    assert level == "warn" and "put-function-event-invoke-config --function-name etl" in text
+    assert '"OnFailure":{"Destination":"arn:aws:sqs:us-east-1:123456789012:etl-failed"}' in text
+
+
+def test_dropped_events_are_kept_by_a_destination_unless_it_refuses_them():
+    keeper = f"arn:aws:sqs:{REGION}:{ACCOUNT}:etl-failed"
+    counts = AsyncCounts(received=400, dropped=8, destination_failures=3)
+    fates = event_fates(_fn(), [S3_TRIGGER], async_config=AsyncConfig(retries=1, on_failure=keeper), counts=counts)
+    assert [(f.outcome, f.count, f.place) for f in fates] == [("lost", 3, "etl-failed"), ("kept", 5, "etl-failed")]
+    assert "after 2 tries" in fates[1].says
+    findings = fate_findings(_fn(), fates)
+    assert "may send to it (sqs:SendMessage" in findings[0][1] and "requestPayload" in findings[1][1]
+    dead_letter = event_fates(_fn(dead_letter=keeper), [S3_TRIGGER], counts=AsyncCounts(received=10, dropped=2))
+    assert [(f.outcome, f.count) for f in dead_letter] == [("kept", 2)]
+
+
+def test_asynchronous_events_none_dropped_or_not_counted():
+    safe = event_fates(_fn(), [S3_TRIGGER], counts=AsyncCounts(received=120, dropped=0))
+    assert [f.outcome for f in safe] == ["safe"] and "none of the 120 events" in safe[0].says
+    quiet = event_fates(_fn(), [S3_TRIGGER], counts=AsyncCounts())
+    assert "counted no events" in quiet[0].says
+    unknown = event_fates(_fn(), [S3_TRIGGER], counts=None)
+    assert [f.outcome for f in unknown] == ["unknown"] and "couldn't be read" in unknown[0].says
+    assert event_fates(_fn(), [], counts=AsyncCounts()) == []
+    assert fate_findings(_fn(), safe + unknown) == []
+
+
+def test_a_queue_without_a_dead_letter_queue_puts_failing_messages_at_risk():
+    queue = QueueState("orders", QUEUE_ARN, visible=3, oldest_age=3.5 * 86400)
+    fates = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})
+    assert [(f.outcome, f.count) for f in fates] == [("at risk", 3), ("at risk", None)]
+    assert "The oldest is 4 days old, and the queue keeps them 4 days" in fates[0].says
+    findings = fate_findings(_fn(), fates)
+    assert "deleted before long" in findings[0][1]
+    assert "aws sqs set-queue-attributes --queue-url https://sqs.us-east-1.amazonaws.com/123456789012/orders" in findings[1][1]
+    assert '\\"maxReceiveCount\\":\\"5\\"' in findings[1][1]
+    young = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: QueueState("orders", QUEUE_ARN, visible=3)})
+    assert [f.outcome for f in young] == ["at risk", "waiting"]
+
+
+def test_a_dead_letter_queue_keeps_messages_and_says_how_to_send_them_back():
+    dead_arn = f"{QUEUE_ARN}-dlq"
+    dead = QueueState("orders-dlq", dead_arn, visible=2, retention=14 * 86400, oldest_age=6 * 3600)
+    queue = QueueState("orders", QUEUE_ARN, dead_letter_arn=dead_arn, max_receives=5, dead_letter=dead)
+    fates = event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})
+    assert [(f.outcome, f.count, f.place) for f in fates] == [("kept", 2, "orders-dlq")]
+    assert "after failing 5 reads" in fates[0].says and "6 hours old" in fates[0].says
+    (level, text), = fate_findings(_fn(), fates)
+    assert level == "info" and f"start-message-move-task --source-arn {dead_arn} --region us-east-1" in text
+    dead.oldest_age = 12 * 86400
+    assert event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})[0].outcome == "at risk"
+    dead.visible = 0
+    assert [f.outcome for f in event_fates(_fn(), [SQS_TRIGGER], queues={QUEUE_ARN: queue})] == ["safe"]
+
+
+def test_unread_queues_streams_and_waiting_callers_are_unknown():
+    denied = QueueState("orders", QUEUE_ARN, error="AccessDenied")
+    stream = Trigger("Kinesis stream", "clicks", arn=f"arn:aws:kinesis:{REGION}:{ACCOUNT}:stream/clicks")
+    url = Trigger("Function URL", "https://abc.lambda-url.us-east-1.on.aws/", via="function URL")
+    fates = event_fates(_fn(), [SQS_TRIGGER, stream, url], queues={QUEUE_ARN: denied})
+    assert [f.outcome for f in fates] == ["unknown"] * 3
+    assert "AccessDenied; needs sqs:GetQueueAttributes" in fates[0].says
+    assert "holds up its shard" in fates[1].says and "get the error back" in fates[2].says
+
+
+def test_errors_say_what_happened_to_failed_events(core, seeded):
+    now = datetime.now(timezone.utc)
+    dims = [{"Name": "FunctionName", "Value": "etl-nightly"}]
+    boto3.client("cloudwatch", region_name=REGION).put_metric_data(Namespace="AWS/Lambda", MetricData=[
+        {"MetricName": "AsyncEventsReceived", "Dimensions": dims, "Timestamp": now - timedelta(hours=2), "Value": 90.0},
+        {"MetricName": "AsyncEventsDropped", "Dimensions": dims, "Timestamp": now - timedelta(hours=2), "Value": 4.0},
+    ])
+    report_ = core.errors("etl-nightly")
+    assert [(f.outcome, f.count) for f in report_.fates] == [("lost", 4), ("at risk", None)]
+    assert report_.fate_errors == {}
+    assert core.errors("etl-nightly", fates=False).fates == []
+
+    sqs = boto3.client("sqs", region_name=REGION)
+    dead_url = sqs.create_queue(QueueName="orders-dlq")["QueueUrl"]
+    dead_arn = sqs.get_queue_attributes(QueueUrl=dead_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+    sqs.send_message(QueueUrl=dead_url, MessageBody="{}")
+    sqs.set_queue_attributes(QueueUrl=sqs.get_queue_url(QueueName="orders")["QueueUrl"], Attributes={
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dead_arn, "maxReceiveCount": "5"})})
+    kept = core.errors("etl-nightly").fates
+    assert [(f.outcome, f.count, f.place) for f in kept] == [("lost", 4, ""), ("kept", 1, "orders-dlq")]
+
+
+def test_errors_report_shows_the_failed_events_and_what_it_couldnt_read(ui, capsys, seeded):
+    class DeniedQueues:
+        meta = None
+
+        def get_queue_url(self, **params):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetQueueUrl")
+
+    ui.core._given["sqs"] = DeniedQueues()
+    ui.core._given["lambda"] = lambda_clients(denied=("get_function_event_invoke_config",))
+    ui.core._clients.clear()
+    out = run(capsys, ui.errors, "etl-nightly")
+    assert "-- What happened to the failed events --" in out and "40 calls failed." in out
+    assert "UNKNOWN  orders: not read: The queue couldn't be read (AccessDenied; needs sqs:GetQueueAttributes)" in out
+    assert ("Couldn't read its asynchronous settings (AccessDeniedException; needs "
+            "lambda:GetFunctionEventInvokeConfig)") in out
+    assert "Events lost" not in out
 
 
 def test_logs_report(ui, capsys):
