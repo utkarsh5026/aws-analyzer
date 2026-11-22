@@ -109,8 +109,8 @@ sfn.overview()            # or overview(days=30)
 
 The numbers are CloudWatch's (`AWS/States`), in whole UTC days, so they cover Express workflows too. The findings point at the next command, such as `failures('order-pipeline')`.
 
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="889" loading=lazy }
-![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="889" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-light.webp#only-light){ width="984" height="963" loading=lazy }
+![overview(): cards for 4 state machines, 183,659 executions and 448 that didn't succeed, findings pointing at failures('order-pipeline'), and a table of each state machine's executions, failures, average run, cost and logging](images/sfn-overview-dark.webp#only-dark){ width="984" height="963" loading=lazy }
 /// caption
 `sfn.overview()`: order-pipeline's warnings are its 4.0% failure rate and that its failures jumped three days ago, and the table puts the failing state machines first.
 ///
@@ -141,8 +141,8 @@ It then asks what changed before each kind of failure began: when the Lambda fun
 
 A strip of bars shows the executions a day, the part that didn't succeed in red, from CloudWatch's whole UTC days. When most of the failures came in the last few days, the day they jumped is outlined and a finding says so: "Failures jumped on 12 Nov: 40 of the 49 in the last 7 days came since then", with the `failures(..., since=)` call that reads just those. `state_machine()` shows the same strip.
 
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-light.webp#only-light){ width="984" height="1723" loading=lazy }
-![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-dark.webp#only-dark){ width="984" height="1723" loading=lazy }
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-light.webp#only-light){ width="984" height="1797" loading=lazy }
+![failures('order-pipeline'): 49 executions that didn't succeed in three groups, LoadOrders failing with KeyError in orders-etl the most common, each with since when, whether a Retry would help and the Lambda logs call or execution to read next, a warning that LoadOrders began failing 4 minutes after orders-etl version 2 was published, a note that 5 can be redriven, and the executions a day as bars](images/sfn-failures-dark.webp#only-dark){ width="984" height="1797" loading=lazy }
 /// caption
 `sfn.failures("order-pipeline")`: most failures stop at LoadOrders with `KeyError: 'customer_id'`, and they began 4 minutes after orders-etl version 2 went out.
 ///
@@ -164,8 +164,8 @@ The states inside a Map or Parallel are summed up under it (`×12`, how many fai
 
 At the end, folded, are **what it returned** (for an execution that succeeded), the error the failed step returned, what that step was given and the execution's input. JSON shows as a tree: unfold the object or array you need, and point at a field for its path.
 
-![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-light.webp#only-light){ width="984" height="1791" loading=lazy }
-![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-dark.webp#only-dark){ width="984" height="1791" loading=lazy }
+![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-light.webp#only-light){ width="984" height="1866" loading=lazy }
+![execution('order-pipeline/ord-7f3a'): findings, a waterfall where ChargeCard's throttled tries and back-off come before LoadOrders fails, the states in order, and one log merging Step Functions' events with the lines of validate-order, charge-card and orders-etl](images/sfn-execution-dark.webp#only-dark){ width="984" height="1866" loading=lazy }
 /// caption
 `sfn.execution("order-pipeline/ord-7f3a")`: the waterfall, then one log where orders-etl's traceback sits between the step that called it and the Catch that ended the execution.
 ///
@@ -184,8 +184,8 @@ A table lists each state either execution went through: how it ran in each, and 
 
 When the error names a field the input lacks, the first finding says so: "The likely cause: ord-7f3a's input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, naming it". In the explorer, **⇄ Compare with the last success** beside **↗ Console** shows the same over a failed execution's page.
 
-![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-light.webp#only-light){ width="984" height="964" loading=lazy }
-![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-dark.webp#only-dark){ width="984" height="964" loading=lazy }
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-light.webp#only-light){ width="984" height="1038" loading=lazy }
+![compare('order-pipeline/ord-7f3a'): ord-7f3a beside ord-cfae, cards for each run, the finding that its input has no customer_id, which ord-cfae's had, and LoadOrders failed with KeyError, then a table of each state in both and a table of the input field that differs](images/sfn-compare-dark.webp#only-dark){ width="984" height="1038" loading=lazy }
 /// caption
 `sfn.compare("order-pipeline/ord-7f3a")`: the run that succeeded just before it had a `customer_id`; this one didn't, and that's the key LoadOrders failed on.
 ///
@@ -208,8 +208,8 @@ sfn.graph("order-pipeline", failures="7d")          # shaded by where executions
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
 
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1401" loading=lazy }
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1401" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1475" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1475" loading=lazy }
 /// caption
 `sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.
 ///

@@ -107,11 +107,14 @@ class _Findings:
 @dataclass
 class _Next:
     """
-    The commands worth running next, as (call, what it shows), with their arguments filled in.
+    The commands worth running next, as (call, what it shows), with their arguments filled in. A View that can run
+    them (_BaseView.next) numbers them and says how under them, in `hint`.
     """
 
     items: list[tuple[str, str]]
     title: str = "Next"
+    numbered: bool = False
+    hint: str = ""
 
 
 @dataclass

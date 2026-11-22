@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🧰 **Every service: next steps you can run** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - A report's Next steps are numbered and written as your notebook runs them: `ui.errors('orders-etl')`.
+  - `ui.next(1)` runs a step; `ui.next()` puts them all in a new cell below.
+  - Each step has a Copy button; a step that writes files goes in a cell to check instead of running.
+
 ## [0.62.0] - 2026-11-22
 
 ### Added

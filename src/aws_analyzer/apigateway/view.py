@@ -117,7 +117,7 @@ class APIGatewayView(_BaseView):
         "🚪 APIs": ("apis", "api_info", "routes", "stages"),
         "📞 Calls": ("calls", "errors", "performance"),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("apis()", "every API: requests, errors, latency, who can call it and its cost"),

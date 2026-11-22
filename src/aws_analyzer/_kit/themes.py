@@ -87,7 +87,13 @@ _SOFT = """\
 {t} .next .ni{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
 {t} .next .ni code{align-self:flex-start;padding:0;border:0;background:none;font-size:12.5px;font-weight:600;color:var(--info-fg)}
 {t} .next .ni code::after{content:"  \\2192"}
-{t} .next .nw{margin:0;font-size:12px}"""
+{t} .next .nw{margin:0;font-size:12px}
+{t} .next.num .ni{position:relative;flex-direction:row;flex-wrap:wrap;align-items:flex-start;padding-right:70px}
+{t} .next.num .ni code{flex:1 1 0;min-width:0;overflow-wrap:anywhere}
+{t} .next.num .ni .copy{position:absolute;top:9px;right:9px}
+{t} .next.num .nw{flex-basis:100%}
+{t} .next.num .ni code::after{content:none}
+{t} .next .nh{grid-column:1/-1;margin:0}"""
 
 _EDITORIAL = """\
 {t}{line-height:1.55;--line:color-mix(in srgb,currentColor 12%,transparent);--muted:color-mix(in srgb,currentColor 55%,transparent)}
@@ -138,7 +144,12 @@ _EDITORIAL = """\
 {t} .next .ni{display:block;padding:4px 0}
 {t} .next .ni code{border:0;font-size:13px;font-weight:600}
 {t} .next .ni code::before{content:"\\2192  ";color:var(--muted)}
-{t} .next .nw{margin-left:12px;opacity:1;color:var(--muted);font-size:13px}""".replace("%SERIF%", _SERIF)
+{t} .next .nw{margin-left:12px;opacity:1;color:var(--muted);font-size:13px}
+{t} .next.num{display:grid}
+{t} .next.num .ni{display:contents}
+{t} .next.num .ni code::before{content:none}
+{t} .next .nn{margin-right:8px;background:none;box-shadow:inset 0 0 0 1px var(--line)}
+{t} .next .nh{display:block;margin-top:8px;opacity:1;color:var(--muted)}""".replace("%SERIF%", _SERIF)
 
 _CONSOLE = """\
 {t}{--accent:#e8860c;--line:color-mix(in srgb,currentColor 14%,transparent);--panel:color-mix(in srgb,currentColor 3%,transparent);--head:color-mix(in srgb,currentColor 6%,transparent);--muted:color-mix(in srgb,currentColor 60%,transparent)}
@@ -188,7 +199,7 @@ _CONSOLE = """\
 {t} .next{gap:6px 22px;margin-top:18px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 {t} .next .nl{opacity:1;color:var(--accent)}
 {t} .next .ni code{padding:0;background:none;font-weight:600}
-{t} .next .ni code::before{content:"$ ";color:var(--muted)}""".replace("%MONO%", _MONO)
+{t} .next .nn{border-radius:4px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-family:%MONO%}""".replace("%MONO%", _MONO)
 
 _BRAND = """\
 {t}{--ink:#172036;--on-ink:#ffffff;--blue:#3949c6;--blue-soft:#eceefc;--mark:#fce7a2;--mark-fg:#172036;--card:#ffffff;--shadow:0 1px 2px rgba(23,32,54,.06),0 4px 14px rgba(23,32,54,.07);--line:color-mix(in srgb,currentColor 10%,transparent);--muted:color-mix(in srgb,currentColor 58%,transparent)}
@@ -234,7 +245,7 @@ _BRAND = """\
 {t} .flt select,{t} .cols>summary{border-color:var(--line);border-radius:8px}
 {t} .tbl button[type=reset]{color:var(--blue)}
 {t} .next{gap:8px 24px;margin:20px 0 4px;padding:14px 18px;border-top:0;border-radius:14px;background:var(--ink);color:var(--on-ink)}
-{t} .next .nl,{t} .next .nw{opacity:.75}
+{t} .next .nl,{t} .next .nw,{t} .next .nh{opacity:.75}
 {t} .next code{background:color-mix(in srgb,var(--on-ink) 14%,transparent);color:var(--on-ink)}"""
 
 _BRAND_DARK = ("--ink:#e6e9f4;--on-ink:#151a2b;--blue:#a3adff;--blue-soft:#222a4d;--mark:rgba(245,196,81,.24);"

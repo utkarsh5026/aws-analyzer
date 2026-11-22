@@ -50,8 +50,9 @@ class S3View(_BucketCommands, _FolderCommands, _CostCommands, _VersionCommands, 
         "🕘 Versions and deleted files": ("versions", "history", "deleted"),
         "📄 Open a file": ("head", "preview", "document", "link"),
         "⬇ Download": ("download", "download_zip", "downloads", "clean_downloads"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"download", "download_zip", "clean_downloads"})
     _START = (
         ("overview()", "every bucket: size, cost and warnings"),
         ("summary('s3://bucket/prefix/')", "what's in a folder and what it costs"),

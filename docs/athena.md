@@ -20,8 +20,8 @@ Find the queries that cost the most and the ones that fail, read why in plain wo
 The examples use acme's data lake: a dashboard runs `SELECT *` on `sales.events`, a CSV table with no partitions, three times a day, and analysts query `sales.orders`, a Parquet table partitioned by day.
 { .muted }
 
-![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-light.webp#only-light){ width="984" height="2438" loading=lazy }
-![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-dark.webp#only-dark){ width="984" height="2438" loading=lazy }
+![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-light.webp#only-light){ width="984" height="2513" loading=lazy }
+![overview(): cards with the week's queries, scanned bytes, cost, failed share, tables and crawlers, then findings about a repeated costly query, a workgroup with no scan limit, tables pointing at a missing bucket or an empty folder, a table with no partitions loaded, and crawlers that failed or stopped, then a bar of the bill by kind of query and what queries cost each day](images/athena-overview-dark.webp#only-dark){ width="984" height="2513" loading=lazy }
 /// caption
 **`athena.overview()`**: one dashboard query is 90% of the bill, two tables point at nothing, and two crawlers stopped.
 ///
@@ -110,8 +110,8 @@ A table is named `"database.table"`; `"sales/events"`, `'"sales"."events"'` and 
 athena.expensive()               # or expensive(since="30d", workgroup="primary")
 ```
 
-![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-light.webp#only-light){ width="984" height="1687" loading=lazy }
-![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-dark.webp#only-dark){ width="984" height="1687" loading=lazy }
+![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-light.webp#only-light){ width="984" height="1761" loading=lazy }
+![expensive(): the week's cost and a monthly estimate, a finding that the same SELECT * query ran 21 times for 90% of the bill, a bar of the bill by kind of query, what queries cost each day, the queries grouped by kind with their share of cost, then the single costliest runs](images/athena-expensive-dark.webp#only-dark){ width="984" height="1761" loading=lazy }
 /// caption
 `athena.expensive()`: the dashboard's `SELECT *` ran 21 times and cost $22.56.
 ///
@@ -127,8 +127,8 @@ Athena bills **$5 per TB a query scans**, rounded up to the MB, at least 10 MB a
 athena.failures()
 ```
 
-![failures(): eight failed queries in five kinds, TABLE_NOT_FOUND first, then HIVE_BAD_DATA, COLUMN_NOT_FOUND, exhausted resources and the scan limit, each with what it means, how to fix it and the newest message](images/athena-failures-light.webp#only-light){ width="984" height="884" loading=lazy }
-![failures(): eight failed queries in five kinds, TABLE_NOT_FOUND first, then HIVE_BAD_DATA, COLUMN_NOT_FOUND, exhausted resources and the scan limit, each with what it means, how to fix it and the newest message](images/athena-failures-dark.webp#only-dark){ width="984" height="884" loading=lazy }
+![failures(): eight failed queries in five kinds, TABLE_NOT_FOUND first, then HIVE_BAD_DATA, COLUMN_NOT_FOUND, exhausted resources and the scan limit, each with what it means, how to fix it and the newest message](images/athena-failures-light.webp#only-light){ width="984" height="933" loading=lazy }
+![failures(): eight failed queries in five kinds, TABLE_NOT_FOUND first, then HIVE_BAD_DATA, COLUMN_NOT_FOUND, exhausted resources and the scan limit, each with what it means, how to fix it and the newest message](images/athena-failures-dark.webp#only-dark){ width="984" height="933" loading=lazy }
 /// caption
 `athena.failures()`: a typo'd table name, a bad value in a CSV file, and a query the scan limit stopped.
 ///
@@ -144,8 +144,8 @@ A kind is Athena's own code when the message starts with one (`TABLE_NOT_FOUND`,
 athena.catalog()                 # or catalog("sales") for one database
 ```
 
-![catalog(): two databases and seven tables, findings about a table in a bucket that doesn't exist, one with an empty folder, one partitioned table with no partitions, a table every query reads in full, and three crawlers, then the tables and crawlers](images/athena-catalog-light.webp#only-light){ width="984" height="1419" loading=lazy }
-![catalog(): two databases and seven tables, findings about a table in a bucket that doesn't exist, one with an empty folder, one partitioned table with no partitions, a table every query reads in full, and three crawlers, then the tables and crawlers](images/athena-catalog-dark.webp#only-dark){ width="984" height="1419" loading=lazy }
+![catalog(): two databases and seven tables, findings about a table in a bucket that doesn't exist, one with an empty folder, one partitioned table with no partitions, a table every query reads in full, and three crawlers, then the tables and crawlers](images/athena-catalog-light.webp#only-light){ width="984" height="1493" loading=lazy }
+![catalog(): two databases and seven tables, findings about a table in a bucket that doesn't exist, one with an empty folder, one partitioned table with no partitions, a table every query reads in full, and three crawlers, then the tables and crawlers](images/athena-catalog-dark.webp#only-dark){ width="984" height="1493" loading=lazy }
 /// caption
 `athena.catalog()`: `marketing.campaigns` points at a bucket that's gone, `sales.clicks` has files but no partitions.
 ///
@@ -178,8 +178,8 @@ Under the queries come the SQL statements to copy: a cheap first query (one part
 athena.query_code("SELECT * FROM orders WHERE total > 100", database="sales")
 ```
 
-![query_code(): the tables the query reads, the most it could read and cost, a warning that it doesn't filter on the partition key dt, and the boto3 code to run it, with an awswrangler version folded](images/athena-query-code-light.webp#only-light){ width="984" height="899" loading=lazy }
-![query_code(): the tables the query reads, the most it could read and cost, a warning that it doesn't filter on the partition key dt, and the boto3 code to run it, with an awswrangler version folded](images/athena-query-code-dark.webp#only-dark){ width="984" height="899" loading=lazy }
+![query_code(): the tables the query reads, the most it could read and cost, a warning that it doesn't filter on the partition key dt, and the boto3 code to run it, with an awswrangler version folded](images/athena-query-code-light.webp#only-light){ width="984" height="947" loading=lazy }
+![query_code(): the tables the query reads, the most it could read and cost, a warning that it doesn't filter on the partition key dt, and the boto3 code to run it, with an awswrangler version folded](images/athena-query-code-dark.webp#only-dark){ width="984" height="947" loading=lazy }
 /// caption
 `athena.query_code(...)`: it doesn't filter on `dt`, so it reads every partition.
 ///

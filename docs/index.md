@@ -282,7 +282,8 @@ Learn one and you can read them all. Each report puts the answer first and ends 
 3. **The detail**
    Tables you can sort, filter and trim, and the raw JSON folded away for when you want it.
 4. **What to run next**
-   Two or three calls with the arguments already filled in. One click selects a call, ready to copy.
+   Two or three numbered calls with the arguments already filled in, written as your notebook runs them
+   (`ui.errors('orders-etl')`). `ui.next(1)` runs the first; `ui.next()` puts them all in a cell below.
 
 </div>
 

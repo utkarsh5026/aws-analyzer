@@ -321,7 +321,7 @@ class StepFunctionsView(_BaseView):
         "🔀 State machines": ("overview", "state_machine", "graph"),
         "🏃 Executions": ("executions", "execution", "compare", "failures"),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("overview()", "every state machine: executions, failures, cost and warnings"),

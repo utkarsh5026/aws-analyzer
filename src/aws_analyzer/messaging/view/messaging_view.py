@@ -102,7 +102,7 @@ class MessagingView(_BaseView):
         "🗺️ Where messages go": ("overview", "follow", "dead_letters"),
         "🔎 One queue, topic or rule": ("queue_info", "topic_info", "rule_info"),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("overview()", "every queue, topic and rule: what's waiting, what failed, what it costs"),

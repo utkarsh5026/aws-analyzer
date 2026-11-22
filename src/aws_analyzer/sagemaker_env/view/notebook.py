@@ -161,8 +161,9 @@ class SageMakerView(_JobCommands, _BaseView):
         "🏋️ Training jobs": ("training_jobs", "training_job"),
         "🔌 Endpoints": ("endpoints",),
         "🔀 Pipelines": ("pipelines", "pipeline_run"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"new_env"})
     _START = (
         ("instance()", "this notebook: its type, cost, idle shutdown, memory and disk"),
         ("disk()", "what fills the disk, and what's safe to clear"),

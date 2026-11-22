@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 CLOUDWATCH_METRICS_PRICE = 0.01
 _NOT_SUGGESTED = frozenset({"help", "explore", "use", "link", "download", "download_zip", "clean_downloads",
-                            "save_file_list", "how_it_works_page"})
+                            "save_file_list", "how_it_works_page", "next"})
 
 
 class Toolkit:

@@ -100,8 +100,8 @@ An API is named by its name, its ID, `"name/stage"`, its invoke URL or a link co
 apigw.apis()              # or apis(days=30)
 ```
 
-![apis(): six APIs with their stages, requests, 4xx and 5xx share, p95, auth and cost, and findings about orders-api's server errors, partner-api's open routes and an unused legacy-v1](images/apigw-apis-light.webp#only-light){ width="984" height="1122" loading=lazy }
-![apis(): six APIs with their stages, requests, 4xx and 5xx share, p95, auth and cost, and findings about orders-api's server errors, partner-api's open routes and an unused legacy-v1](images/apigw-apis-dark.webp#only-dark){ width="984" height="1122" loading=lazy }
+![apis(): six APIs with their stages, requests, 4xx and 5xx share, p95, auth and cost, and findings about orders-api's server errors, partner-api's open routes and an unused legacy-v1](images/apigw-apis-light.webp#only-light){ width="984" height="1197" loading=lazy }
+![apis(): six APIs with their stages, requests, 4xx and 5xx share, p95, auth and cost, and findings about orders-api's server errors, partner-api's open routes and an unused legacy-v1](images/apigw-apis-dark.webp#only-dark){ width="984" height="1197" loading=lazy }
 /// caption
 `apigw.apis()`: orders-api fails most and runs close to the time limit, partner-api has two routes anyone can call, and legacy-v1 had no calls.
 ///
@@ -122,8 +122,8 @@ apigw.api_info("orders-api")              # its main stage: prod, $default, or t
 apigw.api_info("orders-api/dev")          # another stage
 ```
 
-![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-light.webp#only-light){ width="984" height="1171" loading=lazy }
-![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-dark.webp#only-dark){ width="984" height="1171" loading=lazy }
+![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-light.webp#only-light){ width="984" height="1244" loading=lazy }
+![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-dark.webp#only-dark){ width="984" height="1244" loading=lazy }
 /// caption
 `apigw.api_info("orders-api")`: `POST /orders` runs out of time, while `orders-etl` may still be working.
 ///

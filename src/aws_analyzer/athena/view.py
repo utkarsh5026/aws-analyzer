@@ -213,7 +213,7 @@ class AthenaView(_BaseView):
         "📚 Data Catalog": ("catalog", "table_info", "crawlers"),
         "▶️ Run a query yourself": ("query_code",),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("overview()", "what queries cost, which fail, and the tables and crawlers to fix"),
