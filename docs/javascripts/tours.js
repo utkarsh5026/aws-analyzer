@@ -1285,6 +1285,7 @@ window.AA_TOURS = {
      "Every function",
      "One function",
      "Errors",
+     "Logs",
      "Performance",
      "Code"
     ]
@@ -1335,8 +1336,8 @@ window.AA_TOURS = {
     "dur": 14.8,
     "chapter": "Every function",
     "step": 1,
-    "steps": 5,
-    "label": "1 of 5 · Every function",
+    "steps": 6,
+    "label": "1 of 6 · Every function",
     "code": "from aws_analyzer import LambdaView\n\nui = LambdaView()\nui.functions(regions=\"all\")",
     "outputs": [
      {
@@ -1366,8 +1367,8 @@ window.AA_TOURS = {
     "dur": 15.1,
     "chapter": "One function",
     "step": 2,
-    "steps": 5,
-    "label": "2 of 5 · One function",
+    "steps": 6,
+    "label": "2 of 6 · One function",
     "code": "ui.function_info(\"orders-etl\")",
     "outputs": [
      {
@@ -1396,8 +1397,8 @@ window.AA_TOURS = {
     "dur": 14.9,
     "chapter": "Errors",
     "step": 3,
-    "steps": 5,
-    "label": "3 of 5 · Errors",
+    "steps": 6,
+    "label": "3 of 6 · Errors",
     "code": "ui.errors(\"orders-etl\")",
     "outputs": [
      {
@@ -1423,11 +1424,41 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
+    "dur": 14.3,
+    "chapter": "Logs",
+    "step": 4,
+    "steps": 6,
+    "label": "4 of 6 · Logs",
+    "code": "ui.logs(\"orders-etl\", since=\"24h\")",
+    "outputs": [
+     {
+      "img": "lambda-logs",
+      "w": 1476,
+      "h": 1901
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>What did it log?</b> Its runs, newest first, like a log viewer."
+     ],
+     [
+      3.26,
+      "A day of runs: <b>four failed</b>, one of them a timeout,"
+     ],
+     [
+      10.7,
+      "and a click opens a run to its lines and <b>its traceback</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
     "dur": 15.0,
     "chapter": "Performance",
-    "step": 4,
-    "steps": 5,
-    "label": "4 of 5 · Performance",
+    "step": 5,
+    "steps": 6,
+    "label": "5 of 6 · Performance",
     "code": "ui.performance(\"orders-etl\")",
     "outputs": [
      {
@@ -1455,9 +1486,9 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.7,
     "chapter": "Code",
-    "step": 5,
-    "steps": 5,
-    "label": "5 of 5 · Code",
+    "step": 6,
+    "steps": 6,
+    "label": "6 of 6 · Code",
     "code": "ui.code(\"orders-etl\")",
     "outputs": [
      {
@@ -1492,6 +1523,7 @@ window.AA_TOURS = {
      "ui.functions(…)",
      "ui.function_info(…)",
      "ui.errors(…)",
+     "ui.logs(…)",
      "ui.performance(…)",
      "ui.code(…)",
      "ui.help()"
