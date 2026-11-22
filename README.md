@@ -272,6 +272,12 @@ it, ready to copy. The HTML is plain HTML and CSS, with no JavaScript, so a repo
 reopened. `ui.help()` lists every command grouped by task, with a few to start with; `ui.help("summary")` shows one
 command's full description.
 
+A report ends with **Next**: two or three numbered calls with the arguments filled in, written with the name your
+notebook keeps the View under (`ui.errors('orders-etl')`), so they run as pasted. `ui.next(1)` runs the first
+without copying anything, `ui.next('errors')` the one calling `errors()`, and `ui.next()` puts them all in a new
+cell below to edit and run. A step that writes files or changes something (`download`, `clean_downloads`,
+`new_env`, ...) is never run by `next()`: it goes in a cell for you to check first.
+
 ## Amazon S3
 
 <img src="docs/images/aws/s3.svg" width="22" height="22" alt="" align="absmiddle"> **Buckets and the files in them.** Every bucket's size, cost and risks, what's in a folder, a look inside the files,

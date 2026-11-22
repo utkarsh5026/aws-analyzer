@@ -7,7 +7,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.1,
+    "dur": 10.8,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.overview()",
@@ -15,7 +15,7 @@ window.AA_CLIPS = {
      {
       "img": "overview",
       "w": 1476,
-      "h": 1370
+      "h": 1481
      }
     ],
     "captions": [
@@ -42,7 +42,7 @@ window.AA_CLIPS = {
      {
       "img": "bucket-info",
       "w": 1476,
-      "h": 2432
+      "h": 2543
      }
     ],
     "captions": []
@@ -56,7 +56,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 8.9,
+    "dur": 9.4,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.policy(\"acme-ml-data\")",
@@ -64,7 +64,7 @@ window.AA_CLIPS = {
      {
       "img": "policy",
       "w": 1476,
-      "h": 1153
+      "h": 1226
      }
     ],
     "captions": []
@@ -78,7 +78,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.0,
+    "dur": 11.5,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.tree(\"s3://acme-ml-data/curated/\", depth=3)",
@@ -86,7 +86,7 @@ window.AA_CLIPS = {
      {
       "img": "tree",
       "w": 1476,
-      "h": 1371
+      "h": 1444
      }
     ],
     "captions": []
@@ -100,7 +100,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 8.2,
+    "dur": 8.6,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.find(\"s3://acme-ml-data/training/\", pattern=\"*.tar.gz\", min_size=\"4GB\", modified_after=\"90d\")",
@@ -108,7 +108,7 @@ window.AA_CLIPS = {
      {
       "img": "find",
       "w": 1476,
-      "h": 789
+      "h": 862
      }
     ],
     "captions": [
@@ -154,7 +154,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.6,
+    "dur": 12.0,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.preview(\"s3://acme-ml-data/curated/features/churn/train.parquet\", n=8)",
@@ -162,7 +162,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-parquet",
       "w": 1476,
-      "h": 1322
+      "h": 1395
      }
     ],
     "captions": [
@@ -189,7 +189,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-model",
       "w": 1476,
-      "h": 706
+      "h": 801
      }
     ],
     "captions": [
@@ -208,7 +208,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.2,
+    "dur": 13.7,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.preview(\"s3://acme-ml-data/models/tiny-llm/model.safetensors\")",
@@ -216,7 +216,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-safetensors",
       "w": 1476,
-      "h": 1597
+      "h": 1669
      }
     ],
     "captions": [
@@ -235,7 +235,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.1,
+    "dur": 12.5,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.preview(\"s3://acme-ml-data/models/tiny-llm/config.json\")",
@@ -243,7 +243,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-json",
       "w": 1476,
-      "h": 1460
+      "h": 1533
      }
     ],
     "captions": [
@@ -262,7 +262,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 15.1,
+    "dur": 15.6,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.preview(\"s3://acme-ml-data/docs/model-card-churn-xgb.docx\")",
@@ -270,7 +270,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-docx",
       "w": 1476,
-      "h": 1894
+      "h": 1967
      }
     ],
     "captions": [
@@ -297,7 +297,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-pptx",
       "w": 1476,
-      "h": 743
+      "h": 816
      }
     ],
     "captions": [
@@ -343,7 +343,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.6,
+    "dur": 11.1,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.preview(\"s3://acme-ml-data/docs/invoices/vendor-invoice-0471.pdf\")",
@@ -351,7 +351,7 @@ window.AA_CLIPS = {
      {
       "img": "preview-scan",
       "w": 1476,
-      "h": 1201
+      "h": 1274
      }
     ],
     "captions": [
@@ -370,7 +370,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.3,
+    "dur": 13.1,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.what_if(\"s3://acme-ml-data/training/\", move_after={30: \"STANDARD_IA\", 180: \"GLACIER\"})",
@@ -378,7 +378,7 @@ window.AA_CLIPS = {
      {
       "img": "what-if",
       "w": 1476,
-      "h": 1564
+      "h": 1536
      }
     ],
     "captions": [
@@ -405,7 +405,7 @@ window.AA_CLIPS = {
      {
       "img": "duplicates",
       "w": 1476,
-      "h": 2235
+      "h": 2321
      }
     ],
     "captions": [
@@ -424,7 +424,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 7.6,
+    "dur": 8.0,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.deleted(\"s3://acme-ml-data/\")",
@@ -432,7 +432,7 @@ window.AA_CLIPS = {
      {
       "img": "deleted",
       "w": 1476,
-      "h": 922
+      "h": 994
      }
     ],
     "captions": []
@@ -446,7 +446,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.9,
+    "dur": 10.7,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.tables()",
@@ -454,7 +454,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-tables",
       "w": 1476,
-      "h": 1346
+      "h": 1457
      }
     ],
     "captions": [
@@ -473,7 +473,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.7,
+    "dur": 13.4,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.table_info(\"acme-app\")",
@@ -481,7 +481,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-table-info",
       "w": 1476,
-      "h": 1710
+      "h": 1821
      }
     ],
     "captions": [
@@ -500,7 +500,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 8.6,
+    "dur": 9.4,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"), n=8, attributes=[\"status\", \"created_at\", \"total\", \"currency\", \"coupon\"])",
@@ -508,7 +508,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-query",
       "w": 1476,
-      "h": 841
+      "h": 952
      }
     ],
     "captions": []
@@ -522,7 +522,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.7,
+    "dur": 13.2,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.get(\"acme-app\", \"CUSTOMER#1042\", \"ORDER#2026-08-14#7731\")",
@@ -530,7 +530,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-get",
       "w": 1476,
-      "h": 1548
+      "h": 1620
      }
     ],
     "captions": []
@@ -544,7 +544,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.2,
+    "dur": 11.0,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.scan(\"acme-app\", 10, where={\"status\": \"failed\", \"total\": (\">\", 300)}, attributes=[\"status\", \"created_at\", \"total\", \"failure_reason\"])",
@@ -552,7 +552,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-scan-filter",
       "w": 1476,
-      "h": 1075
+      "h": 1186
      }
     ],
     "captions": [
@@ -579,7 +579,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-schema",
       "w": 1476,
-      "h": 4174
+      "h": 4247
      }
     ],
     "captions": [
@@ -598,7 +598,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 7.2,
+    "dur": 7.7,
     "chapter": "Amazon DynamoDB",
     "label": "Amazon DynamoDB",
     "code": "ui.value_counts(\"acme-app\", \"status\")",
@@ -606,7 +606,7 @@ window.AA_CLIPS = {
      {
       "img": "dynamodb-value-counts",
       "w": 1476,
-      "h": 844
+      "h": 917
      }
     ],
     "captions": [
@@ -625,7 +625,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.7,
+    "dur": 12.4,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.kbs()",
@@ -633,7 +633,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-kbs",
       "w": 1476,
-      "h": 1605
+      "h": 1716
      }
     ],
     "captions": [
@@ -660,7 +660,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-kb-info",
       "w": 1476,
-      "h": 2320
+      "h": 2432
      }
     ],
     "captions": [
@@ -679,7 +679,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.6,
+    "dur": 10.0,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.syncs(\"support-docs\")",
@@ -687,7 +687,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-syncs",
       "w": 1476,
-      "h": 1254
+      "h": 1326
      }
     ],
     "captions": [
@@ -706,7 +706,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 7.8,
+    "dur": 8.3,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.documents(\"support-docs\")",
@@ -714,7 +714,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-documents",
       "w": 1476,
-      "h": 976
+      "h": 1049
      }
     ],
     "captions": [
@@ -741,7 +741,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-unsynced",
       "w": 1476,
-      "h": 970
+      "h": 969
      }
     ],
     "captions": [
@@ -760,7 +760,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.0,
+    "dur": 11.7,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.use(\"support-docs\")\nui.search(\"How long do refunds take?\")",
@@ -768,7 +768,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-search",
       "w": 1476,
-      "h": 1257
+      "h": 1369
      }
     ],
     "captions": [
@@ -787,7 +787,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 8.5,
+    "dur": 9.3,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.use(\"support-docs\")\nui.ask(\"How long do refunds take?\")",
@@ -795,7 +795,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-ask",
       "w": 1476,
-      "h": 908
+      "h": 1019
      }
     ],
     "captions": [
@@ -818,7 +818,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.2,
+    "dur": 10.0,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.use(\"support-docs\")\nui.ask(\"How long do refunds take?\", engine=\"converse\", model=\"sonnet\")",
@@ -826,7 +826,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-ask-converse",
       "w": 1476,
-      "h": 925
+      "h": 1036
      }
     ],
     "captions": [
@@ -845,7 +845,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 7.3,
+    "dur": 7.8,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.models()",
@@ -853,7 +853,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-models",
       "w": 1476,
-      "h": 953
+      "h": 1028
      }
     ],
     "captions": [
@@ -872,7 +872,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.6,
+    "dur": 12.0,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.use(\"support-docs\")\nui.compare(\"what does error E1234 mean?\", n=(2, 5))",
@@ -880,7 +880,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-compare",
       "w": 1476,
-      "h": 1283
+      "h": 1355
      }
     ],
     "captions": [
@@ -899,7 +899,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.0,
+    "dur": 13.4,
     "chapter": "Bedrock Knowledge Bases",
     "label": "Bedrock Knowledge Bases",
     "code": "ui.use(\"support-docs\"); cases = [\n    (\"How long do refunds take?\", \"refund-policy.pdf\"),\n    (\"How do I reset my password?\", \"account-faq\"),\n    (\"Can EU customers return an order?\", \"eu-returns.pdf\"),\n    (\"What does error E1234 mean?\", \"payment-errors\"),\n    (\"Can I return a faulty laptop?\", \"warranty.pdf\"),\n    (\"When do holiday orders ship?\", \"holiday-shipping\"),\n]\nui.evaluate(cases)",
@@ -907,7 +907,7 @@ window.AA_CLIPS = {
      {
       "img": "bedrock-evaluate",
       "w": 1476,
-      "h": 1232
+      "h": 1305
      }
     ],
     "captions": [
@@ -934,7 +934,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-instance",
       "w": 1476,
-      "h": 3004
+      "h": 3114
      }
     ],
     "captions": [
@@ -961,7 +961,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-disk",
       "w": 1476,
-      "h": 3108
+      "h": 3218
      }
     ],
     "captions": [
@@ -988,7 +988,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-running",
       "w": 1476,
-      "h": 2078
+      "h": 2190
      }
     ],
     "captions": [
@@ -1007,7 +1007,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.1,
+    "dur": 12.6,
     "chapter": "Amazon SageMaker",
     "label": "Amazon SageMaker",
     "code": "ui.training_job(\"churn-xgb-0517\")",
@@ -1015,7 +1015,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-training-job",
       "w": 1476,
-      "h": 1584
+      "h": 1657
      }
     ],
     "captions": [
@@ -1034,7 +1034,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 6.4,
+    "dur": 7.1,
     "chapter": "Amazon SageMaker",
     "label": "Amazon SageMaker",
     "code": "ui.endpoints()",
@@ -1042,7 +1042,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-endpoints",
       "w": 1476,
-      "h": 821
+      "h": 931
      }
     ],
     "captions": [
@@ -1069,7 +1069,7 @@ window.AA_CLIPS = {
      {
       "img": "sagemaker-pipeline-run",
       "w": 1476,
-      "h": 2239
+      "h": 2351
      }
     ],
     "captions": [
@@ -1088,7 +1088,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.2,
+    "dur": 12.9,
     "chapter": "Amazon OpenSearch",
     "label": "Amazon OpenSearch",
     "code": "ui.overview()",
@@ -1096,7 +1096,7 @@ window.AA_CLIPS = {
      {
       "img": "opensearch-overview",
       "w": 1476,
-      "h": 1680
+      "h": 1791
      }
     ],
     "captions": [
@@ -1115,7 +1115,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.5,
+    "dur": 14.0,
     "chapter": "Amazon OpenSearch",
     "label": "Amazon OpenSearch",
     "code": "ui.indexes(\"vectors-prod\")",
@@ -1123,7 +1123,7 @@ window.AA_CLIPS = {
      {
       "img": "opensearch-indexes",
       "w": 1476,
-      "h": 1827
+      "h": 1900
      }
     ],
     "captions": [
@@ -1169,7 +1169,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 14.0,
+    "dur": 14.5,
     "chapter": "Amazon OpenSearch",
     "label": "Amazon OpenSearch",
     "code": "ui.sample(\"vectors-prod/support-docs\", n=5)",
@@ -1177,7 +1177,7 @@ window.AA_CLIPS = {
      {
       "img": "opensearch-sample",
       "w": 1476,
-      "h": 1826
+      "h": 1899
      }
     ],
     "captions": [
@@ -1204,7 +1204,7 @@ window.AA_CLIPS = {
      {
       "img": "opensearch-search",
       "w": 1476,
-      "h": 2165
+      "h": 2276
      }
     ],
     "captions": [
@@ -1231,7 +1231,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-functions",
       "w": 1476,
-      "h": 2353
+      "h": 2435
      }
     ],
     "captions": [
@@ -1285,7 +1285,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 3223
+      "h": 3357
      }
     ],
     "captions": [
@@ -1312,7 +1312,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2763
+      "h": 2874
      }
     ],
     "captions": [
@@ -1358,7 +1358,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.8,
+    "dur": 13.5,
     "chapter": "AWS Lambda",
     "label": "AWS Lambda",
     "code": "ui.diff(\"orders-etl\")",
@@ -1366,7 +1366,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-diff",
       "w": 1476,
-      "h": 1746
+      "h": 1856
      }
     ],
     "captions": [
@@ -1412,7 +1412,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 12.2,
+    "dur": 13.0,
     "chapter": "Amazon API Gateway",
     "label": "Amazon API Gateway",
     "code": "apigw.apis()",
@@ -1420,7 +1420,7 @@ window.AA_CLIPS = {
      {
       "img": "apigw-apis",
       "w": 1476,
-      "h": 1683
+      "h": 1795
      }
     ],
     "captions": [
@@ -1439,7 +1439,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.1,
+    "dur": 13.8,
     "chapter": "Amazon API Gateway",
     "label": "Amazon API Gateway",
     "code": "apigw.api_info(\"orders-api\")",
@@ -1447,7 +1447,7 @@ window.AA_CLIPS = {
      {
       "img": "apigw-api-info",
       "w": 1476,
-      "h": 1756
+      "h": 1866
      }
     ],
     "captions": [
@@ -1474,7 +1474,7 @@ window.AA_CLIPS = {
      {
       "img": "msg-overview",
       "w": 1476,
-      "h": 3952
+      "h": 4063
      }
     ],
     "captions": [
@@ -1501,7 +1501,7 @@ window.AA_CLIPS = {
      {
       "img": "msg-follow",
       "w": 1476,
-      "h": 2339
+      "h": 2450
      }
     ],
     "captions": [
@@ -1528,7 +1528,7 @@ window.AA_CLIPS = {
      {
       "img": "msg-queue-info",
       "w": 1476,
-      "h": 2426
+      "h": 2537
      }
     ],
     "captions": [
@@ -1574,7 +1574,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.9,
+    "dur": 10.6,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.overview()",
@@ -1582,7 +1582,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-overview",
       "w": 1476,
-      "h": 1334
+      "h": 1445
      }
     ],
     "captions": [
@@ -1609,7 +1609,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 2584
+      "h": 2695
      }
     ],
     "captions": [
@@ -1636,7 +1636,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-execution",
       "w": 1476,
-      "h": 2687
+      "h": 2799
      }
     ],
     "captions": [
@@ -1655,7 +1655,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.3,
+    "dur": 12.1,
     "chapter": "AWS Step Functions",
     "label": "AWS Step Functions",
     "code": "sfn.compare(\"order-pipeline/ord-7f3a\")",
@@ -1663,7 +1663,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-compare",
       "w": 1476,
-      "h": 1446
+      "h": 1557
      }
     ],
     "captions": [
@@ -1690,7 +1690,7 @@ window.AA_CLIPS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 2102
+      "h": 2213
      }
     ],
     "captions": [
@@ -1771,7 +1771,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-overview",
       "w": 1476,
-      "h": 3657
+      "h": 3769
      }
     ],
     "captions": [
@@ -1798,7 +1798,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-expensive",
       "w": 1476,
-      "h": 2530
+      "h": 2641
      }
     ],
     "captions": [
@@ -1817,7 +1817,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 9.8,
+    "dur": 10.3,
     "chapter": "Amazon Athena",
     "label": "Amazon Athena",
     "code": "athena.failures()",
@@ -1825,7 +1825,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-failures",
       "w": 1476,
-      "h": 1326
+      "h": 1399
      }
     ],
     "captions": [
@@ -1852,7 +1852,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-catalog",
       "w": 1476,
-      "h": 2129
+      "h": 2240
      }
     ],
     "captions": [
@@ -1898,7 +1898,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 11.9,
+    "dur": 12.3,
     "chapter": "Amazon Athena",
     "label": "Amazon Athena",
     "code": "athena.query_code(\"SELECT * FROM orders WHERE total > 100\", database=\"sales\")",
@@ -1906,7 +1906,7 @@ window.AA_CLIPS = {
      {
       "img": "athena-query-code",
       "w": 1476,
-      "h": 1349
+      "h": 1421
      }
     ],
     "captions": [

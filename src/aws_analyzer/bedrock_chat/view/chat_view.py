@@ -73,8 +73,9 @@ class BedrockChatView(_ChatCommands, _TestCommands, _RunsCommands, _SettingsComm
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request", "code"),
         "📚 Knowledge base, files and model": ("use", "kbs", "files", "save_file_list", "models",
                                                  "inference_profiles"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"save_runs", "save_file_list"})
     _START = (
         ("app()", "the chat window: pick a model, change settings, see the JSON"),
         ("ask('a question')", "an answer with citations, as a report"),

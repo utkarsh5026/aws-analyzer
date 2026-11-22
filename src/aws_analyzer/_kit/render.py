@@ -181,6 +181,15 @@ _BASE_RULES = """\
 .{root} .next{border-top:1px dashed rgba(127,127,127,.35)}
 .{root} .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
 .{root} .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+.{root} .next.num{display:grid;grid-template-columns:auto minmax(0,max-content) minmax(0,1fr) auto;align-items:center;gap:6px 10px}
+.{root} .next.num>.nl,.{root} .next.num>.nh{grid-column:1/-1}
+.{root} .next.num .ni{display:contents}
+.{root} .next.num code{justify-self:start;overflow-wrap:anywhere}
+.{root} .next.num .nw{margin-left:0}
+.{root} .next .nn{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:9px;background:rgba(127,127,127,.18);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.{root} .next .ni .copy{justify-self:end;visibility:hidden;height:18px;padding:0 8px;font-size:10.5px}
+.{root} .next .ni:hover .copy,.{root} .next .ni .copy:focus{visibility:visible}
+.{root} .next .nh{margin-top:2px;font-size:12px;opacity:.7}
 .{root} .tabs{margin:12px 0 4px}
 .{root} .tabs>.tbar{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:10px;border-bottom:1px solid rgba(127,127,127,.28)}
 .{root} .tabs>.tbar>label{display:inline-flex;align-items:center;gap:6px;padding:6px 14px 7px;margin-bottom:-1px;border-radius:7px 7px 0 0;font-weight:600;cursor:pointer;opacity:.62;user-select:none;-webkit-user-select:none;transition:opacity .12s,background-color .12s}
@@ -643,15 +652,27 @@ def _findings_html(block: _Findings, report: _Report) -> str:
 
 @_draws(_Next, "html")
 def _next_html(block: _Next, report: _Report) -> str:
+    """
+    The next steps: a line each, its call as code one click selects and what it shows. Numbered ones (a View that
+    runs them) also get a Copy button and the hint saying how to run them under them.
+    """
     if not block.items:
         return ""
-    calls = "".join(
-        f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
-        + (f'<span class="nw">{_esc(why)}</span>' if why else "")
-        + "</span>"
-        for call, why in block.items
-    )
-    return f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
+    steps = "".join(_next_step_html(block, number, call, why)
+                    for number, (call, why) in enumerate(block.items, start=1))
+    hint = f'<span class="nh">{_prose(block.hint)}</span>' if block.hint else ""
+    kind = "next num" if block.numbered else "next"
+    return f'<div class="{kind}"><span class="nl">{_esc(block.title)}</span>{steps}{hint}</div>'
+
+
+def _next_step_html(block: _Next, number: int, call: str, why: str) -> str:
+    """
+    One next step's line: its number when the block is numbered, the call, what it shows, and a Copy button.
+    """
+    number_html = f'<span class="nn">{number}</span>' if block.numbered else ""
+    copy = _copy_button(call, "the call") if block.numbered else ""
+    why_html = f'<span class="nw">{_esc(why)}</span>' if why else ""
+    return f'<span class="ni">{number_html}<code{_SELECT}>{_esc(call)}</code>{why_html}{copy}</span>'
 
 
 @_draws(_Tone, "cell")
@@ -940,7 +961,11 @@ def _next_lines(block: _Next, report: _Report) -> list[str]:
     if not block.items:
         return []
     width = max(len(call) for call, _ in block.items)
-    return ["", f"{block.title}:"] + [f"  {call.ljust(width)}   {why}".rstrip() for call, why in block.items]
+    lines = ["", f"{block.title}:"]
+    for number, (call, why) in enumerate(block.items, start=1):
+        number_text = f"{number}  " if block.numbered else ""
+        lines.append(f"  {number_text}{call.ljust(width)}   {why}".rstrip())
+    return lines + ([f"  {block.hint}"] if block.hint else [])
 
 
 @_draws(_Table, "text")

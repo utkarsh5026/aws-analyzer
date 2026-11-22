@@ -419,8 +419,10 @@ class AgentView(_BaseView):
         "🔑 Set up": ("setup", "use_model"),
         "🧰 What it can do": ("tools", "runbooks"),
         "🔌 MCP servers": ("mcp", "add_mcp", "remove_mcp", "enable_mcp", "disable_mcp", "reconnect_mcp", "import_mcp"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"save_charts", "add_mcp", "remove_mcp", "import_mcp", "forget", "forget_all", "rename_chat",
+                          "delete_chat"})
     _START = (
         ("setup()", "set up the model it answers with: the steps to copy, checked against this notebook"),
         ("chat()", "a chat window: ask, and watch each tool call as it runs"),

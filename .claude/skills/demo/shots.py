@@ -1056,8 +1056,9 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
             ui._show = lambda blocks: None
             exec(figure.setup, scope)
             look = figure.theme or importlib.import_module("aws_analyzer._kit.themes")._theme_name()
+            sys.modules["__main__"].ui = ui
             ui._show = lambda blocks, ui=ui, shown=shown, look=look: shown.append(
-                ui._render_html(blocks, ui.max_rows, theme=look))
+                ui._render_html(ui._runnable_steps(blocks), ui.max_rows, theme=look))
             exec(figure.code, scope)
             out[figure.name] = shown
         return out

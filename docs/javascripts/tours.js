@@ -67,7 +67,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.2,
+    "dur": 12.9,
     "chapter": "Every bucket",
     "step": 1,
     "steps": 6,
@@ -77,7 +77,7 @@ window.AA_TOURS = {
      {
       "img": "overview",
       "w": 1476,
-      "h": 1370
+      "h": 1481
      }
     ],
     "captions": [
@@ -90,7 +90,7 @@ window.AA_TOURS = {
       "Four buckets, 4.3 TB, about <b>$86.50 a month</b>, and three with something to fix."
      ],
      [
-      8.6,
+      9.3,
       "Sizes come from CloudWatch's daily storage metrics, so no bucket is listed."
      ]
     ]
@@ -107,7 +107,7 @@ window.AA_TOURS = {
      {
       "img": "bucket-info",
       "w": 1476,
-      "h": 2432,
+      "h": 2543,
       "panMax": 700
      }
     ],
@@ -168,7 +168,7 @@ window.AA_TOURS = {
      {
       "img": "find",
       "w": 1476,
-      "h": 789
+      "h": 862
      }
     ],
     "captions": [
@@ -188,7 +188,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 11.7,
+    "dur": 12.0,
     "chapter": "Preview",
     "step": 5,
     "steps": 6,
@@ -198,7 +198,7 @@ window.AA_TOURS = {
      {
       "img": "preview-parquet",
       "w": 1476,
-      "h": 1322
+      "h": 1395
      }
     ],
     "captions": [
@@ -211,14 +211,14 @@ window.AA_TOURS = {
       "A Parquet file: only its footer and first row group are read."
      ],
      [
-      8.1,
+      8.4,
       "Rows, columns, row groups and the schema, <b>in the notebook</b>."
      ]
     ]
    },
    {
     "kind": "cell",
-    "dur": 13.3,
+    "dur": 13.1,
     "chapter": "What if",
     "step": 6,
     "steps": 6,
@@ -228,7 +228,7 @@ window.AA_TOURS = {
      {
       "img": "what-if",
       "w": 1476,
-      "h": 1564
+      "h": 1536
      }
     ],
     "captions": [
@@ -241,7 +241,7 @@ window.AA_TOURS = {
       "Moving training outputs to cheaper storage saves <b>$11.95 a month</b>, and pays for itself in under a month."
      ],
      [
-      9.7,
+      9.5,
       "Then the rule's JSON to copy. <b>The tool never changes the bucket.</b>"
      ]
     ]
@@ -332,7 +332,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.3,
+    "dur": 12.4,
     "chapter": "Every table",
     "step": 1,
     "steps": 5,
@@ -342,7 +342,7 @@ window.AA_TOURS = {
      {
       "img": "dynamodb-tables",
       "w": 1476,
-      "h": 1346,
+      "h": 1457,
       "panMax": 650
      }
     ],
@@ -356,14 +356,14 @@ window.AA_TOURS = {
       "Four tables, about <b>$264 a month</b>, and three with warnings."
      ],
      [
-      8.7,
+      8.8,
       "Each warning comes with the command that fixes it."
      ]
     ]
    },
    {
     "kind": "cell",
-    "dur": 12.7,
+    "dur": 13.4,
     "chapter": "One table",
     "step": 2,
     "steps": 5,
@@ -373,7 +373,7 @@ window.AA_TOURS = {
      {
       "img": "dynamodb-table-info",
       "w": 1476,
-      "h": 1710
+      "h": 1821
      }
     ],
     "captions": [
@@ -386,7 +386,7 @@ window.AA_TOURS = {
       "For an on-demand table, the cost includes reads and writes at the last day's rate."
      ],
      [
-      9.1,
+      9.8,
       "Each index comes with the <b><code>query(...)</code> call</b> that uses it."
      ]
     ]
@@ -403,7 +403,7 @@ window.AA_TOURS = {
      {
       "img": "dynamodb-query",
       "w": 1476,
-      "h": 841
+      "h": 952
      }
     ],
     "captions": [
@@ -433,7 +433,7 @@ window.AA_TOURS = {
      {
       "img": "dynamodb-scan-filter",
       "w": 1476,
-      "h": 1075
+      "h": 1186
      }
     ],
     "captions": [
@@ -463,7 +463,7 @@ window.AA_TOURS = {
      {
       "img": "dynamodb-schema",
       "w": 1476,
-      "h": 4174
+      "h": 4247
      }
     ],
     "captions": [
@@ -577,7 +577,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-kbs",
       "w": 1476,
-      "h": 1605,
+      "h": 1716,
       "panMax": 650
      }
     ],
@@ -608,7 +608,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-kb-info",
       "w": 1476,
-      "h": 2320,
+      "h": 2432,
       "panMax": 800
      }
     ],
@@ -639,7 +639,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-syncs",
       "w": 1476,
-      "h": 1254
+      "h": 1326
      }
     ],
     "captions": [
@@ -669,7 +669,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-unsynced",
       "w": 1476,
-      "h": 970
+      "h": 969
      }
     ],
     "captions": [
@@ -689,7 +689,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 11.3,
+    "dur": 11.7,
     "chapter": "Search",
     "step": 5,
     "steps": 6,
@@ -699,7 +699,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-search",
       "w": 1476,
-      "h": 1257
+      "h": 1369
      }
     ],
     "captions": [
@@ -712,7 +712,7 @@ window.AA_TOURS = {
       "Two passages from the refund policy, then three weaker ones, each with its score."
      ],
      [
-      7.7,
+      8.1,
       "The question's words are <b>highlighted</b> in each passage."
      ]
     ]
@@ -729,7 +729,7 @@ window.AA_TOURS = {
      {
       "img": "bedrock-ask",
       "w": 1476,
-      "h": 908
+      "h": 1019
      }
     ],
     "captions": [
@@ -844,7 +844,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-instance",
       "w": 1476,
-      "h": 3004,
+      "h": 3114,
       "panMax": 700
      }
     ],
@@ -875,7 +875,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-disk",
       "w": 1476,
-      "h": 3108
+      "h": 3218
      }
     ],
     "captions": [
@@ -905,7 +905,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-running",
       "w": 1476,
-      "h": 2078
+      "h": 2190
      }
     ],
     "captions": [
@@ -925,7 +925,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.1,
+    "dur": 12.6,
     "chapter": "Training job",
     "step": 4,
     "steps": 6,
@@ -935,7 +935,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-training-job",
       "w": 1476,
-      "h": 1584
+      "h": 1657
      }
     ],
     "captions": [
@@ -948,7 +948,7 @@ window.AA_TOURS = {
       "<code>ExecuteUserScriptError</code> becomes <b>\"add lightgbm to requirements.txt\"</b>."
      ],
      [
-      8.5,
+      9.0,
       "With the traceback it came from, and what it cost."
      ]
     ]
@@ -965,7 +965,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-endpoints",
       "w": 1476,
-      "h": 821
+      "h": 931
      }
     ],
     "captions": [
@@ -995,7 +995,7 @@ window.AA_TOURS = {
      {
       "img": "sagemaker-pipeline-run",
       "w": 1476,
-      "h": 2239
+      "h": 2351
      }
     ],
     "captions": [
@@ -1099,7 +1099,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 14.8,
+    "dur": 15.5,
     "chapter": "Everything",
     "step": 1,
     "steps": 5,
@@ -1109,7 +1109,7 @@ window.AA_TOURS = {
      {
       "img": "opensearch-overview",
       "w": 1476,
-      "h": 1680
+      "h": 1791
      }
     ],
     "captions": [
@@ -1122,14 +1122,14 @@ window.AA_TOURS = {
       "What each domain runs on, and <b>how much memory</b> its nodes have for vector graphs."
      ],
      [
-      11.2,
+      11.9,
       "And what Serverless bills even when it's idle."
      ]
     ]
    },
    {
     "kind": "cell",
-    "dur": 13.5,
+    "dur": 14.0,
     "chapter": "Indexes",
     "step": 2,
     "steps": 5,
@@ -1139,7 +1139,7 @@ window.AA_TOURS = {
      {
       "img": "opensearch-indexes",
       "w": 1476,
-      "h": 1827
+      "h": 1900
      }
     ],
     "captions": [
@@ -1152,7 +1152,7 @@ window.AA_TOURS = {
       "The graphs need more memory than the nodes have, so <b>searches read them from disk</b>."
      ],
      [
-      9.9,
+      10.4,
       "One index uses a deprecated engine; another has documents search can't find."
      ]
     ]
@@ -1189,7 +1189,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 14.0,
+    "dur": 14.5,
     "chapter": "Sample",
     "step": 4,
     "steps": 5,
@@ -1199,7 +1199,7 @@ window.AA_TOURS = {
      {
       "img": "opensearch-sample",
       "w": 1476,
-      "h": 1826
+      "h": 1899
      }
     ],
     "captions": [
@@ -1212,7 +1212,7 @@ window.AA_TOURS = {
       "Unit-length vectors, none all zeros, and <b>a few passages repeated</b>."
      ],
      [
-      10.4,
+      10.9,
       "Each document's text, source and vector, side by side."
      ]
     ]
@@ -1229,7 +1229,7 @@ window.AA_TOURS = {
      {
       "img": "opensearch-search",
       "w": 1476,
-      "h": 2165
+      "h": 2276
      }
     ],
     "captions": [
@@ -1342,7 +1342,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-functions",
       "w": 1476,
-      "h": 2353,
+      "h": 2435,
       "panMax": 900
      }
     ],
@@ -1403,7 +1403,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-errors",
       "w": 1476,
-      "h": 3223
+      "h": 3357
      }
     ],
     "captions": [
@@ -1433,7 +1433,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-performance",
       "w": 1476,
-      "h": 2763
+      "h": 2874
      }
     ],
     "captions": [
@@ -1573,7 +1573,7 @@ window.AA_TOURS = {
      {
       "img": "apigw-apis",
       "w": 1476,
-      "h": 1683,
+      "h": 1795,
       "panMax": 800
      }
     ],
@@ -1594,7 +1594,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 13.1,
+    "dur": 13.8,
     "chapter": "One API",
     "step": 2,
     "steps": 2,
@@ -1604,7 +1604,7 @@ window.AA_TOURS = {
      {
       "img": "apigw-api-info",
       "w": 1476,
-      "h": 1756
+      "h": 1866
      }
     ],
     "captions": [
@@ -1617,7 +1617,7 @@ window.AA_TOURS = {
       "Where each route sends a request, and who's allowed to call it."
      ],
      [
-      9.5,
+      10.2,
       "<code>POST /orders</code> <b>runs out of time</b> while orders-etl may still be working."
      ]
     ]
@@ -1712,7 +1712,7 @@ window.AA_TOURS = {
      {
       "img": "msg-overview",
       "w": 1476,
-      "h": 3952,
+      "h": 4063,
       "panMax": 900
      }
     ],
@@ -1743,7 +1743,7 @@ window.AA_TOURS = {
      {
       "img": "msg-follow",
       "w": 1476,
-      "h": 2339
+      "h": 2450
      }
     ],
     "captions": [
@@ -1773,7 +1773,7 @@ window.AA_TOURS = {
      {
       "img": "msg-queue-info",
       "w": 1476,
-      "h": 2426
+      "h": 2537
      }
     ],
     "captions": [
@@ -1874,7 +1874,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.5,
+    "dur": 13.2,
     "chapter": "Every workflow",
     "step": 1,
     "steps": 5,
@@ -1884,7 +1884,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-overview",
       "w": 1476,
-      "h": 1334
+      "h": 1445
      }
     ],
     "captions": [
@@ -1897,7 +1897,7 @@ window.AA_TOURS = {
       "order-pipeline's <b>4.0% failure rate</b> is the one warning,"
      ],
      [
-      8.9,
+      9.6,
       "and the failing state machines come first."
      ]
     ]
@@ -1914,7 +1914,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-failures",
       "w": 1476,
-      "h": 2584
+      "h": 2695
      }
     ],
     "captions": [
@@ -1944,7 +1944,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-execution",
       "w": 1476,
-      "h": 2687,
+      "h": 2799,
       "panMax": 1000
      }
     ],
@@ -1975,7 +1975,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 2102
+      "h": 2213
      }
     ],
     "captions": [
@@ -2119,7 +2119,7 @@ window.AA_TOURS = {
      {
       "img": "athena-overview",
       "w": 1476,
-      "h": 3657,
+      "h": 3769,
       "panMax": 900
      }
     ],
@@ -2150,7 +2150,7 @@ window.AA_TOURS = {
      {
       "img": "athena-expensive",
       "w": 1476,
-      "h": 2530
+      "h": 2641
      }
     ],
     "captions": [
@@ -2170,7 +2170,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 9.9,
+    "dur": 10.3,
     "chapter": "Failures",
     "step": 3,
     "steps": 6,
@@ -2180,7 +2180,7 @@ window.AA_TOURS = {
      {
       "img": "athena-failures",
       "w": 1476,
-      "h": 1326
+      "h": 1399
      }
     ],
     "captions": [
@@ -2193,7 +2193,7 @@ window.AA_TOURS = {
       "A typo'd table name, a bad value in a CSV file,"
      ],
      [
-      6.3,
+      6.7,
       "and a query the scan limit stopped, <b>each with its fix</b>."
      ]
     ]
@@ -2210,7 +2210,7 @@ window.AA_TOURS = {
      {
       "img": "athena-catalog",
       "w": 1476,
-      "h": 2129,
+      "h": 2240,
       "panMax": 900
      }
     ],
@@ -2261,7 +2261,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 11.9,
+    "dur": 12.3,
     "chapter": "Query code",
     "step": 6,
     "steps": 6,
@@ -2271,7 +2271,7 @@ window.AA_TOURS = {
      {
       "img": "athena-query-code",
       "w": 1476,
-      "h": 1349
+      "h": 1421
      }
     ],
     "captions": [
@@ -2284,7 +2284,7 @@ window.AA_TOURS = {
       "It doesn't filter on <code>dt</code>, so it <b>reads every partition</b>."
      ],
      [
-      8.3,
+      8.7,
       "The tool never starts a query: it shows the code to copy."
      ]
     ]

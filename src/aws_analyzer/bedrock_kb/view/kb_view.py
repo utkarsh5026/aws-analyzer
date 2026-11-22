@@ -48,8 +48,9 @@ class BedrockKBView(_KnowledgeBaseCommands, _IndexCommands, _SearchCommands, _Me
         "📥 What's indexed": ("files", "save_file_list", "file", "search_file", "syncs", "documents", "unsynced"),
         "🔎 Search and answer": ("search", "chunk", "link", "ask", "follow_up", "models"),
         "📏 Measure retrieval": ("compare", "evaluate"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"save_file_list"})
     _START = (
         ("explore()", "the explorer window: every file, how it was indexed, syncs and search, by clicking"),
         ("kbs()", "every knowledge base: status, last sync, cost and warnings"),

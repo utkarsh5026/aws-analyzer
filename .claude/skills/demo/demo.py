@@ -2541,11 +2541,13 @@ def main() -> int:
         fragments: list[str] = []
 
         def show(blocks: list) -> None:
+            blocks = ui._runnable_steps(blocks)
             print(ui._render_text(blocks, ui.max_rows), flush=True)  # how the View draws a report as text
             if args.html:
                 fragments.append(ui._render_html(blocks, ui.max_rows, theme=look))
 
         ui._show = show
+        sys.modules["__main__"].ui = ui
         exec(compile(args.code, "<demo>", "exec"), {"ui": ui, "core": core, "mod": mod, args.service: mod})
         if args.html:
             args.html.parent.mkdir(parents=True, exist_ok=True)

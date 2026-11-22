@@ -333,8 +333,9 @@ class LambdaView(_BaseView):
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"download", "how_it_works_page"})
     _START = (
         ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),

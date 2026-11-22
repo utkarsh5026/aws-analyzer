@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🧰 **Every service: next steps you can run** ([#267](https://github.com/utkarsh5026/aws-analyzer/pull/267))
+  - A report's Next steps are numbered and written as your notebook runs them: `ui.errors('orders-etl')`.
+  - `ui.next(1)` runs a step; `ui.next()` puts them all in a new cell below.
+  - Each step has a Copy button; a step that writes files goes in a cell to check instead of running.
 - ⚡ **Lambda: did we lose data?** ([#265](https://github.com/utkarsh5026/aws-analyzer/pull/265))
   - `errors()` says what happened to the failed events: dropped, kept in a dead-letter queue, or still in the queue.
   - It counts dropped S3, SNS and EventBridge events with Lambda's own `AsyncEventsDropped`, and shows how to keep the next ones.

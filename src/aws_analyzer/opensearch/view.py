@@ -276,7 +276,7 @@ class OpenSearchView(_BaseView):
         "📇 Indexes": ("indexes", "index_info"),
         "🧭 Vectors": ("sample", "search"),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("overview()", "every domain and collection: size, cost and warnings"),

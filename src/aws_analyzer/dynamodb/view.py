@@ -197,7 +197,7 @@ class DynamoDBView(_BaseView):
         "👀 Look at items": ("sample", "scan", "query", "get", "sql", "more"),
         "🔬 Understand the data": ("schema", "value_counts", "largest", "count"),
         "🖱️ Explore by clicking": ("explore",),
-        "❓ Help": ("help",),
+        "❓ Help": ("help", "next"),
     }
     _START = (
         ("tables()", "every table: items, size, cost and warnings"),

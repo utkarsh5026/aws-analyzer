@@ -129,8 +129,8 @@ Run `instance()` and `disk()` in the notebook you want to know about: they look 
 ui.instance()
 ```
 
-![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-light.webp#only-light){ width="984" height="2003" loading=lazy }
-![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-dark.webp#only-dark){ width="984" height="2003" loading=lazy }
+![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-light.webp#only-light){ width="984" height="2076" loading=lazy }
+![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-dark.webp#only-dark){ width="984" height="2076" loading=lazy }
 /// caption
 `ui.instance()` in the `churn-analysis` space: the GPU has done nothing for this session, and nothing will stop the app tonight.
 ///
@@ -216,8 +216,8 @@ ui.disk("~/SageMaker/data")             # one folder
 ui.disk("/", limit=None)                # the whole system disk, however many files
 ```
 
-![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-light.webp#only-light){ width="984" height="2072" loading=lazy }
-![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-dark.webp#only-dark){ width="984" height="2072" loading=lazy }
+![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-light.webp#only-light){ width="984" height="2145" loading=lazy }
+![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-dark.webp#only-dark){ width="984" height="2145" loading=lazy }
 /// caption
 `ui.disk()`: 3.8 GB of it is a file deleted in JupyterLab weeks ago, still sitting in the trash.
 ///
@@ -276,8 +276,8 @@ ui.running(days=30)          # endpoint traffic over 30 days
 ui.running(metrics=False)    # skip CloudWatch
 ```
 
-![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-light.webp#only-light){ width="984" height="1385" loading=lazy }
-![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-dark.webp#only-dark){ width="984" height="1385" loading=lazy }
+![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-light.webp#only-light){ width="984" height="1460" loading=lazy }
+![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-dark.webp#only-dark){ width="984" height="1460" loading=lazy }
 /// caption
 `ui.running()`: a forgotten notebook, a forgotten app and an unused endpoint add up to about $590 a month.
 ///
@@ -326,8 +326,8 @@ A failure reason like `AlgorithmError: ExecuteUserScriptError: ExitCode 1` doesn
 - the **time limit** or a **spot interruption**: a longer `max_run`, and checkpoints;
 - the role **unable to read S3**, or **input data that isn't there**.
 
-![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-light.webp#only-light){ width="984" height="1056" loading=lazy }
-![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-dark.webp#only-dark){ width="984" height="1056" loading=lazy }
+![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-light.webp#only-light){ width="984" height="1105" loading=lazy }
+![training_job(): a failed job that ran a minute for under a cent; the finding says the training script imports lightgbm, which the container doesn't have, and to add it to a requirements.txt beside the script; then the traceback its log ends in, the log itself, and the steps it went through with how long each took](images/sagemaker-training-job-dark.webp#only-dark){ width="984" height="1105" loading=lazy }
 /// caption
 `ui.training_job("churn-xgb-0517")`: `ExecuteUserScriptError` becomes "add lightgbm to requirements.txt".
 ///
@@ -349,8 +349,8 @@ ui.endpoints()              # the last 30 days
 ui.endpoints(days=90)       # a longer look back
 ```
 
-![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-light.webp#only-light){ width="984" height="547" loading=lazy }
-![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-dark.webp#only-dark){ width="984" height="547" loading=lazy }
+![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-light.webp#only-light){ width="984" height="621" loading=lazy }
+![endpoints(): three endpoints costing $419.75 a month, one idle at $83.95 a month; the finding says churn-v1 got no requests in 30 days and gives the command that deletes it and the one that brings it back; a table of each endpoint's instances, cost a month, requests, last request and 5xx errors](images/sagemaker-endpoints-dark.webp#only-dark){ width="984" height="621" loading=lazy }
 /// caption
 `ui.endpoints()`: churn-v1 hasn't been called in a month and costs $83.95 a month.
 ///
@@ -368,8 +368,8 @@ ui.pipeline_run("churn-pipeline")       # its latest run
 ui.pipeline_run("churn-pipeline", 1)    # the run before
 ```
 
-![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-light.webp#only-light){ width="984" height="1493" loading=lazy }
-![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-dark.webp#only-dark){ width="984" height="1493" loading=lazy }
+![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-light.webp#only-light){ width="984" height="1567" loading=lazy }
+![pipeline_run(): a failed run whose TrainModel step failed because lightgbm is missing, with the call that shows the training job; four steps never ran, with the command that retries the run from the failed step; the steps as a graph, Preprocess green, TrainModel red and the rest dashed, with the condition's if and else branches; a waterfall of when each step ran; and a table of the steps and their jobs](images/sagemaker-pipeline-run-dark.webp#only-dark){ width="984" height="1567" loading=lazy }
 /// caption
 `ui.pipeline_run("churn-pipeline")`: the training step broke, and the four steps after it never ran.
 ///

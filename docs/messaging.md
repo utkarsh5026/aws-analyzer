@@ -21,8 +21,8 @@ See which queues back up and which dead-letter queues hold failed messages, foll
 The examples use acme's `orders-events` topic, which delivers to four queues and a Lambda function, and the `shop` event bus, whose `order-placed` rule sends big orders to an audit queue and a fraud check. Some of those deliveries fail, and 42 orders wait in a dead-letter queue.
 { .muted }
 
-![overview(): cards with 9 queues, 3 topics and 4 rules, 135 messages waiting, 42 in dead-letter queues and 2,720 failed deliveries, then the findings, warnings first: orders-dlq holds 42 failed messages, orders-events failed 2,310 deliveries, two queues keep it out, and the tables of queues, topics and rules](images/msg-overview-light.webp#only-light){ width="984" height="2635" loading=lazy }
-![overview(): cards with 9 queues, 3 topics and 4 rules, 135 messages waiting, 42 in dead-letter queues and 2,720 failed deliveries, then the findings, warnings first: orders-dlq holds 42 failed messages, orders-events failed 2,310 deliveries, two queues keep it out, and the tables of queues, topics and rules](images/msg-overview-dark.webp#only-dark){ width="984" height="2635" loading=lazy }
+![overview(): cards with 9 queues, 3 topics and 4 rules, 135 messages waiting, 42 in dead-letter queues and 2,720 failed deliveries, then the findings, warnings first: orders-dlq holds 42 failed messages, orders-events failed 2,310 deliveries, two queues keep it out, and the tables of queues, topics and rules](images/msg-overview-light.webp#only-light){ width="984" height="2709" loading=lazy }
+![overview(): cards with 9 queues, 3 topics and 4 rules, 135 messages waiting, 42 in dead-letter queues and 2,720 failed deliveries, then the findings, warnings first: orders-dlq holds 42 failed messages, orders-events failed 2,310 deliveries, two queues keep it out, and the tables of queues, topics and rules](images/msg-overview-dark.webp#only-dark){ width="984" height="2709" loading=lazy }
 /// caption
 **`msg.overview()`**: what failed first, then every queue, topic and rule, with the commands that fix what's wrong.
 ///
@@ -131,8 +131,8 @@ msg.follow("orders")               # a queue: what sends to it, who reads it, wh
 msg.follow("shop/order-placed")    # a rule, or "shop" for the whole bus
 ```
 
-![follow('orders-events'): the topic as a diagram of boxes and arrows, the two queues that keep it out outlined in red, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-light.webp#only-light){ width="984" height="1559" loading=lazy }
-![follow('orders-events'): the topic as a diagram of boxes and arrows, the two queues that keep it out outlined in red, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-dark.webp#only-dark){ width="984" height="1559" loading=lazy }
+![follow('orders-events'): the topic as a diagram of boxes and arrows, the two queues that keep it out outlined in red, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-light.webp#only-light){ width="984" height="1633" loading=lazy }
+![follow('orders-events'): the topic as a diagram of boxes and arrows, the two queues that keep it out outlined in red, then a tree of its five subscriptions: shipping-updates with its filter, its reader shipping-notifier and its dead-letter queue, partner-webhooks and audit-events marked because their policy keeps the topic out, an HTTPS endpoint and the fraud-check function](images/msg-follow-dark.webp#only-dark){ width="984" height="1633" loading=lazy }
 /// caption
 `msg.follow("orders-events")`: two of the five places it delivers to keep it out.
 ///
@@ -169,8 +169,8 @@ msg.topic_info("orders-events")
 msg.rule_info("shop/order-placed")
 ```
 
-![queue_info('orders'): cards with 15 waiting, 10 in flight, 31,000 in and 30,850 done over 7 days and 42 dead letters, findings that orders-dlq holds 42 failed messages, then its settings explained, what sends to it and the orders-etl function that reads it](images/msg-queue-info-light.webp#only-light){ width="984" height="1617" loading=lazy }
-![queue_info('orders'): cards with 15 waiting, 10 in flight, 31,000 in and 30,850 done over 7 days and 42 dead letters, findings that orders-dlq holds 42 failed messages, then its settings explained, what sends to it and the orders-etl function that reads it](images/msg-queue-info-dark.webp#only-dark){ width="984" height="1617" loading=lazy }
+![queue_info('orders'): cards with 15 waiting, 10 in flight, 31,000 in and 30,850 done over 7 days and 42 dead letters, findings that orders-dlq holds 42 failed messages, then its settings explained, what sends to it and the orders-etl function that reads it](images/msg-queue-info-light.webp#only-light){ width="984" height="1691" loading=lazy }
+![queue_info('orders'): cards with 15 waiting, 10 in flight, 31,000 in and 30,850 done over 7 days and 42 dead letters, findings that orders-dlq holds 42 failed messages, then its settings explained, what sends to it and the orders-etl function that reads it](images/msg-queue-info-dark.webp#only-dark){ width="984" height="1691" loading=lazy }
 /// caption
 `msg.queue_info("orders")`: its dead-letter queue holds 42 failures, and its visibility timeout is short for its reader.
 ///

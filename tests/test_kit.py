@@ -11,6 +11,7 @@ import itertools
 import threading
 import os
 import re
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -91,7 +92,7 @@ def test_code_to_copy_has_a_copy_button():
 
 
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 187
+    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 198
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")
@@ -156,8 +157,8 @@ def test_friendly_errors_asks_the_view_what_each_error_means(capsys):
 
 
 def test_help_lists_the_views_commands_and_its_own(capsys):
-    assert [name for name in vars(_BaseView) if not name.startswith("_")] == ["help"]  # the base's only command
-    assert list(_commands(_Toy)) == ["fail", "help"]  # the View's own first, then the base's
+    assert [name for name in vars(_BaseView) if not name.startswith("_")] == ["help", "next"]  # the base's commands
+    assert list(_commands(_Toy)) == ["fail", "help", "next"]  # the View's own first, then the base's
     _Toy().help()
     out = capsys.readouterr().out
     assert "_Toy commands" in out and "-- Help --\nCommand" in out and "-- Other --" in out and "fail(exc," in out
@@ -181,6 +182,136 @@ def test_progress_says_the_views_words_unless_given_its_own(capsys, monkeypatch)
     with _Toy(progress="plain")._progress("Reading", unit="B") as tick:
         tick(2048)
     assert "Reading... 2.0 KB" in capsys.readouterr().err
+
+
+class _Steps(_BaseView):
+    """
+    A View whose report suggests next steps: one of its commands, one that changes something, and code that isn't
+    one of its commands.
+    """
+
+    _render_html = staticmethod(lambda blocks, max_rows, theme="": _report_html(blocks, max_rows, _Look("", "x", "")))
+    _GROUPS = {"Help": ("help", "next"), "Steps": ("report", "look", "wipe")}
+    _CHANGES = frozenset({"wipe"})
+
+    def __init__(self):
+        super().__init__(mode="text")
+        self.core = _Core(region="us-east-1")
+        self.looked: list[tuple] = []
+
+    @_friendly_errors
+    def report(self, name: str) -> None:
+        """
+        A report ending in three next steps.
+        """
+        self._show([_Title(f"Report on {name}"), _Next([
+            (f"look({name!r}, since='7d', tags=['a', 1])", "a closer look"),
+            ("wipe()", "deletes what it found"),
+            ("import shutil; shutil.rmtree('x')", "not one of its commands"),
+        ])])
+
+    @_friendly_errors
+    def look(self, name: str, *, since: str = "24h", tags: list | None = None) -> None:
+        """
+        Remembers what it was asked.
+        """
+        self.looked.append((name, since, tags))
+        self._show([_Title(f"A look at {name}")])
+
+    @_friendly_errors
+    def wipe(self) -> None:
+        """
+        Would change something: next() never runs it.
+        """
+        raise AssertionError("next() ran a command that changes something")
+
+
+@pytest.fixture
+def steps(monkeypatch):
+    """
+    A _Steps View kept in the notebook as `ui` (the __main__ module's names), and the cells next() makes.
+    """
+    view = _Steps()
+    monkeypatch.setattr(sys.modules["__main__"], "ui", view, raising=False)
+    cells: list[str] = []
+    monkeypatch.setattr(viewmod, "_cell_maker", lambda: cells.append)
+    return view, cells
+
+
+def test_next_steps_read_as_the_notebook_runs_them(steps, capsys, monkeypatch):
+    view, _ = steps
+    view.report("etl")
+    out = capsys.readouterr().out
+    assert "  1  ui.look('etl', since='7d', tags=['a', 1])" in out and "  2  ui.wipe()" in out
+    assert "  3  import shutil; shutil.rmtree('x')" in out
+    assert "Run one with ui.next(1), or put them all in a cell below with ui.next()." in out
+    html = view._render_html(view._runnable_steps([_Next([("look('etl')", "a look")])]), 50)
+    assert 'class="next num"' in html and '<span class="nn">1</span>' in html and 'class="copy"' in html
+    assert "<code" in html and "ui.next(1)" in html and "Run it with" in html
+
+    monkeypatch.delattr(sys.modules["__main__"], "ui")
+    view.report("etl")
+    out = capsys.readouterr().out
+    assert "  1  look('etl'," in out and "Run one with next(1)" in out
+
+
+def test_next_runs_a_step_and_puts_the_rest_in_a_cell(steps, capsys):
+    view, cells = steps
+    view.next(1)
+    assert "No report has suggested next steps yet" in capsys.readouterr().out and not view.looked
+
+    view.report("etl")
+    view.next(1)
+    view.next("look")
+    view.next("ui.look()")
+    assert view.looked == [("etl", "7d", ["a", 1])] * 3 and "A look at etl" in capsys.readouterr().out
+
+    view.next(2)
+    assert cells == ["ui.wipe()"] and "wipe() writes files or changes something" in capsys.readouterr().out
+    view.next(3)
+    assert cells[-1] == "import shutil; shutil.rmtree('x')" and "isn't one command" in capsys.readouterr().out
+    view.next()
+    assert cells[-1].splitlines() == [
+        "ui.look('etl', since='7d', tags=['a', 1])  # a closer look",
+        "ui.wipe()                                  # deletes what it found",
+        "import shutil; shutil.rmtree('x')          # not one of its commands",
+    ]
+    assert "The last report's 3 next steps are in a new cell below" in capsys.readouterr().out
+
+    for wrong in (4, 0, True, "nope"):
+        view.next(wrong)
+    out = capsys.readouterr().out
+    assert "There's no step 4: the last report suggested 3 (ui.next(1) to ui.next(3))." in out
+    assert "There's no step True" in out and "didn't suggest 'nope': its steps are 'look', 'wipe'" in out
+
+
+def test_next_shows_the_steps_to_copy_outside_jupyter(steps, capsys, monkeypatch):
+    view, _ = steps
+    monkeypatch.setattr(viewmod, "_cell_maker", lambda: None)
+    view.report("etl")
+    capsys.readouterr()
+    view.next(2)
+    assert capsys.readouterr().out.split("\n")[:2] == [
+        "[i] wipe() writes files or changes something, so next() doesn't run it for you: copy it from here.",
+        "ui.wipe()",
+    ]
+    view.next()
+    assert "The last report's 3 next steps, to copy:" in capsys.readouterr().out
+
+
+def test_next_leaves_other_views_steps_alone(steps, capsys):
+    view, _ = steps
+    view._show([_Next([("LambdaView().logs('x')", "another View's call")])])
+    assert "  LambdaView().logs('x')   another View's call" in capsys.readouterr().out and not view._next_steps
+
+
+def test_parse_call_reads_only_literal_arguments():
+    parsed = viewmod._parse_call("logs('etl', n=20, tags={'a': [1, 2]})")
+    assert (parsed.name, parsed.args, parsed.kwargs) == ("logs", ["etl"], {"n": 20, "tags": {"a": [1, 2]}})
+    for not_one in ("logs(name)", "ui.logs('x')", "logs(**options)", "x = logs('a')", "logs(", "logs('a') + 1"):
+        assert viewmod._parse_call(not_one) is None
+    assert [viewmod._command_name(call) for call in ("errors('a')", "ui.errors('a')", "import x", "f (1)")] == [
+        "errors", "", "", ""]
 
 
 # ----------------------------------------------------------------------------- shared state
