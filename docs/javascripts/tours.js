@@ -1424,7 +1424,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 14.3,
+    "dur": 14.8,
     "chapter": "Logs",
     "step": 4,
     "steps": 6,
@@ -1434,7 +1434,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-logs",
       "w": 1476,
-      "h": 1901
+      "h": 1974
      }
     ],
     "captions": [
@@ -1447,7 +1447,7 @@ window.AA_TOURS = {
       "A day of runs: <b>four failed</b>, one of them a timeout,"
      ],
      [
-      10.7,
+      11.2,
       "and a click opens a run to its lines and <b>its traceback</b>."
      ]
     ]

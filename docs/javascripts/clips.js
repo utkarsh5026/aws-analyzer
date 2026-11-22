@@ -1304,7 +1304,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 14.3,
+    "dur": 14.8,
     "chapter": "AWS Lambda",
     "label": "AWS Lambda",
     "code": "ui.logs(\"orders-etl\", since=\"24h\")",
@@ -1312,7 +1312,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-logs",
       "w": 1476,
-      "h": 1901
+      "h": 1974
      }
     ],
     "captions": [
