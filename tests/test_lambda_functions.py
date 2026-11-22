@@ -9,6 +9,7 @@ import threading
 import urllib.request
 import zipfile
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,7 @@ from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_grap
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, logs as logs_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.blocks.runs import _round_up, _zoom_for
+from aws_analyzer.lambda_functions.analysis.performance import short_stream
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
 from aws_analyzer.lambda_functions.explorer import plain as plain_search
@@ -121,9 +123,20 @@ from aws_analyzer.lambda_functions import (
     parse_function_ref,
     parse_policy,
     parse_report,
+    RunStats,
+    cold_vs_warm,
+    hung_timeouts,
+    memory_by_container,
     percentile,
     performance_findings,
+    performance_verdict,
     provisioned_monthly_cost,
+    run_cost,
+    run_groups,
+    run_stats,
+    run_time_bins,
+    slowdown,
+    time_slices,
     read_package,
     read_sources,
     request_id_of,
@@ -610,6 +623,138 @@ def test_performance_findings():
     killed.invocations[0].error_type = "Runtime.OutOfMemory"
     assert "1 run ran out of memory at 128 MB: Lambda killed it" in performance_findings(killed)[0][1]
     assert performance_findings(Performance(fn(), "/x", NOW, NOW)) == []
+
+
+def spaced(durations, *, stream="2026/10/06/[$LATEST]0000aa", used=100, until=NOW, timeout=None, memory=1024,
+           every=10):
+    """
+    Runs `every` minutes apart ending at `until`, oldest first; a duration equal to `timeout` seconds is a timeout.
+    """
+    out = []
+    for i, duration in enumerate(durations):
+        status = "timeout" if timeout and duration >= timeout * 1000 else None
+        moment = until - timedelta(minutes=every * (len(durations) - 1 - i))
+        out.append(Invocation(f"{i:08d}-aaaa-4000-8000-000000000000", moment, duration, duration + 1, memory, used,
+                              status=status, stream=stream))
+    return out
+
+
+def window_of(runs_, function, before=None):
+    perf = Performance(function, "/aws/lambda/etl", NOW - timedelta(days=1), NOW, sorted(runs_, key=lambda r: r.time,
+                                                                                          reverse=True))
+    if before is not None:
+        perf.before = Performance(function, "/aws/lambda/etl", NOW - timedelta(days=2), NOW - timedelta(days=1),
+                                  before)
+    return perf
+
+
+def test_run_stats_leave_timeouts_out_of_run_times():
+    runs_ = spaced([1000.0, 2000.0, 3000.0, 30_000.0], timeout=30)
+    runs_[0].init = 400.0
+    stats = run_stats(runs_, 30)
+    assert (stats.runs, stats.finished, stats.timeouts) == (4, 3, 1)
+    assert stats.median_ms == 2000.0 and stats.longest_ms == 3000.0 and stats.cold_starts == 1
+    assert stats.timeout_share == 0.25 and stats.start_up_ms == 400.0
+    assert lfmod.timed_out(Invocation("x", duration=29_800.0), 30)
+    assert run_stats([], 30) == RunStats()
+    cost = run_cost(run_stats(spaced([1000.0] * 10), 30), fn(memory=1024))
+    assert cost == pytest.approx(10 * 1.001 * 0.0000166667 + 10 * 0.2 / 1_000_000)
+
+
+def test_hung_timeouts_and_the_verdict():
+    hung = spaced([1500.0, 2000.0, 2500.0, 1800.0, 2200.0, 60_000.0], timeout=60)
+    perf = window_of(hung, fn(timeout=60))
+    assert hung_timeouts(run_stats(hung, 60), 60)
+    verdict = performance_verdict(perf, "24 hours")
+    assert verdict.headline == "Typical run 2.00 s. 1 run hung until the 60 s timeout; every other run finished within 2.50 s."
+    assert verdict.tone == "warn" and verdict.detail == ""
+    slow = spaced([10_000.0, 20_000.0, 25_000.0, 22_000.0, 24_000.0, 60_000.0], timeout=60)
+    assert not hung_timeouts(run_stats(slow, 60), 60)
+    assert "hit the 60 s timeout" in performance_verdict(window_of(slow, fn(timeout=60)), "24 hours").headline
+    calm = window_of(spaced([100.0] * 12), fn(timeout=30), before=spaced([100.0] * 12, until=NOW - timedelta(days=1)))
+    verdict = performance_verdict(calm, "24 hours")
+    assert verdict.tone == "ok" and "well inside the 30 s timeout" in verdict.headline
+    assert verdict.detail == "About as fast as the 24 hours before (median 100 ms → 100 ms)."
+    assert performance_verdict(window_of([], fn()), "24 hours") is None
+
+
+def test_findings_say_timeouts_hung_and_runs_got_slower():
+    hung = window_of(spaced([1500.0, 2000.0, 2500.0, 1800.0, 2200.0, 60_000.0], timeout=60), fn(timeout=60))
+    text = performance_findings(hung)[0][1]
+    assert text.startswith("1 run hung until the 60 s timeout: every other run finished within 2.50 s")
+    assert "a longer timeout would only cost more" in text and "how_it_works('etl')" in text
+    assert "logs('etl', request_id='00000005-aaaa-4000-8000-000000000000')" in text
+    earlier = spaced([1000.0] * 12, until=NOW - timedelta(days=1))
+    slower = window_of(spaced([1500.0] * 12), fn(), before=earlier)
+    found = " ".join(message for _, message in performance_findings(slower))
+    assert "Runs are 50% slower than the 24 hours before: the median went from 1.00 s to 1.50 s" in found
+    same = window_of(spaced([1050.0] * 12), fn(), before=earlier)
+    assert "slower than" not in " ".join(message for _, message in performance_findings(same))
+
+
+def test_runs_split_by_version_or_at_the_last_change():
+    old = spaced([1000.0] * 6, stream="2026/10/06/[7]0000aa", until=NOW - timedelta(hours=3))
+    new = spaced([2000.0] * 6, stream="2026/10/06/[8]0000bb")
+    perf = window_of(old + new, fn())
+    assert new[0].version == "8" and Invocation("x").version == ""
+    groups = run_groups(perf)
+    assert [g.label for g in groups] == ["version 7", "version 8"] and groups[1].stats.median_ms == 2000.0
+    older, newer, share = slowdown(groups)
+    assert (older.version, newer.version, share) == ("7", "8", 1.0)
+    text = " ".join(message for _, message in performance_findings(perf))
+    assert "Runs got 100% slower with version 8 (median 1.00 s → 2.00 s): diff('etl', '7', '8')" in text
+    changed = NOW - timedelta(hours=2, minutes=5)
+    same_stream = [replace(run, stream="2026/10/06/[$LATEST]0000aa") for run in old + new]
+    perf = window_of(same_stream, fn(last_modified=changed))
+    assert [g.label for g in run_groups(perf)] == [f"before its change at {_fmt_dt(changed)}",
+                                                   f"since its change at {_fmt_dt(changed)}"]
+    assert "slower after its change at" in " ".join(message for _, message in performance_findings(perf))
+    assert run_groups(window_of(same_stream, fn())) == []
+
+
+def test_bins_slices_cold_starts_and_containers():
+    runs_ = spaced([400.0, 1200.0, 1900.0, 8700.0, 60_000.0], timeout=60)
+    bins = run_time_bins(runs_, 60)
+    assert (bins[0].low, bins[-1].high, sum(b.runs for b in bins)) == (0.0, 9000.0, 4)
+    assert [b.runs for b in run_time_bins(spaced([102.0]), 30)] == [1]
+    slices = time_slices(runs_, 60, NOW - timedelta(hours=1), NOW, slices=2)
+    assert [s.runs for s in slices] == [1, 3] and slices[1].median_ms == 1900.0
+    cold = spaced([3000.0, 3100.0, 2000.0, 2100.0])
+    cold[0].init = cold[1].init = 1000.0
+    numbers = cold_vs_warm(cold, 30)
+    assert (numbers.cold, numbers.warm, numbers.start_up_median_ms) == (2, 2, 1000.0)
+    assert numbers.start_up_share == pytest.approx(2000 / 12200)
+    assert cold_vs_warm(spaced([100.0]), 30) is None
+    leaking = spaced([100.0] * 12, stream="2026/10/06/[$LATEST]0000000000a1")
+    for i, run_ in enumerate(leaking):
+        run_.max_memory = 100 + 5 * i
+    steady = spaced([100.0] * 12, stream="2026/10/06/[$LATEST]0000000000b2")
+    boxes = memory_by_container(steady + leaking)
+    assert [b.is_climbing for b in boxes] == [True, False] and (boxes[0].first, boxes[0].last) == (100, 155)
+    assert short_stream(boxes[0].stream) == "[$LATEST]…0000a1"
+    text = " ".join(message for _, message in performance_findings(window_of(steady + leaking, fn())))
+    assert "Memory climbs run after run in container [$LATEST]…0000a1: from 100 to 155 MB over 12 runs" in text
+    assert "it reaches the 1,024 MB limit in about 174 more runs" in text
+
+
+def test_performance_charts_draw_in_html():
+    from aws_analyzer.lambda_functions.blocks.performance import _PerformanceSetup, performance_blocks
+
+    runs_ = spaced([1500.0, 2000.0, 2500.0, 1800.0, 2200.0, 60_000.0, 1900.0, 2100.0, 2000.0, 1700.0], timeout=60,
+                   every=140)
+    runs_[0].init = 900.0
+    for i, run_ in enumerate(runs_):
+        run_.max_memory = 100 + 8 * i
+        run_.stream = "2026/10/06/[$LATEST]0000000000a1"
+    perf = window_of(runs_ + spaced([1600.0], stream="2026/10/06/[$LATEST]0000000000b2"), fn(timeout=60))
+    setup = _PerformanceSetup(window="24 hours", call=lambda command, *a, **k: f"ui.{command}('etl')")
+    page = stylemod._render_html(performance_blocks(perf, setup, []), 30)
+    assert 'class="vd warn"' in page and "hung until the 60 s timeout" in page
+    assert 'class="lane"' in page and "timed out · 1" in page and 'class="timeout"' in page
+    assert 'class="band"' in page and "median to 1 in 10, every 2 hours" in page
+    assert "none up to the timeout" in page and 'class="to"' in page
+    assert 'class="cwb-bar"' in page and ">start-up</i>" in page
+    assert 'class="spk warn"' in page and "climbing" in page and ".lmb .rtl" in page
 
 
 def test_handler_file_and_package_findings():
@@ -2101,6 +2246,14 @@ def test_a_search_reads_its_slices_side_by_side_and_keeps_the_newest(seeded):
     assert len(core._filter(*args, None)[0]) == 30
 
 
+def test_performance_reads_the_window_before_when_asked(core):
+    assert core.performance("etl-nightly").before is None
+    perf = core.performance("etl-nightly", compare=True)
+    assert perf.before is not None and perf.before.invocations == []
+    assert perf.before.until == perf.since and perf.before.since == perf.since - (perf.until - perf.since)
+    assert core.performance("api-handler", compare=True).before is None
+
+
 def test_errors_and_performance(core):
     report_ = core.errors("etl-nightly")
     assert report_.errors_found == 1 and [g.kind for g in report_.groups] == ["KeyError"]
@@ -2832,15 +2985,36 @@ def test_logs_search_box_filters_the_runs_read_and_enter_asks_cloudwatch(ui, mon
 
 def test_performance_report(ui, capsys):
     out = run(capsys, ui.performance, "etl-nightly")
-    assert "Performance of etl-nightly" in out and "Runs: 1" in out and "Memory used: 88 of 1,024 MB" in out
-    assert "Cold starts: 100.0% · 300 ms" in out and "-- The slowest runs --" in out
-    assert "256 MB still leaves room" in out
+    assert "Performance of etl-nightly" in out and "Runs: 1" in out and "Memory peak: 88 of 1,024 MB" in out
+    assert ">> Typical run 102 ms; the slowest took 102 ms, well inside the 900 s timeout." in out
+    assert "Cold starts: 100.0% · +300 ms" in out and "-- The slowest runs that finished --" in out
+    assert "256 MB still leaves room" in out and "No runs in the 24 hours before" in out
     assert "-- Memory: the most a run used, of what it has --" in out
     assert "88 MB of 1,024 MB (9%)" in out and "256 MB would do" in out
-    assert "Every run, by when it ran" not in out
+    assert "Every run, by when it ran" not in out and "How long the runs that finished take" not in out
     assert f"logs('etl-nightly', request_id='{RID}')" in out
     assert "No REPORT lines" not in out
+    assert "No runs in the 24 hours before" not in run(capsys, ui.performance, "etl-nightly", compare=False)
     assert "has no log group yet" in run(capsys, ui.performance, "api-handler")
+
+
+def test_performance_report_compares_with_the_day_before(ui, capsys):
+    now = datetime.now(timezone.utc)
+    seed_runs(now - timedelta(hours=1), stream="2026/10/06/[$LATEST]today", count=12)
+    events = []
+    for i in range(12):
+        rid = f"{i:08x}-2222-4222-8333-444455556666"
+        start = now - timedelta(days=1, hours=1, minutes=i)
+        events += [(start, f"START RequestId: {rid} Version: $LATEST"),
+                   (start + timedelta(milliseconds=10), report_line(rid, 20.0))]
+    put_logs("/aws/lambda/etl-nightly", sorted(events), stream="2026/10/05/[$LATEST]yesterday")
+    out = run(capsys, ui.performance, "etl-nightly")
+    assert "compared with the 24 hours before" in out and ">> Typical run 56 ms" in out
+    assert "Slower than the 24 hours before: median 20 ms → 56 ms (+180%)." in out
+    assert "Typical run: 56 ms (+180%)   Slowest" in out
+    assert "-- Compared with the 24 hours before" in out and "Typical run (median)  20 ms" in out
+    assert "slower than the 24 hours before" not in out
+    assert "-- Every run, by when it ran (UTC) --" in out and "-- How long the runs that finished take --" in out
 
 
 def test_reports_show_times_in_the_zone_picked(ui, capsys):

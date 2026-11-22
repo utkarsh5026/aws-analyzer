@@ -11,16 +11,15 @@ import os
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Generator
+from typing import TYPE_CHECKING, Any, Generator
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .._kit.charts import _Dots, _Meter, _Part, _Point
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
 from .._kit.deps import _in_notebook, _require
 from .._kit.errors import _Hint, _error_code, _why
 from .._kit.fmt import (
-    _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _tz_label, _utcnow, human_age, human_money,
+    _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age, human_money,
     human_size,
 )
 from .._kit.jsontree import _JsonTree
@@ -34,7 +33,7 @@ from .helpers import (
     runtime_family,
 )
 from .models import (
-    CodePackage, ErrorReport, Function, FunctionDetail, Invocation, LogEvent, LogGroup, PackageDownload, Performance,
+    CodePackage, ErrorReport, Function, FunctionDetail, LogEvent, LogGroup, PackageDownload, Performance,
     RuntimeStatus,
     SavedPage, Trigger,
 )
@@ -47,7 +46,6 @@ from .analysis.errors import (
 )
 from .analysis.fates import fate_findings
 from .analysis.word_search import WordSearch, word_search
-from .analysis.performance import memory_to_try, percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
 )
@@ -63,6 +61,7 @@ from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
+from .blocks.performance import _PerformanceSetup, performance_blocks
 from .blocks.causes import _cause_blocks
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
@@ -109,18 +108,6 @@ _VIA = {
     "resource policy": "allowed to invoke it",
     "function URL": "its HTTPS address",
 }
-
-_DURATION_BANDS = (  # performance()'s table of how long runs take
-    ("under 100 ms", 100),
-    ("100 ms to 1 s", 1_000),
-    ("1 to 3 s", 3_000),
-    ("3 to 10 s", 10_000),
-    ("10 to 30 s", 30_000),
-    ("30 s to 1 min", 60_000),
-    ("1 to 5 min", 300_000),
-    ("5 to 15 min", None),
-)
-
 
 _INFO_ORDER = ("head", "runs", "triggers", "async", "access", "versions", "days", "cost", "tags", "raw", "next")  # function_info()'s parts
 
@@ -257,62 +244,6 @@ def _since_arg(since: Any, default: str) -> dict[str, Any]:
     since= for a next step: carried over when the user chose one (as text), left out when it's the default.
     """
     return {"since": since} if isinstance(since, str) and since != default else {}
-
-
-def _run_tone(run: Invocation) -> str:
-    """
-    How a run's dot is coloured: red when it failed or timed out, violet for a cold start.
-    """
-    if run.status:
-        return "bad"
-    return "note" if run.init is not None else ""
-
-
-def _run_label(run: Invocation) -> str:
-    """
-    What pointing at a run's dot says: when, how long, and how it ended.
-    """
-    parts = [_fmt_dt(run.time, seconds=True), human_ms(run.duration)]
-    if run.status:
-        parts.append(run.status)
-    if run.init is not None:
-        parts.append("cold start")
-    return " · ".join(parts)
-
-
-def _runs_dots(perf: Performance) -> _Dots | None:
-    """
-    Every run read as a dot by when it ran and how long it took, under its timeout, so runs that hit it, and
-    whether slow runs are all the time or some of the time, show at once.
-    """
-    timed = sorted((run for run in perf.invocations if run.time is not None), key=lambda run: run.time)
-    if len(timed) < 2:
-        return None
-    fn = perf.function
-    timeout_ms = fn.timeout * 1000.0
-    points = [_Point(run.time.timestamp(), run.duration, _run_tone(run), _run_label(run)) for run in timed]
-    top = max(timeout_ms, max(point.value for point in points))
-    note = f"These are the newest {len(timed):,} runs: the reading stopped there." if perf.truncated else ""
-    return _Dots(points, top, human_ms(top), _fmt_dt(timed[0].time), _fmt_dt(timed[-1].time),
-                 limit=timeout_ms, limit_text=f"timeout {fn.timeout} s",
-                 tones={"bad": "failed or timed out", "note": "cold starts"}, noun="run",
-                 title=f"Every run, by when it ran and how long it took ({_tz_label()})", note=note)
-
-
-def _memory_meter(perf: Performance, memory: int) -> _Meter | None:
-    """
-    The most memory a run used against what the function has, with the size worth trying marked when it's far
-    more than runs use.
-    """
-    used = max((run.max_memory or 0 for run in perf.invocations), default=0)
-    if not used or not memory:
-        return None
-    suggested = memory_to_try(used, memory)
-    meter = _Meter([_Part("most a run used", float(used), f"{used:,} MB")], float(memory), f"{memory:,} MB",
-                   f"{used:,} MB", title="Memory: the most a run used, of what it has")
-    if suggested:
-        meter.mark, meter.mark_text = float(suggested), f"{suggested:,} MB would do"
-    return meter
 
 
 class LambdaView(_BaseView):
@@ -1068,16 +999,19 @@ class LambdaView(_BaseView):
         self._show(blocks)
 
     @_friendly_errors
-    def performance(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 5_000) -> None:
+    def performance(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 5_000,
+                    compare: bool = True) -> None:
         """
-        How a function's runs went in the last 24 hours, from the REPORT line Lambda logs after each one: run time
-        (median, slowest 1 in 100, longest) against the timeout, memory used against what it has and the size that
-        would do, cold starts and their start-up time, timeouts, and the slowest runs. since='7d' looks further
-        back; reading stops at the newest `limit` runs.
+        How a function's runs went in the last 24 hours, from the REPORT line Lambda logs after each one: a verdict,
+        the typical and slow run time against the timeout, every run over time with the timeouts in a lane of their
+        own, how it compares with the 24 hours before and between versions, cold starts against warm runs, memory
+        used against what it has and per container, and the slowest runs. since='7d' looks further back; reading
+        stops at the newest `limit` runs; compare=False skips reading the window before.
         """
         limit = _as_count(limit, "limit")
         with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
-            perf = self.core.performance(name, since=since, region=region, limit=limit, progress=tick)
+            perf = self.core.performance(name, since=since, region=region, limit=limit, compare=compare,
+                                         progress=tick)
         self._show(self._performance_blocks(perf, since=since, limit=limit))
 
     def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
@@ -1086,96 +1020,14 @@ class LambdaView(_BaseView):
         performance()'s report, as blocks; for_window=True leaves out the slowest runs (the explorer lists them as runs
         to click).
         """
-        fn, runs = perf.function, perf.invocations
-        window = _window((perf.until - perf.since).total_seconds())
-        found = performance_findings(perf, prices=self.core.prices)
-        blocks: list[Any] = [_Title(
-            f"Performance of {fn.name}",
-            f"from {_plural(len(runs), 'REPORT line')} (one per run) in the last {window} · log group "
-            f"{perf.log_group}",
-        )]
-        if not runs:
-            blocks += self._log_notes(perf.errors, fn, perf.log_group)
-            if "logs" not in perf.errors:
-                blocks.append(_Note(
-                    f"No REPORT lines in the last {window}: it wasn't called, or its logs go somewhere else. "
-                    f"{self._call_for('function_info', fn)} shows when it was last called."
-                ))
-            return blocks
-        durations = [r.duration for r in runs]
-        billed = [r.billed for r in runs]
-        used = [float(r.max_memory) for r in runs if r.max_memory]
-        cold = perf.cold_starts
-        init = [r.init for r in cold if r.init is not None]
-        memory = max((r.memory for r in runs if r.memory), default=fn.memory)
-        timeouts = [r for r in runs if r.status == "timeout"]
-        longest = max(durations)
-        # the same limits performance_findings() warns at, so a card is amber only when a warning is about it
-        near_timeout = bool(timeouts) or (percentile(durations, 99) or 0) >= 0.8 * fn.timeout * 1000
-        memory_warning = any((r.error_type or "").endswith("OutOfMemory") for r in runs) or (
-            max(used, default=0) >= 0.9 * memory)
-        cards: list[tuple[str, ...]] = [
-            ("Runs", _count(len(runs))),
-            ("Median run time", human_ms(percentile(durations, 50))),
-            ("1 in 100 takes", human_ms(percentile(durations, 99))),
-            ("Longest", f"{human_ms(longest)} of {fn.timeout} s", "warn" if near_timeout else ""),
-            ("Memory used", f"{max(used, default=0):,.0f} of {memory:,} MB", "warn" if memory_warning else ""),
-            ("Cold starts", f"{_pct(len(cold) / len(runs))}" + (f" · {human_ms(sum(init) / len(init))}" if init else "")),
-            ("Timeouts", _count(len(timeouts)), "warn" if timeouts else ""),
-        ]
-        blocks.append(_Cards(cards))
-        blocks += self._log_notes(perf.errors, fn, perf.log_group)
-        if perf.truncated:
-            blocks.append(_Note(
-                f"Reading stopped at the newest {_count(limit)} runs, back to {_fmt_dt(perf.covered_from, zone=True)}: "
-                "pass limit= to read more."
-            ))
-        blocks.append(_Findings(found, empty=(
-            f"Runs stay well inside the {fn.timeout} s timeout and the {memory:,} MB of memory, and the memory isn't "
-            "far more than they use.")))
-        charts = [_runs_dots(perf), _memory_meter(perf, memory)]
-        blocks += [chart for chart in charts if chart]
-
-        def spread(values: list[float], show: Callable[[float | None], str]) -> list[str]:
-            return [show(percentile(values, q)) for q in (50, 90, 99)] + [show(max(values) if values else None)]
-
-        measures = [
-            ["Run time", *spread(durations, _ms)],
-            ["Billed time", *spread(billed, _ms)],
-            ["Memory used", *spread(used, _mb)],
-        ]
-        if init:
-            measures.append([f"Cold start ({_plural(len(init), 'run')})", *spread(init, _ms)])
-        blocks.append(_Table(["Measure", "Median", "p90", "p99", "Most"], measures, max_rows=0,
-                             title=f"Run time and memory (it has {memory:,} MB and a {fn.timeout} s timeout)"))
-        bands: list[list[Any]] = []
-        counts: list[int] = []
-        low = 0.0
-        for label, high in _DURATION_BANDS:
-            count = sum(1 for d in durations if d >= low and (high is None or d < high))
-            if count:
-                bands.append([label, _count(count)])
-                counts.append(count)
-            low = float(high or 0)
-        blocks.append(_Table(["Run time", "Runs"], bands, bars=[_share(c, len(runs)) for c in counts],
-                             title="How long runs take", max_rows=0))
-        slowest = sorted(runs, key=lambda r: r.duration, reverse=True)[:10]
-        if not for_window:
-            blocks.append(_Table(
-                [f"Time ({_tz_label()})", "Request ID", "Run time", "Billed", "Memory used", "Cold start", "Status"],
-                [[_stamp(r.time), r.request_id, _ms(r.duration), _ms(r.billed), _mb(r.max_memory),
-                  _ms(r.init) if r.init is not None else "-",
-                  _Tone(r.status + (f" ({r.error_type})" if r.error_type else ""), "bad") if r.status else "ok"]
-                 for r in slowest],
-                title="The slowest runs", max_rows=0,
-            ))
-        steps = [(self._call_for("logs", fn, request_id=slowest[0].request_id, **_since_arg(since, "24h")),
-                  "everything the slowest run logged")]
-        if timeouts:
-            steps.append((self._call_for("errors", fn, **_since_arg(since, "24h")), "every error, grouped by cause"))
-        steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
-        blocks.append(_Next(steps))
-        return blocks
+        fn = perf.function
+        setup = _PerformanceSetup(
+            window=_window((perf.until - perf.since).total_seconds()),
+            call=lambda command, *args, **kwargs: self._call_for(command, fn, *args, **kwargs),
+            limit=limit, since=_since_arg(since, "24h"), prices=self.core.prices, price_basis=self._price_basis(),
+            for_window=for_window,
+        )
+        return performance_blocks(perf, setup, self._log_notes(perf.errors, fn, perf.log_group))
 
     # ------------------------------------------------------------------ code
 

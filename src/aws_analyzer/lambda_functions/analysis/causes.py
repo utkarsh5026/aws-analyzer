@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from ..._kit.fmt import _in_zone, _plural, human_age
 from ..._kit.text import _clip
@@ -18,9 +19,11 @@ from ..helpers import human_ms
 from ..models import ErrorGroup, ErrorReport, Function, FunctionMetrics
 from .errors import _ACCESS_DENIED_RE, _CONNECT_RE, _DENIED_ACTION_RE, _LOAD_ERRORS, _THROTTLED_RE
 from .fates import LOST
-from .logs import LogRun
 from .findings import _longer, _next_memory
 from .text import _cli, _window
+
+if TYPE_CHECKING:
+    from .logs import LogRun
 
 
 NEW, ONGOING, STOPPED = "new", "still failing", "stopped"
