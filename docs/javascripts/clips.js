@@ -1297,6 +1297,33 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "lambda-logs": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.logs(\"orders-etl\", since=\"24h\"): ui.logs(\"orders-etl\", since=\"24h\"): a day of runs, newest first, the failed one and the timeout among them.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 14.8,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.logs(\"orders-etl\", since=\"24h\")",
+    "outputs": [
+     {
+      "img": "lambda-logs",
+      "w": 1476,
+      "h": 1974
+     }
+    ],
+    "captions": [
+     [
+      3.26,
+      "A day of runs, newest first, the failed one and the timeout among them."
+     ]
+    ]
+   }
+  ]
+ },
  "lambda-performance": {
   "notebook": "lambda.ipynb",
   "summary": "ui.performance(\"orders-etl\"): ui.performance(\"orders-etl\"): runs use at most 182 MB of the 1,024 MB it has, and three ran into the 60 s timeout.",

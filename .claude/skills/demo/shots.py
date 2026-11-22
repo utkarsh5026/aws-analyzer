@@ -158,6 +158,7 @@ FIGURES = [
     Figure("lambda-functions", "lambda_functions", 'ui.functions(regions="all")'),
     Figure("lambda-function-info", "lambda_functions", 'ui.function_info("orders-etl")', crop=1400),
     Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
+    Figure("lambda-logs", "lambda_functions", 'ui.logs("orders-etl", since="24h")'),
     Figure("lambda-performance", "lambda_functions", 'ui.performance("orders-etl")'),
     Figure("lambda-code", "lambda_functions", 'ui.code("orders-etl")', crop=1150),
     Figure("lambda-diff", "lambda_functions", 'ui.diff("orders-etl")'),
