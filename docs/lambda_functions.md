@@ -236,21 +236,28 @@ ui.errors("orders-etl")
 ui.errors("orders-etl", since="7d")            # further back
 ```
 
-![errors("orders-etl"): cards for 66 failed calls of 2,226, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied, each with a row of dots for when it happened over the 24 hours, the line of code it failed on and the call that reads its newest run](images/lambda-errors-light.webp#only-light){ width="984" height="1707" loading=lazy }
-![errors("orders-etl"): cards for 66 failed calls of 2,226, 8 events lost, error lines, causes, 3 timeouts and the last error; findings that 8 S3 events were dropped, that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, that KeyError: 'customer_id' happened 8 times and that 2 messages wait in orders-dlq; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied, each with a row of dots for when it happened over the 24 hours, the line of code it failed on and the call that reads its newest run](images/lambda-errors-dark.webp#only-dark){ width="984" height="1707" loading=lazy }
+![errors("orders-etl"): the verdict that 8 events were lost, 2 causes are still failing and 1 stopped; cards for 61 failed calls of 2,067, 8 events lost and 3 causes; a chart of calls and failed calls per hour over the 24 hours with a row of dots per cause under it; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied (stopped), each saying what it means, where it fails and what to do, with the command or call to copy](images/lambda-errors-light.webp#only-light){ width="984" height="2149" loading=lazy }
+![errors("orders-etl"): the verdict that 8 events were lost, 2 causes are still failing and 1 stopped; cards for 61 failed calls of 2,067, 8 events lost and 3 causes; a chart of calls and failed calls per hour over the 24 hours with a row of dots per cause under it; cards for what happened to the failed events, 8 lost and 2 kept; and a card per cause, KeyError, the timeout and AccessDenied (stopped), each saying what it means, where it fails and what to do, with the command or call to copy](images/lambda-errors-dark.webp#only-dark){ width="984" height="2149" loading=lazy }
 /// caption
-`ui.errors("orders-etl")`: three different reasons to fail, each with what to do and the run to look at, and where the failed events went: 8 dropped, 2 kept in a dead-letter queue.
+`ui.errors("orders-etl")`: the answer first, when it failed hour by hour, where the failed events went, and a card per cause with what to do about it.
 ///
 
-Each cause gets its own advice:
+It reads in four parts:
 
-- **Timeouts**: raise the timeout, or find what's slow with `performance()`. At 900 seconds there's no more room: split the work, or run it somewhere without the limit.
-- **Out of memory**: Lambda killed the run. Give it more memory.
+- **The verdict**: one sentence that says what matters, such as "8 events were lost, 2 causes are still failing and 1 stopped", with the numbers behind it.
+- **When it failed**: calls and failed calls per hour (per day for a longer window), with a row of dots per cause under them on the same columns, and a sentence that reads it: one spike, rising, falling or spread out.
+- **What happened to the failed events**: [below](#failed-events).
+- **A card per cause**, still failing ones first. Its tag says whether it's new, still failing or stopped (stopped means no line for a while; the card says how many calls ran since). It says **what it means** in plain words, **where it fails** (the line of the function's own code its traceback names), and **what to do**, with the command or call to copy.
+
+What each kind of cause gets:
+
+- **Timeouts**: the command that raises the timeout, or `performance()` to find what's slow. At 900 seconds there's no more room: split the work, or run it somewhere without the limit.
+- **Out of memory**: the command that gives it more memory.
 - **Code that can't load** (`Runtime.ImportModuleError`): a package missing from the deployment package or a layer, or a handler setting that doesn't match a file. `code()` shows what's in the package.
-- **Access denied**: the function's role isn't allowed something its code does, named with the action and the resource.
-- **Throttled or unreachable services**, and otherwise the most common error, with an example.
+- **Access denied**: the role, the action and the resource, and the `aws iam put-role-policy` command that allows it.
+- **Throttled or unreachable services**, and the common Python errors (`KeyError`, `TypeError`, `ValueError`, ...) in plain words.
 
-Each cause is a card: how often it happened and its share of the error lines, a row of dots on a time axis shared by every card (so a cause that started an hour ago, or stopped yesterday, stands out), the line of the function's own code its traceback names, and the `logs("orders-etl", request_id="...")` call that shows its newest run, start to end. The raw error lines are folded underneath.
+Each card ends with the `logs("orders-etl", request_id="...")` call for its newest run, start to end. The raw error lines are folded at the bottom.
 
 ### Did we lose data? { #failed-events }
 

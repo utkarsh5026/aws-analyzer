@@ -387,6 +387,17 @@ def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
             f"The most common {'error' if not covered else 'other error'} happened {_times(g.count)} (the last "
             f"{human_age(g.last, report.until)}): {_clip(g.message, 160).rstrip('.')}.{see}"
         )))
+    return found + window_findings(report)
+
+
+def window_findings(report: ErrorReport) -> list[tuple[str, str]]:
+    """
+    What the window says beyond its causes: failed calls that left no error line, and calls throttled before they
+    ran.
+    """
+    fn = report.function
+    name = fn.name
+    found: list[tuple[str, str]] = []
     m = report.metrics
     window = _window((report.until - report.since).total_seconds())
     if m is not None and m.errors >= 1 and not report.groups and "logs" not in report.errors:

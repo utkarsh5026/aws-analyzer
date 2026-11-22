@@ -18,10 +18,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: errors by cause as cards** ([#265](https://github.com/utkarsh5026/aws-analyzer/pull/265))
-  - `errors()` shows each cause as a card with a row of dots for when it happened, on one time axis.
-  - Each card names the line of code it failed on and the `logs(..., request_id=...)` call for its newest run.
-  - The newest error lines are folded under the cards.
+- ⚡ **Lambda: errors() reads like a case file** ([#265](https://github.com/utkarsh5026/aws-analyzer/pull/265))
+  - It opens with a verdict and a chart of failed calls per hour, a row of dots per cause under it.
+  - Each cause is a card: new, still failing or stopped, what it means, where it fails and what to do.
+  - Its advice moved into the cards, and the raw error lines are folded at the bottom.
 
 ## [0.61.0] - 2026-11-20
 

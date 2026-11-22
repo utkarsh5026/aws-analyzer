@@ -22,6 +22,7 @@ from moto import mock_aws
 from aws_analyzer import lambda_functions as lfmod
 from aws_analyzer.lambda_functions import analyzer as analyzer_mod, helpers, style as stylemod, view as viewmod
 from aws_analyzer.lambda_functions.analysis import text as textmod
+from aws_analyzer.lambda_functions.analysis import causes as causes_mod
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
@@ -2457,7 +2458,7 @@ def test_errors_report(ui, capsys):
     out = run(capsys, ui.errors, "etl-nightly")
     assert "Errors in etl-nightly" in out and "Failed calls (CloudWatch): 40" in out
     assert "Throttled calls: 3 (!)" in out and "Causes: 1" in out
-    assert "The most common error happened once (the last" in out and "): KeyError: 'customer_id'." in out
+    assert "means: The code read a key the data didn't have ('customer_id')" in out
     assert "-- Errors by cause" in out and "-- The newest error lines --" in out
     assert "function_info('etl-nightly')" in out
     none = run(capsys, ui.errors, "api-handler")
@@ -2476,7 +2477,7 @@ def test_error_causes_share_all_error_lines(ui, capsys, monkeypatch):
 
     monkeypatch.setattr(ui.core, "errors", errors)
     out = run(capsys, ui.errors, "etl-nightly")
-    assert "3 (75%)" in out and "1 (25%)" in out and "(100%)" not in out
+    assert "3 times (75%)" in out and "1 time (25%)" in out and "(100%)" not in out
 
 
 def test_time_slots_count_each_slice_of_the_window():
@@ -2488,20 +2489,118 @@ def test_time_slots_count_each_slice_of_the_window():
     assert lfmod.time_slots(times, until, since, 4) == [0, 0, 0, 0]
 
 
-def test_errors_by_cause_are_cards_on_one_time_axis(ui, capsys):
+def test_errors_report_leads_with_a_verdict_a_chart_and_a_card_per_cause(ui, capsys):
     out = run(capsys, ui.errors, "etl-nightly")
+    assert ">> 1 cause is still failing. (!)" in out and "In the last 24 hours, 40 of 1,000 calls failed (4.0%)" in out
+    chart = out[out.index("-- When it failed, a column per hour --"):out.index("-- What happened to the failed events")]
+    assert "failed calls" in chart and "KeyError: 'customer_i…" in chart and chart.rstrip().endswith("now")
     cause = out[out.index("-- Errors by cause"):out.index("-- The newest error lines")]
-    axis, line = cause.splitlines()[1:3]
-    assert axis.rstrip().endswith("now")
-    assert line.split()[:3] == ["1", "KeyError:", "'customer_id'"] and line.rstrip().endswith("1 (100%)")
-    assert "•" in line and "first 10m ago, last 10m ago · where: app.py, line 2, in handler()" in cause
-    assert f"newest run: logs('etl-nightly', request_id='{RID}')" in cause
+    assert " 1  KeyError: 'customer_id'   1 time (100%) (!)" in cause
+    assert "new: started 10m ago · first 10m ago" in cause and "where: app.py, line 2, in handler()" in cause
+    assert "do:    Read it with .get() and a default" in cause
+    assert f"run:   logs('etl-nightly', request_id='{RID}')" in cause
+    assert "-- Findings" in out and "calls were throttled" in out
     blocks = ui._errors_blocks(ui.core.errors("etl-nightly"))
     page = stylemod._render_html(blocks, 50)
-    assert 'class="cz-c"' in page and "app.py, line 2, in handler()" in page
+    assert 'class="vd bad"' in page and 'class="ec-bars"' in page and 'class="cz-c bad"' in page
     assert "The whole message" in page and "Traceback (most recent call last)" in page
     folded = next(b for b in blocks if getattr(b, "title", "") == "The newest error lines")
     assert folded.collapsed and not folded.sortable
+    window = ui._errors_blocks(ui.core.errors("etl-nightly"), for_window=True)
+    assert not any(type(b).__name__ in ("_Verdict", "_ErrorChart", "_Causes") for b in window)
+    assert "KeyError" in stylemod._render_html(window, 50)
+
+
+def _group(kind, message, *, first, last, example="", times=None):
+    return ErrorGroup(kind, message, len(times or [first]), first, last, example or message, times=times or [first])
+
+
+NOW_ = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
+
+
+def test_cause_states_tell_new_still_failing_and_stopped():
+    since = NOW_ - timedelta(hours=24)
+    stopped = _group("KeyError", "KeyError: 'x'", first=since + timedelta(hours=1), last=NOW_ - timedelta(hours=6))
+    daily = [DailyUsage(NOW_ - timedelta(hours=h), invocations=10.0) for h in range(1, 5)]
+    metrics = FunctionMetrics("etl", 1, 3600, invocations=40.0, daily=daily)
+    state = causes_mod.cause_state(stopped, since=since, until=NOW_, metrics=metrics)
+    assert (state.state, state.says) == ("stopped", "stopped: none for 6h, about 40 calls since")
+    new = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=2), last=NOW_ - timedelta(minutes=5))
+    assert causes_mod.cause_state(new, since=since, until=NOW_).says == "new: started 2h ago"
+    going = _group("KeyError", "KeyError: 'x'", first=since, last=NOW_ - timedelta(hours=1))
+    assert causes_mod.cause_state(going, since=since, until=NOW_).says == "still failing, the last 1h ago"
+    short = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=5), last=NOW_ - timedelta(hours=2))
+    assert causes_mod.cause_state(short, since=NOW_ - timedelta(hours=6), until=NOW_).state != "stopped"
+
+
+def test_cause_advice_says_what_it_means_and_what_to_do():
+    fn = Function("etl", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl", region=REGION, timeout=60, memory=512,
+                  role=f"arn:aws:iam::{ACCOUNT}:role/etl-role", handler="app.handler")
+    at = NOW_
+    timeout = causes_mod.cause_advice(_group("Timeout", "Task timed out after 60.00 seconds", first=at, last=at), fn)
+    assert "60 s limit" in timeout.means and "--timeout 120" in timeout.steps[0] and "performance('etl')" in timeout.steps[1]
+    memory = causes_mod.cause_advice(_group("Out of memory", "Runtime.OutOfMemory", first=at, last=at), fn)
+    assert "512 MB" in memory.means and "--memory-size" in memory.steps[0]
+    denied = causes_mod.cause_advice(_group(
+        "ClientError", "ClientError: AccessDeniedException", first=at, last=at,
+        example="ClientError: User: x is not authorized to perform: s3:GetObject on resource: arn:aws:s3:::b/k"), fn)
+    assert denied.means == "Its role etl-role isn't allowed s3:GetObject on arn:aws:s3:::b/k."
+    assert ("aws iam put-role-policy --role-name etl-role --policy-name allow-s3-getobject --policy-document "
+            '\'{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject",'
+            '"Resource":"arn:aws:s3:::b/k"}]}\'') in denied.steps[0]
+    key = causes_mod.cause_advice(_group("KeyError", "KeyError: 'customer_id'", first=at, last=at), fn)
+    assert key.means == "The code read a key the data didn't have ('customer_id'): some inputs don't carry it."
+    other = causes_mod.cause_advice(_group("OrderRejected", "OrderRejected: no stock", first=at, last=at), fn)
+    assert other.means == "Its code raised OrderRejected and nothing caught it."
+    load = causes_mod.cause_advice(_group("Runtime.ImportModuleError", "Unable to import module", first=at, last=at), fn)
+    assert "app.handler" in load.steps[0] and "code('etl')" in load.steps[0]
+
+
+def _columns_report(daily, groups, *, hours=24):
+    fn = Function("etl", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl", region=REGION)
+    metrics = FunctionMetrics("etl", hours / 24, 3600, invocations=sum(r.invocations for r in daily),
+                              errors=sum(r.errors for r in daily), daily=daily) if daily is not None else None
+    return ErrorReport(fn, "/aws/lambda/etl", NOW_ - timedelta(hours=hours), NOW_, groups=groups, metrics=metrics)
+
+
+def test_chart_columns_put_cloudwatch_rows_and_error_lines_in_their_hour():
+    rows = [DailyUsage(NOW_ - timedelta(hours=3, minutes=30), invocations=50.0, errors=2.0),
+            DailyUsage(NOW_ - timedelta(minutes=30), invocations=30.0, errors=1.0)]
+    group = _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=3, minutes=10), last=NOW_,
+                   times=[NOW_ - timedelta(hours=3, minutes=10), NOW_ - timedelta(minutes=20)])
+    columns = causes_mod.chart_columns(_columns_report(rows, [group], hours=4))
+    assert len(columns.starts) == 4 and columns.period == 3600 and columns.unit == "hour"
+    assert columns.calls == [50.0, 0.0, 0.0, 30.0] and columns.failed == [2.0, 0.0, 0.0, 1.0]
+    assert columns.lanes == [[1, 0, 0, 1]]
+    plain = causes_mod.chart_columns(_columns_report(None, [group], hours=4))
+    assert len(plain.starts) == 48 and plain.calls is None and sum(plain.lanes[0]) == 2
+
+
+@pytest.mark.parametrize("failed, says", [
+    ([0, 1, 0, 1], ""),
+    ([0, 9, 1, 0, 1, 0], "Most failures came at once: 9 of 11 in the hour from"),
+    ([0, 1, 0, 2, 3, 4], "Failures are rising: 1 in the first half of the window, 9 in the second."),
+    ([4, 3, 2, 1, 0, 0], "Failures are falling: 9 in the first half of the window, 1 in the second."),
+    ([2, 1, 2, 2, 1, 2], "Failures are spread across the window, at most 2 in one hour, with no spike."),
+])
+def test_failure_pattern_reads_the_chart(failed, says):
+    starts = [NOW_ - timedelta(hours=len(failed) - i) for i in range(len(failed))]
+    columns = causes_mod.ChartColumns(starts, 3600, [10.0] * len(failed), [float(f) for f in failed])
+    assert causes_mod.failure_pattern(columns).startswith(says) if says else causes_mod.failure_pattern(columns) == ""
+
+
+def test_the_verdict_counts_lost_events_and_causes():
+    report_ = _columns_report([DailyUsage(NOW_ - timedelta(hours=1), invocations=200.0, errors=6.0)], [
+        _group("KeyError", "KeyError: 'x'", first=NOW_ - timedelta(hours=20), last=NOW_ - timedelta(minutes=5))])
+    report_.fates = [lfmod.EventFate("lost", "S3 bucket b", "3 events dropped", "", count=3)]
+    states = [causes_mod.CauseState("still failing", ""), causes_mod.CauseState("stopped", "")]
+    verdict = causes_mod.errors_verdict(report_, states)
+    assert verdict.headline == "3 events were lost, 1 cause is still failing and 1 stopped."
+    assert verdict.detail == "In the last 24 hours, 6 of 200 calls failed (3.0%); the last error 5m ago."
+    assert verdict.tone == "bad"
+    calm = causes_mod.errors_verdict(_columns_report([], []), [causes_mod.CauseState("stopped", "")])
+    assert (calm.headline, calm.tone) == ("1 cause is stopped.", "ok")
+
 
 
 def _fn(name="etl", **kwargs):

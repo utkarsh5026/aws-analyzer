@@ -78,9 +78,13 @@ from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
 from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
-    time_slots,
+    time_slots, window_findings,
 )
 from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
+from .analysis.causes import (
+    CauseAdvice, CauseState, ChartColumns, Verdict, calls_after, cause_advice, cause_state, chart_columns,
+    column_counts, errors_verdict, failure_pattern,
+)
 from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
     run_timeline, slow_cutoff, split_runs,
@@ -240,6 +244,18 @@ __all__ = [
     "function_monthly_cost",
     "failing_frame",
     "time_slots",
+    "CauseAdvice",
+    "CauseState",
+    "ChartColumns",
+    "Verdict",
+    "calls_after",
+    "cause_advice",
+    "cause_state",
+    "chart_columns",
+    "column_counts",
+    "errors_verdict",
+    "failure_pattern",
+    "window_findings",
     "group_errors",
     "handler_file",
     "human_age",

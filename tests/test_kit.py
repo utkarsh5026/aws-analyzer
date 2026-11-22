@@ -591,3 +591,12 @@ def test_too_many_dots_become_a_band_that_keeps_the_ones_that_matter():
     assert html.count("<polygon") == 1 and html.count("<circle") == 100
     assert "typical run, and up to the highest, per slice of time" in html
     assert len(html) < 60_000
+
+
+def test_a_command_s_quoted_json_argument_stays_one_piece_of_code():
+    from aws_analyzer._kit.render import _prose
+
+    text = ("Allow it: aws iam put-role-policy --role-name r --policy-document "
+            """'{"Version":"2012-10-17","Statement":[{"Effect":"Allow"}]}'. Then, carry on.""")
+    page = _prose(text)
+    assert page.count("<code") == 1 and "Allow&quot;}]}&#x27;</code>. Then, carry on." in page

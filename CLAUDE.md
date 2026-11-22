@@ -571,10 +571,17 @@ How the View layer works:
   `ReceiveMessage`), and `analysis/fates.py` (pure: `event_fates` into `EventFate`s, lost / kept / waiting / at risk /
   safe / unknown, each with its `basis`; `fate_findings`) works out where they went. `blocks/fates.py`'s `_Fates`
   draws a card per fate. The agent's `function_errors` passes `fates=False`.
-  Its causes are `blocks/causes.py`'s `_Causes`: a card per `ErrorGroup` with a row of dots on one time axis
-  (`time_slots`, pure, over `ErrorGroup.times`; the axis ends at "now" when the window does), the line its traceback
-  names (`failing_frame`) and the `logs(..., request_id=...)` call for its newest run; the newest error lines are a
-  folded, unsorted table under it. The explorer's Errors tab draws its own cause lines (`for_window=True`).
+  The rest of the report is `blocks/causes.py`'s `_cause_blocks`: a `_Verdict` (`analysis/causes.py`'s pure
+  `errors_verdict`: events lost, causes still failing and stopped), an `_ErrorChart` (`chart_columns`: CloudWatch's
+  periods with calls and failed calls, each row put in the column it falls in, and each cause's `ErrorGroup.times` in the
+  same columns, `column_counts`; `failure_pattern` the sentence that reads it) and `_Causes`, a case card per cause
+  (`cause_state`: new / still failing / stopped, with `calls_after` for "about N calls since"; `cause_advice`: what it
+  means and the steps, the IAM command for a denied action, plain words for common Python exceptions; `failing_frame`
+  for where it fails), still failing first, then the newest error lines folded and unsorted. With cards, the findings
+  panel holds only `fate_findings` and `window_findings` (failed calls without an error line, throttles), the rest of
+  `error_findings` being in the cards. The explorer's Errors tab (`for_window=True`) keeps `error_findings` and draws
+  its own cause lines. A command's option may be a single-quoted string with commas in `_kit/render.py`'s `_CALL_RE`,
+  so a JSON policy stays one piece of code.
 - `LambdaView.runs()` is a function's runs as rows of fields: `analysis/runs.py`'s `run_table` turns a `LogPage` into a
   `RunTable` of `RunRow`s (`run_fields`: Lambda's `BUILTIN_FIELDS`, every field its JSON lines carry by dotted path, the
   event as `event.*` when `logged_event` finds it, and `fields=` regexes on text lines), with `where()`, `sorted_by()`,

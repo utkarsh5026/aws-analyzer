@@ -86,6 +86,7 @@ import gzip
 import importlib
 import io
 import json
+import math
 import os
 import random
 import re
@@ -1819,6 +1820,32 @@ def _backdate_function(name: str, when: datetime) -> None:
     function.last_modified = when.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
+def _share_out(total: int, weights: list[float]) -> list[int]:
+    """
+    `total` split in proportion to `weights`, whole numbers that add up to it (the largest remainders round up).
+    """
+    exact = [total * w / sum(weights) for w in weights]
+    parts = [int(x) for x in exact]
+    for i in sorted(range(len(exact)), key=lambda i: parts[i] - exact[i])[:total - sum(parts)]:
+        parts[i] += 1
+    return parts
+
+
+def _by_hour(day: datetime, dims: list[dict], calls: int, failed: int) -> list[dict]:
+    """
+    A day's calls and failed calls as a point an hour, busier in the day than at night, up to the hour now for today:
+    what CloudWatch holds, so a report over the last hours draws a column an hour. The day's totals don't change.
+    """
+    hours = [h for h in range(24) if day + timedelta(hours=h, minutes=30) <= NOW] or [0]
+    weights = [1.5 + math.sin((h - 9) / 24 * 2 * math.pi) for h in hours]
+    points = []
+    for hour, hour_calls, hour_failed in zip(hours, _share_out(calls, weights), _share_out(failed, weights)):
+        when = day + timedelta(hours=hour, minutes=30)
+        points += [{"MetricName": "Invocations", "Dimensions": dims, "Timestamp": when, "Value": hour_calls},
+                   {"MetricName": "Errors", "Dimensions": dims, "Timestamp": when, "Value": hour_failed}]
+    return points
+
+
 def _seed_failed_events(now: datetime) -> None:
     """
     Where orders-etl's failed events went: orders-queue moves a message to orders-dlq after 5 failed reads (2 are
@@ -1976,9 +2003,11 @@ def seed_lambda_functions() -> dict:
             when = today - timedelta(days=day) + timedelta(hours=12 if day else 0, minutes=30)
             count = round(calls * rng.uniform(0.8, 1.2))
             failed = round(count * (0.03 if name == "orders-etl" and day < 3 else errors))
-            data += [
+            data += _by_hour(today - timedelta(days=day), dims, count, failed) if day < 2 else [
                 {"MetricName": "Invocations", "Dimensions": dims, "Timestamp": when, "Value": count},
                 {"MetricName": "Errors", "Dimensions": dims, "Timestamp": when, "Value": failed},
+            ]
+            data += [
                 {"MetricName": "Throttles", "Dimensions": dims, "Timestamp": when,
                  "Value": round(throttles * rng.uniform(0, 2))},
                 {"MetricName": "Duration", "Dimensions": dims, "Timestamp": when, "StatisticValues": {
