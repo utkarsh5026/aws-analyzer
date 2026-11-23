@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- ⚡ **Lambda: run a function and see its logs at once** ([#273](https://github.com/utkarsh5026/aws-analyzer/pull/273))
+  - `ui.invoke("orders-etl", {"order_id": 42})` runs it once and shows what it returned, its run time, memory and cost, and every line it logged.
+  - In the explorer, ▶ Invoke in the Logs tab runs it and puts your run first, opened, with what was sent and returned.
+  - It's the one command that does more than read: it needs `lambda:InvokeFunction`, and `next()` never runs it for you.
 - 🧰 **Every service: next steps you can run** ([#267](https://github.com/utkarsh5026/aws-analyzer/pull/267))
   - A report's Next steps are numbered and written as your notebook runs them: `ui.errors('orders-etl')`.
   - `ui.next(1)` runs a step; `ui.next()` puts them all in a new cell below.
@@ -26,6 +30,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - It opens with "4 of 6 functions need you", then where the monthly bill goes, as one bar.
   - Do this first: the three problems to fix, each kind once with every function that has it and its command.
   - Functions are grouped as Failing, Paying for nothing, Needs a fix or Healthy, each with its calls a day; click one for its findings.
+- ⚡ **Lambda: function_info() shows its days as charts** ([#275](https://github.com/utkarsh5026/aws-analyzer/pull/275))
+  - Under the findings: calls, failed calls (on their own scale) and run time a day, the day it last changed marked.
+  - Then how it's wired (what calls it, where failed events and logs go) and its monthly cost as one bar.
+  - A Throttled card when calls were throttled; the explorer's Overview tab gets the failed-calls chart and cost bar too.
 - ⚡ **Lambda: runs() says how many failed and why** ([#271](https://github.com/utkarsh5026/aws-analyzer/pull/271))
   - It opens with a verdict: "13 of 70 runs failed (19%), from 3 causes", and the cause still failing.
   - A dot per run by start and run time, the timeouts in a lane of their own, as in `performance()`.

@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHECKED_FOLDERS = ["src", "tests", ".claude/skills"]
 
-ALLOWED_COMMENT = re.compile(r"#(!| =+$| \d+\. | read-only:| noqa\b| type: ignore| pragma: )")
+ALLOWED_COMMENT = re.compile(r"#(!| =+$| \d+\. | read-only:| runs-on-request:| noqa\b| type: ignore| pragma: )")
 
 COMMENTS_LEFT = {
     ".claude/skills/check/rules.py": 33,
@@ -109,7 +109,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/lambda_functions/explorer/code.py": 14,
     "src/aws_analyzer/lambda_functions/explorer/errors.py": 1,
     "src/aws_analyzer/lambda_functions/explorer/frame.py": 12,
-    "src/aws_analyzer/lambda_functions/explorer/function.py": 6,
+    "src/aws_analyzer/lambda_functions/explorer/function.py": 5,
     "src/aws_analyzer/lambda_functions/explorer/functions.py": 4,
     "src/aws_analyzer/lambda_functions/explorer/logs.py": 11,
     "src/aws_analyzer/lambda_functions/explorer/widgets.py": 1,

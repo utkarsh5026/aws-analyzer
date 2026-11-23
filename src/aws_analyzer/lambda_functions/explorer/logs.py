@@ -75,7 +75,7 @@ _LIVE_SECONDS = 5  # how often Live looks for new lines...
 _LIVE_MINUTES = 15  # ...and for how long, before it stops by itself
 
 
-_RUN_CHIPS = (("", "All runs", "all"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
+_RUN_CHIPS = (("", "All runs", "all"), ("mine", "You ran", "mine"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
               ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"), ("slow", "Slowest 10%", "warn"))
 
 
@@ -151,10 +151,11 @@ def _run_tip(run: LogRun, opened: bool) -> str:
                                     "click to fold its lines" if opened else "click to see its lines"]))
 
 
-def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
+def _run_face(run: LogRun, timeout: int, words: list[str], today: date, *, mine: bool = False) -> str:
     """
     A run's line in the Logs tab: its status, when it started, its run time against the timeout, the memory it
-    used, a cold start, what failed or the first thing it logged, and its request ID.
+    used, a cold start, what failed or the first thing it logged, and its request ID. mine=True marks a run you
+    invoked from the window ("you ran").
     """
     icon, tone, _ = _RUN_STATES.get(run.status, ("?", "", run.status))
     report = run.report
@@ -172,10 +173,11 @@ def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
         cold = "cold start"
     summary, summary_tone = _run_summary(run)
     request = run.request_id or ""
+    tag = '<span class="ry">you ran</span>' if mine else ""
     return (f'<div class="rr {tone}"><span class="rv"></span><span class="ri">{_esc(icon)}'
             f'</span><span class="rw">{_esc(_run_clock(run.start, today))}</span><span class="rd">{took}</span>'
             f'<span class="rm">{_esc(memory)}</span><span class="rc">{_esc(cold)}</span>'
-            f'<span class="rs {summary_tone}">{_marked(summary, words)}</span>'
+            f'<span class="rs {summary_tone}">{tag}{_marked(summary, words)}</span>'
             f'<span class="rq">{_esc(request[:8])}</span></div>')
 
 
@@ -365,7 +367,8 @@ class _LogsTab:
         again.add_class("lmx-small")
         again.on_click(self._safely(lambda _button: self._reload_logs()))
         plain, draft_row = self._plain_widgets()
-        bar = w.HBox([self.range_pick, ask, plain, self.live_button, again], layout=layout(width="100%"))
+        invoke, invoke_panel = self._invoke_widgets()
+        bar = w.HBox([self.range_pick, ask, plain, self.live_button, again, invoke], layout=layout(width="100%"))
         bar.add_class("lmx-bar")
         terms_row = self._terms_widgets()
         self.custom_bar = self._custom_range_bar()
@@ -389,7 +392,7 @@ class _LogsTab:
         self.older_button.on_click(self._safely(lambda _button: self._older()))
         pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
         pager.add_class("lmx-pager")
-        page = w.VBox([bar, terms_row, draft_row, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
+        page = w.VBox([bar, invoke_panel, terms_row, draft_row, self.custom_bar, chip_row, self._timeline_strip(), self.run_head, self.jump_button,
                        self.runs_box, pager])
         page.add_class("lmx-logpage")
         return page
@@ -626,7 +629,7 @@ class _LogsTab:
     def _got_logs(self, page: LogPage) -> None:
         self._done_reading("logs")
         self.logs_page = page
-        self._runs = page.runs
+        self._runs = self._with_mine(page.runs)
         self._run_window = None
         self._run_offset = 0
         self._draw_run_chips()
@@ -901,7 +904,7 @@ class _LogsTab:
         if key == "slow":
             cutoff = self._slow_cutoff
             return cutoff is not None and run.duration is not None and run.duration >= cutoff
-        return {"": True, "failed": run.status in ("failed", "timeout"), "timeout": run.status == "timeout",
+        return {"": True, "mine": self._is_mine(run), "failed": run.status in ("failed", "timeout"), "timeout": run.status == "timeout",
                 "logged": run.status == "logged", "cold": run.cold}[key]
 
     def _visible_runs(self) -> list[LogRun]:
@@ -913,7 +916,16 @@ class _LogsTab:
             runs = [r for r in runs if self._in_run_chip(r, self._run_chip)]
         if self._log_query and self.found is None:
             runs = self._searched_runs(runs)
-        return _sorted_runs(runs, self._run_sort)
+        return self._mine_first(_sorted_runs(runs, self._run_sort))
+
+    def _mine_first(self, runs: list[LogRun]) -> list[LogRun]:
+        """
+        The runs you invoked from the window first (they're newest anyway, unless another order is picked), then the
+        rest in their order.
+        """
+        mine = [r for r in runs if self._is_mine(r)]
+        held = {id(r) for r in mine}
+        return [*mine, *(r for r in runs if id(r) not in held)]
 
     def _searched_runs(self, runs: list[LogRun]) -> list[LogRun]:
         """
@@ -953,6 +965,7 @@ class _LogsTab:
             if key and not n:
                 continue
             tip = ("Show every run" if not key
+                   else "Show only the runs you invoked from this window" if key == "mine"
                    else f"Show only the slowest 10% of the runs read: {human_ms(self._slow_cutoff)} or longer"
                    if key == "slow" else f"Show only the runs that {label.lower()} (click again for every run)")
             chips.append((self._chip_button(self._run_chip_buttons, key, tone, self._pick_run_chip), f"{label} {n:,}", tip,
@@ -973,7 +986,7 @@ class _LogsTab:
         timeout = self._full().timeout if self.function is not None else 0
         for row, run in zip(self._run_rows, page):
             row.run = run
-            self._set(row.face, _run_face(run, timeout, words, today))
+            self._set(row.face, _run_face(run, timeout, words, today, mine=self._is_mine(run)))
             opened = run.key in self._open_runs
             _class_if(row.box, "lmx-open", opened)
             tip = _run_tip(run, opened)
@@ -983,6 +996,7 @@ class _LogsTab:
                 self._set(row.body, self._run_body_html(run, words))
             row.body.layout.display = "" if opened else "none"
             self._draw_run_code(row, opened)
+            self._draw_run_invoke(row, opened)
         children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
         changed_at = self._changed_at(visible) if not self._run_sort else None
         if changed_at is not None and self._run_offset < changed_at < self._run_offset + len(page):
@@ -1115,7 +1129,8 @@ class _LogsTab:
 
     def _run_body_html(self, run: LogRun, words: list[str]) -> str:
         fn = self._full()
-        return _run_body(run, words, region=fn.region or self._session_region() or "", log_group=fn.log_group)
+        body = _run_body(run, words, region=fn.region or self._session_region() or "", log_group=fn.log_group)
+        return self._mine_html(run) + body
 
     def _draw_run_code(self, row: _RunRow, opened: bool) -> None:
         """
@@ -1146,6 +1161,7 @@ class _LogsTab:
             row.body.layout.display = ""
         opened = run.key in self._open_runs
         self._draw_run_code(row, opened)
+        self._draw_run_invoke(row, opened)
         _class_if(row.box, "lmx-open", opened)
         row.button.tooltip = _run_tip(run, opened)
 

@@ -94,6 +94,7 @@ What's wrong
 -   [Why did this run fail?](#explorer-logs) <span class="how">Click a function, then Logs, then a ✕ run</span>
 -   [Which runs logged this error?](#explorer-logs) <span class="how">Type it in the Logs search box, press Enter</span>
 -   [What are its errors, by cause?](#explorer-more) <span class="how">Open the Errors tab</span>
+-   [What happens if I run it now?](#explorer-invoke) <span class="how">Logs, then ▶ Invoke</span>
 
 Right now, and since last time
 { .qgroup }
@@ -221,17 +222,37 @@ Logs in JSON (a function whose log format is JSON) show each line's message, wit
 report-api logs JSON: each line's message, its level, and its other fields a click away.
 ///
 
+## Run it and see its logs { #explorer-invoke }
+
+**▶ Invoke** at the end of the Logs tab's bar runs the function once with an event you write, and puts that run first among the others, opened.
+{ .gist }
+
+The box starts with the event you sent last, or the newest one a run logged, and says as you type whether it can send it. **▶ Run** sends it. The run comes back marked *you ran*, with what was sent and what it returned side by side above its lines, and what to change when it failed or came close to its memory or timeout. The last 4 KB of its log arrive with the answer, so there's nothing to wait for; a longer log is read whole from CloudWatch Logs as soon as it gets there.
+
+![The Logs tab of orders-etl with the Invoke box open under the search bar: an event naming batch-042.json and customer c-1042, a Run and a Dry run button, and a note that it's valid JSON and runs the function for real, once; under it, the run it made is first among the runs, marked you ran, with a green tick and 419 ms, and open: what was sent on the left and what came back on the right, status 200 with 18 orders written, then its log lines; the status line says orders-etl ran in 419 ms and that the run is first below, opened](images/lambda-explorer-invoke-light.webp#only-light){ width="984" height="811" loading=lazy }
+![The Logs tab of orders-etl with the Invoke box open under the search bar: an event naming batch-042.json and customer c-1042, a Run and a Dry run button, and a note that it's valid JSON and runs the function for real, once; under it, the run it made is first among the runs, marked you ran, with a green tick and 419 ms, and open: what was sent on the left and what came back on the right, status 200 with 18 orders written, then its log lines; the status line says orders-etl ran in 419 ms and that the run is first below, opened](images/lambda-explorer-invoke-dark.webp#only-dark){ width="984" height="811" loading=lazy }
+/// caption
+**▶ Invoke** on orders-etl: the run it made is first, opened, with what was sent and what came back.
+///
+
+??? more "Running it again, dry runs, and what it needs"
+
+    - **▶ Invoke with this event** sits under any open run whose event is known (the one you sent, or one the code logged). It puts that event in the box, so replaying a real call takes two clicks. Nothing runs until you click ▶ Run.
+    - **Dry run** only asks Lambda whether you may invoke the function. Nothing runs.
+    - **The You ran chip** shows only the runs you made from the window. They stay first when the time range is read again, even before CloudWatch has their lines. Running it while a search is in the box clears the search, so your run shows.
+    - **It runs for real**: whatever the code writes, sends or deletes happens. It's sent once and never retried, even when the answer is slow, so it never runs twice. It needs `lambda:InvokeFunction` on the function, on top of the read-only permissions; without it, the box says so. In a cell, [`ui.invoke(name, event)`](lambda_functions.md#invoke) draws the same as a report.
+
 ## How it's doing { #explorer-overview }
 
-The **Overview** tab has what to fix first, then **how it's wired**: what calls the function and where its results, failed events and logs go.
+The **Overview** tab has what to fix first, then **how it's wired**: what calls the function and where its results, failed events and logs go. Then its days as charts (calls, failed calls on their own scale, run time against the timeout) and its cost as one bar.
 { .gist }
 
 A failure destination it doesn't have shows in amber. Then its calls a day over 30 days, the failed part in red, its run time a day against the timeout, and what it costs. A dashed line on both charts marks the day it was last changed (its code or settings), and when its calls began to fail after that, a warning says so, with how many failed before and since.
 
-![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and its run time a day, the average under the longest, against a dashed line at its 60 s timeout; on both, a dashed purple line through Oct 27, labelled changed Oct 27, after which more calls fail](images/lambda-explorer-overview-light.webp#only-light){ width="984" height="811" loading=lazy }
-![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and its run time a day, the average under the longest, against a dashed line at its 60 s timeout; on both, a dashed purple line through Oct 27, labelled changed Oct 27, after which more calls fail](images/lambda-explorer-overview-dark.webp#only-dark){ width="984" height="811" loading=lazy }
+![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and under it its failed calls a day on their own scale, low until a dashed purple line labelled changed Nov 20 and about seven times higher after it](images/lambda-explorer-overview-light.webp#only-light){ width="984" height="811" loading=lazy }
+![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and under it its failed calls a day on their own scale, low until a dashed purple line labelled changed Nov 20 and about seven times higher after it](images/lambda-explorer-overview-dark.webp#only-dark){ width="984" height="811" loading=lazy }
 /// caption
-**Overview**, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout.
+**Overview**, under the findings: failed S3 events go nowhere, its logs are kept forever, and its failed calls jumped the day after it changed.
 ///
 
 ## Errors, run times, code and settings { #explorer-more }

@@ -96,6 +96,11 @@ Cost and code
 -   [What does its code actually do?](#how-it-works) `ui.how_it_works("orders-etl")`{ .long }
 -   [It worked last week. What changed?](#diff) `ui.diff("orders-etl")`
 
+Try it
+{ .qgroup }
+
+-   [Run it now and see what it logged.](#invoke) `ui.invoke("orders-etl", {"order_id": 42})`{ .long }
+
 Rather click?
 { .qgroup }
 
@@ -167,8 +172,10 @@ It reads from the top down, so you can stop as soon as you have your answer:
 
 ## One function { #function-info }
 
-`function_info()` explains one function in plain English, and every finding ends in the command that fixes it.
+`function_info()` shows how one function is behaving and how it's wired, then explains its setup in plain English; every finding ends in the command that fixes it.
 { .gist }
+
+Under the findings come the pictures: calls a day with the failed part in red, failed calls a day on their own scale (so a jump after a change shows even when failures are a small share), run time a day against the timeout, each with a dashed line on the day it was last changed; a diagram of what calls it and where its results, failed events and logs go; and the monthly cost as one bar of its parts. Then the settings, triggers, versions and the numbers day by day.
 
 The `update-function-configuration` call that moves it to a supported runtime or raises its timeout, the `put-retention-policy` call that stops its logs being kept forever, the `put-function-event-invoke-config` call that catches failed events. `days=7` reads a shorter window.
 
@@ -176,8 +183,8 @@ The `update-function-configuration` call that moves it to a supported runtime or
 ui.function_info("orders-etl")
 ```
 
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; and tables of what it runs, what triggers it, what happens to events that fail and what it can reach](images/lambda-function-info-light.webp#only-light){ width="984" height="1400" loading=lazy }
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; and tables of what it runs, what triggers it, what happens to events that fail and what it can reach](images/lambda-function-info-dark.webp#only-dark){ width="984" height="1400" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-light.webp#only-light){ width="984" height="2150" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-dark.webp#only-dark){ width="984" height="2150" loading=lazy }
 /// caption
 `ui.function_info("orders-etl")`: its logs cost six times its compute, and failed S3 events are dropped because nothing catches them.
 ///
@@ -190,7 +197,7 @@ ui.function_info("orders-etl")
     - **What it can reach**: its execution role (what its code may do in AWS), its network (a VPC reaches the internet only through a NAT gateway or VPC endpoints), and the names of its environment variables.
     - **Versions, aliases and provisioned concurrency**, with what each provisioned copy costs.
     - **The last 30 days**, one row per day: calls, errors, throttles, average and longest run.
-    - **The estimated monthly cost**, by part, and the configuration as Lambda returns it, folded away, with environment values hidden: JSON in colour, where a click on an object or a list folds it, as in S3's preview of a `.json` file.
+    - **The estimated monthly cost**, as one bar of its parts (logs sent, logs kept, compute, requests...), and the configuration as Lambda returns it, folded away, with environment values hidden: JSON in colour, where a click on an object or a list folds it, as in S3's preview of a `.json` file.
 
 
 ### Runtime support { #runtimes }
@@ -359,6 +366,25 @@ ui.performance("orders-etl")
 !!! tip "Worth knowing"
 
     **Try a smaller size, then check again.** Lambda bills memory × run time, and memory also sets the CPU (a full vCPU at 1,769 MB). When runs use far less memory than the function has, the report suggests a smaller size that still leaves 30% room, never less than a quarter of what it has in one step, and what that would save if the run time stays the same. A function held back by its CPU may run slower with less memory, which can cost more, so try it, and run `performance()` again a day later. When runs come close to the memory or the timeout, it says so and gives the command that raises them.
+
+## Run it and see its logs { #invoke }
+
+`invoke()` runs a function once with an event and shows what it returned and every line it logged, in one report.
+{ .gist }
+
+It's the console's Test button and its log tab together: no switching tabs, and no waiting for CloudWatch to catch up. Lambda hands back the last 4 KB of a run's log with its answer, so the lines show at once; when the log is longer, the whole run is read from CloudWatch Logs as soon as it gets there (up to `wait_logs=10` seconds).
+
+```python
+ui.invoke("orders-etl", {"order_id": 42})        # a dict, a list, JSON text, or nothing for {}
+ui.invoke("orders-etl:prod", '{"order_id": 42}')  # an alias, with the event as JSON text
+ui.invoke("orders-etl", dry_run=True)             # only check that you may invoke it
+```
+
+The report opens with whether it ran or failed, then cards for its run time against the timeout, the memory it used, a cold start and what the call cost (and what a million like it would). Findings say what to change: a failure with the error that made it, a timeout with the command that raises it, memory close to running out with the command that adds more. Then what it returned (a failure as its traceback), its log lines as one run, opened, and the event it was sent, folded. Next steps run it again or open the run in `logs()`.
+
+!!! tip "Worth knowing"
+
+    **This really runs your function**, with whatever its code writes, sends or deletes: use it on functions that are safe to call with the event you give. It's called once and never retried, even when the answer is slow, and it's the only command that does more than read. It needs `lambda:InvokeFunction`, the agent can't use it, and `ui.next()` puts it in a cell for you to check rather than running it.
 
 ## Look at the code { #code }
 
@@ -590,7 +616,7 @@ ui = LambdaView(LambdaAnalyzer(prices={"gb_second": 0.0000183, "request": 0.22})
 
 ## Permissions { #permissions }
 
-Everything is read-only. Anything the notebook's role can't read shows up as a note instead of an error, so you can start with less and add what you need. This IAM policy covers every command:
+Everything is read-only but `invoke()`, which needs `lambda:InvokeFunction` as well (leave it out to keep the role read-only). Anything the notebook's role can't read shows up as a note instead of an error, so you can start with less and add what you need. This IAM policy covers every command:
 
 ```json title="IAM policy"
 {
@@ -689,11 +715,12 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 |---|---|
 | `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`), the ones that need you first: a verdict, where the bill goes, what to fix first with the commands, then each function by group with its calls a day, failed share, longest run against its timeout and cost |
-| `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
+| `function_info(name, region=None, days=30)` | One function: charts of its calls, failures and run time a day, how it's wired, where its cost goes, then what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
 | `performance(name, since="24h", region=None, limit=5000, compare=True)` | A verdict, every run over time, how it compares with the 24 hours before and between versions, cold starts against warm runs, memory per container, the slowest runs, and the memory size that would do |
+| `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)` | [Runs it once](#invoke) and shows what it returned, its run time, memory used, cold start and cost, and every line it logged during that run |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
 | `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |

@@ -7,26 +7,22 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import time
-from datetime import timedelta, timezone
 from typing import Any
 
 from botocore.exceptions import ClientError
 
 from ..._kit.blocks import _Cards, _Note, _Text, _Title
 from ..._kit.errors import _error_code
-from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money, human_size
+from ..._kit.fmt import _count, _plural, _total, _utcnow, human_money
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _skeleton
 
-from ..helpers import MB, _midnight, _pct, human_ms, parse_function_ref
+from ..helpers import _pct, human_ms, parse_function_ref
 from ..models import ErrorReport, Function, FunctionDetail, Performance
 from ..analysis.logs import LogPage
-from ..analysis.functions import _source_name
 from ..analysis.cost import function_monthly_cost
 from ..analysis.findings import _errors_level, function_findings
 from ..analysis.changes import change_findings, function_changes
-from ..blocks.wiring import _Columns, _Wiring
-from ..blocks.logs import _short_day
 from .frame import _FUNCTION_TABS, _with_findings
 from .functions import _problem_rank
 
@@ -66,24 +62,6 @@ class _KeptReads:
 _SETUP_CARDS = {"Runtime", "Memory", "Timeout", "Architecture", "Triggers"}  # function_info()'s cards the Overview
 
 # keeps: the window's header already shows the calls, errors, run times and cost
-_DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda function", "events": "EventBridge bus",
-                 "s3": "S3 bucket"}  # an on-success / on-failure destination's service -> what it is
-
-
-def _retries(count: int) -> str:
-    return "no retries" if not count else "1 retry" if count == 1 else f"{count} retries"
-
-
-def _destination(arn: str | None) -> tuple[str, str]:
-    """
-    (what it is, its name) for an on-success / on-failure destination or a dead-letter queue: an SQS queue, an SNS
-    topic, another function...
-    """
-    parts = (arn or "").split(":")
-    kind = _DESTINATIONS.get(parts[2], parts[2]) if len(parts) > 5 else ""
-    return kind or "destination", _source_name(arn)[0] or (arn or "-")
-
-
 def _stat_cards_html(cards: list[tuple[str, str, str]]) -> str:
     items = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b></div>'
                     for label, value, tone in cards)
@@ -209,7 +187,7 @@ class _FunctionTab:
         """
         Back to no function picked: the Functions tab, the header showing the region.
         """
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup", "invoke")
         self._stop_live()
         self.function = self.detail = None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
@@ -264,7 +242,7 @@ class _FunctionTab:
         """
         Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened.
         """
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup", "invoke")
         self._stop_live()
         rereading, self._rereading = self._rereading, False
         if rereading:
@@ -309,6 +287,11 @@ class _FunctionTab:
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._run_window = None
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
+        self._mine = {}
+        self._invoking = 0.0
+        if self._w is not None:
+            self.invoke_panel.layout.display = "none"
+            _class_if(self.invoke_button, "lmx-on", False)
         self._run_values = {}
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
         self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()
@@ -431,7 +414,7 @@ class _FunctionTab:
         sections = self.ui._function_sections(detail, days=30)
         head = [dataclasses.replace(block, items=[item for item in block.items if item[0] in _SETUP_CARDS])
                 if isinstance(block, _Cards) else block for block in sections["head"]]  # the header has the numbers
-        blocks = [*_with_findings(head, self._since_last_look(detail)), self._wiring(detail), *self._charts(detail),
+        blocks = [*_with_findings(head, self._since_last_look(detail)), *sections["wiring"], *sections["charts"],
                   *sections["cost"]]
         self._draw("overview", self.overview_view, blocks)
 
@@ -444,85 +427,6 @@ class _FunctionTab:
             return []
         changes = function_changes(detail.function, before=before, since=since, now=_utcnow(), metrics=detail.metrics)
         return change_findings(changes)
-
-    def _wiring(self, detail: FunctionDetail) -> _Wiring:
-        """
-        What calls the function, and where its results, failed events and logs go.
-        """
-        fn = detail.function
-        inputs = []
-        for t in detail.triggers:
-            disabled = (t.state or "").lower() == "disabled"
-            problem = bool(t.last_result and t.last_result.upper().startswith("PROBLEM"))
-            detail_text = "; ".join(filter(None, ["anyone on the internet can call it" if t.public else "",
-                                                  "disabled" if disabled else "", t.detail, t.last_result]))
-            inputs.append((t.kind, t.source or ("anyone" if t.public else "-"), detail_text,
-                           "warn" if t.public or disabled or problem else ""))
-        outputs = []
-        config = detail.async_config
-        if config is not None and config.on_success:
-            kind, name = _destination(config.on_success)
-            outputs.append(("On success", name, f"{kind}: each asynchronous call's result", ""))
-        failure = (config.on_failure if config is not None else None) or fn.dead_letter
-        asynchronous = list(dict.fromkeys(t.kind for t in detail.triggers if t.asynchronous))
-        if failure:
-            kind, name = _destination(failure)
-            retries = f"after {_retries(config.retries)}" if config is not None else ""
-            outputs.append(("On failure", name, f"{kind}, {retries}".rstrip(", "), ""))
-        elif asynchronous and config is not None:
-            outputs.append(("On failure", "nowhere: dropped",
-                            f"events from {', '.join(asynchronous)} that still fail after {_retries(config.retries)} "
-                            "are lost", "warn"))
-        group = detail.log_group
-        kept = ("kept forever" if group is not None and group.retention_days is None
-                else f"kept {_plural(group.retention_days, 'day')}" if group is not None and group.retention_days
-                else "no log group yet" if group is None and "log_group" not in detail.errors else "")
-        stored = f", {human_size(group.stored_bytes)} stored" if group is not None and group.stored_bytes else ""
-        forever_and_big = group is not None and group.retention_days is None and (group.stored_bytes or 0) >= 100 * MB
-        outputs.append(("Logs", fn.log_group, (kept + stored).strip(", "), "warn" if forever_and_big else ""))
-        if fn.role:
-            outputs.append(("Allowed to use", fn.role.split("/")[-1],
-                            f"its execution role{' · in VPC ' + fn.vpc_id if fn.vpc_id else ''}", ""))
-        center = (fn.name, " · ".join(filter(None, [fn.runtime or "container image", f"{fn.memory:,} MB",
-                                                    f"{fn.timeout} s timeout", fn.architecture])))
-        return _Wiring(inputs, center, outputs, title="How it's wired: what calls it, and where its results and logs go",
-                       empty="Nothing calls it on its own: it's called directly (an SDK, Step Functions...)")
-
-    def _charts(self, detail: FunctionDetail) -> list[Any]:
-        """
-        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days, a
-        dashed line through the day it was last changed (its code or settings), when that's one of them.
-        """
-        m, fn = detail.metrics, detail.function
-        if m is None or not m.invocations or m.period < 86400:
-            return []
-        today = _midnight(_utcnow())
-        by_day = {d.start.astimezone(timezone.utc).date(): d for d in m.daily}
-        days = [today - timedelta(days=30 - 1 - i) for i in range(30)]
-        calls, times = [], []
-        for day in days:
-            d = by_day.get(day.date())
-            label = _short_day(day)
-            if d is None:
-                calls.append((label, 0.0, 0.0, f"{day:%a} {label}: no calls"))
-                times.append((label, 0.0, 0.0, f"{day:%a} {label}: no calls"))
-                continue
-            failed = f", {_count(round(d.errors))} failed ({_pct(d.errors / d.invocations)})" if d.errors and (
-                d.invocations) else ""
-            calls.append((label, d.invocations, d.errors, f"{day:%a} {label}: {_count(round(d.invocations))} calls"
-                          + failed + (f", {_count(round(d.throttles))} throttled" if d.throttles else "")))
-            times.append((label, d.duration_max or d.avg_duration or 0.0, d.avg_duration or 0.0,
-                          f"{day:%a} {label}: average {human_ms(d.avg_duration)}, longest {human_ms(d.duration_max)}"))
-        changed = fn.last_modified
-        mark = (days.index(_midnight(changed)) if changed is not None and _midnight(changed) in days else None)
-        label = f"changed {_short_day(changed)}" if mark is not None else ""
-        return [
-            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)",
-                     mark=mark, mark_label=label),
-            _Columns(times, title=f"Run time a day: the average (dark) under the longest (light), against its "
-                                  f"{fn.timeout} s timeout", part="dim", limit=fn.timeout * 1000,
-                     limit_label=f"timeout {fn.timeout} s", unit="ms", mark=mark, mark_label=label),
-        ]
 
     def _draw_settings(self) -> None:
         detail = self.detail

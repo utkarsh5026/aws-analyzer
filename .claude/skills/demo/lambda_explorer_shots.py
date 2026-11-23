@@ -12,7 +12,8 @@ then uses it the way a person would: reads the Functions tab, opens orders-etl's
 its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors tab and the
 Code tab (a folder of its tree open), then Code › on the Errors tab's KeyError (the line it failed on), then picks
 report-api in the function field for its JSON logs, a failed run and a good one open; then seeds what's running now
-(demo.seed_lambda_live), opens the Live tab and follows orders-etl. Each figure is the window, 984 CSS px wide at
+(demo.seed_lambda_live), opens the Live tab and follows orders-etl. For the invoke figure, it opens ▶ Invoke on
+orders-etl's Logs tab and runs it with an event (demo.py answers Invoke, which moto runs only in Docker). Each figure is the window, 984 CSS px wide at
 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is
 set in docs/lambda_explorer.md, by shots.py's set_height.
 
@@ -45,7 +46,7 @@ WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
            "lambda-explorer-recent", "lambda-explorer-live", "lambda-explorer-live-follow", "lambda-explorer-changed",
-           "lambda-explorer-changes")
+           "lambda-explorer-changes", "lambda-explorer-invoke")
 LIVE = ("lambda-explorer-live", "lambda-explorer-live-follow")
 SECOND_WINDOW = ("lambda-explorer-changed", "lambda-explorer-changes")
 
@@ -228,6 +229,17 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         settled()
         page.mouse.move(1, 1)
         shot("lambda-explorer-failed-line")
+    if "lambda-explorer-invoke" in wanted:
+        tab("Logs")
+        settled()
+        page.locator(".lmx-app button.lmx-invoke").first.click()
+        box = page.locator(".lmx-app .lmx-ivk textarea")
+        box.fill('{"key": "batch-042.json", "customer_id": "c-1042"}')
+        page.locator(".lmx-app .lmx-ivk button.lmx-invoke").click()
+        page.wait_for_selector(".lmx-app .lmx-mine", timeout=30_000)
+        settled()
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-invoke")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON
         page.locator(".lmx-app .lmx-trig-b").first.click()
         page.locator(".lmx-app .lmx-pop input").fill("report")

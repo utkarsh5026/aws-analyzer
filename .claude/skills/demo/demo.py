@@ -2176,6 +2176,7 @@ def seed_lambda_functions() -> dict:
         handlers = {
             "get_function": get_function,
             "get_policy": get_policy,
+            "invoke": _demo_invoke(client),
             "list_provisioned_concurrency_configs": provisioned,
             "get_account_settings": lambda: {
                 "AccountLimit": {"TotalCodeSize": 75 * 1024**3, "CodeSizeUnzipped": 250 * 1024**2,
@@ -2200,6 +2201,49 @@ def seed_lambda_functions() -> dict:
         return _Patched(client, {"describe_log_groups": describe_log_groups})
 
     return {"clients": {"lambda": lambda_client, "logs": logs_client}}
+
+
+def _demo_invoke(client):
+    """
+    Invoke for the demo (moto runs code only in Docker): any function answers at once with Lambda's log tail. An
+    event that names a customer_id works; one without fails with the KeyError orders-etl's logs show.
+    """
+    import base64
+    import io
+    import uuid
+
+    def invoke(FunctionName, Payload=b"{}", InvocationType="RequestResponse", LogType="None", **params):
+        config = client.get_function_configuration(FunctionName=FunctionName)
+        memory, rid = config["MemorySize"], str(uuid.uuid4())
+        if InvocationType == "DryRun":
+            return {"StatusCode": 204, "ResponseMetadata": {"RequestId": rid}}
+        event = Payload if isinstance(Payload, bytes) else Payload.read()
+        works = b"customer_id" in event
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        lines = [f"START RequestId: {rid} Version: $LATEST",
+                 f"[INFO]\t{stamp}.104Z\t{rid}\treading s3://acme-uploads/orders/2026-10-06/batch-042.json"]
+        if works:
+            lines.append(f"[INFO]\t{stamp}.391Z\t{rid}\twrote 18 orders to orders-table")
+            answer = {"statusCode": 200, "body": {"orders_written": 18, "batch": "batch-042.json"}}
+        else:
+            lines.append("[ERROR] KeyError: 'customer_id'\rTraceback (most recent call last):\r  File "
+                         '"/var/task/etl.py", line 22, in handler\r    table.put_item(Item={"pk": row["customer_id"]})')
+            answer = {"errorMessage": "'customer_id'", "errorType": "KeyError", "requestId": rid, "stackTrace": [
+                '  File "/var/task/etl.py", line 22, in handler\n    table.put_item(Item={"pk": row["customer_id"], '
+                '"sk": row["order_id"]})\n']}
+        took = 418.62 if works else 96.4
+        lines += [f"END RequestId: {rid}",
+                  f"REPORT RequestId: {rid}\tDuration: {took} ms\tBilled Duration: {int(took) + 1} ms\t"
+                  f"Memory Size: {memory} MB\tMax Memory Used: {int(memory * 0.17)} MB"]
+        reply = {"StatusCode": 200, "ExecutedVersion": "$LATEST", "Payload": io.BytesIO(json.dumps(answer).encode()),
+                 "ResponseMetadata": {"RequestId": rid}}
+        if LogType == "Tail":
+            reply["LogResult"] = base64.b64encode("\n".join(lines).encode()).decode()
+        if not works:
+            reply["FunctionError"] = "Unhandled"
+        return reply
+
+    return invoke
 
 
 def seed_lambda_live() -> None:
@@ -2387,11 +2431,12 @@ class _Patched:
                     if report.has_errors():
                         raise AssertionError(report.generate_report())
                 answer = handler(**params)
+                meta = answer.pop("ResponseMetadata", None)
                 report = ParamValidator().validate(answer, operations[name].output_shape)
                 if report.has_errors():
                     raise AssertionError(f"demo {name} response doesn't match the service model:\n"
                                          f"{report.generate_report()}")
-                return answer
+                return {**answer, "ResponseMetadata": meta} if meta else answer
             return call
 
         self._client = client

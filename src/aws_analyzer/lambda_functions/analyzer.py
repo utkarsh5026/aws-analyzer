@@ -30,6 +30,7 @@ from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 
 from .prices import LAMBDA_PRICES
 from .activity import _ActivityReads
+from .invoke import _InvokeRuns
 from .fate_reads import _FateReads
 from .performance_reads import _PerformanceReads
 from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
@@ -194,9 +195,10 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _BaseAnalyzer):
+class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns, _BaseAnalyzer):
     """
-    Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
+    Pure-logic Lambda analysis: every method returns data and nothing is printed. Every method only reads, but
+    invoke(), which runs a function when you ask it to.
 
     Functions are read in the analyzer's region, or in several: overview(regions=['us-east-1', 'eu-west-1']) or
     regions='all'. Methods about one function take its name, 'name:alias', an ARN or a console link, and region=

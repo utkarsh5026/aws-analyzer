@@ -61,6 +61,7 @@ from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
 from .blocks.walk import _Walk
+from .blocks.info import cost_split, day_charts, wiring_block
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
@@ -70,6 +71,7 @@ from .blocks.causes import _Verdict, _cause_blocks
 from .blocks.fleet import _FunctionList, _Todo
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
+from .blocks.invoke import invoke_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -116,7 +118,8 @@ _VIA = {
     "function URL": "its HTTPS address",
 }
 
-_INFO_ORDER = ("head", "runs", "triggers", "async", "access", "versions", "days", "cost", "tags", "raw", "next")  # function_info()'s parts
+_INFO_ORDER = ("head", "charts", "wiring", "cost", "runs", "access", "triggers", "async", "versions", "days", "tags",
+               "raw", "next")  # function_info()'s parts, the answer and its pictures first, then the detail
 
 
 def _unread(errors: dict[str, str], owner: str) -> _Note | None:
@@ -255,10 +258,11 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
+        "▶ Run it": ("invoke",),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"download", "how_it_works_page"})
+    _CHANGES = frozenset({"download", "how_it_works_page", "invoke"})
     _START = (
         ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),
@@ -289,7 +293,11 @@ class LambdaView(_BaseView):
         if code == "ResourceNotFoundException":
             return (f"{text} Names are case-sensitive, and functions are regional (this is {self.core.region}): "
                     "functions() lists them, and functions(regions='all') looks in every region.")
-        if code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation") or "not authorized" in lowered:
+        denied = code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation") or "not authorized" in lowered
+        if denied and "invokefunction" in lowered:
+            return (f"{text} invoke() needs lambda:InvokeFunction on the function, on top of the read-only ones "
+                    "README lists for the other commands.")
+        if denied:
             return f"{text} README lists the read-only IAM permissions each command needs."
         if code in ("ThrottlingException", "TooManyRequestsException"):
             return f"{text} AWS throttled the call: wait a few seconds and retry."
@@ -572,8 +580,9 @@ class LambdaView(_BaseView):
                            ) -> dict[str, list[Any]]:
         """
         function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
-        on different tabs: 'head' (title, cards, findings), 'runs', 'triggers', 'async', 'access', 'versions', 'days',
-        'cost', 'tags', 'raw' and 'next'.
+        on different tabs: 'head' (title, cards, findings), 'charts' (calls and run time a day), 'wiring' (what calls
+        it and where its results go), 'cost', 'runs', 'access', 'triggers', 'async', 'versions', 'days', 'tags', 'raw'
+        and 'next'.
         """
         fn, m = detail.function, detail.metrics
         now = _utcnow()
@@ -600,6 +609,8 @@ class LambdaView(_BaseView):
                  f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}" if m.invocations else "-",
                  "warn" if near_timeout else ""),
             ]
+            if m.throttles:
+                cards.append(("Throttled", _count(round(m.throttles))))
         cards.append(("Est. cost / month", human_money(_total(cost)) if cost else "-"))
         cards.append(("Triggers", f"{len(detail.triggers):,}", "warn" if public else ""))
         sub = " · ".join(filter(None, [
@@ -613,6 +624,8 @@ class LambdaView(_BaseView):
         if note:
             head.append(note)
         head.append(_Findings(found, empty=f"No problems found in its settings or its last {days} days."))
+        sections["charts"] += day_charts(detail, days=days, now=now)
+        sections["wiring"].append(wiring_block(detail))
 
         package = (f"{fn.package_type}, {human_size(fn.code_size)}" if fn.package_type == "Zip"
                    else f"container image {fn.image_uri or ''}".strip())
@@ -743,11 +756,7 @@ class LambdaView(_BaseView):
         if cost:
             basis = (f"{self._price_basis()}; usage over the last {days} days scaled to a month" if m is not None
                      else self._price_basis())
-            sections["cost"].append(_Table(
-                ["Part", "Est. $/month"], [[_PARTS.get(part, part), human_money(value)] for part, value in cost.items()],
-                title=f"Estimated monthly cost: {human_money(_total(cost))} ({basis}, before the free tier)",
-                max_rows=0,
-            ))
+            sections["cost"].append(cost_split(cost, _PARTS, basis=basis))
         if fn.tags:
             sections["tags"].append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())],
                                            title="Tags", collapsed=True, max_rows=0))
@@ -984,6 +993,38 @@ class LambdaView(_BaseView):
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
         return blocks
+
+    @_friendly_errors
+    def invoke(
+        self,
+        name: str,
+        event: Any = None,
+        *,
+        region: str | None = None,
+        wait_logs: float = 10,
+        dry_run: bool = False,
+    ) -> None:
+        """
+        Runs a function once with an event and shows what happened in one report, like the console's Test button
+        and its log tab together: whether it worked, what it returned (the error and traceback when it failed), its
+        run time, memory used, cold start and cost, and every line it logged during that run. event= is a dict, a
+        list, JSON text or nothing ({}); 'name:alias' runs that alias. The last 4 KB of its log come back with the
+        answer at once; a longer log is read from CloudWatch Logs, waiting up to wait_logs= seconds for it.
+        dry_run=True only checks that you may invoke it. This really runs the function, with whatever its code
+        writes or sends, so use it on functions that are safe to call.
+        """
+        with self._progress("Running", unit="calls") as tick, self._named(name, region):
+            invoked = self.core.invoke(name, event, region=region, wait_logs=wait_logs, dry_run=dry_run)
+            tick(1)
+        fn = invoked.function
+        qualified = f"{fn.name}:{invoked.qualifier}" if invoked.qualifier else fn.name
+        region_args = {"region": fn.region} if fn.region and fn.region != self.core.region else {}
+
+        def call(command: str, *args: Any, **kwargs: Any) -> str:
+            target = qualified if command == "invoke" else fn.name
+            return _call(command, target, *args, **kwargs, **region_args)
+
+        self._show(invoke_blocks(invoked, call=call))
 
     @_friendly_errors
     def runs(
