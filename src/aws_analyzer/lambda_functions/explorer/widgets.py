@@ -156,7 +156,7 @@ class _RunRow:
     One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
     memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again. An open run
     whose traceback names a line of the function's own code has a button under its lines that opens that line in
-    the Code tab (`frame`). on_toggle is what a click does (the Logs tab's _toggle_run unless given: the Live tab's
+    the Code tab (`frame`), and one whose event is known a button that puts it in the Invoke box. on_toggle is what a click does (the Logs tab's _toggle_run unless given: the Live tab's
     runs have their own).
     """
 
@@ -173,5 +173,10 @@ class _RunRow:
         self.code_button.add_class("lmx-small")
         self.code_button.add_class("lmx-tocode")
         self.code_button.on_click(app._safely(lambda _button: app._open_code_at(self.frame) if self.frame else None))
-        self.box = w.VBox([head, self.body, self.code_button], layout=layout(width="100%"))
+        self.invoke_button = w.Button(description="▶ Invoke with this event", layout=layout(
+            width="auto", display="none", align_self="flex-start"),
+            tooltip="Put this run's event in the Invoke box above, to run the function with it again")
+        self.invoke_button.add_class("lmx-small")
+        self.invoke_button.on_click(app._safely(lambda _button: app._invoke_with(self)))
+        self.box = w.VBox([head, self.body, self.code_button, self.invoke_button], layout=layout(width="100%"))
         self.box.add_class("lmx-run")

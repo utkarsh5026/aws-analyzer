@@ -65,6 +65,7 @@ from .blocks.performance import _PerformanceSetup, performance_blocks
 from .blocks.causes import _cause_blocks
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
+from .blocks.invoke import invoke_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -263,10 +264,11 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
+        "▶ Run it": ("invoke",),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"download", "how_it_works_page"})
+    _CHANGES = frozenset({"download", "how_it_works_page", "invoke"})
     _START = (
         ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),
@@ -297,7 +299,11 @@ class LambdaView(_BaseView):
         if code == "ResourceNotFoundException":
             return (f"{text} Names are case-sensitive, and functions are regional (this is {self.core.region}): "
                     "functions() lists them, and functions(regions='all') looks in every region.")
-        if code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation") or "not authorized" in lowered:
+        denied = code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation") or "not authorized" in lowered
+        if denied and "invokefunction" in lowered:
+            return (f"{text} invoke() needs lambda:InvokeFunction on the function, on top of the read-only ones "
+                    "README lists for the other commands.")
+        if denied:
             return f"{text} README lists the read-only IAM permissions each command needs."
         if code in ("ThrottlingException", "TooManyRequestsException"):
             return f"{text} AWS throttled the call: wait a few seconds and retry."
@@ -962,6 +968,38 @@ class LambdaView(_BaseView):
         steps.append((self._call_for("performance", fn), "run times, memory used and cold starts"))
         blocks.append(_Next(steps[:3]))
         return blocks
+
+    @_friendly_errors
+    def invoke(
+        self,
+        name: str,
+        event: Any = None,
+        *,
+        region: str | None = None,
+        wait_logs: float = 10,
+        dry_run: bool = False,
+    ) -> None:
+        """
+        Runs a function once with an event and shows what happened in one report, like the console's Test button
+        and its log tab together: whether it worked, what it returned (the error and traceback when it failed), its
+        run time, memory used, cold start and cost, and every line it logged during that run. event= is a dict, a
+        list, JSON text or nothing ({}); 'name:alias' runs that alias. The last 4 KB of its log come back with the
+        answer at once; a longer log is read from CloudWatch Logs, waiting up to wait_logs= seconds for it.
+        dry_run=True only checks that you may invoke it. This really runs the function, with whatever its code
+        writes or sends, so use it on functions that are safe to call.
+        """
+        with self._progress("Running", unit="calls") as tick, self._named(name, region):
+            invoked = self.core.invoke(name, event, region=region, wait_logs=wait_logs, dry_run=dry_run)
+            tick(1)
+        fn = invoked.function
+        qualified = f"{fn.name}:{invoked.qualifier}" if invoked.qualifier else fn.name
+        region_args = {"region": fn.region} if fn.region and fn.region != self.core.region else {}
+
+        def call(command: str, *args: Any, **kwargs: Any) -> str:
+            target = qualified if command == "invoke" else fn.name
+            return _call(command, target, *args, **kwargs, **region_args)
+
+        self._show(invoke_blocks(invoked, call=call))
 
     @_friendly_errors
     def runs(
