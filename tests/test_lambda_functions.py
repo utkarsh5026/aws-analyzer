@@ -29,6 +29,7 @@ from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_f
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, logs as logs_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
+from aws_analyzer.lambda_functions.blocks.info import cost_split
 from aws_analyzer.lambda_functions.analysis.performance import short_stream
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
@@ -2634,6 +2635,28 @@ def test_function_info_report(ui, capsys):
     assert "errors('etl-nightly')" in out and "performance('etl-nightly')" in out and "code('etl-nightly')" in out
 
 
+def test_function_info_shows_its_charts_wiring_and_cost_before_its_settings(ui, capsys):
+    out = run(capsys, ui.function_info, "etl-nightly")
+    titles = ["-- Findings", "-- Calls a day, the failed part in red", "-- Failed calls a day, on their own scale",
+              "-- Run time a day", "-- How it's wired", "-- Estimated monthly cost:", "-- What it runs --",
+              "-- What it can reach --", "-- The last 30 days (CloudWatch"]
+    places = [out.index(title) for title in titles]
+    assert places == sorted(places)
+    assert "Called by: SQS queue orders" in out and "Logs: /aws/lambda/etl-nightly" in out
+    assert "From us-east-1 list prices; usage over the last 30 days scaled to a month" in out
+
+
+def test_function_info_cards_say_when_calls_were_throttled(ui, capsys):
+    assert "Throttled: 3" in run(capsys, ui.function_info, "etl-nightly")
+
+
+def test_cost_split_leaves_out_parts_without_a_price():
+    split = cost_split({"compute": 2.0, "logs": 6.0, "provisioned": None}, {"logs": "Logs", "provisioned": "PC"},
+                       basis="your prices")
+    assert [part.label for part in split.parts] == ["Logs", "compute"] and split.total_text == "$8.00"
+    assert split.note == "From your prices, before the free tier. Not priced, so left out: PC."
+
+
 def test_function_info_of_a_missing_function_suggests_names(ui, capsys):
     out = run(capsys, ui.function_info, "etl-nightlyy")
     assert out.startswith("[i] No function 'etl-nightlyy' in us-east-1. Did you mean 'etl-nightly'?")
@@ -3367,7 +3390,7 @@ def html_widgets(widget):
 def test_explorer_holds_the_report_css_once(explorer):
     # Each page is a report drawn without the stylesheet _render_html starts with, which the window's hidden style
     # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match. A page
-    # keeps only the rules its own tables add (their filters and columns), which ship with them.
+    # keeps only the rules its own tables and charts add (filters and columns, the cost bar), which ship with them.
     x = explorer()
     row_of(x, "etl-nightly").button.click()
     x.tab_buttons["settings"].click()
@@ -3376,8 +3399,8 @@ def test_explorer_holds_the_report_css_once(explorer):
     assert style.layout.display == "none"
     pages = [pane for pane in panes if '<div class="lmb theme-console">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
-             for rule in style.split("</style>")[0].split("\n")]
-    assert len(pages) >= 2 and all(rule.startswith(".lmb form.tbl:has(") for rule in rules)
+             for rule in style.split("</style>")[0].split("\n") if rule]
+    assert len(pages) >= 2 and all(rule.startswith((".lmb form.tbl:has(", ".lmb .spl")) for rule in rules)
 
 
 def test_explorer_searches_filters_sorts_and_pages_the_functions(role, core, explorer):

@@ -1258,7 +1258,7 @@ window.AA_CLIPS = {
      {
       "img": "lambda-function-info",
       "w": 1476,
-      "h": 2100
+      "h": 3225
      }
     ],
     "captions": [
@@ -3981,7 +3981,7 @@ window.AA_CLIPS = {
  },
  "lambda-explorer-overview": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.explore(): Overview, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout.",
+  "summary": "ui.explore(): Overview, under the findings: failed S3 events go nowhere, its logs are kept forever, and its failed calls jumped the day after it changed.",
   "video": "",
   "scenes": [
    {
@@ -4004,7 +4004,7 @@ window.AA_CLIPS = {
      ],
      [
       2.7,
-      "<b>Overview</b>, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout."
+      "<b>Overview</b>, under the findings: failed S3 events go nowhere, its logs are kept forever, and its failed calls jumped the day after it changed."
      ]
     ]
    }

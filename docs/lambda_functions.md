@@ -169,8 +169,10 @@ ui.functions(regions="all")
 
 ## One function { #function-info }
 
-`function_info()` explains one function in plain English, and every finding ends in the command that fixes it.
+`function_info()` shows how one function is behaving and how it's wired, then explains its setup in plain English; every finding ends in the command that fixes it.
 { .gist }
+
+Under the findings come the pictures: calls a day with the failed part in red, failed calls a day on their own scale (so a jump after a change shows even when failures are a small share), run time a day against the timeout, each with a dashed line on the day it was last changed; a diagram of what calls it and where its results, failed events and logs go; and the monthly cost as one bar of its parts. Then the settings, triggers, versions and the numbers day by day.
 
 The `update-function-configuration` call that moves it to a supported runtime or raises its timeout, the `put-retention-policy` call that stops its logs being kept forever, the `put-function-event-invoke-config` call that catches failed events. `days=7` reads a shorter window.
 
@@ -178,8 +180,8 @@ The `update-function-configuration` call that moves it to a supported runtime or
 ui.function_info("orders-etl")
 ```
 
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; and tables of what it runs, what triggers it, what happens to events that fail and what it can reach](images/lambda-function-info-light.webp#only-light){ width="984" height="1400" loading=lazy }
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; and tables of what it runs, what triggers it, what happens to events that fail and what it can reach](images/lambda-function-info-dark.webp#only-dark){ width="984" height="1400" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-light.webp#only-light){ width="984" height="2150" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-dark.webp#only-dark){ width="984" height="2150" loading=lazy }
 /// caption
 `ui.function_info("orders-etl")`: its logs cost six times its compute, and failed S3 events are dropped because nothing catches them.
 ///
@@ -192,7 +194,7 @@ ui.function_info("orders-etl")
     - **What it can reach**: its execution role (what its code may do in AWS), its network (a VPC reaches the internet only through a NAT gateway or VPC endpoints), and the names of its environment variables.
     - **Versions, aliases and provisioned concurrency**, with what each provisioned copy costs.
     - **The last 30 days**, one row per day: calls, errors, throttles, average and longest run.
-    - **The estimated monthly cost**, by part, and the configuration as Lambda returns it, folded away, with environment values hidden: JSON in colour, where a click on an object or a list folds it, as in S3's preview of a `.json` file.
+    - **The estimated monthly cost**, as one bar of its parts (logs sent, logs kept, compute, requests...), and the configuration as Lambda returns it, folded away, with environment values hidden: JSON in colour, where a click on an object or a list folds it, as in S3's preview of a `.json` file.
 
 
 ### Runtime support { #runtimes }
@@ -710,7 +712,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 |---|---|
 | `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
-| `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
+| `function_info(name, region=None, days=30)` | One function: charts of its calls, failures and run time a day, how it's wired, where its cost goes, then what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
