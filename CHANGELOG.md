@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- ⚡ **Lambda: functions() shows what needs you first** ([#276](https://github.com/utkarsh5026/aws-analyzer/pull/276))
+  - It opens with "4 of 6 functions need you", then where the monthly bill goes, as one bar.
+  - Do this first: the three problems to fix, each kind once with every function that has it and its command.
+  - Functions are grouped as Failing, Paying for nothing, Needs a fix or Healthy, each with its calls a day; click one for its findings.
+
 ## [0.63.0] - 2026-11-22
 
 ### Added
@@ -28,10 +35,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: functions() shows what needs you first** ([#276](https://github.com/utkarsh5026/aws-analyzer/pull/276))
-  - It opens with "4 of 6 functions need you", then where the monthly bill goes, as one bar.
-  - Do this first: the three problems to fix, each kind once with every function that has it and its command.
-  - Functions are grouped as Failing, Paying for nothing, Needs a fix or Healthy, each with its calls a day; click one for its findings.
 - ⚡ **Lambda: function_info() shows its days as charts** ([#275](https://github.com/utkarsh5026/aws-analyzer/pull/275))
   - Under the findings: calls, failed calls (on their own scale) and run time a day, the day it last changed marked.
   - Then how it's wired (what calls it, where failed events and logs go) and its monthly cost as one bar.
