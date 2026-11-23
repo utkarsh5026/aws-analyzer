@@ -1218,7 +1218,7 @@ window.AA_CLIPS = {
  },
  "lambda-functions": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.functions(regions=\"all\"): ui.functions(regions=\"all\"): two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month.",
+  "summary": "ui.functions(regions=\"all\"): ui.functions(regions=\"all\"): orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses.",
   "video": "",
   "scenes": [
    {
@@ -1231,13 +1231,13 @@ window.AA_CLIPS = {
      {
       "img": "lambda-functions",
       "w": 1476,
-      "h": 2435
+      "h": 2964
      }
     ],
     "captions": [
      [
       3.04,
-      "Two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month."
+      "Orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses."
      ]
     ]
    }

@@ -1904,10 +1904,10 @@ fails, read from its own logs, with its memory, cold starts and code. The
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-functions-dark.webp">
-  <img src="docs/images/lambda-functions-light.webp" alt="functions(regions=&quot;all&quot;): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL">
+  <img src="docs/images/lambda-functions-light.webp" alt="functions(regions=&quot;all&quot;): &quot;4 of 6 functions need you&quot;, the monthly bill as one bar, the three problems to fix first with their commands, then the functions grouped as Failing, Paying for nothing, Needs a fix and Healthy, each with its calls a day, failed share, longest run against its timeout and cost">
 </picture>
 
-<p align="center"><sub><code>ui.functions(regions="all")</code>: two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month.</sub></p>
+<p align="center"><sub><code>ui.functions(regions="all")</code>: orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses.</sub></p>
 
 ### Quick start
 
@@ -1920,7 +1920,7 @@ from aws_analyzer import LambdaView
 ui = LambdaView()                            # uses the notebook's execution role and region
 ui.help()                                    # every command, grouped by task
 
-ui.functions()                               # every function: runtime, triggers, calls, errors, cost, warnings
+ui.functions()                               # which functions need you and why, what to fix first, where the bill goes
 ui.functions(regions="all")                  # ...in every region your account has turned on
 ui.function_info("orders-etl")               # one function in plain English, and its last 30 days
 ui.errors("orders-etl")                      # its errors in the last 24 hours, grouped by cause
@@ -2001,7 +2001,7 @@ Grouped the way `ui.help()` lists them.
 
 | Command                                                                  | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region, or in several (`regions="all"` for every region your account has turned on): its runtime and **when that loses support**, memory, timeout, **what triggers it** (queues and streams, services and accounts its resource policy allows, its function URL), calls, error rate, average run time and when it was last called (CloudWatch, 30 days), and the **estimated monthly cost**. Warnings: runtimes past or near end of support, functions anyone can call, idle provisioned concurrency, frequent or rising errors, throttles, runs close to the timeout |
+| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region, or in several (`regions="all"` for every region your account has turned on), **the ones that need you first**: a verdict, **where the monthly bill goes**, the **problems to fix first** (each kind once, with every function that has it and its command), then each function under Failing, Paying for nothing, Needs a fix, Not called or Healthy, with its runtime and **when that loses support**, **what triggers it**, its calls a day and failed share (CloudWatch, 30 days), its longest run against its timeout and the **estimated monthly cost**. Click a function for its findings |
 | `function_info(name, region=None, days=30)`                              | One function: charts of its calls, **failed calls** and run time a day (the day it changed marked), a diagram of what calls it and where its failed events and logs go, and its cost as one bar; then, in plain English, what it runs (handler, memory and the CPU it buys, timeout, layers), what triggers it and who may call it, **what happens to failed asynchronous events**, what it can reach (role, network, environment variable names), versions, aliases and provisioned concurrency, its last 30 days day by day, and the cost by part. Findings end in the command to fix each: the runtime to move to, the timeout to set, the log retention to add |
 
 #### When something goes wrong

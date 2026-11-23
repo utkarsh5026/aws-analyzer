@@ -22,6 +22,7 @@ from .._kit.fmt import (
     _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age, human_money,
     human_size,
 )
+from .._kit.charts import _Part, _Split
 from .._kit.jsontree import _JsonTree
 from .._kit.render import _call
 from .._kit.text import _clip
@@ -35,16 +36,19 @@ from .helpers import (
 from .models import (
     CodePackage, ErrorReport, Function, FunctionDetail, LogEvent, LogGroup, PackageDownload, Performance,
     RuntimeStatus,
-    SavedPage, Trigger,
+    SavedPage,
 )
 from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
 from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
-from .analysis.findings import _day_age, _errors_level, _times, account_findings, function_findings
+from .analysis.findings import _errors_level, _times, account_findings, function_findings
 from .analysis.errors import (
     _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings, window_findings,
 )
 from .analysis.fates import fate_findings
+from .analysis.fleet import (
+    FleetIssue, FleetRow, bill_note, bill_parts, first_issues, fleet_issues, fleet_rows, fleet_verdict,
+)
 from .analysis.word_search import WordSearch, word_search
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
@@ -63,7 +67,8 @@ from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
 from .blocks.performance import _PerformanceSetup, performance_blocks
-from .blocks.causes import _cause_blocks
+from .blocks.causes import _Verdict, _cause_blocks
+from .blocks.fleet import _FunctionList, _Todo
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
 from .blocks.invoke import invoke_blocks
@@ -79,6 +84,8 @@ def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
     """
     return _fmt_dt(moment, seconds=True, zone=zone)
 
+
+_SMALLEST_BILL = 0.01
 
 _SECTIONS = {  # what a section of a report is, and the permission that reads it
     "list": ("functions", "lambda:ListFunctions"),
@@ -125,21 +132,6 @@ def _unread(errors: dict[str, str], owner: str) -> _Note | None:
         what, permission = _SECTIONS.get(section, (section, "the permission"))
         parts.append(f"{owner}{what} ({_why(code, permission)})")
     return _Note(f"Couldn't read {'; '.join(parts)}.", "warn") if parts else None
-
-
-def _label(fn: Function, multi: bool) -> str:
-    return f"{fn.name} ({fn.region})" if multi else fn.name
-
-
-def _triggers_cell(triggers: list[Trigger]) -> Any:
-    """
-    'SQS, S3' for a table cell: amber when anyone may call the function.
-    """
-    if not triggers:
-        return "-"
-    labels = list(dict.fromkeys(t.short for t in triggers))
-    text = ", ".join(labels[:3]) + (f" +{len(labels) - 3}" if len(labels) > 3 else "")
-    return _Tone(text, "warn") if any(t.public for t in triggers) else text
 
 
 def _runtime_meaning(status: RuntimeStatus) -> str:
@@ -365,95 +357,106 @@ class LambdaView(_BaseView):
         details: bool = True,
     ) -> None:
         """
-        Every Lambda function in the region: its runtime (and when that loses support), memory, timeout, what
-        triggers it, calls, error rate and run time over the last 30 days, the estimated monthly cost, and
-        warnings. regions='all' covers every region your account has turned on (or pass a list); match='etl-*'
-        keeps matching names; metrics=False skips CloudWatch and details=False the reads made per function
-        (resource policy, provisioned concurrency), for speed.
+        Every Lambda function in the region, the ones that need you first: a sentence saying what's wrong, where the
+        monthly bill goes, the few problems to fix first (each with the command), then each function under Failing,
+        Paying for nothing, Needs a fix, Not called or Healthy, with its calls a day, failed calls, longest run
+        against its timeout and cost; click a function for its findings. regions='all' covers every region your
+        account has turned on (or pass a list); match='etl-*' keeps matching names; metrics=False skips CloudWatch
+        and details=False the reads made per function (resource policy, provisioned concurrency), for speed.
         """
         with self._progress("Reading functions", unit="functions") as tick:
             ov = self.core.overview(match=match, regions=regions, days=days, metrics=metrics, details=details,
                                     progress=tick)
         now = _utcnow()
-        prices = self.core.prices
         multi = len(ov.regions) > 1
-        warnings: list[list[str]] = []
-        warned: Counter[str] = Counter()
-        rows: list[list[Any]] = []
-        calls = failed = total = 0.0
-        costed = unsupported = 0
-        error_warning = False
-        regional: dict[str, dict[str, float]] = defaultdict(lambda: {"functions": 0, "calls": 0.0, "cost": 0.0})
-        for fn in sorted(ov.functions, key=lambda f: (f.region, f.name.lower())):
-            detail = ov.detail(fn)
-            m = detail.metrics
-            found = function_findings(fn, m, detail, prices=prices, now=now)
-            warns = [message for level, message in found if level == "warn"]
-            warnings += [[_label(fn, multi), message] for message in warns]
-            warned[fn.arn] = len(warns)
-            status = runtime_status(fn.runtime, package_type=fn.package_type, today=now.date())
-            unsupported += status.state in ("deprecated", "blocked")
-            cost = _total(function_monthly_cost(fn, m, detail.provisioned, detail.log_group, prices=prices))
-            if cost is not None:
-                costed += 1
-                total += cost
-            region_row = regional[fn.region]
-            region_row["functions"] += 1
-            region_row["cost"] += cost or 0.0
-            row: list[Any] = [fn.name] + ([fn.region] if multi else []) + [
-                _Tone(status.label, status.tone) if status.tone else status.label,
-                _mb(fn.memory),
-                f"{fn.timeout} s",
-                _triggers_cell(detail.triggers),
-            ]
-            if metrics:
-                level = _errors_level(m, now)
-                error_warning = error_warning or level == "warn"
-                if m is not None:
-                    calls += m.invocations
-                    failed += m.errors
-                    region_row["calls"] += m.invocations
-                rate = _pct(m.error_rate) if m is not None and m.invocations else "-"
-                row += [
-                    _count(round(m.invocations)) if m is not None else "-",
-                    _Tone(rate, "warn") if level == "warn" else rate,
-                    _ms(m.avg_duration) if m is not None and m.invocations else "-",
-                    (_day_age(m.last_invoked, now) if m.invocations else f"not in {ov.days}d") if m is not None else "-",
-                ]
-            row += [human_money(cost) if cost is not None else "-", _Tone(str(len(warns)), "warn" if warns else "")]
-            rows.append(row)
-        for region, limits in sorted(ov.accounts.items()):
-            warnings += [[region, message] for level, message in account_findings(limits, ov.days) if level == "warn"]
-
-        title = (f"Lambda functions in {ov.regions[0]}" if not multi
-                 else f"Lambda functions in {len(ov.regions)} regions")
-        sub = [f"names matching {match!r}" if match else ""]
-        if metrics:
-            sub.append(f"calls, errors and run time from CloudWatch over the last {ov.days} days")
-        sub.append(f"cost estimated at {self._price_basis()}, before the free tier")
-        cards: list[tuple[str, ...]] = [("Functions", f"{len(ov.functions):,}")]
+        rows = fleet_rows(ov, prices=self.core.prices, now=now)
+        account = [(region, level, message) for region, limits in sorted(ov.accounts.items())
+                   for level, message in account_findings(limits, ov.days)]
+        issues = fleet_issues(rows, with_region=multi, account=account)
+        blocks: list[Any] = [_Title(self._functions_title(ov, multi), self._functions_subtitle(ov, match, metrics))]
+        if rows:
+            verdict = fleet_verdict(rows, issues)
+            blocks += [_Verdict(verdict.headline, verdict.detail, verdict.tone),
+                       _Cards(self._functions_cards(ov, rows, multi=multi, metrics=metrics, issues=issues))]
+        blocks += self._functions_notes(ov, match=match, multi=multi, details=details)
+        if not rows:
+            self._show(blocks)
+            return
+        blocks += self._bill_blocks(rows, multi=multi)
+        first, rest = first_issues(issues)
+        blocks.append(_Todo(first, rest))
+        total = sum(row.total_cost or 0.0 for row in rows)
+        next_calls = {row.function.arn: self._row_calls(row) for row in rows}
+        blocks.append(_FunctionList(rows, now, with_region=multi, with_metrics=metrics, total_cost=total,
+                                    next_calls=next_calls))
         if multi:
-            cards.append(("Regions with functions", f"{len(regional):,} of {len(ov.regions):,}"))
+            blocks.append(self._regions_table(ov, rows, metrics=metrics))
+        if ov.metrics_read:
+            cost = ov.metrics_read / 1000 * self.core.prices["metric_request"]
+            blocks.append(_Note(
+                f"Cost estimates scale CloudWatch's last {ov.days} days to a month, and include provisioned concurrency "
+                f"and the logs kept. This report read {ov.metrics_read:,} CloudWatch metrics (about "
+                f"{human_money(cost)})."
+            ))
+        blocks.append(_Next(self._functions_next(rows, multi=multi, regions=regions)))
+        self._show(blocks)
+
+    @staticmethod
+    def _functions_title(ov: Any, multi: bool) -> str:
+        if not multi:
+            return f"Lambda functions in {ov.regions[0]}"
+        return f"Lambda functions in {len(ov.regions)} regions"
+
+    def _functions_subtitle(self, ov: Any, match: str | None, metrics: bool) -> str:
+        parts = [f"names matching {match!r}" if match else ""]
         if metrics:
+            parts.append(f"calls, errors and run time from CloudWatch over the last {ov.days} days")
+        parts.append(f"cost estimated at {self._price_basis()}, before the free tier")
+        return " · ".join(filter(None, parts))
+
+    @staticmethod
+    def _functions_cards(ov: Any, rows: list[FleetRow], *, multi: bool, metrics: bool,
+                         issues: list[FleetIssue]) -> list[tuple[str, ...]]:
+        """
+        functions()' cards: how many functions, how many are failing (only CloudWatch can tell) and need a fix, the
+        calls and failed share, the monthly cost, and the region's code storage.
+        """
+        failing = sum(row.group == "failing" for row in rows)
+        needing = sum(row.group in ("waste", "risk") for row in rows)
+        cards: list[tuple[str, ...]] = [("Functions", f"{len(rows):,}")]
+        if multi:
+            with_functions = len({row.function.region for row in rows})
+            cards.append(("Regions with functions", f"{with_functions:,} of {len(ov.regions):,}"))
+        if metrics:
+            cards.append(("Failing", f"{failing:,}", "bad" if failing else ""))
+        cards.append(("Need a fix", f"{needing:,}", "warn" if needing else ""))
+        if metrics:
+            calls = sum(row.metrics.invocations for row in rows if row.metrics)
+            failed = sum(row.metrics.errors for row in rows if row.metrics)
+            errors_warned = any(issue.kind.key == "errors" and issue.level == "warn" for issue in issues)
             cards.append((f"Calls ({ov.days}d)", _count(round(calls))))
-            cards.append(("Error rate", _pct(failed / calls) if calls else "-", "warn" if error_warning else ""))
-        cards.append(("Est. cost / month", human_money(total) if costed else "-"))
-        if unsupported:
-            cards.append(("Unsupported runtimes", f"{unsupported:,}", "bad"))
+            cards.append(("Failed calls", _pct(failed / calls) if calls else "-", "warn" if errors_warned else ""))
+        costs = [row.total_cost for row in rows if row.total_cost is not None]
+        cards.append(("Est. cost / month", human_money(sum(costs)) if costs else "-"))
         if not multi and ov.regions[0] in ov.accounts:
             limits = ov.accounts[ov.regions[0]]
             if limits.code_storage is not None and limits.code_storage_limit:
                 full = limits.code_storage >= 0.8 * limits.code_storage_limit
                 cards.append(("Code storage", f"{human_size(limits.code_storage)} of "
                               f"{human_size(limits.code_storage_limit)}", "warn" if full else ""))
-        cards.append(("With warnings", f"{sum(1 for n in warned.values() if n):,}", "warn" if warnings else "ok"))
-        blocks: list[Any] = [_Title(title, " · ".join(filter(None, sub))), _Cards(cards)]
+        return cards
 
+    @staticmethod
+    def _functions_notes(ov: Any, *, match: str | None, multi: bool, details: bool) -> list[Any]:
+        """
+        What functions() couldn't read, and what it says when there's no function.
+        """
+        notes: list[Any] = []
         listed = {key.split(":")[0] for key in ov.errors if key.endswith(":list")}
         for region in sorted(listed):
             code = ov.errors[f"{region}:list"]
-            blocks.append(_Note(f"Couldn't list the functions in {region} ({_why(code, 'lambda:ListFunctions')}).",
-                                "warn"))
+            notes.append(_Note(f"Couldn't list the functions in {region} ({_why(code, 'lambda:ListFunctions')}).",
+                               "warn"))
         by_region: dict[str, dict[str, str]] = defaultdict(dict)
         for key, code in ov.errors.items():
             region, _, section = key.partition(":")
@@ -462,83 +465,102 @@ class LambdaView(_BaseView):
         for region, errors in sorted(by_region.items()):
             note = _unread(errors, f"{region}'s ")
             if note:
-                blocks.append(note)
+                notes.append(note)
         for section in ("policy", "provisioned"):
             codes = Counter(fn.errors[section] for fn in ov.functions if section in fn.errors)
             if codes:
                 code, count = codes.most_common(1)[0]
                 what, permission = _SECTIONS[section]
-                blocks.append(_Note(
+                notes.append(_Note(
                     f"Couldn't read the {what} of {_plural(count, 'function')} ({_why(code, permission)}), so "
                     + ("triggers from other services and public access aren't shown for them."
                        if section == "policy" else "the cost of provisioned concurrency is missing for them."),
                     "warn"))
         if ov.skipped:
-            blocks.append(_Note(
+            notes.append(_Note(
                 f"Left out {_plural(len(ov.skipped), 'region')} not turned on for this account: "
                 f"{', '.join(sorted(ov.skipped))}."
             ))
-        if not ov.functions:
-            if not listed:
-                where = f"matching {match!r} " if match else ""
-                place = ov.regions[0] if not multi else f"these {len(ov.regions)} regions"
-                more = "" if multi else " Functions are regional: functions(regions='all') looks in every region."
-                blocks.append(_Note(f"No Lambda functions {where}in {place}.{more}"))
-            self._show(blocks)
-            return
-        if not details:
-            blocks.append(_Note(
+        if not ov.functions and not listed:
+            where = f"matching {match!r} " if match else ""
+            place = ov.regions[0] if not multi else f"these {len(ov.regions)} regions"
+            more = "" if multi else " Functions are regional: functions(regions='all') looks in every region."
+            notes.append(_Note(f"No Lambda functions {where}in {place}.{more}"))
+        if ov.functions and not details:
+            notes.append(_Note(
                 "details=False: resource policies and provisioned concurrency weren't read, so triggers from other "
                 "services, public access and the cost of provisioned concurrency are missing."
             ))
-        headers = ["Function"] + (["Region"] if multi else []) + ["Runtime", "Memory", "Timeout", "Triggers"]
-        if metrics:
-            headers += [f"Calls ({ov.days}d)", "Error rate", "Avg run time", "Last called"]
-        headers += ["Est. $/month", "Warnings"]
-        blocks.append(_Table(headers, rows, title="Functions (function_info(name) explains one)"))
-        if multi:
-            region_rows = []
-            for region in sorted(regional):
-                limits = ov.accounts.get(region)
-                storage = "-"
-                peak = "-"
-                if limits is not None and limits.code_storage is not None:
-                    storage = human_size(limits.code_storage) + (
-                        f" of {human_size(limits.code_storage_limit)}" if limits.code_storage_limit else "")
-                if limits is not None and limits.peak_concurrency is not None:
-                    peak = f"{limits.peak_concurrency:,.0f}" + (f" of {limits.concurrency:,}" if limits.concurrency else "")
-                numbers = regional[region]
-                region_rows.append([region, f"{numbers['functions']:,.0f}",
-                                    _count(round(numbers["calls"])) if metrics else "-",
-                                    human_money(numbers["cost"]), storage, peak])
-            blocks.append(_Table(
-                ["Region", "Functions", f"Calls ({ov.days}d)", "Est. $/month", "Code storage", "Most at once"],
-                region_rows, title="By region", max_rows=0,
-            ))
-        if warnings:
-            blocks.append(_Table(
-                ["Function", "Warning"], warnings, prose_cols=(1,), max_rows=0,
-                title="Warnings (function_info(name) shows every finding for one function)",
-            ))
-        if ov.metrics_read:
-            cost = ov.metrics_read / 1000 * prices["metric_request"]
-            blocks.append(_Note(
-                f"Cost estimates scale CloudWatch's last {ov.days} days to a month, and include provisioned concurrency "
-                f"and the logs kept. This report read {ov.metrics_read:,} CloudWatch metrics (about "
-                f"{human_money(cost)})."
-            ))
-        busiest = sorted(ov.functions, key=lambda f: (
-            -warned[f.arn], -(ov.metrics[f.arn].invocations if f.arn in ov.metrics else 0), f.name))
-        steps = [(self._call_for("function_info", busiest[0]), "everything about it, and its last 30 days")]
-        failing = [f for f in ov.functions if f.arn in ov.metrics and ov.metrics[f.arn].errors]
-        if failing:  # the one with an error warning first, then the most failed calls
-            worst = max(failing, key=lambda f: (_errors_level(ov.metrics[f.arn], now) == "warn",
-                                                ov.metrics[f.arn].errors))
-            steps.append((self._call_for("errors", worst), "its errors, grouped by cause"))
+        return notes
+
+    @staticmethod
+    def _bill_blocks(rows: list[FleetRow], *, multi: bool) -> list[Any]:
+        """
+        The monthly bill as one bar of its parts, with who pays the largest; nothing when it's all but free.
+        """
+        parts = bill_parts(rows, with_region=multi)
+        total = sum(part.amount for part in parts)
+        if total < _SMALLEST_BILL:
+            return []
+        split = _Split([_Part(part.label, part.amount, human_money(part.amount)) for part in parts],
+                       human_money(total), title=f"Where the {human_money(total)} a month goes",
+                       note=bill_note(parts))
+        return [split]
+
+    def _row_calls(self, row: FleetRow) -> list[str]:
+        """
+        The calls a function's line offers when it's opened.
+        """
+        fn, metrics = row.function, row.metrics
+        calls = [self._call_for("function_info", fn)]
+        if metrics is not None and metrics.errors:
+            calls.append(self._call_for("errors", fn))
+        if metrics is not None and metrics.invocations:
+            calls.append(self._call_for("performance", fn))
+        return calls
+
+    @staticmethod
+    def _regions_table(ov: Any, rows: list[FleetRow], *, metrics: bool) -> _Table:
+        """
+        Each region with functions: how many, their calls and cost, its code storage and the most run at once.
+        """
+        regional: dict[str, dict[str, float]] = defaultdict(lambda: {"functions": 0, "calls": 0.0, "cost": 0.0})
+        for row in rows:
+            numbers = regional[row.function.region]
+            numbers["functions"] += 1
+            numbers["calls"] += row.metrics.invocations if row.metrics else 0.0
+            numbers["cost"] += row.total_cost or 0.0
+        region_rows = []
+        for region in sorted(regional):
+            limits = ov.accounts.get(region)
+            storage = "-"
+            peak = "-"
+            if limits is not None and limits.code_storage is not None:
+                storage = human_size(limits.code_storage) + (
+                    f" of {human_size(limits.code_storage_limit)}" if limits.code_storage_limit else "")
+            if limits is not None and limits.peak_concurrency is not None:
+                peak = f"{limits.peak_concurrency:,.0f}" + (f" of {limits.concurrency:,}" if limits.concurrency else "")
+            numbers = regional[region]
+            region_rows.append([region, f"{numbers['functions']:,.0f}",
+                                _count(round(numbers["calls"])) if metrics else "-",
+                                human_money(numbers["cost"]), storage, peak])
+        return _Table(["Region", "Functions", f"Calls ({ov.days}d)", "Est. $/month", "Code storage", "Most at once"],
+                      region_rows, title="By region", max_rows=0)
+
+    def _functions_next(self, rows: list[FleetRow], *, multi: bool, regions: Any) -> list[tuple[str, str]]:
+        """
+        functions()' next steps: the function that needs you most, the errors of the worst failing one, and every
+        region when only one was read.
+        """
+        first = rows[0].function
+        steps = [(self._call_for("function_info", first), "everything about it, and its last 30 days")]
+        failing = [row for row in rows if row.metrics is not None and row.metrics.errors]
+        if failing:
+            worst = max(failing, key=lambda row: (row.group == "failing", row.metrics.errors))
+            steps.append((self._call_for("errors", worst.function), "its errors, grouped by cause"))
         if not multi and regions is None:
             steps.append(("functions(regions='all')", "every region your account has turned on"))
-        blocks.append(_Next(steps))
-        self._show(blocks)
+        return steps
 
     @_friendly_errors
     def function_info(self, name: str, *, region: str | None = None, days: int = 30) -> None:
