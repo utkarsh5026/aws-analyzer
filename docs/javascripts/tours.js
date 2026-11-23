@@ -1343,7 +1343,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-functions",
       "w": 1476,
-      "h": 2435,
+      "h": 2964,
       "panMax": 900
      }
     ],

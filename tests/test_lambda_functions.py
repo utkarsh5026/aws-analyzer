@@ -24,6 +24,7 @@ from aws_analyzer import lambda_functions as lfmod
 from aws_analyzer.lambda_functions import analyzer as analyzer_mod, helpers, style as stylemod, view as viewmod
 from aws_analyzer.lambda_functions.analysis import text as textmod
 from aws_analyzer.lambda_functions.analysis import causes as causes_mod
+from aws_analyzer.lambda_functions.analysis import fleet
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
@@ -2587,23 +2588,101 @@ def ui(core):
 
 def test_functions_report(ui, capsys):
     out = run(capsys, ui.functions)
-    assert "Lambda functions in us-east-1" in out and "Functions: 2" in out
-    assert "Calls (30d): 1,000" in out and "Error rate: 4.0% (!)" in out and "Unsupported runtimes: 1 (!)" in out
-    assert "Code storage: 3.0 GB of 75.0 GB" in out
-    assert "python3.9 (ended)" in out and "Anyone (public)" in out and "SQS, S3" in out
-    assert "Its resource policy lets anyone invoke it (statement open" in out
-    assert "40 of 1,000 calls failed (4.0%)" in out
+    assert "Lambda functions in us-east-1" in out and ">> 2 of 2 functions need you. (!)" in out
+    assert "Calls failing: etl-nightly; open to anyone: api-handler; runtimes AWS no longer patches" in out
+    assert "Functions: 2" in out and "Failing: 1 (!)" in out and "Need a fix: 1 (!)" in out
+    assert "Calls (30d): 1,000" in out and "Failed calls: 4.0% (!)" in out and "Code storage: 3.0 GB of 75.0 GB" in out
+    first = out[out.index("-- Do this first --"):out.index("-- Also worth a look --")]
+    assert "1. Calls failing" in first and "40 of 1,000 calls failed (4.0%)" in first
+    assert "Its resource policy lets anyone invoke it (statement open" in first
+    assert "Secrets in environment variables: etl-nightly" in out
+    assert out.index("-- Failing (1) --") < out.index("!! etl-nightly  python3.9 (ended)") < out.index(
+        "-- Needs a fix (1) --") < out.index("!  api-handler")
+    assert "failed 4.0%" in out and "unsupported runtime, failed calls, throttled" in out
+    assert "Anyone (public)" in out and "SQS, S3" in out
     assert "This report read 15 CloudWatch metrics" in out
     assert "function_info('etl-nightly')" in out and "errors('etl-nightly')" in out
     assert "functions(regions='all')" in out
+
+
+def test_functions_report_draws_the_new_blocks_in_html(core):
+    shown = []
+    html = LambdaView(core, mode="html")
+    html._show = shown.append
+    html.functions()
+    page = stylemod._render_html(shown[0], 50)
+    assert 'class="vd bad"' in page and "<h4>Do this first</h4>" in page and '<details class="fx-i warn" open>' in page
+    assert '<div class="fx-list">' in page and '<details class="fx-row bad">' in page and 'class="fx-spark"' in page
+    assert "40 failed" in page and '<span class="chip warn">failed calls</span>' in page
+    assert ".lmb .fx-row{" in page and "Est. $/month" in page
 
 
 def test_functions_report_across_regions(ui, capsys):
     out = run(capsys, ui.functions, regions=[REGION, OTHER])
     assert "Lambda functions in 2 regions" in out and "Regions with functions: 2 of 2" in out
     assert "-- By region --" in out and "eu-fn (eu-west-1)" in out and "nodejs18.x (ended)" in out
+    assert "!  eu-fn  nodejs18.x (ended) · eu-west-1" in out
     assert "functions(regions='all')" not in out
     assert "function_info('eu-fn', region='eu-west-1')" in run(capsys, ui.functions, match="eu-*", regions=[OTHER])
+
+
+def test_fleet_sorts_findings_into_kinds_and_functions_into_groups(core):
+    now = datetime.now(timezone.utc)
+    rows = fleet.fleet_rows(core.overview(), prices=core.prices, now=now)
+    by_name = {row.function.name: row for row in rows}
+    assert [row.function.name for row in rows] == ["etl-nightly", "api-handler"]
+    assert by_name["etl-nightly"].group == "failing" and by_name["api-handler"].group == "risk"
+    kinds = {found.kind.key for row in rows for found in row.findings}
+    assert kinds == {"runtime", "errors", "throttles", "secret", "public", "unused"}
+    detail = core.describe("etl-nightly")
+    described = {fleet.finding_kind(message).key for _, message in function_findings(
+        detail.function, detail.metrics, detail, now=now)}
+    assert "dropped" in described and "other" not in described
+    assert fleet.finding_kind("Something new and odd.").key == "other"
+    issues = fleet.fleet_issues(rows, with_region=False)
+    first, rest = fleet.first_issues(issues)
+    assert [issue.kind.key for issue in first] == ["errors", "public", "runtime"]
+    assert all(issue.level == "warn" for issue in first) and rest[0].kind.key == "throttles"
+
+
+def _metrics_with(days: list[tuple[int, int]], now: datetime) -> FunctionMetrics:
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=len(days) - 1)
+    daily = [DailyUsage(start + timedelta(days=place), invocations=calls, errors=failed)
+             for place, (calls, failed) in enumerate(days)]
+    return FunctionMetrics("f", 30, invocations=sum(c for c, _ in days), errors=sum(e for _, e in days), daily=daily)
+
+
+def test_fleet_failure_trend_calls_a_jump_rising():
+    now = datetime.now(timezone.utc)
+    steady = fleet.failure_trend(_metrics_with([(1000, 4)] * 30, now), now)
+    assert steady is not None and not steady.is_rising and steady.recent_rate == pytest.approx(0.004)
+    jump = fleet.failure_trend(_metrics_with([(1000, 4)] * 27 + [(1000, 30)] * 3, now), now)
+    assert jump is not None and jump.is_rising and jump.recent_rate == pytest.approx(0.03)
+    assert fleet.failure_trend(FunctionMetrics("f", 30), now) is None
+
+
+def test_fleet_first_issues_skip_a_function_already_named_in_the_same_group():
+    changed, errors = fleet.KINDS_BY_KEY["changed"], fleet.KINDS_BY_KEY["errors"]
+    issues = [fleet.FleetIssue(changed, "warn", [("etl", "began to fail")]),
+              fleet.FleetIssue(errors, "warn", [("etl", "calls failed (")]),
+              fleet.FleetIssue(fleet.KINDS_BY_KEY["runtime"], "warn", [("etl", "end of support")])]
+    first, rest = fleet.first_issues(issues)
+    assert [issue.kind.key for issue in first] == ["changed", "runtime"] and rest == [issues[1]]
+
+
+def test_fleet_verdict_and_bill(core):
+    now = datetime.now(timezone.utc)
+    rows = fleet.fleet_rows(core.overview(), prices=core.prices, now=now)
+    for row in rows:
+        row.cost = {"provisioned": 30.0, "logs": 5.0} if row.function.name == "etl-nightly" else {"compute": 1.0}
+    parts = fleet.bill_parts(rows, with_region=False)
+    assert [(part.key, part.amount, part.payers) for part in parts] == [
+        ("provisioned", 30.0, ["etl-nightly"]), ("logs", 5.0, ["etl-nightly"]), ("compute", 1.0, ["api-handler"])]
+    assert fleet.bill_note(parts) == "Provisioned concurrency (kept ready) is 83% of it, all from etl-nightly."
+    for row in rows:
+        row.findings, row.group = [], "healthy"
+    verdict = fleet.fleet_verdict(rows, [])
+    assert verdict.tone == "ok" and verdict.headline == "All 2 functions look healthy."
 
 
 def test_overview_says_what_it_did_not_read(core):
@@ -2617,6 +2696,7 @@ def test_overview_says_what_it_did_not_read(core):
 def test_functions_report_without_metrics_or_details(ui, capsys):
     out = run(capsys, ui.functions, metrics=False, details=False)
     assert "Calls (30d)" not in out and "details=False: resource policies" in out and "Anyone" not in out
+    assert "Failing:" not in out and "failed " not in out and "-- Healthy (1) --" in out
     assert "No Lambda functions matching 'zzz*' in us-east-1" in run(capsys, ui.functions, "zzz*")
 
 
@@ -3203,7 +3283,7 @@ def test_html_report(core):
     ui.functions()
     page = stylemod._render_html(shown[0], 50)
     assert page.startswith("<style>") and 'class="lmb"' in page and "⚡ Lambda" in page
-    assert '<span class="pill bad">python3.9 (ended)</span>' in page
+    assert '<span class="fx-rt bad">python3.9 (ended)</span>' in page
     ui.function_info("etl-nightly")
     page = stylemod._render_html(shown[1], 50)
     # the configuration is a JSON tree to fold, coloured like code, with each line's path from fn.raw

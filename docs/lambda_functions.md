@@ -132,24 +132,27 @@ Every function is listed with how it's doing, the ones that need attention first
 
 ## Every function { #functions }
 
-Start with `functions()`: one table answers what you have, what's failing, what costs money and what needs attention.
+Start with `functions()`: it says which functions need you and why, what to fix first, and where the bill goes.
 { .gist }
 
 ```python
 ui.functions(regions="all")
 ```
 
-![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-light.webp#only-light){ width="984" height="1623" loading=lazy }
-![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-dark.webp#only-dark){ width="984" height="1623" loading=lazy }
+![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-light.webp#only-light){ width="984" height="1976" loading=lazy }
+![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-dark.webp#only-dark){ width="984" height="1976" loading=lazy }
 /// caption
-`ui.functions(regions="all")`: two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month.
+`ui.functions(regions="all")`: orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses.
 ///
 
-- **Runtime**, marked when AWS has ended its support (no more security patches) or ends it within 90 days. The dates come from AWS's published schedule (`RUNTIMES` in the file); [Runtime support](#runtimes) explains them.
-- **Triggers**: the queues and streams Lambda reads for it (event source mappings), the services and accounts its resource policy lets call it (S3, EventBridge, API Gateway, a Bedrock agent...), and its function URL. **Anyone** or **URL (public)**, in amber, means anyone on the internet can run it.
-- **Calls, error rate, average run time** over the last 30 days, and when it was **last called**, from CloudWatch.
-- **Est. $/month**: calls and run time scaled to a month, plus provisioned concurrency and what its logs cost. [Cost](#cost) has the details.
-- **Warnings** (listed under the table) cover runtimes past or near the end of support, functions anyone can invoke, provisioned concurrency that sits idle, errors that are frequent or rising, throttled calls, runs close to the timeout, and failed updates. `function_info()` shows every finding for one function.
+It reads from the top down, so you can stop as soon as you have your answer:
+
+- **The verdict**: how many functions need you, and the first few problems in a sentence.
+- **Where the money goes**: the estimated monthly bill as one bar of its parts (provisioned concurrency, logs written and stored, run time, requests), with who pays the largest. [Cost](#cost) has the details.
+- **Do this first**: the three problems to fix first, each kind once with every function that has it and the command for each. One problem shared by many functions, such as three runtimes past their end of support, is one job. The rest are folded under it.
+- **The functions**, under **Failing**, **Paying for nothing**, **Needs a fix**, **Not called** and **Healthy** (folded). Each line shows its runtime (marked when AWS has ended or is ending its support; [Runtime support](#runtimes)), memory and triggers, its problems as small labels, its **calls a day** over the window with failed calls in red below, its **failed share** with an ↑ when the last 3 days are well above it, its **longest run against its timeout**, and its **estimated cost**. Click a line for its findings and the calls to run next.
+
+**URL (public)** or **Anyone** in a function's triggers means anyone on the internet can run it. `function_info()` shows every finding for one function.
 
 `match="etl-*"` keeps the functions whose names match. `metrics=False` skips CloudWatch, and `details=False` skips the reads made for each function (its resource policy and provisioned concurrency), which makes accounts with hundreds of functions quicker.
 
@@ -679,7 +682,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | Command | What it shows |
 |---|---|
 | `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
-| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
+| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`), the ones that need you first: a verdict, where the bill goes, what to fix first with the commands, then each function by group with its calls a day, failed share, longest run against its timeout and cost |
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |

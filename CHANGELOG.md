@@ -22,6 +22,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- ⚡ **Lambda: functions() shows what needs you first** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - It opens with "4 of 6 functions need you", then where the monthly bill goes, as one bar.
+  - Do this first: the three problems to fix, each kind once with every function that has it and its command.
+  - Functions are grouped as Failing, Paying for nothing, Needs a fix or Healthy, each with its calls a day; click one for its findings.
 - ⚡ **Lambda: runs() says how many failed and why** ([#271](https://github.com/utkarsh5026/aws-analyzer/pull/271))
   - It opens with a verdict: "13 of 70 runs failed (19%), from 3 causes", and the cause still failing.
   - A dot per run by start and run time, the timeouts in a lane of their own, as in `performance()`.
