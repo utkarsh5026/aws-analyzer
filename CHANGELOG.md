@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- ⚡ **Lambda: run a function and see its logs at once** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - `ui.invoke("orders-etl", {"order_id": 42})` runs it once and shows what it returned, its run time, memory and cost, and every line it logged.
+  - A failure shows its traceback and what to change; a long log is read whole from CloudWatch Logs.
+  - It's the one command that does more than read: it needs `lambda:InvokeFunction`, and `next()` never runs it for you.
 - 🧰 **Every service: next steps you can run** ([#267](https://github.com/utkarsh5026/aws-analyzer/pull/267))
   - A report's Next steps are numbered and written as your notebook runs them: `ui.errors('orders-etl')`.
   - `ui.next(1)` runs a step; `ui.next()` puts them all in a new cell below.

@@ -20,8 +20,10 @@ settings (ipywidgets, which SageMaker notebooks have).
 
 Functions and their settings come from Lambda, how often they ran, failed and were
 throttled from CloudWatch, and what they logged from CloudWatch Logs. Nothing in this
-file invokes, changes or deletes a function: where a change would help, the report
-shows the command to run instead. Environment variable values are never shown.
+package changes or deletes a function: where a change would help, the report shows the
+command to run instead. The one call that does more than read is invoke(), which runs a
+function once, only when you ask, with the event you give it. Environment variable
+values are never shown.
 
 Quick start
 -----------
@@ -36,6 +38,7 @@ Quick start
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
     ui.diff("etl-nightly")                            # what changed since its last published version: files, lines, settings
+    ui.invoke("etl-nightly", {"order_id": 42})        # run it once: its answer, run time, cost and log lines together
     ui.how_it_works("etl-nightly")                    # how its Python code works, step by step from the handler
     ui.how_it_works_page("etl-nightly")               # the same as a page of its own, to open in a browser tab
     ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
@@ -89,6 +92,7 @@ from .analysis.logs import (
     LogPage, LogRun, TimeBucket, line_level, parse_report, readable_line, run_console_url, run_insights_query,
     run_timeline, slow_cutoff, split_runs,
 )
+from .analysis.invoke import Invoked, call_cost, event_payload, invoke_findings, tail_events
 from .analysis.live import (
     LIVE_WINDOW_MINUTES, LiveFunction, in_flight, live_rank, minute_values, ran_lately, running_for,
     timeout_warning,
@@ -327,4 +331,9 @@ __all__ = [
     "slowdown",
     "time_slices",
     "timed_out",
+    "Invoked",
+    "call_cost",
+    "event_payload",
+    "invoke_findings",
+    "tail_events",
 ]

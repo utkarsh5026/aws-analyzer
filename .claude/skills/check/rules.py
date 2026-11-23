@@ -19,7 +19,9 @@ Errors (exit 1):
   - no `from __future__ import annotations`
   - the five numbered `# N. ...` section banners missing or out of order (not in _kit/, a shared module or an
     analyzer that is a package, like agent/: one concern per module there, and one of them has the View)
-  - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
+  - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write; the one exception is
+    RUNS_ON_REQUEST (Lambda's Invoke, for LambdaView.invoke()), and only on a client call marked
+    `# runs-on-request: <why>`
   - a public View method without @_friendly_errors (a companion's window: @_window_errors) or a docstring
     (help() lists the docstring's first line), or one that prints / displays directly instead of building blocks
     for self._show()
@@ -80,6 +82,8 @@ READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "
                  "Retrieve")
 PARTIQL = {"ExecuteStatement", "BatchExecuteStatement", "ExecuteTransaction"}
 PRAGMA = "# read-only:"
+RUNS_PRAGMA = "# runs-on-request:"
+RUNS_ON_REQUEST = {"Invoke"}
 REGEX_METHODS = {"search", "match", "fullmatch", "findall", "finditer", "sub", "subn", "split"}
 
 # IAM action for operations whose permission isn't simply <service>:<OperationName>.
@@ -118,6 +122,7 @@ IAM_ACTION = {
     "apigateway:GetAuthorizer": "apigateway:GET",
     "apigatewayv2:GetStages": "apigateway:GET",
     "sts:GetCallerIdentity": None,  # needs no permission
+    "lambda:Invoke": "lambda:InvokeFunction",
 }
 # boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:,
 # OpenSearch Service as es:, OpenSearch Serverless as aoss: and Step Functions as states:).
@@ -574,7 +579,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             if "client" in target.lower() or (node.func.attr not in defined and node.func.attr not in REGEX_METHODS):
                 name = node.func.attr
         elif (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops
-              and id(node) not in labels):
+              and id(node) not in labels and not _runs_on_request(ops[node.value])):
             name = node.value  # getattr(client, "get_bucket_policy"), get_paginator("list_objects_v2"), ...
         if name and name not in found:
             found[name] = getattr(node, "lineno", 0)
@@ -590,10 +595,23 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             if not acknowledged:
                 report.warn(where, f"{name} runs any PartiQL, including INSERT / UPDATE / DELETE; only let SELECT "
                                    f"through, then mark the line `{PRAGMA} <how>`")
+        elif _runs_on_request(ops[name]):
+            if RUNS_PRAGMA not in lines[lineno - 1]:
+                report.error(where, f"{name} ({candidates[0]}) runs a function; only LambdaView.invoke() may, on a "
+                                    f"line marked `{RUNS_PRAGMA} <why>`")
         elif not op.startswith(READ_PREFIXES) and not acknowledged:
             report.error(where, f"{name} ({candidates[0]}) is not a read-only operation; nothing may write to AWS")
         if not documented:
             report.warn(where, f"{name} needs `{' or '.join(a for a in actions if a)}`, which README.md's IAM permissions don't list")
+
+
+def _runs_on_request(candidates: list[tuple[str, str]]) -> bool:
+    """
+    Whether an operation name is the one write allowed when a user asks for it: Lambda's Invoke (RUNS_ON_REQUEST,
+    for LambdaView.invoke(), which runs a function once when the user calls it). Its name as a string ("invoke" in
+    _GROUPS, a next step's call) isn't a call to AWS, so only the client call itself is checked, for its marker.
+    """
+    return any(service == "lambda" and op in RUNS_ON_REQUEST for service, op in candidates)
 
 
 def _parents_reached(tree: ast.AST, inside: tuple[str, ...], parents: tuple[str, ...]) -> tuple[str, ...]:

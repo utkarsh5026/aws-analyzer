@@ -660,9 +660,9 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
 </details>
 
 <details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+<summary><b>IAM permissions</b>: read-only but for `invoke`, and what each one is for</summary>
 
-Read-only. Grant what you need:
+Read-only, but for `lambda:InvokeFunction`, which only `invoke()` uses. Grant what you need:
 
 | Permission                                                                                                                                                        | For                                                                                                                 |
 | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
@@ -1926,6 +1926,7 @@ ui.function_info("orders-etl")               # one function in plain English, an
 ui.errors("orders-etl")                      # its errors in the last 24 hours, grouped by cause
 ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
 ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
+ui.invoke("orders-etl", {"order_id": 42})    # run it once: what it returned, run time, cost and its log lines
 ui.code("orders-etl")                        # the files in its package, and the handler's source
 ui.diff("orders-etl")                        # what changed since its last published version: files, lines, settings
 ui.how_it_works("orders-etl")                # how its Python code works, step by step from the handler
@@ -1936,8 +1937,10 @@ ui.explore()                                 # all of it in a window, by clickin
 
 > [!NOTE]
 > A function is named by its name, `"name:alias"`, its ARN or a link to it in the Lambda console; pass
-> `region="eu-west-1"` for one in another region. Nothing in the file invokes, changes or deletes a function: where a
-> change would help, the report shows the AWS CLI command to run. Environment variable values never appear in a
+> `region="eu-west-1"` for one in another region. Nothing in the package changes or deletes a function: where a
+> change would help, the report shows the AWS CLI command to run. The one command that does more than read is
+> `invoke()`, which runs a function once, only when you call it, with the event you give it (it needs
+> `lambda:InvokeFunction`); `next()` never runs it for you. Environment variable values never appear in a
 > report, only their names. The one file it writes is the package `download()` (or the explorer's **Download .zip**)
 > saves, on the notebook's disk.
 
@@ -2009,6 +2012,12 @@ Grouped the way `ui.help()` lists them.
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | Its newest runs, like a log viewer: a line each (status, run time, memory, cold start, what failed) that opens to its lines, with chips for failed runs, errors and cold starts, and a search box (ipywidgets) that filters as you type; `search=` keeps the runs with some text (`KeyError OR Timeout` joins words, or pass a CloudWatch Logs filter pattern), and `request_id=` shows one run from start to end                                                                                                          |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | **Its runs as rows you can ask about**: status, start, run time, memory, cold start and what it logged, one row each. `where="duration > 15s and cold"` keeps the runs that match (also `memory_share > 80%`, `status in (failed, timeout)`, `error ~ KeyError`, `started > 14:00`, any field its JSON logs carry, and the event when it logs it: `event.Records.s3.object.size > 30MB`, or `size > 30MB` for short), `sort="-duration"` the longest first, `columns=[...]` what each row shows, `group_by="hour"` sums them up per hour (or `error_type`, `version`, any field), `fields={"written": r"wrote (\d+) orders"}` reads more fields out of text lines, and `since="today"` another range. It opens with how many failed and why, a dot per run by start and run time, and a card per cause of the failed runs (still failing or stopped, what it means, what to do). Findings: runs that reached the timeout or used 90% of the memory, and a field no run has, with the one it likely meant. The fields there are to ask about are listed, folded, at the end |
 | `performance(name, since="24h", region=None, limit=5000, compare=True)`  | **A verdict** (the typical run, and whether timeouts were runs that hung or ran slow), every run over time with the timeouts in a lane of their own, **how it compares with the 24 hours before** and between versions (or before and since its last change), how long runs take, cold starts against warm runs, **memory used against what it has, the size that would do, and memory that climbs in a container**, and the slowest runs, from the REPORT line Lambda logs after each run; `compare=False` skips reading the window before |
+
+#### Run it
+
+| Command                                                                  | Shows |
+| :----------------------------------------------------------------------- | :---- |
+| `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)`     | **Runs the function once and shows what happened in one report**, like the console's Test button and its logs together: whether it worked, **what it returned** (the error and its traceback when it failed), its run time against the timeout, memory used, cold start and **what the call cost**, then **every line it logged during that run**, opened. `event=` is a dict, a list, JSON text (a Python dict written as text works too) or nothing (`{}`); `"name:alias"` runs that alias. The last 4 KB of its log come back with the answer at once; when the log is longer, the whole run is read from CloudWatch Logs, waiting up to `wait_logs=` seconds for its lines to arrive. Findings: a failure or timeout and what to change, memory or time close to the limit, a cold start. `dry_run=True` only checks you may invoke it. **This really runs the function**, with whatever its code writes or sends; it's called once and never retried |
 
 #### Code
 
@@ -2103,6 +2112,7 @@ Read-only. Grant what you need:
 | `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs`, `performance` and the explorer's Logs tab |
 | `ec2:DescribeRegions`                                                                                                                                                               | `functions(regions="all")`: the regions your account has turned on            |
 | `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`                                                                                                                                         | `errors`: how many failed messages wait in an SQS trigger's queue and its dead-letter queue (never receives one) |
+| `lambda:InvokeFunction` (not read-only)                                                                                                                                             | `invoke` only: runs the function once when you call it. Leave it out to keep every command read-only |
 
 `lambda:GetFunction` also returns the environment variables' values, which the reports never show. Anything you can't
 read shows up as a note instead of an error. The
