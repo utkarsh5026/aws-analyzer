@@ -1374,7 +1374,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-function-info",
       "w": 1476,
-      "h": 2100
+      "h": 3225
      }
     ],
     "captions": [
@@ -1387,8 +1387,12 @@ window.AA_TOURS = {
       "Its findings first: an ended runtime, and calls failing <b>since its last change</b>."
      ],
      [
+      7.32,
+      "Then its days as charts: failed calls <b>jump right after the change</b>,"
+     ],
+     [
       11.5,
-      "Further down: its logs cost <b>six times its compute</b>."
+      "how it's wired (failed S3 events go <b>nowhere</b>), and logs costing <b>six times its compute</b>."
      ]
     ]
    },

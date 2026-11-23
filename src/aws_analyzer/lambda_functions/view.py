@@ -57,6 +57,7 @@ from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
 from .blocks.walk import _Walk
+from .blocks.info import cost_split, day_charts, wiring_block
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
@@ -109,7 +110,8 @@ _VIA = {
     "function URL": "its HTTPS address",
 }
 
-_INFO_ORDER = ("head", "runs", "triggers", "async", "access", "versions", "days", "cost", "tags", "raw", "next")  # function_info()'s parts
+_INFO_ORDER = ("head", "charts", "wiring", "cost", "runs", "access", "triggers", "async", "versions", "days", "tags",
+               "raw", "next")  # function_info()'s parts, the answer and its pictures first, then the detail
 
 
 def _unread(errors: dict[str, str], owner: str) -> _Note | None:
@@ -550,8 +552,9 @@ class LambdaView(_BaseView):
                            ) -> dict[str, list[Any]]:
         """
         function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
-        on different tabs: 'head' (title, cards, findings), 'runs', 'triggers', 'async', 'access', 'versions', 'days',
-        'cost', 'tags', 'raw' and 'next'.
+        on different tabs: 'head' (title, cards, findings), 'charts' (calls and run time a day), 'wiring' (what calls
+        it and where its results go), 'cost', 'runs', 'access', 'triggers', 'async', 'versions', 'days', 'tags', 'raw'
+        and 'next'.
         """
         fn, m = detail.function, detail.metrics
         now = _utcnow()
@@ -578,6 +581,8 @@ class LambdaView(_BaseView):
                  f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}" if m.invocations else "-",
                  "warn" if near_timeout else ""),
             ]
+            if m.throttles:
+                cards.append(("Throttled", _count(round(m.throttles))))
         cards.append(("Est. cost / month", human_money(_total(cost)) if cost else "-"))
         cards.append(("Triggers", f"{len(detail.triggers):,}", "warn" if public else ""))
         sub = " · ".join(filter(None, [
@@ -591,6 +596,8 @@ class LambdaView(_BaseView):
         if note:
             head.append(note)
         head.append(_Findings(found, empty=f"No problems found in its settings or its last {days} days."))
+        sections["charts"] += day_charts(detail, days=days, now=now)
+        sections["wiring"].append(wiring_block(detail))
 
         package = (f"{fn.package_type}, {human_size(fn.code_size)}" if fn.package_type == "Zip"
                    else f"container image {fn.image_uri or ''}".strip())
@@ -721,11 +728,7 @@ class LambdaView(_BaseView):
         if cost:
             basis = (f"{self._price_basis()}; usage over the last {days} days scaled to a month" if m is not None
                      else self._price_basis())
-            sections["cost"].append(_Table(
-                ["Part", "Est. $/month"], [[_PARTS.get(part, part), human_money(value)] for part, value in cost.items()],
-                title=f"Estimated monthly cost: {human_money(_total(cost))} ({basis}, before the free tier)",
-                max_rows=0,
-            ))
+            sections["cost"].append(cost_split(cost, _PARTS, basis=basis))
         if fn.tags:
             sections["tags"].append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())],
                                            title="Tags", collapsed=True, max_rows=0))
