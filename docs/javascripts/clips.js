@@ -1324,6 +1324,33 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "lambda-runs": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.runs(\"orders-etl\", since=\"24h\", where=\"status in (failed, timeout)\"): ui.runs(\"orders-etl\", since=\"24h\", where=\"status in (failed, timeout)\"): 13 of the day's 70 runs failed, from three causes, and two of them are still failing.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 16.4,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.runs(\"orders-etl\", since=\"24h\", where=\"status in (failed, timeout)\")",
+    "outputs": [
+     {
+      "img": "lambda-runs",
+      "w": 1476,
+      "h": 4071
+     }
+    ],
+    "captions": [
+     [
+      4.42,
+      "13 of the day's 70 runs failed, from three causes, and two of them are still failing."
+     ]
+    ]
+   }
+  ]
+ },
  "lambda-performance": {
   "notebook": "lambda.ipynb",
   "summary": "ui.performance(\"orders-etl\"): ui.performance(\"orders-etl\"): three runs hung until the 60 s timeout while every other run finished within 9 s, and runs are slower than the day before.",
