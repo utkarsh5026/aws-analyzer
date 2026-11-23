@@ -22,7 +22,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: function_info() shows its days as charts** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- ⚡ **Lambda: function_info() shows its days as charts** ([#275](https://github.com/utkarsh5026/aws-analyzer/pull/275))
   - Under the findings: calls, failed calls (on their own scale) and run time a day, the day it last changed marked.
   - Then how it's wired (what calls it, where failed events and logs go) and its monthly cost as one bar.
   - A Throttled card when calls were throttled; the explorer's Overview tab gets the failed-calls chart and cost bar too.
