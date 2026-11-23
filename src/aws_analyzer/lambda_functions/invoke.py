@@ -117,9 +117,19 @@ class _InvokeRuns:
         (wait_logs=0 doesn't wait). dry_run=True only checks that you may invoke it. This runs the function's code,
         with whatever it writes or sends: it's the one call in aws_analyzer that changes something.
         """
-        payload = event_payload(event)
         _, qualifier, _ = self.locate(ref, region)
+        payload = event_payload(event)
         fn = self.function(ref, region=region)
+        return self._invoke_function(fn, payload, qualifier=qualifier, wait_logs=wait_logs, dry_run=dry_run)
+
+    def _invoke_function(
+        self, fn: Function, payload: bytes, *, qualifier: str | None = None, wait_logs: float = 10,
+        dry_run: bool = False,
+    ) -> Invoked:
+        """
+        invoke() for a function already read (no GetFunction), with the event already turned into bytes: what the
+        explorer's ▶ Invoke runs.
+        """
         invoked = self._sent(fn, payload, qualifier=qualifier, dry_run=dry_run)
         if dry_run:
             return invoked

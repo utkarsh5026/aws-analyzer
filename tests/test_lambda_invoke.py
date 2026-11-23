@@ -4,8 +4,10 @@ Docker, so Invoke is answered by a handler here, checked against the service mod
 """
 
 import base64
+import html
 import io
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -14,6 +16,7 @@ from botocore.exceptions import ClientError
 from botocore.validate import ParamValidator
 
 from aws_analyzer.lambda_functions import LAMBDA_PRICES, Function, LambdaAnalyzer, LambdaView
+from aws_analyzer.lambda_functions.explorer.window import LambdaExplorer
 from aws_analyzer.lambda_functions import invoke as invoke_mod
 from aws_analyzer.lambda_functions.analysis.invoke import (
     TAIL_STREAM, Invoked, call_cost, decode_tail, event_payload, invoke_findings, read_answer, tail_events,
@@ -259,3 +262,131 @@ def test_a_denied_invoke_is_a_note(fn_role, capsys):
     ui = LambdaView(LambdaAnalyzer(region=REGION, clients={"lambda": denied}), mode="text", progress="off")
     out = run(capsys, ui.invoke, "orders-api")
     assert "lambda:InvokeFunction" in out and "on top of the read-only ones" in out and "Traceback" not in out
+
+
+def plain_text(value):
+    return " ".join(re.sub(r"<[^>]+>", " ", html.unescape(value)).split())
+
+
+def seed_old_run(event=None):
+    now = datetime.now(timezone.utc) - timedelta(minutes=5)
+    old = "0ld0ld00-0000-4000-8000-000000000000"
+    lines = [(now, f"START RequestId: {old} Version: $LATEST")]
+    if event is not None:
+        lines.append((now + timedelta(milliseconds=1), json.dumps({"level": "INFO", "message": "got", "event": event})))
+    lines += [(now + timedelta(milliseconds=5), f"END RequestId: {old}"),
+              (now + timedelta(milliseconds=6), f"REPORT RequestId: {old}\tDuration: 5.00 ms\tBilled Duration: 5 ms\t"
+                                                "Memory Size: 128 MB\tMax Memory Used: 40 MB")]
+    put_logs("/aws/lambda/orders-api", lines)
+    return old
+
+
+def window(core):
+    return LambdaExplorer("orders-api", tab="logs", core=core, mode="widgets")
+
+
+def test_explorer_invoke_puts_your_run_first_and_opened(fn_role):
+    old = seed_old_run()
+    calls = []
+    x = window(analyzer({"statusCode": 200, "body": {"saved": 42}}, calls=calls))
+    assert [run.request_id for run in x._runs] == [old] and x.invoke_panel.layout.display == "none"
+    x.invoke_button.click()
+    assert x.invoke_panel.layout.display == "" and x.event_box.value == "{}"
+    assert "Invoke orders-api" in plain_text(x.invoke_title.value)
+    x.event_box.value = "{'order_id': 42}"
+    assert "read as a Python dict, sent as JSON" in plain_text(x.event_said.value) and not x.run_button.disabled
+    x.run_button.click()
+    assert calls[0]["Payload"] == b'{"order_id": 42}' and calls[0]["InvocationType"] == "RequestResponse"
+    assert [run.request_id for run in x._visible_runs()] == [RID, old]
+    first = x._run_rows[0]
+    assert "you ran" in plain_text(first.face.value) and "lmx-mine" in first.box._dom_classes
+    body = plain_text(first.body.value)
+    assert first.body.layout.display == "" and "Sent the event" in body and '"saved" : 42' in body
+    assert "loading order 42" in body and "121 of its 128 MB" in body
+    assert [c.description for c in x.run_chips.children][:2] == ["All runs 2", "You ran 1"]
+    assert plain_text(x.status.value) == "orders-api ran in 312 ms · your run is first below, opened"
+    assert first.invoke_button.layout.display == ""
+    x.event_box.value = "{}"
+    first.invoke_button.click()
+    assert json.loads(x.event_box.value) == {"order_id": 42}
+    x._toggle_invoke(False)
+    x.invoke_button.click()
+    assert json.loads(x.event_box.value) == {"order_id": 42}
+
+
+def test_explorer_invoke_keeps_your_run_through_a_reread(fn_role):
+    seed_old_run()
+    x = window(analyzer({}))
+    x.invoke_button.click()
+    x.run_button.click()
+    x._reload_logs()
+    assert x._runs[0].request_id == RID and "you ran" in plain_text(x._run_rows[0].face.value)
+
+
+def test_explorer_invoke_refuses_an_event_it_cannot_read(fn_role):
+    seed_old_run()
+    x = window(analyzer({}))
+    x.invoke_button.click()
+    x.event_box.value = "{order_id: }"
+    assert x.run_button.disabled and "looks like JSON but isn't" in plain_text(x.event_said.value)
+
+
+def test_explorer_invoke_shows_a_failure(fn_role):
+    seed_old_run()
+    x = window(analyzer(FAILURE, tail=FAILED_TAIL, error="Unhandled"))
+    x.invoke_button.click()
+    x.run_button.click()
+    assert plain_text(x.status.value).startswith("orders-api failed with KeyError in 12 ms")
+    body = plain_text(x._run_rows[0].body.value)
+    assert "Returned KeyError" in body and "It failed with KeyError" in body
+
+
+def test_explorer_invoke_with_a_logged_event(fn_role):
+    seed_old_run({"order_id": 7, "customer_id": "c-1"})
+    x = window(analyzer({}))
+    x.invoke_button.click()
+    assert json.loads(x.event_box.value) == {"order_id": 7, "customer_id": "c-1"}
+    x._toggle_invoke(False)
+    row = x._run_rows[0]
+    row.button.click()
+    assert row.invoke_button.layout.display == ""
+    row.invoke_button.click()
+    assert x.invoke_panel.layout.display == "" and json.loads(x.event_box.value)["order_id"] == 7
+    assert "is in the box above" in plain_text(x.status.value)
+
+
+def test_explorer_dry_run_and_denied(fn_role):
+    seed_old_run()
+    calls = []
+    x = window(analyzer({}, calls=calls))
+    x.invoke_button.click()
+    next(b for b in x.invoke_panel.children[2].children if getattr(b, "description", "") == "Dry run").click()
+    assert calls[0]["InvocationType"] == "DryRun" and "nothing ran" in plain_text(x.status.value)
+    assert len(x._runs) == 1
+
+    def denied(region):
+        client = invoking({})["lambda"](region)
+
+        def invoke(**params):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform "
+                                         "lambda:InvokeFunction"}}, "Invoke")
+        client._handlers["invoke"] = invoke
+        return client
+
+    y = window(LambdaAnalyzer(region=REGION, clients={"lambda": denied}))
+    y.invoke_button.click()
+    y.run_button.click()
+    assert "lambda:InvokeFunction" in plain_text(y.event_said.value) and not y.run_button.disabled
+
+
+def test_explorer_invoke_shows_your_run_during_a_cloudwatch_search(fn_role):
+    seed_old_run()
+    x = window(analyzer({}))
+    x.log_find.value = "nothing logged this"
+    x._log_search()
+    assert x.found is not None
+    x.invoke_button.click()
+    x.run_button.click()
+    assert x.found is None and x.log_find.value == ""
+    assert [run.request_id for run in x._visible_runs()][:1] == [RID] and len(x._visible_runs()) == 2
+    assert plain_text(x.status.value).endswith("the search was cleared to show it")

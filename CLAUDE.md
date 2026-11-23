@@ -264,6 +264,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   synchronously with `LogType=Tail`, on a client of its own that never retries (`_invoke_client`: a retry would run it
   twice), and reads the run whole from CloudWatch Logs when the 4 KB tail is cut; its pure side is
   `analysis/invoke.py`, `event_payload`, `tail_events`, `Invoked`, `invoke_findings`, drawn by `blocks/invoke.py`;
+  the explorer's Logs tab has it as ▶ Invoke, `explorer/invoke.py`'s `_InvokeBox`: an event box, the run merged into
+  the runs first and opened (`_mine`, request ID -> Invoked; `_with_mine`, `_mine_first`, the You ran chip), what was
+  sent and returned above its lines (`_mine_html`), ▶ Invoke with this event under a run whose event is known;
   the client call carries `# runs-on-request:`, which `rules.py` accepts for Lambda's Invoke only
   (`RUNS_ON_REQUEST`); it's in the View's `_CHANGES`, so `next()` never runs it, and in the agent's
   `_NOT_SUGGESTED`, whose guard refuses Invoke anyway); its `filter_log_events` call lines carry `# read-only:`

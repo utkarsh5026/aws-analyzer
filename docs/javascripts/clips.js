@@ -3797,6 +3797,37 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "lambda-explorer-invoke": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.explore(): ▶ Invoke on orders-etl: the run it made is first, opened, with what was sent and what came back.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "Lambda explorer",
+    "label": "Lambda explorer",
+    "code": "ui.explore()",
+    "outputs": [
+     {
+      "img": "lambda-explorer-invoke",
+      "w": 1476,
+      "h": 1217
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Opens the window</b>, shown here a few clicks in."
+     ],
+     [
+      2.7,
+      "<b>▶ Invoke</b> on orders-etl: the run it made is first, opened, with what was sent and what came back."
+     ]
+    ]
+   }
+  ]
+ },
  "lambda-explorer-json": {
   "notebook": "lambda.ipynb",
   "summary": "ui.explore(): report-api logs JSON: each line's message, its level, and its other fields a click away.",

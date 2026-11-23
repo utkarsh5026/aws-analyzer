@@ -42,10 +42,12 @@ from .code import _CodeTab
 from .focus import _FocusReads
 from .plain import _PLAIN_CSS, _PlainSearch
 from .terms import _TERMS_CSS, _SearchTerms
+from .invoke import _INVOKE_CSS, _InvokeBox
+from ..analysis.invoke import Invoked
 
 
-class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline, _ErrorsTab, _PerformanceTab, _CodeTab,
-                     _PlainSearch, _SearchTerms, _FocusReads, _Explorer):
+class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox, _Timeline, _ErrorsTab,
+                     _PerformanceTab, _CodeTab, _PlainSearch, _SearchTerms, _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
@@ -62,7 +64,9 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         Logs         what it logged, run by run, newest first: each run's start, status, run time, memory and cold
                      start, the failed ones in red; click a run for its lines. Type to find runs with some text (an
                      order ID, KeyError, a request ID), Enter to search CloudWatch for the whole time range, pick the
-                     time range, show only failed runs or cold starts, and turn on Live to see new runs as they come
+                     time range, show only failed runs or cold starts, and turn on Live to see new runs as they come.
+                     ▶ Invoke runs it once with an event you write: your run comes first, opened, with what was sent
+                     and what it returned above its lines
         Errors       its errors grouped by cause, with what to do about each, and the runs that failed: click one to
                      read every line of it
         Performance  run times against the timeout, memory used against what it has, cold starts, and the slowest
@@ -174,6 +178,9 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         self._searched = ""  # what the CloudWatch search (or the run opened) looked for
         self._open_runs: set[str] = set()  # LogRun.key of the runs opened to show their lines
         self._run_rows: list[_RunRow] = []
+        self._mine: dict[str, Invoked] = {}
+        self._sent_events: dict[str, str] = {}
+        self._invoking = 0.0
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
         self._error_rows: list[_Row] = []
         self._cause_rows: list[_Row] = []
@@ -498,7 +505,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _Timeline,
         self.settings_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
-        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + _TERMS_CSS + self._theme_style, head, tabs, {
+        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + _TERMS_CSS + _INVOKE_CSS + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
             "live": self._live_page(),
             "overview": self._scroll_page([self.overview_view]),
