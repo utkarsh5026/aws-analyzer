@@ -1286,6 +1286,7 @@ window.AA_TOURS = {
      "One function",
      "Errors",
      "Logs",
+     "Runs",
      "Performance",
      "Code"
     ]
@@ -1336,8 +1337,8 @@ window.AA_TOURS = {
     "dur": 14.8,
     "chapter": "Every function",
     "step": 1,
-    "steps": 6,
-    "label": "1 of 6 · Every function",
+    "steps": 7,
+    "label": "1 of 7 · Every function",
     "code": "from aws_analyzer import LambdaView\n\nui = LambdaView()\nui.functions(regions=\"all\")",
     "outputs": [
      {
@@ -1367,8 +1368,8 @@ window.AA_TOURS = {
     "dur": 15.1,
     "chapter": "One function",
     "step": 2,
-    "steps": 6,
-    "label": "2 of 6 · One function",
+    "steps": 7,
+    "label": "2 of 7 · One function",
     "code": "ui.function_info(\"orders-etl\")",
     "outputs": [
      {
@@ -1401,8 +1402,8 @@ window.AA_TOURS = {
     "dur": 14.9,
     "chapter": "Errors",
     "step": 3,
-    "steps": 6,
-    "label": "3 of 6 · Errors",
+    "steps": 7,
+    "label": "3 of 7 · Errors",
     "code": "ui.errors(\"orders-etl\")",
     "outputs": [
      {
@@ -1431,8 +1432,8 @@ window.AA_TOURS = {
     "dur": 14.8,
     "chapter": "Logs",
     "step": 4,
-    "steps": 6,
-    "label": "4 of 6 · Logs",
+    "steps": 7,
+    "label": "4 of 7 · Logs",
     "code": "ui.logs(\"orders-etl\", since=\"24h\")",
     "outputs": [
      {
@@ -1458,11 +1459,41 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
+    "dur": 16.4,
+    "chapter": "Runs",
+    "step": 5,
+    "steps": 7,
+    "label": "5 of 7 · Runs",
+    "code": "ui.runs(\"orders-etl\", since=\"24h\", where=\"status in (failed, timeout)\")",
+    "outputs": [
+     {
+      "img": "lambda-runs",
+      "w": 1476,
+      "h": 4071
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Ask its runs a question</b>: which ones failed in the last day?"
+     ],
+     [
+      4.42,
+      "13 of 70 runs, from <b>three causes</b>, two of them still failing,"
+     ],
+     [
+      12.8,
+      "each cause a card with <b>what to do</b>, then the runs as rows."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
     "dur": 15.0,
     "chapter": "Performance",
-    "step": 5,
-    "steps": 6,
-    "label": "5 of 6 · Performance",
+    "step": 6,
+    "steps": 7,
+    "label": "6 of 7 · Performance",
     "code": "ui.performance(\"orders-etl\")",
     "outputs": [
      {
@@ -1490,9 +1521,9 @@ window.AA_TOURS = {
     "kind": "cell",
     "dur": 12.7,
     "chapter": "Code",
-    "step": 6,
-    "steps": 6,
-    "label": "6 of 6 · Code",
+    "step": 7,
+    "steps": 7,
+    "label": "7 of 7 · Code",
     "code": "ui.code(\"orders-etl\")",
     "outputs": [
      {
@@ -1528,6 +1559,7 @@ window.AA_TOURS = {
      "ui.function_info(…)",
      "ui.errors(…)",
      "ui.logs(…)",
+     "ui.runs(…)",
      "ui.performance(…)",
      "ui.code(…)",
      "ui.help()"

@@ -187,7 +187,7 @@ class _FunctionTab:
         """
         Back to no function picked: the Functions tab, the header showing the region.
         """
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup", "invoke")
         self._stop_live()
         self.function = self.detail = None
         self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
@@ -242,7 +242,7 @@ class _FunctionTab:
         """
         Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened.
         """
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup", "invoke")
         self._stop_live()
         rereading, self._rereading = self._rereading, False
         if rereading:
@@ -287,6 +287,11 @@ class _FunctionTab:
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._run_window = None
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
+        self._mine = {}
+        self._invoking = 0.0
+        if self._w is not None:
+            self.invoke_panel.layout.display = "none"
+            _class_if(self.invoke_button, "lmx-on", False)
         self._run_values = {}
         self._code_fn = self._package_data = self._code_file = self.saved = self.page_saved = None
         self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()

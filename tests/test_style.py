@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHECKED_FOLDERS = ["src", "tests", ".claude/skills"]
 
-ALLOWED_COMMENT = re.compile(r"#(!| =+$| \d+\. | read-only:| noqa\b| type: ignore| pragma: )")
+ALLOWED_COMMENT = re.compile(r"#(!| =+$| \d+\. | read-only:| runs-on-request:| noqa\b| type: ignore| pragma: )")
 
 COMMENTS_LEFT = {
     ".claude/skills/check/rules.py": 33,

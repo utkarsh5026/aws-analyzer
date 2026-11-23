@@ -94,6 +94,7 @@ What's wrong
 -   [Why did this run fail?](#explorer-logs) <span class="how">Click a function, then Logs, then a ✕ run</span>
 -   [Which runs logged this error?](#explorer-logs) <span class="how">Type it in the Logs search box, press Enter</span>
 -   [What are its errors, by cause?](#explorer-more) <span class="how">Open the Errors tab</span>
+-   [What happens if I run it now?](#explorer-invoke) <span class="how">Logs, then ▶ Invoke</span>
 
 Right now, and since last time
 { .qgroup }
@@ -220,6 +221,26 @@ Logs in JSON (a function whose log format is JSON) show each line's message, wit
 /// caption
 report-api logs JSON: each line's message, its level, and its other fields a click away.
 ///
+
+## Run it and see its logs { #explorer-invoke }
+
+**▶ Invoke** at the end of the Logs tab's bar runs the function once with an event you write, and puts that run first among the others, opened.
+{ .gist }
+
+The box starts with the event you sent last, or the newest one a run logged, and says as you type whether it can send it. **▶ Run** sends it. The run comes back marked *you ran*, with what was sent and what it returned side by side above its lines, and what to change when it failed or came close to its memory or timeout. The last 4 KB of its log arrive with the answer, so there's nothing to wait for; a longer log is read whole from CloudWatch Logs as soon as it gets there.
+
+![The Logs tab of orders-etl with the Invoke box open under the search bar: an event naming batch-042.json and customer c-1042, a Run and a Dry run button, and a note that it's valid JSON and runs the function for real, once; under it, the run it made is first among the runs, marked you ran, with a green tick and 419 ms, and open: what was sent on the left and what came back on the right, status 200 with 18 orders written, then its log lines; the status line says orders-etl ran in 419 ms and that the run is first below, opened](images/lambda-explorer-invoke-light.webp#only-light){ width="984" height="811" loading=lazy }
+![The Logs tab of orders-etl with the Invoke box open under the search bar: an event naming batch-042.json and customer c-1042, a Run and a Dry run button, and a note that it's valid JSON and runs the function for real, once; under it, the run it made is first among the runs, marked you ran, with a green tick and 419 ms, and open: what was sent on the left and what came back on the right, status 200 with 18 orders written, then its log lines; the status line says orders-etl ran in 419 ms and that the run is first below, opened](images/lambda-explorer-invoke-dark.webp#only-dark){ width="984" height="811" loading=lazy }
+/// caption
+**▶ Invoke** on orders-etl: the run it made is first, opened, with what was sent and what came back.
+///
+
+??? more "Running it again, dry runs, and what it needs"
+
+    - **▶ Invoke with this event** sits under any open run whose event is known (the one you sent, or one the code logged). It puts that event in the box, so replaying a real call takes two clicks. Nothing runs until you click ▶ Run.
+    - **Dry run** only asks Lambda whether you may invoke the function. Nothing runs.
+    - **The You ran chip** shows only the runs you made from the window. They stay first when the time range is read again, even before CloudWatch has their lines. Running it while a search is in the box clears the search, so your run shows.
+    - **It runs for real**: whatever the code writes, sends or deletes happens. It's sent once and never retried, even when the answer is slow, so it never runs twice. It needs `lambda:InvokeFunction` on the function, on top of the read-only permissions; without it, the box says so. In a cell, [`ui.invoke(name, event)`](lambda_functions.md#invoke) draws the same as a report.
 
 ## How it's doing { #explorer-overview }
 

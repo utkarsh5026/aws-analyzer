@@ -258,8 +258,18 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   library is needed. `rules.py` can't see those calls: `OpenSearchAnalyzer.request()` sends GET, and POSTs only to
   `_search` / `_count` (`_READ_POSTS`), refusing anything else before it's sent, and `tests/fake_opensearch.py` fails a
   test on any other request. Index fixes (replicas, force merge) are shown as opensearch-py calls, never run.
-  `lambda_functions` never invokes, changes or deletes a function (findings show the `aws lambda ...` /
-  `aws logs put-retention-policy ...` command instead); its `filter_log_events` call lines carry `# read-only:`
+  `lambda_functions` never changes or deletes a function (findings show the `aws lambda ...` /
+  `aws logs put-retention-policy ...` command instead), and invokes one only in `invoke()` (`invoke.py`'s
+  `_InvokeRuns`, the one write the package has: `LambdaView.invoke()` runs a function once with the user's event,
+  synchronously with `LogType=Tail`, on a client of its own that never retries (`_invoke_client`: a retry would run it
+  twice), and reads the run whole from CloudWatch Logs when the 4 KB tail is cut; its pure side is
+  `analysis/invoke.py`, `event_payload`, `tail_events`, `Invoked`, `invoke_findings`, drawn by `blocks/invoke.py`;
+  the explorer's Logs tab has it as ▶ Invoke, `explorer/invoke.py`'s `_InvokeBox`: an event box, the run merged into
+  the runs first and opened (`_mine`, request ID -> Invoked; `_with_mine`, `_mine_first`, the You ran chip), what was
+  sent and returned above its lines (`_mine_html`), ▶ Invoke with this event under a run whose event is known;
+  the client call carries `# runs-on-request:`, which `rules.py` accepts for Lambda's Invoke only
+  (`RUNS_ON_REQUEST`); it's in the View's `_CHANGES`, so `next()` never runs it, and in the agent's
+  `_NOT_SUGGESTED`, whose guard refuses Invoke anyway); its `filter_log_events` call lines carry `# read-only:`
   comments (`FilterLogEvents` isn't a Get/List/Describe name), and `code()` and `download()` download the deployment
   package with urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only),
   which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
@@ -360,6 +370,7 @@ anyway, but don't reformat files you aren't otherwise touching.
   a comment above it, and the reasoning in the docstring of the function it belongs to. Only these stay:
   - the `# ====` section banners in an analyzer file,
   - the `# read-only:` markers `rules.py` reads on `Converse`, `InvokeModel` and `filter_log_events` call lines,
+  - the `# runs-on-request:` marker on the one `invoke` call line (`lambda_functions/invoke.py`),
   - tool directives: `# noqa: ...`, `# type: ignore[...]`, `# pragma: no cover`.
 - **Docstrings open and close on their own lines**, the text between them, even when it's one sentence:
 

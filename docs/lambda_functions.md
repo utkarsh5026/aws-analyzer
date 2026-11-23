@@ -23,7 +23,7 @@ The examples use acme's functions: `orders-etl` loads each day's orders from S3 
 
 ## Watch it run { #video }
 
-Five calls in a notebook, from every function to the code it runs: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
+Seven calls in a notebook, from every function to the code it runs: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="lambda_functions">
@@ -95,6 +95,11 @@ Cost and code
 -   [Did it get slower, or is it paying for memory it never uses?](#performance) `ui.performance("orders-etl")`{ .long }
 -   [What does its code actually do?](#how-it-works) `ui.how_it_works("orders-etl")`{ .long }
 -   [It worked last week. What changed?](#diff) `ui.diff("orders-etl")`
+
+Try it
+{ .qgroup }
+
+-   [Run it now and see what it logged.](#invoke) `ui.invoke("orders-etl", {"order_id": 42})`{ .long }
 
 Rather click?
 { .qgroup }
@@ -313,6 +318,12 @@ ui.runs("orders-etl", where="size > 30MB", columns=["started", "duration", "even
 ui.runs("orders-etl", fields={"written": r"wrote (\d+) orders"}, where="written > 40000")  # from text lines
 ```
 
+![runs("orders-etl", since="24h", where="status in (failed, timeout)"): 13 of 70 runs match, all failed, from 3 causes; cards for the runs that match, failed runs, median and longest run time, memory and cold starts; a finding that 3 runs reached the 60 s timeout; a dot per run by when it started and how long it took, the timeouts in a lane above; a card per cause, KeyError: 'customer_id' and the timeout still failing, a denied DynamoDB PutItem stopped; then the runs as a table, and the fields to query](images/lambda-runs-light.webp#only-light){ width="984" height="2714" loading=lazy }
+![runs("orders-etl", since="24h", where="status in (failed, timeout)"): 13 of 70 runs match, all failed, from 3 causes; cards for the runs that match, failed runs, median and longest run time, memory and cold starts; a finding that 3 runs reached the 60 s timeout; a dot per run by when it started and how long it took, the timeouts in a lane above; a card per cause, KeyError: 'customer_id' and the timeout still failing, a denied DynamoDB PutItem stopped; then the runs as a table, and the fields to query](images/lambda-runs-dark.webp#only-dark){ width="984" height="2714" loading=lazy }
+/// caption
+`ui.runs("orders-etl", since="24h", where="status in (failed, timeout)")`: 13 of the day's 70 runs failed, from three causes, and two of them are still failing.
+///
+
 The report answers first: how many runs failed and from how many causes, which one is still failing, and how long the runs that worked took. Then a dot per run by when it started and how long it took, drawn as `performance()` draws them (failed ones red, the runs that timed out in a lane above so the rest stay to scale), and a card per cause of the failed runs: still failing or stopped, what it means, where its code fails, what to do and the call that reads its newest run. Findings say when a run reached the timeout or used 90% of the memory (with the command to fix it), and when a field you named isn't one any run has, with the one you likely meant. The runs follow as a table, and the fields there are to ask about are listed, folded, at the end.
 
 ??? more "What a query can say"
@@ -352,6 +363,25 @@ ui.performance("orders-etl")
 !!! tip "Worth knowing"
 
     **Try a smaller size, then check again.** Lambda bills memory × run time, and memory also sets the CPU (a full vCPU at 1,769 MB). When runs use far less memory than the function has, the report suggests a smaller size that still leaves 30% room, never less than a quarter of what it has in one step, and what that would save if the run time stays the same. A function held back by its CPU may run slower with less memory, which can cost more, so try it, and run `performance()` again a day later. When runs come close to the memory or the timeout, it says so and gives the command that raises them.
+
+## Run it and see its logs { #invoke }
+
+`invoke()` runs a function once with an event and shows what it returned and every line it logged, in one report.
+{ .gist }
+
+It's the console's Test button and its log tab together: no switching tabs, and no waiting for CloudWatch to catch up. Lambda hands back the last 4 KB of a run's log with its answer, so the lines show at once; when the log is longer, the whole run is read from CloudWatch Logs as soon as it gets there (up to `wait_logs=10` seconds).
+
+```python
+ui.invoke("orders-etl", {"order_id": 42})        # a dict, a list, JSON text, or nothing for {}
+ui.invoke("orders-etl:prod", '{"order_id": 42}')  # an alias, with the event as JSON text
+ui.invoke("orders-etl", dry_run=True)             # only check that you may invoke it
+```
+
+The report opens with whether it ran or failed, then cards for its run time against the timeout, the memory it used, a cold start and what the call cost (and what a million like it would). Findings say what to change: a failure with the error that made it, a timeout with the command that raises it, memory close to running out with the command that adds more. Then what it returned (a failure as its traceback), its log lines as one run, opened, and the event it was sent, folded. Next steps run it again or open the run in `logs()`.
+
+!!! tip "Worth knowing"
+
+    **This really runs your function**, with whatever its code writes, sends or deletes: use it on functions that are safe to call with the event you give. It's called once and never retried, even when the answer is slow, and it's the only command that does more than read. It needs `lambda:InvokeFunction`, the agent can't use it, and `ui.next()` puts it in a cell for you to check rather than running it.
 
 ## Look at the code { #code }
 
@@ -583,7 +613,7 @@ ui = LambdaView(LambdaAnalyzer(prices={"gb_second": 0.0000183, "request": 0.22})
 
 ## Permissions { #permissions }
 
-Everything is read-only. Anything the notebook's role can't read shows up as a note instead of an error, so you can start with less and add what you need. This IAM policy covers every command:
+Everything is read-only but `invoke()`, which needs `lambda:InvokeFunction` as well (leave it out to keep the role read-only). Anything the notebook's role can't read shows up as a note instead of an error, so you can start with less and add what you need. This IAM policy covers every command:
 
 ```json title="IAM policy"
 {
@@ -687,6 +717,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |
 | `performance(name, since="24h", region=None, limit=5000, compare=True)` | A verdict, every run over time, how it compares with the 24 hours before and between versions, cold starts against warm runs, memory per container, the slowest runs, and the memory size that would do |
+| `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)` | [Runs it once](#invoke) and shows what it returned, its run time, memory used, cold start and cost, and every line it logged during that run |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
 | `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |

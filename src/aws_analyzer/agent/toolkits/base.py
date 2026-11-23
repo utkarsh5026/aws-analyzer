@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 CLOUDWATCH_METRICS_PRICE = 0.01
 _NOT_SUGGESTED = frozenset({"help", "explore", "use", "link", "download", "download_zip", "clean_downloads",
-                            "save_file_list", "how_it_works_page", "next"})
+                            "save_file_list", "how_it_works_page", "next", "invoke"})
 
 
 class Toolkit:
@@ -120,7 +120,7 @@ class Toolkit:
     def view_commands(self) -> dict[str, Callable[..., Any]]:
         """
         The commands of its View, name -> function, alphabetically: the calls a finding can name (empty without a
-        View). Commands that write files, delete downloads, make a link to share, open a window or change the View's
+        View). Commands that write files, delete downloads, make a link to share, open a window, run a function or change the View's
         settings (_NOT_SUGGESTED) are left out: a finding points at a report to read.
         """
         view = self.view_class()
