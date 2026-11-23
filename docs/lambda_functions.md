@@ -23,7 +23,7 @@ The examples use acme's functions: `orders-etl` loads each day's orders from S3 
 
 ## Watch it run { #video }
 
-Five calls in a notebook, from every function to the code it runs: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
+Seven calls in a notebook, from every function to the code it runs: each call typed and run, and the report it draws, with what to notice. It plays as you scroll to it; click it to pause, or pick a chapter to jump to a call.
 { .gist }
 
 <div class="aa-tour" data-tour="lambda_functions">
@@ -310,6 +310,12 @@ ui.runs("orders-etl", where="status in (failed, timeout)", group_by="hour")   # 
 ui.runs("orders-etl", where="size > 30MB", columns=["started", "duration", "event.Records.s3.object.key"])
 ui.runs("orders-etl", fields={"written": r"wrote (\d+) orders"}, where="written > 40000")  # from text lines
 ```
+
+![runs("orders-etl", since="24h", where="status in (failed, timeout)"): 13 of 70 runs match, all failed, from 3 causes; cards for the runs that match, failed runs, median and longest run time, memory and cold starts; a finding that 3 runs reached the 60 s timeout; a dot per run by when it started and how long it took, the timeouts in a lane above; a card per cause, KeyError: 'customer_id' and the timeout still failing, a denied DynamoDB PutItem stopped; then the runs as a table, and the fields to query](images/lambda-runs-light.webp#only-light){ width="984" height="2714" loading=lazy }
+![runs("orders-etl", since="24h", where="status in (failed, timeout)"): 13 of 70 runs match, all failed, from 3 causes; cards for the runs that match, failed runs, median and longest run time, memory and cold starts; a finding that 3 runs reached the 60 s timeout; a dot per run by when it started and how long it took, the timeouts in a lane above; a card per cause, KeyError: 'customer_id' and the timeout still failing, a denied DynamoDB PutItem stopped; then the runs as a table, and the fields to query](images/lambda-runs-dark.webp#only-dark){ width="984" height="2714" loading=lazy }
+/// caption
+`ui.runs("orders-etl", since="24h", where="status in (failed, timeout)")`: 13 of the day's 70 runs failed, from three causes, and two of them are still failing.
+///
 
 The report answers first: how many runs failed and from how many causes, which one is still failing, and how long the runs that worked took. Then a dot per run by when it started and how long it took, drawn as `performance()` draws them (failed ones red, the runs that timed out in a lane above so the rest stay to scale), and a card per cause of the failed runs: still failing or stopped, what it means, where its code fails, what to do and the call that reads its newest run. Findings say when a run reached the timeout or used 90% of the memory (with the command to fix it), and when a field you named isn't one any run has, with the one you likely meant. The runs follow as a table, and the fields there are to ask about are listed, folded, at the end.
 
