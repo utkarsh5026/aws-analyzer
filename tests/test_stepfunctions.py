@@ -1600,3 +1600,52 @@ def test_the_reports_and_the_window_say_whether_a_retry_helps(core, fakes, capsy
     assert "A Retry rule for ChargeCard, to paste into its Retry list" in page and '"MaxAttempts": 6' in page
     next(line for line in x._failure_lines if line.key.startswith("LoadOrders")).button.click()
     assert "to paste into its Retry list" not in plain(x.failures_view.value)
+
+
+def test_an_execution_joins_each_lambda_step_to_its_run():
+    from types import SimpleNamespace
+
+    from aws_analyzer.lambda_functions.models import Invocation
+    from aws_analyzer.stepfunctions.analysis.datasets import execution_data
+    from aws_analyzer.stepfunctions.analysis.story import ExecutionStory, StoryRun
+
+    detail = detail_of("ord-7f3a")
+    load = detail.step("LoadOrders")
+    report = Invocation(FAILED_RUN, duration=1500.0, billed=1501.0, memory=1024, max_memory=980, init=200.0)
+    run = SimpleNamespace(report=report, failures=[("line", "KeyError", "x")], events=[1, 2, 3])
+    story = ExecutionStory([], [StoryRun(load, run, "found by its request ID"),
+                                StoryRun(detail.step("ValidateOrder"), None, "no log group")])
+    data = execution_data(detail, story, STEPFUNCTIONS_PRICES)
+    assert data.names == ["steps", "tries", "lambda_runs"]
+    joined = data["lambda_runs"]
+    first = joined.iloc[0]
+    assert first.step == "LoadOrders" and first.request_id == FAILED_RUN and first.lambda_ms == 1500.0
+    assert first.outside_ms == pytest.approx(250.0, abs=60) and bool(first.cold_start) and bool(first.failed)
+    assert first.memory_share == pytest.approx(980 / 1024)
+    assert first.lambda_cost_usd == pytest.approx(1.501 * 1 * 0.0000166667 + 0.0000002)
+    assert joined.iloc[1].note == "no log group" and joined.iloc[1].lambda_ms != joined.iloc[1].lambda_ms
+    steps = data["steps"]
+    charge = steps[steps.step == "ChargeCard"].iloc[0]
+    assert charge.retries == 2 and charge.transitions == 3 and charge.est_cost_usd == pytest.approx(3 * 0.000025)
+    assert steps.share_of_execution.max() <= 1
+    assert len(data["tries"][data["tries"].step == "ChargeCard"]) == 3
+
+
+def test_reports_give_their_tables_for_pandas(ui, capsys, tmp_path, monkeypatch):
+    out = run(capsys, ui.executions, "order-pipeline")
+    assert "-- This report as data (pandas, Excel) --" in out
+    executions = ui.data()["executions"]
+    assert executions.ref.str.startswith("order-pipeline/").all() and (executions.est_cost_usd > 0).all()
+    assert ui.data().again == "data('executions', 'order-pipeline')"
+    run(capsys, ui.overview)
+    machines = ui.data()["machines"]
+    assert set(machines.state_machine) >= {"order-pipeline", "image-resize-express"}
+    assert machines.est_monthly_usd.fillna(0).is_monotonic_decreasing
+    failures = ui.data("failures", "order-pipeline")
+    assert capsys.readouterr().out == "" and failures["causes"]["share"].sum() == pytest.approx(1.0)
+    assert ui.data("graph", "order-pipeline", timings=True).names == ["timings"]
+    assert ui.data("state_machine", "order-pipeline")["states"].state.iloc[0] == "ValidateOrder"
+    monkeypatch.chdir(tmp_path)
+    ui.data("execution", "order-pipeline/ord-7f3a", logs=False)
+    ui.to_excel()
+    assert "Saved Execution ord-7f3a as a workbook" in capsys.readouterr().out

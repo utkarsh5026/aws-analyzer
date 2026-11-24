@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🔀 **Step Functions: reports as pandas tables and an Excel workbook, Lambda runs joined in**
+  - Every report ends with **🐼 This report as data**; `sfn.data()` and `sfn.to_excel()` as in Lambda and S3.
+  - `execution()`'s `lambda_runs` puts each Lambda step beside its run: the code's time, the time around it, memory and cost.
+  - `executions()` gives each execution's estimated cost, and its `ref` opens it: `sfn.data("execution", ref)`.
 - 🪣 **S3: reports as pandas tables and an Excel workbook** ([#282](https://github.com/utkarsh5026/aws-analyzer/pull/282))
   - `summary()`, `overview()`, `ls()`, `find()`, `duplicates()`, `versions()`, `deleted()`, `compare()` and more end with **🐼 This report as data**.
   - `ui.data()` gives their tables as DataFrames, each row with its file's s3:// path, ready for `ui.core.read_df()`.

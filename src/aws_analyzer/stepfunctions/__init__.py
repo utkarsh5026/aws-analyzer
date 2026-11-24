@@ -56,6 +56,9 @@ from .analysis import (
     ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
     timing_marks, timing_report,
 )
+from .analysis.datasets import (
+    execution_data, executions_data, failures_data, machine_data, overview_data, timings_data,
+)
 from .analyzer import StepFunctionsAnalyzer
 from .view import StepFunctionsView
 from .explorer.window import StepFunctionsExplorer, explore
@@ -130,7 +133,8 @@ __all__ = [
     "machine_name",
     "merge_log",
     "mermaid",
-    "monthly_cost",
+    "monthly_cost", "execution_data", "executions_data", "failures_data", "machine_data", "overview_data",
+    "timings_data",
     "numbers_findings",
     "overview_findings",
     "parse_definition",

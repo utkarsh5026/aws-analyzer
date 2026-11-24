@@ -2230,7 +2230,17 @@ sfn.failures("order-pipeline")               # where and why its executions fail
 sfn.execution("order-pipeline/ord-7f3a")     # one execution step by step, and the Lambda lines that broke it
 sfn.compare("order-pipeline/ord-7f3a")       # beside the last one that succeeded: the states and inputs that differ
 sfn.state_machine("order-pipeline")          # its numbers, what its definition risks, every state
+data = sfn.data()                            # the last report's tables as pandas DataFrames, each column explained
+sfn.to_excel()                               # the last report as an Excel workbook: summary, charts, tables
 ```
+
+Every report ends with a folded **🐼 This report as data**, as Lambda's and S3's do. `execution()`'s tables join
+each Lambda step to the run behind it: `data["lambda_runs"]` holds the step's time in Step Functions beside the
+function's own run time (`lambda_ms`), the time around it (`outside_ms`: a cold start, throttling, Step Functions),
+billed time, memory and what the run cost, and `data["steps"]` each state's time, share of the execution, retries
+and state transitions with their cost. `executions()` gives a row per execution with its estimated cost,
+`failures()` a row per cause, `overview()` a row per state machine and per day, and `graph(timings=True)` each
+state's share of the time.
 
 Executions are named by their ARN, a console link, or `"state-machine/execution-name"`. **Express workflows** keep no
 history in Step Functions, so their executions, failures and steps are read from the log group their logging writes to:
@@ -2267,6 +2277,13 @@ Grouped the way `sfn.help()` lists them.
 | Command                                                                 | Shows                                                                                                                                                                       |
 | :---------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The [explorer window](#explore-state-machines-by-clicking): every state machine, its executions with their waterfall and log, its failures and its definition. `view.explorer` is the window |
+
+#### As data
+
+| Command | Shows |
+| :-- | :-- |
+| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("execution", "order-pipeline/ord-7f3a")` reads one without showing it |
+| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
 
 #### Executions
 
