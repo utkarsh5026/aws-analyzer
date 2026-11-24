@@ -17,10 +17,12 @@ from botocore.validate import ParamValidator
 
 from aws_analyzer.lambda_functions import LAMBDA_PRICES, Function, LambdaAnalyzer, LambdaView
 from aws_analyzer.lambda_functions.explorer.window import LambdaExplorer
+from aws_analyzer.lambda_functions.explorer.tester import LambdaTester
 from aws_analyzer.lambda_functions import invoke as invoke_mod
 from aws_analyzer.lambda_functions.analysis.invoke import (
-    TAIL_STREAM, Invoked, call_cost, decode_tail, event_payload, invoke_findings, read_answer, tail_events,
-    tail_is_whole,
+    EVENT_SAMPLES, TAIL_STREAM, Invoked, call_cost, check_event, code_lines, decode_tail, event_payload,
+    format_event, invoke_extras, invoke_findings, lambda_lines, read_answer, sample_event, tail_events,
+    tail_is_whole, xray_trace,
 )
 from aws_analyzer.lambda_functions.blocks import invoke as invoke_block
 
@@ -76,7 +78,9 @@ def invoking(answer, *, tail=OK_TAIL, error=None, calls=None):
                 reply["FunctionError"] = error
             found = ParamValidator().validate(reply, model.output_shape)
             assert not found.has_errors(), found.generate_report()
-            return {**reply, "ResponseMetadata": {"RequestId": RID, "HTTPStatusCode": 200}}
+            headers = {"X-Amzn-Trace-Id": "Root=1-6743a1b2-0123456789abcdef01234567;Parent=53995c3f42cd8ad8;Sampled=1",
+                       "X-Amz-Executed-Version": "$LATEST"}
+            return {**reply, "ResponseMetadata": {"RequestId": RID, "HTTPStatusCode": 200, "HTTPHeaders": headers}}
 
         client._handlers["invoke"] = invoke
         return client
@@ -390,3 +394,200 @@ def test_explorer_invoke_shows_your_run_during_a_cloudwatch_search(fn_role):
     assert x.found is None and x.log_find.value == ""
     assert [run.request_id for run in x._visible_runs()][:1] == [RID] and len(x._visible_runs()) == 2
     assert plain_text(x.status.value).endswith("the search was cleared to show it")
+
+
+def test_check_event_says_where_json_breaks():
+    good = check_event('{"order_id": 42, "items": [1, 2]}')
+    assert good.ok and good.message.startswith("Valid JSON") and json.loads(good.pretty) == {"order_id": 42,
+                                                                                            "items": [1, 2]}
+    assert good.pretty.startswith('{\n  "order_id": 42')
+    python = check_event("{'paid': True}")
+    assert python.ok and "Python dict" in python.message and json.loads(python.pretty) == {"paid": True}
+    broken = check_event('{\n  "order_id": 42,\n  "x": \n}')
+    assert not broken.ok and broken.line == 4 and broken.column == 1 and "line 4, column 1" in broken.message
+    assert check_event("").ok and check_event("").pretty == "{}"
+    assert format_event('{"b":1,"a":[]}') == '{\n  "b": 1,\n  "a": []\n}' and format_event("{oops") == "{oops"
+
+
+def test_samples_are_events():
+    assert {sample.name for sample in EVENT_SAMPLES} >= {"Empty", "S3 upload", "SQS message", "API Gateway (HTTP API)"}
+    assert json.loads(sample_event("S3 upload"))["Records"][0]["eventSource"] == "aws:s3"
+    with pytest.raises(KeyError):
+        sample_event("nothing")
+
+
+XRAY_TAIL = OK_TAIL.replace("Init Duration: 401.02 ms\n", "Init Duration: 401.02 ms\t\nXRAY TraceId: "
+                            "1-6743a1b2-aaaa SegmentId: 1a2b3c Sampled: true\n")
+EXTENSION_TAIL = f"EXTENSION\tName: datadog-agent\tState: Ready\tEvents: [INVOKE, SHUTDOWN]\n{XRAY_TAIL}"
+
+
+def test_extras_say_everything_else_lambda_returned():
+    invoked = _invoked(EXTENSION_TAIL, answer={"ok": True})
+    invoked.executed_version, invoked.status_code = "7", 200
+    invoked.headers = {"x-amzn-trace-id": "Root=1-ffff;Parent=0;Sampled=0", "content-type": "application/json"}
+    extras = dict(invoke_extras(invoked))
+    assert extras["Request ID"] == RID and extras["Version that ran"] == "7" and extras["HTTP status"] == "200 OK"
+    assert extras["X-Ray trace"] == "1-6743a1b2-aaaa · sampled: true"
+    assert extras["Billed duration"] == "313 ms" and extras["Init duration (cold start)"] == "401 ms"
+    assert extras["Log lines"].startswith("1 from its code, ") and extras["Content type"] == "application/json"
+    assert [e.message.split()[0] for e in lambda_lines(invoked)] == ["EXTENSION", "START", "END", "REPORT", "XRAY"]
+    assert [e.message for e in code_lines(invoked)] == [OK_TAIL.split("\n")[1]]
+    header_only = _invoked(OK_TAIL, answer={})
+    header_only.headers = {"x-amzn-trace-id": "Root=1-ffff;Parent=0;Sampled=0"}
+    assert xray_trace(header_only).trace_id == "1-ffff" and xray_trace(header_only).sampled == "false"
+
+
+def test_the_report_shows_everything_else(fn_role, capsys):
+    ui = LambdaView(analyzer({"ok": True}, tail=EXTENSION_TAIL), mode="text", progress="off")
+    out = run(capsys, ui.invoke, "orders-api", {"order_id": 42})
+    assert "Everything else Lambda returned" in out and "1-6743a1b2-aaaa" in out and "X-Ray trace header" in out
+
+
+def open_tester(core, event=None):
+    return LambdaTester("orders-api", event, core=core, mode="widgets")
+
+
+def test_the_test_window_checks_formats_and_runs(fn_role):
+    calls = []
+    x = open_tester(analyzer({"statusCode": 200, "body": {"saved": 42}}, calls=calls))
+    assert x.function.name == "orders-api" and x.test_box.value == "{}" and not x.test_run_button.disabled
+    assert "Test orders-api" in plain_text(x.title.value) and "3 s timeout" in plain_text(x.title.value)
+    x.test_box.value = '{\n  "order_id": 42,\n  "x": \n}'
+    assert x.test_run_button.disabled and "line 4, column 1" in plain_text(x.test_said.value)
+    assert '<tr class="bad"><td class="ln">4</td>' in x.test_preview.value
+    x.test_box.value = '{"order_id":42,"items":[{"sku":"A-1"}]}'
+    assert not x.test_run_button.disabled and '<span class="jk">' in x.test_preview.value
+    format_button = next(b for b in x.tool_row.children if getattr(b, "description", "") == "{ } Format")
+    format_button.click()
+    assert x.test_box.value.startswith('{\n  "order_id": 42,\n  "items": [')
+    x.sample_pick.value = "SQS message"
+    assert json.loads(x.test_box.value)["Records"][0]["eventSource"] == "aws:sqs" and x.sample_pick.value == ""
+    x.test_box.value = '{"order_id": 42}'
+    x.test_run_button.click()
+    assert calls[0]["Payload"] == b'{"order_id": 42}' and calls[0]["InvocationType"] == "RequestResponse"
+    result = plain_text(x.test_result.value)
+    assert "orders-api ran" in result and "Everything else Lambda returned" in result and '"saved"' in result
+    assert "loading order 42" in result and "1-6743a1b2-0123456789abcdef01234567" in result
+    assert plain_text(x.status.value) == "orders-api ran in 312 ms · what it returned and logged is below"
+    assert x.test_runs_pick.layout.display == "" and len(x.runs) == 1
+
+
+def test_the_test_window_keeps_earlier_runs(fn_role):
+    x = open_tester(analyzer(FAILURE, tail=FAILED_TAIL, error="Unhandled"), {"order_id": 1})
+    assert json.loads(x.test_box.value) == {"order_id": 1} and x.test_box.value.startswith('{\n  "order_id"')
+    x.run()
+    assert plain_text(x.status.value).startswith("orders-api failed with KeyError in 12 ms")
+    assert "KeyError" in plain_text(x.test_result.value)
+    x.run({"order_id": 2})
+    assert [label for label, _ in x.test_runs_pick.options][0].startswith("Run 2 · ✕ failed")
+    x.test_runs_pick.value = 0
+    assert json.loads(x.test_box.value) == {"order_id": 1}
+
+
+def test_the_test_window_runs_an_alias_and_dry_runs(fn_role):
+    boto3.client("lambda", region_name=REGION).create_alias(
+        FunctionName="orders-api", Name="live", FunctionVersion="$LATEST")
+    calls = []
+    x = LambdaTester("orders-api:live", core=analyzer({}, calls=calls), mode="widgets")
+    x.dry_button.click()
+    assert calls[0]["InvocationType"] == "DryRun" and calls[0]["Qualifier"] == "live"
+    assert "nothing ran" in plain_text(x.status.value)
+    x.event("{order_id: }")
+    assert "looks like JSON but isn't" in plain_text(x.status.value) and calls[1:] == []
+
+
+def test_the_test_window_says_a_denied_invoke(fn_role):
+    def denied(region):
+        client = invoking({})["lambda"](region)
+
+        def invoke(**params):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform "
+                                         "lambda:InvokeFunction"}}, "Invoke")
+        client._handlers["invoke"] = invoke
+        return client
+
+    x = open_tester(LambdaAnalyzer(region=REGION, clients={"lambda": denied}))
+    x.test_run_button.click()
+    assert "lambda:InvokeFunction" in plain_text(x.test_said.value) and not x.test_run_button.disabled
+
+
+def test_ui_test_opens_the_window(fn_role, capsys):
+    ui = LambdaView(analyzer({}), mode="html", progress="off")
+    ui.test("orders-api", {"order_id": 9})
+    assert isinstance(ui.tester, LambdaTester) and json.loads(ui.tester.test_box.value) == {"order_id": 9}
+    text = LambdaView(analyzer({}), mode="text", progress="off")
+    out = run(capsys, text.test, "orders-api")
+    assert "invoke('orders-api', event)" in out and text.tester is None
+
+
+def seed_run(request_id, *, ago, message="working"):
+    now = datetime.now(timezone.utc) - ago
+    put_logs("/aws/lambda/orders-api", stream=f"2026/11/24/[$LATEST]{request_id[:8]}", events=[
+        (now, f"START RequestId: {request_id} Version: $LATEST"),
+        (now + timedelta(milliseconds=1), f"[INFO]\t{now:%Y-%m-%dT%H:%M:%S}.001Z\t{request_id}\t{message}"),
+        (now + timedelta(milliseconds=5), f"END RequestId: {request_id}"),
+        (now + timedelta(milliseconds=6), f"REPORT RequestId: {request_id}\tDuration: 5.00 ms\tBilled Duration: 5 ms\t"
+                                          "Memory Size: 128 MB\tMax Memory Used: 40 MB"),
+    ])
+
+
+def test_the_test_window_watches_the_logs(fn_role):
+    old = seed_old_run()
+    x = open_tester(analyzer({}))
+    assert x.logs_view.layout.display == "none" and "not watching" in plain_text(x.watch_said.value)
+    x.watch()
+    assert x._watching and x.logs_view.layout.display == "" and x.test_result.layout.display == "none"
+    assert x.logs_chip.description == "Live logs · 1" and old[:8] in plain_text(x.logs_view.value)
+    assert "watching every 5 s" in plain_text(x.watch_said.value)
+    later = "1a7e0000-0000-4000-8000-000000000001"
+    seed_run(later, ago=timedelta(seconds=30), message="a later call")
+    x._look_now()
+    assert x.logs_chip.description == "Live logs · 2" and "1 new run" in plain_text(x.watch_said.value)
+    assert "a later call" in plain_text(x.logs_view.value)
+    x._look_now()
+    assert len(x.watched) == 7
+    x.watch(False)
+    assert not x._watching and x.watch_button.description == "Watch logs"
+
+
+def test_running_starts_watching_and_marks_your_run(fn_role):
+    seed_old_run()
+    x = open_tester(analyzer({}))
+    x.run({"order_id": 1})
+    assert x._watching and x._view == "result" and x.logs_chip.description == "Live logs · 1"
+    seed_run(RID, ago=timedelta(seconds=1), message="your own run")
+    x._look_now()
+    x.logs_chip.click()
+    assert x.shown["logs"][0].opened == {next(r.key for r in x.shown["logs"][0].runs if r.request_id == RID)}
+    assert "your runs are open" in plain_text(x.logs_view.value)
+
+
+def test_watching_a_function_that_never_logged(fn_role):
+    x = open_tester(analyzer({}))
+    x.watch()
+    assert x._watching and "Nothing logged in the last 10 minutes yet" in plain_text(x.logs_view.value)
+
+
+def test_the_watch_loop_runs_in_the_background(fn_role, monkeypatch):
+    from aws_analyzer.lambda_functions.explorer import tester_logs
+    import asyncio
+
+    monkeypatch.setattr(tester_logs, "_WATCH_SECONDS", 0.05)
+    seed_old_run()
+
+    async def scenario():
+        x = open_tester(analyzer({}))
+        await asyncio.gather(*x._tasks.values())
+        x.watch()
+        await asyncio.sleep(0.3)
+        seed_run("1a7e0000-0000-4000-8000-000000000002", ago=timedelta(seconds=1), message="came in live")
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if "came in live" in plain_text(x.logs_view.value):
+                break
+        assert "came in live" in plain_text(x.logs_view.value)
+        x.watch(False)
+        await asyncio.sleep(0.1)
+        assert "watch" not in x._tasks
+
+    asyncio.run(scenario())

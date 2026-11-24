@@ -1927,6 +1927,7 @@ ui.errors("orders-etl")                      # its errors in the last 24 hours, 
 ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
 ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
 ui.invoke("orders-etl", {"order_id": 42})    # run it once: what it returned, run time, cost and its log lines
+ui.test("orders-etl")                        # a window to paste an event in, run it, read it all and watch its logs
 ui.code("orders-etl")                        # the files in its package, and the handler's source
 ui.diff("orders-etl")                        # what changed since its last published version: files, lines, settings
 ui.how_it_works("orders-etl")                # how its Python code works, step by step from the handler
@@ -2018,6 +2019,7 @@ Grouped the way `ui.help()` lists them.
 | Command                                                                  | Shows |
 | :----------------------------------------------------------------------- | :---- |
 | `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)`     | **Runs the function once and shows what happened in one report**, like the console's Test button and its logs together: whether it worked, **what it returned** (the error and its traceback when it failed), its run time against the timeout, memory used, cold start and **what the call cost**, then **every line it logged during that run**, opened. `event=` is a dict, a list, JSON text (a Python dict written as text works too) or nothing (`{}`); `"name:alias"` runs that alias. The last 4 KB of its log come back with the answer at once; when the log is longer, the whole run is read from CloudWatch Logs, waiting up to `wait_logs=` seconds for its lines to arrive. Findings: a failure or timeout and what to change, memory or time close to the limit, a cold start. `dry_run=True` only checks you may invoke it. **This really runs the function**, with whatever its code writes or sends; it's called once and never retried |
+| `test(name, event=None, region=None, height=None)` | **A window to test one function**, like the console's Test page: paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one) and see it as tidy JSON in colour, the line where it breaks marked when it isn't valid; ▶ Run runs it once and draws `invoke()`'s report under the box, with everything else Lambda returned (request ID, version, X-Ray trace, headers). **Live logs** watches its log group every 5 seconds while you test, its runs newest first as they come, yours opened. Earlier runs stay in a menu. Nothing runs until you click ▶ Run |
 
 #### Code
 
@@ -2112,7 +2114,7 @@ Read-only. Grant what you need:
 | `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs`, `performance` and the explorer's Logs tab |
 | `ec2:DescribeRegions`                                                                                                                                                               | `functions(regions="all")`: the regions your account has turned on            |
 | `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`                                                                                                                                         | `errors`: how many failed messages wait in an SQS trigger's queue and its dead-letter queue (never receives one) |
-| `lambda:InvokeFunction` (not read-only)                                                                                                                                             | `invoke` only: runs the function once when you call it. Leave it out to keep every command read-only |
+| `lambda:InvokeFunction` (not read-only)                                                                                                                                             | `invoke`, `test` and the explorer's ▶ Invoke only: runs the function once when you ask. Leave it out to keep every command read-only |
 
 `lambda:GetFunction` also returns the environment variables' values, which the reports never show. Anything you can't
 read shows up as a note instead of an error. The

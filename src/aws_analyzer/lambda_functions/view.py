@@ -75,6 +75,7 @@ from .blocks.invoke import invoke_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
+    from .explorer.tester import LambdaTester
 
 
 def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
@@ -258,11 +259,11 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
-        "▶ Run it": ("invoke",),
+        "▶ Run it": ("test", "invoke"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"download", "how_it_works_page", "invoke"})
+    _CHANGES = frozenset({"download", "how_it_works_page", "invoke", "test"})
     _START = (
         ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),
@@ -281,6 +282,7 @@ class LambdaView(_BaseView):
         super().__init__(mode=mode, max_rows=max_rows, progress=progress)
         self.core: LambdaAnalyzer = core or LambdaAnalyzer()
         self.explorer: LambdaExplorer | None = None  # the window explore() opened last
+        self.tester: LambdaTester | None = None
 
     # ------------------------------------------------------------------ plumbing
 
@@ -1374,6 +1376,25 @@ class LambdaView(_BaseView):
         return blocks
 
     # ------------------------------------------------------------------ the window
+
+    @_friendly_errors
+    def test(self, name: str, event: Any = None, *, region: str | None = None,
+             height: int | str | None = None) -> None:
+        """
+        A window to test one function with an event, like the Lambda console's Test page: paste the event (or start
+        from one shaped like what S3, SQS, SNS, API Gateway or EventBridge send) and see it as tidy JSON in colour,
+        with the line where it breaks when it isn't valid; ▶ Run runs it once and shows what it returned, every line
+        it logged, its run time, memory and cost, and everything else Lambda returned (request ID, version, X-Ray
+        trace, headers). event= is what the box starts with. Nothing runs until you click ▶ Run, and then it really
+        runs (needs lambda:InvokeFunction). Needs Jupyter and ipywidgets; view.tester is the window.
+        """
+        if not self.use_html:
+            raise _Hint("The test window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, "
+                        f"invoke({name!r}, event) runs it once and shows what came back.")
+        _require("ipywidgets", "The test window")
+        from .explorer.tester import LambdaTester
+
+        self.tester = LambdaTester(name, event, region=region, view=self, height=height, mode="widgets")
 
     @_friendly_errors
     def explore(self, name: str | None = None, *, tab: str | None = None, region: str | None = None,
