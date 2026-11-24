@@ -14,6 +14,8 @@ STEPFUNCTIONS_PRICES: dict[str, float] = {
     "express_memory_gb": 0.0625,
     "metric_read": 0.00001,
     "logs_ingest_gb": 0.50,
+    "lambda_gb_second": 0.0000166667,
+    "lambda_request": 0.0000002,
 }
 
 PRICE_NOTES = {
@@ -23,6 +25,8 @@ PRICE_NOTES = {
     "express_memory_gb": "Express: memory billed per execution, at least 64 MB",
     "metric_read": "CloudWatch GetMetricData: per metric read ($0.01 per 1,000)",
     "logs_ingest_gb": "CloudWatch Logs: per GB of execution logs written",
+    "lambda_gb_second": "Lambda (the functions its states call): per GB-second of run time, x86_64",
+    "lambda_request": "Lambda: per request ($0.20 per million)",
 }
 
 FREE_TRANSITIONS = 4_000

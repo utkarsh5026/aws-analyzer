@@ -84,6 +84,7 @@ One workflow
 -   [What was different about this failed one?](#compare) `sfn.compare("order-pipeline/ord-7f3a")`{ .long }
 -   [What does this workflow do, and what could go wrong?](#state-machine) `sfn.state_machine("order-pipeline")`{ .long }
 -   [Which state is slow, and which one retries?](#timings) `sfn.graph("order-pipeline", timings=True)`{ .long }
+-   [Can I analyse the executions and their Lambda runs in pandas?](#as-data) `sfn.data()` `sfn.to_excel()`
 
 Rather click?
 { .qgroup }
@@ -255,6 +256,35 @@ sfn.explore("order-pipeline", execution="ord-7f3a") # with one execution open
 
 Its Graph tab draws the workflow with an execution's path on it, and its Failures tab groups the failures by the state they stopped at. The [Step Functions explorer guide](stepfunctions_explorer.md) covers every tab, with its own video tour.
 
+## Take a report into pandas or Excel { #as-data }
+
+Every report ends with **🐼 This report as data**: its tables for pandas, each column explained, and a workbook to share. An execution's tables put each step beside the Lambda run behind it.
+{ .gist }
+
+```python
+sfn.execution("order-pipeline/ord-7f3a")
+data = sfn.data()
+data["steps"]            # each state: seconds, share_of_execution, retries, transitions, est_cost_usd
+data["lambda_runs"]      # each Lambda step beside its run: step_seconds, lambda_ms, outside_ms, billed_ms, memory, cost
+data["tries"]            # every try, with its error and request ID
+sfn.to_excel()           # aws-analyzer-exports/stepfunctions-execution-ord-7f3a.xlsx
+```
+
+`outside_ms` is the step's time the function's code didn't account for: a cold start, throttling or Step Functions itself. A step whose `outside_ms` is large beside its `lambda_ms` isn't slow code. `lambda_cost_usd` plus the steps' `est_cost_usd` is what the execution cost.
+
+??? more "Which tables each report gives"
+
+    | Report | Tables |
+    |---|---|
+    | `overview()` | `machines` (executions, failures, average run, estimated monthly cost), `days` (a row per state machine per day) |
+    | `state_machine()` | `states` (each state, what it calls, its retries and catches), `days` |
+    | `executions()` | `executions` (a row per execution with its run time and estimated cost, and the `ref` that opens it), `days` |
+    | `execution()` | `steps`, `tries`, `lambda_runs` |
+    | `failures()` | `causes` (a row per state and error), `failed` (every failed execution read) |
+    | `graph(timings=True)` | `timings`: each state's median, longest and share of the time, and how often it retries |
+
+    `sfn.data("executions", "order-pipeline", since="30d")` reads a report without showing it; each row's `ref` opens that execution: `sfn.data("execution", ref)`. Costs are estimates at list prices (Lambda's at x86_64 prices), before the free tier.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -361,6 +391,8 @@ Every `StepFunctionsView` command. `sfn.help()` prints the same list grouped by 
 | `compare(execution, other=None, machine=None, since="30d")` | An execution beside the last success before it (or other=): the states and input fields that differ, and the likely cause |
 | `failures(name, since="7d", limit=50)` | Failures grouped by the state they stopped at and the error |
 | `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The explorer window: every state machine, its executions with their waterfall and log, failures and definition |
+| `data(command=None, *args, **kwargs)` | [The last report's tables](#as-data) as pandas DataFrames, each column explained |
+| `to_excel(command=None, *args, path=None, **kwargs)` | [The last report as an Excel workbook](#as-data): summary, charts, a sheet per table and how to read them |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

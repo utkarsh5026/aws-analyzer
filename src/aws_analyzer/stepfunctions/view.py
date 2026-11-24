@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import statistics
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from .._kit.errors import _Hint
 from .._kit.fmt import _count, _duration, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
+from .._kit.dataview import _DataCommands
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import STATUS_TONES, STATUS_WORDS, execution_ref, short_cause
@@ -27,6 +29,14 @@ from .analysis import (
     numbers_findings, overview_findings, resource_label, retry_label, transitions_per_execution,
 )
 from .analysis.cost import free_tier_note
+from .analysis.datasets import (
+    execution_data,
+    executions_data,
+    failures_data,
+    machine_data,
+    overview_data,
+    timings_data,
+)
 from .analysis.failures import can_redrive
 from .analysis.findings import lambda_logs_call, redrive_command
 from .analysis.express import logging_gaps
@@ -310,7 +320,15 @@ def _with_story_run(detail: ExecutionDetail, story: ExecutionStory) -> None:
         detail.lambda_run, detail.lambda_note = found.run, found.note
 
 
-class StepFunctionsView(_BaseView):
+
+def _unless(**options: tuple[Any, Any]) -> dict[str, Any]:
+    """
+    A command's options as its call writes them: each (value, default) pair kept only when it isn't the default.
+    """
+    return {name: value for name, (value, default) in options.items() if value != default}
+
+
+class StepFunctionsView(_DataCommands, _BaseView):
     """
     Notebook UI for Step Functions. Every public method renders a report and returns None; the data is on
     self.core (a StepFunctionsAnalyzer).
@@ -321,14 +339,19 @@ class StepFunctionsView(_BaseView):
         "🔀 State machines": ("overview", "state_machine", "graph"),
         "🏃 Executions": ("executions", "execution", "compare", "failures"),
         "🖱️ Explore by clicking": ("explore",),
+        "🐼 As data": ("data", "to_excel"),
         "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"to_excel"})
     _START = (
         ("overview()", "every state machine: executions, failures, cost and warnings"),
         ("failures('state-machine')", "where and why its executions fail, with the Lambda run to read"),
         ("execution('state-machine/execution-name')", "one execution step by step, and the Lambda lines that broke it"),
     )
     _PROGRESS = ("Reading", "executions")
+
+    def _data_example(self) -> str:
+        return "data('executions', 'my-state-machine')"
 
     def __init__(
         self,
@@ -372,7 +395,8 @@ class StepFunctionsView(_BaseView):
                         _Note(f"No state machines in {overview.region}. They're regional: pass "
                               "StepFunctionsAnalyzer(region='...') to look in another region.")])
             return
-        self._show(self._overview_blocks(overview))
+        data = replace(overview_data(overview, self.core.prices), source=_call("overview", **_unless(days=(days, 7))))
+        self._show(self._with_data(self._overview_blocks(overview), data))
 
     def _overview_blocks(self, overview: Overview) -> list[Any]:
         prices, days = self.core.prices, overview.days
@@ -464,7 +488,8 @@ class StepFunctionsView(_BaseView):
         with self._progress("Reading the state machine", unit="calls"):
             machine = self.core.state_machine(name)
             numbers = self.core.numbers([machine], days=days)[0].get(machine.arn)
-        self._show(self._machine_blocks(machine, numbers))
+        data = replace(machine_data(machine, numbers), source=_call("state_machine", name, **_unless(days=(days, 7))))
+        self._show(self._with_data(self._machine_blocks(machine, numbers), data))
 
     def _machine_blocks(self, machine: StateMachine, numbers: MachineNumbers | None) -> list[Any]:
         cost = monthly_cost(machine, numbers, self.core.prices)
@@ -565,7 +590,11 @@ class StepFunctionsView(_BaseView):
             with self._progress("Reading succeeded executions", unit="executions") as tick:
                 timing = self.core.timings(machine.arn, n=sample, progress=tick)
             marks = timing_marks(layout, timing)
-        self._show(self._graph_blocks(machine, marks, timing))
+        blocks = self._graph_blocks(machine, marks, timing)
+        if timing is None:
+            return self._show(blocks)
+        data = replace(timings_data(timing), source=_call("graph", name, timings=timings))
+        self._show(self._with_data(blocks, data))
 
     def _graph_blocks(self, machine: StateMachine, marks: FlowMarks | None = None,
                       timing: TimingReport | None = None) -> list[Any]:
@@ -632,7 +661,9 @@ class StepFunctionsView(_BaseView):
         """
         with self._progress("Listing executions", unit="executions"):
             page = self.core.executions(name, status=status, since=since, limit=n)
-        self._show(self._executions_blocks(page, status=status, since=since))
+        asked = _unless(status=(status, None), since=(since, "7d"), n=(n, 25))
+        data = replace(executions_data(page, self.core.prices), source=_call("executions", name, **asked))
+        self._show(self._with_data(self._executions_blocks(page, status=status, since=since), data))
 
     def _executions_blocks(self, page: ExecutionPage, *, status: str | None, since: Any) -> list[Any]:
         machine, executions = page.machine, page.executions
@@ -699,7 +730,9 @@ class StepFunctionsView(_BaseView):
             story = self.core.execution_story(detail) if logs else None
         if story is not None:
             _with_story_run(detail, story)
-        self._show(self._execution_blocks(detail, story))
+        asked = _unless(machine=(machine, None), logs=(logs, True))
+        data = replace(execution_data(detail, story, self.core.prices), source=_call("execution", ref, **asked))
+        self._show(self._with_data(self._execution_blocks(detail, story), data))
 
     @_friendly_errors
     def compare(self, execution: str, other: str | None = None, *, machine: str | None = None,
@@ -803,7 +836,9 @@ class StepFunctionsView(_BaseView):
         """
         with self._progress("Reading failed executions", unit="executions") as tick:
             report = self.core.failures(name, since=since, limit=limit, progress=tick)
-        self._show(self._failure_blocks(report))
+        asked = _unless(since=(since, "7d"), limit=(limit, 50))
+        data = replace(failures_data(report, self.core.prices), source=_call("failures", name, **asked))
+        self._show(self._with_data(self._failure_blocks(report), data))
 
     def _failure_blocks(self, report: FailureReport, *, for_window: bool = False) -> list[Any]:
         machine, numbers = report.machine, report.numbers
