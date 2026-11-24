@@ -4,6 +4,7 @@ The Versions and deleted files commands.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -13,6 +14,7 @@ from ..._kit.fmt import _fmt_dt, _plural, _share, _tz_label, human_age, human_mo
 from ..._kit.render import _call
 from ..._kit.view import _friendly_errors
 
+from ..analysis.datasets import deleted_data, history_data, versions_data
 from ..helpers import base_prefix, parse_s3_uri, relative_key, s3_uri
 
 
@@ -93,7 +95,7 @@ class _VersionCommands:
             else []
         )
         blocks.append(_Next(steps))
-        self._show(blocks)
+        self._show(self._with_data(blocks, replace(versions_data(v), source=_call("versions", uri))))
 
     @_friendly_errors
     def history(self, uri: str) -> None:
@@ -111,15 +113,12 @@ class _VersionCommands:
             ]
             for v in history
         ]
-        self._show(
-            [
-                _Title(
-                    f"History of {s3_uri(*parse_s3_uri(uri))}",
-                    f"{len(history)} versions",
-                ),
-                _Table(["Size", f"Modified ({_tz_label()})", "Age", "", "Version id"], rows),
-            ]
-        )
+        where = s3_uri(*parse_s3_uri(uri))
+        blocks = [
+            _Title(f"History of {where}", f"{len(history)} versions"),
+            _Table(["Size", f"Modified ({_tz_label()})", "Age", "", "Version id"], rows),
+        ]
+        self._show(self._with_data(blocks, replace(history_data(where, history), source=_call("history", uri))))
 
     @_friendly_errors
     def deleted(
@@ -243,4 +242,5 @@ class _VersionCommands:
                     ]
                 )
             )
-        self._show(blocks)
+        source = _call("deleted", uri, deleted_after=deleted_after) if deleted_after else _call("deleted", uri)
+        self._show(self._with_data(blocks, replace(deleted_data(d), source=source)))

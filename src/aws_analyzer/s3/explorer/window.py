@@ -13,6 +13,7 @@ from typing import Any, Callable
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ..._kit.blocks import _Next, _Note, _Title
+from ..._kit.dataview import _DataGuide
 from ..._kit.deps import _in_notebook, _require
 from ..._kit.history import PlaceHistory
 from ..._kit.window import _AskSlot, _cell_number, _check_assistant, _css_height, _drawer_css, _window_errors
@@ -342,12 +343,12 @@ class S3Explorer(_ListPane, _ReportPane, _SelectionPane, _SettingsPane, _RecentP
 
     def _trim(self, blocks: list[Any], selected: str) -> list[Any]:
         """
-        A report for the right pane: without its Next block (its calls name commands of a view you don't have
-        here), and with the file's name instead of its whole path (the status bar shows that).
+        A report for the right pane: without its Next block and its data fold (their calls name commands of a view
+        you don't have here), and with the file's name instead of its whole path (the status bar shows that).
         """
         kept = []
         for block in blocks:
-            if isinstance(block, _Next):
+            if isinstance(block, (_Next, _DataGuide)):
                 continue
             if isinstance(block, _Title) and selected and selected in block.text:
                 block = dataclasses.replace(block, text=block.text.replace(selected, Entry(

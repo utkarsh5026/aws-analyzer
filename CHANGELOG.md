@@ -11,7 +11,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- ⚡ **Lambda: every report as pandas tables and an Excel workbook**
+- 🪣 **S3: reports as pandas tables and an Excel workbook**
+  - `summary()`, `overview()`, `ls()`, `find()`, `duplicates()`, `versions()`, `deleted()`, `compare()` and more end with **🐼 This report as data**.
+  - `ui.data()` gives their tables as DataFrames, each row with its file's s3:// path, ready for `ui.core.read_df()`.
+  - `preview()` of a table gives its rows and schema; `ui.to_excel()` saves any of them as a workbook.
+- ⚡ **Lambda: every report as pandas tables and an Excel workbook** ([#281](https://github.com/utkarsh5026/aws-analyzer/pull/281))
   - Reports end with **🐼 This report as data**: their tables, every column explained, and pandas lines worth running.
   - `ui.data()` gives the last report's tables as DataFrames (`data["runs"]`, `data.guide()`), with no new read from AWS.
   - `ui.to_excel()` saves a workbook: a summary, Excel charts, a formatted sheet per table and how to read it.

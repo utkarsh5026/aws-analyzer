@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
+import openpyxl
 import pypdf
 import pytest
 from botocore.exceptions import ClientError
@@ -4599,3 +4600,55 @@ def test_ui_next_steps_are_filled_in(ui, capsys, aws):
     assert f"preview('{root}big/file.bin')" in run(capsys, ui.largest, root, 1)
     out = run(capsys, ui.ls, root)
     assert f"summary('{root}')" in out and f"ls('{root}archive/')" in out
+
+
+def test_reports_give_their_tables_for_pandas(ui, capsys, dupes):
+    uri = f"s3://{BUCKET}/"
+    run(capsys, ui.summary, uri)
+    data = ui.data()
+    assert data.names == ["folders", "file_types", "storage_classes", "size_bands", "ages", "largest"]
+    assert data.again == f"data('summary', '{uri}')"
+    folders = data["folders"]
+    assert folders.size_bytes.is_monotonic_decreasing and folders.share_of_size.sum() == pytest.approx(1.0)
+    largest = data["largest"]
+    assert largest.loc[0, "key"] == "big/file.bin" and largest.loc[0, "uri"] == f"s3://{BUCKET}/big/file.bin"
+    assert largest.loc[0, "size_mb"] == pytest.approx(2.0) and largest.loc[0, "est_monthly_usd"] > 0
+
+    ls_out = run(capsys, ui.ls, f"{uri}raw/2024/01/")
+    assert "-- This report as data (pandas, Excel) --" in ls_out
+    assert list(ui.data()["entries"].file_name) == ["events-copy.csv", "events.csv"]
+
+    run(capsys, ui.find, uri, pattern="*.csv")
+    assert set(ui.data()["files"].key) == {"archive/old.csv", "raw/2024/01/events-copy.csv", "raw/2024/01/events.csv"}
+    assert ui.data().source == f"find('{uri}', pattern='*.csv')"
+    run(capsys, ui.largest, uri, 2)
+    assert ui.data().again == f"data('largest', '{uri}', 2)" and len(ui.data()["files"]) == 2
+    run(capsys, ui.duplicates, f"{uri}dupes/")
+    duplicates = ui.data()
+    assert duplicates.names == ["groups", "copies"]
+    assert set(duplicates["copies"].role) == {"keep", "copy"}
+
+
+def test_a_preview_gives_the_file_rows_and_other_reports_their_own(ui, capsys, tmp_path, monkeypatch):
+    uri = f"s3://{BUCKET}/curated/table/part-0.parquet"
+    data = ui.data("preview", uri, 5)
+    assert capsys.readouterr().out == "" and data.again == f"data('preview', '{uri}', 5)"
+    rows = data["rows"]
+    assert list(rows.columns) == ["id", "value"] and len(rows) == 5 and rows.value.iloc[-1] == 6.0
+    assert f"ui.core.read_df('{uri}')" in str(data.guide("rows"))
+    assert "This report as data" not in run(capsys, ui.preview, f"s3://{BUCKET}/docs/readme.md")
+    monkeypatch.chdir(tmp_path)
+    ui.data("compare", f"s3://{BUCKET}/raw/2024/01/", f"s3://{BUCKET}/raw/2024/02/")
+    ui.to_excel()
+    assert "Saved Compare prefixes as a workbook" in capsys.readouterr().out
+    book = openpyxl.load_workbook(next((tmp_path / "aws-analyzer-exports").glob("s3-compare-*.xlsx")))
+    assert book.sheetnames == ["Summary", "differences", "How to read"]
+
+
+def test_the_explorer_pane_leaves_out_the_data_fold(ui):
+    from aws_analyzer._kit.dataview import _DataGuide
+    from aws_analyzer.s3.explorer.window import S3Explorer
+
+    guide = _DataGuide(None, "ui.data()", "ui.to_excel()")
+    kept = S3Explorer._trim(None, [_Title("Preview"), guide], "")
+    assert kept == [_Title("Preview")]

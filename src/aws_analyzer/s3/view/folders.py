@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import posixpath
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable, Iterable
 
@@ -19,11 +20,15 @@ from ..._kit.view import _friendly_errors
 
 from ..helpers import GB, base_prefix, parse_s3_uri, relative_key, s3_uri
 from ..models import FileDetailsReport, ObjectInfo, PrefixSummary
+from ..analysis.datasets import compare_data, files_data, listing_data, summary_data
 from ..analysis.summary import summary_findings
 from ..analysis.details import (
     _KIND_NAMES, _TABLE_KINDS, FileDetails, _clock, _count_text, _sheets_text, _short_count, file_details_findings,
 )
 from .cells import _FORMAT_LABELS, _folder_label
+
+
+_TOP_FILES = 20
 
 
 def _stat_table(
@@ -53,6 +58,13 @@ def _stat_table(
         bars=bars,
         bar_label="% of size" if by == "size" else "% of objects",
     )
+
+
+def _unless_default(n: int) -> tuple[int, ...]:
+    """
+    largest()'s, newest()'s and oldest()'s n as the call writes it: left out when it's the default.
+    """
+    return () if n == _TOP_FILES else (n,)
 
 
 def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Table:
@@ -404,7 +416,9 @@ class _FolderCommands:
                 else []
             )
             blocks.append(_Next(steps[:3]))
-        self._show(blocks)
+        data = listing_data(listing, inside=inside if report else None, prices=self.core.prices)
+        source = _call("ls", uri, details=True) if details else _call("ls", uri)
+        self._show(self._with_data(blocks, replace(data, source=source)))
 
     @_friendly_errors
     def summary(
@@ -509,7 +523,8 @@ class _FolderCommands:
                 (_call("find", s.uri, min_size="1GB"), "every file of 1 GB or more")
             )
         blocks.append(_Next(steps))
-        self._show(blocks)
+        data = replace(summary_data(s, prices=self.core.prices), source=_call("summary", uri))
+        self._show(self._with_data(blocks, data))
 
     @_friendly_errors
     def tree(
@@ -682,7 +697,11 @@ class _FolderCommands:
             _objects_table("Matches", matches, base_prefix(prefix)),
             _Next(_file_steps(bucket, matches)),
         ]
-        self._show(blocks)
+        data = files_data(matches, title=f"Files found in {s3_uri(bucket, prefix)}", uri=uri, command="find",
+                          prices=self.core.prices)
+        if hit_limit:
+            data.tables[0].notes.append(f"The search stopped at limit={limit:,}: there may be more files.")
+        self._show(self._with_data(blocks, replace(data, source=_call("find", uri, **filters))))
 
     @_friendly_errors
     def file_details(
@@ -780,17 +799,17 @@ class _FolderCommands:
         self._show(blocks)
 
     @_friendly_errors
-    def largest(self, uri: str, n: int = 20) -> None:
+    def largest(self, uri: str, n: int = _TOP_FILES) -> None:
         """
         The n biggest objects under a prefix.
         """
         with self._progress() as tick:
             self._top(
-                f"Largest {n} objects", uri, self.core.largest(uri, n, progress=tick)
+                f"Largest {n} objects", uri, self.core.largest(uri, n, progress=tick), _call("largest", uri, *_unless_default(n))
             )
 
     @_friendly_errors
-    def newest(self, uri: str, n: int = 20) -> None:
+    def newest(self, uri: str, n: int = _TOP_FILES) -> None:
         """
         The n most recently modified objects.
         """
@@ -799,10 +818,11 @@ class _FolderCommands:
                 f"{n} most recently modified",
                 uri,
                 self.core.newest(uri, n, progress=tick),
+                _call("newest", uri, *_unless_default(n)),
             )
 
     @_friendly_errors
-    def oldest(self, uri: str, n: int = 20) -> None:
+    def oldest(self, uri: str, n: int = _TOP_FILES) -> None:
         """
         The n least recently modified objects.
         """
@@ -811,17 +831,22 @@ class _FolderCommands:
                 f"{n} least recently modified",
                 uri,
                 self.core.oldest(uri, n, progress=tick),
+                _call("oldest", uri, *_unless_default(n)),
             )
 
-    def _top(self, title: str, uri: str, objects: list[ObjectInfo]) -> None:
+    def _top(self, title: str, uri: str, objects: list[ObjectInfo], source: str) -> None:
+        """
+        largest()'s, newest()'s or oldest()'s report: the files in a table, and their data.
+        """
         bucket, prefix = parse_s3_uri(uri)
-        self._show(
-            [
-                _Title(f"{title} in {s3_uri(bucket, prefix)}"),
-                _objects_table("", objects, base_prefix(prefix)),
-                _Next(_file_steps(bucket, objects)),
-            ]
-        )
+        blocks = [
+            _Title(f"{title} in {s3_uri(bucket, prefix)}"),
+            _objects_table("", objects, base_prefix(prefix)),
+            _Next(_file_steps(bucket, objects)),
+        ]
+        data = files_data(objects, title=f"{title} in {s3_uri(bucket, prefix)}", uri=uri,
+                          command=source.partition("(")[0], prices=self.core.prices)
+        self._show(self._with_data(blocks, replace(data, source=source)))
 
     @_friendly_errors
     def compare(self, uri_a: str, uri_b: str, *, show: int = 20) -> None:
@@ -881,4 +906,4 @@ class _FolderCommands:
                     parse_s3_uri(r.uri_b)[1],
                 )
             )
-        self._show(blocks)
+        self._show(self._with_data(blocks, replace(compare_data(r), source=_call("compare", uri_a, uri_b))))
