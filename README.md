@@ -1934,6 +1934,8 @@ ui.how_it_works("orders-etl")                # how its Python code works, step b
 ui.how_it_works_page("orders-etl")           # the same as a page of its own, to read in a tab with room for it
 ui.download("orders-etl")                    # its package (.zip) saved in lambda-downloads/, next to the notebook
 ui.explore()                                 # all of it in a window, by clicking (below)
+data = ui.data()                             # the last report's tables as pandas DataFrames: data["runs"], data.guide()
+ui.to_excel()                                # the last report as an Excel workbook: summary, charts, tables, how to read
 ```
 
 > [!NOTE]
@@ -1942,8 +1944,8 @@ ui.explore()                                 # all of it in a window, by clickin
 > change would help, the report shows the AWS CLI command to run. The one command that does more than read is
 > `invoke()`, which runs a function once, only when you call it, with the event you give it (it needs
 > `lambda:InvokeFunction`); `next()` never runs it for you. Environment variable values never appear in a
-> report, only their names. The one file it writes is the package `download()` (or the explorer's **Download .zip**)
-> saves, on the notebook's disk.
+> report, only their names. The files it writes are the package `download()` (or the explorer's **Download .zip**)
+> saves and the workbook `to_excel()` saves, on the notebook's disk.
 
 ### Explore functions and logs by clicking
 
@@ -1988,6 +1990,38 @@ Everything is read in the background, so a click shows what's known at once and 
 of the file it only reads. `explore()` returns the window: `x.logs(search="KeyError", since="24h")`, `x.run(request_id)`
 and `x.open("report-api")` do what the clicks do, and `x.ui` is a `LambdaView` for reports in other cells.
 
+### Your reports as data: pandas and Excel
+
+Every report but the code ones ends with a folded **🐼 This report as data**: the tables it was drawn from, each
+column explained (what it holds, its unit, how to read it) with pandas lines worth running. Nothing is read from AWS
+again.
+
+```python
+ui.performance("orders-etl")
+data = ui.data()                     # ReportData: the tables behind that report
+df = data["runs"]                    # one of them: a pandas DataFrame, a row per run
+data.guide("runs")                   # what each column means and how to read it
+df[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99])
+ui.to_excel()                        # aws-analyzer-exports/lambda-performance-orders-etl.xlsx
+data = ui.data("errors", "orders-etl", since="7d")   # another report's tables, without showing it
+```
+
+`to_excel()` saves a workbook laid out like the report: a **Summary** sheet (the verdict, the numbers as cards, the
+findings, warnings first, and a link to every sheet), **Charts** (Excel's own charts, so you can edit them: run times
+over time, errors by cause, the bill by function...), **a sheet per table** (an Excel table with a filter on every
+column, numbers formatted as milliseconds, money or percentages, data bars, timeouts and failures in red) and
+**How to read** (every column in plain words). It's saved under a new name in `aws-analyzer-exports/` beside the
+notebook, never over a file, or at `path=`. It needs `openpyxl` (in the `data` extra).
+
+| Report | Tables |
+| :-- | :-- |
+| `functions()` | `functions`: a row per function, the costliest first: settings, calls, errors, error rate, run time, estimated monthly cost |
+| `function_info()` | `days`: its calls, errors, run time and concurrency a day |
+| `errors()` | `causes` (a row per cause: count, share, still failing or stopped, the run to read), `error_lines`, `calls` (CloudWatch's failed calls per hour) |
+| `performance()` | `runs` (a row per run: run time, share of the timeout, memory used, cold start, timed out), `hours` (median and p95 run time, timeouts, cold starts per hour) |
+| `runs()` | `runs` (every field, the ones its JSON logs carry too), `hours` |
+| `logs()` | `lines` (every line read), `hours` |
+
 ### Commands (`LambdaView`)
 
 Grouped the way `ui.help()` lists them.
@@ -2020,6 +2054,13 @@ Grouped the way `ui.help()` lists them.
 | :----------------------------------------------------------------------- | :---- |
 | `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)`     | **Runs the function once and shows what happened in one report**, like the console's Test button and its logs together: whether it worked, **what it returned** (the error and its traceback when it failed), its run time against the timeout, memory used, cold start and **what the call cost**, then **every line it logged during that run**, opened. `event=` is a dict, a list, JSON text (a Python dict written as text works too) or nothing (`{}`); `"name:alias"` runs that alias. The last 4 KB of its log come back with the answer at once; when the log is longer, the whole run is read from CloudWatch Logs, waiting up to `wait_logs=` seconds for its lines to arrive. Findings: a failure or timeout and what to change, memory or time close to the limit, a cold start. `dry_run=True` only checks you may invoke it. **This really runs the function**, with whatever its code writes or sends; it's called once and never retried |
 | `test(name, event=None, region=None, height=None)` | **A window to test one function**, like the console's Test page: paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one) and see it as tidy JSON in colour, the line where it breaks marked when it isn't valid; ▶ Run runs it once and draws `invoke()`'s report under the box, with everything else Lambda returned (request ID, version, X-Ray trace, headers). **Live logs** watches its log group every 5 seconds while you test, its runs newest first as they come, yours opened. Earlier runs stay in a menu. Nothing runs until you click ▶ Run |
+
+#### As data
+
+| Command | Shows |
+| :-- | :-- |
+| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames** (`ReportData`): `data["runs"]`, `data.frames()`, and `data.guide()`, what every column means. `data("performance", "etl", since="7d")` runs a report without showing it and gives its tables |
+| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a formatted sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
 
 #### Code
 

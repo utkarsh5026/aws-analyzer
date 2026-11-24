@@ -11,6 +11,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- ⚡ **Lambda: every report as pandas tables and an Excel workbook**
+  - Reports end with **🐼 This report as data**: their tables, every column explained, and pandas lines worth running.
+  - `ui.data()` gives the last report's tables as DataFrames (`data["runs"]`, `data.guide()`), with no new read from AWS.
+  - `ui.to_excel()` saves a workbook: a summary, Excel charts, a formatted sheet per table and how to read it.
+
 - ⚡ **Lambda: a window to test a function** ([#277](https://github.com/utkarsh5026/aws-analyzer/pull/277))
   - `ui.test("orders-etl")` opens it: paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one), see it as tidy JSON in colour, the broken line marked.
   - ▶ Run shows what it returned, every line it logged and everything else Lambda returned: request ID, version, X-Ray trace, headers.

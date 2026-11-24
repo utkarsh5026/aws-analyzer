@@ -155,6 +155,13 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `focus.py` (`Focus` and `FocusPart`: what an explorer window is showing, as data, pure; each explorer's `focus`
   property builds one in its own `explorer/focus.py`, a `_FocusReads` mixin, and `chips()` / `value(key)` /
   `without(key)` read it),
+  `datasets.py` (pure: a report as data, `ReportData` of `DataTable`s, each `DataColumn` with its meaning, kind
+  (`KINDS`: 'ms', 'share' 0 to 1, 'time', ...), how to read it, `bar=` and `tones=`, plus `Recipe`s (pandas lines) and
+  `DataChart`s; `.to_df()`, `data["runs"]`, `.guide()`; `nearest_rank`, `median_of`, `by_hour`), `workbook.py` (a
+  ReportData as an .xlsx through openpyxl, `_require`d: Summary, Charts (Excel's own charts), a sheet per table (an
+  Excel table, number formats by kind, data bars, coloured cells) and How to read; `cell_value` makes a value what a
+  cell holds), `dataview.py` (UI: the `_DataGuide` fold a report ends with, and `_DataCommands`, the mixin giving a
+  View `data()` and `to_excel()`; see "Reports as data" under "How the View layer works"),
   and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
@@ -231,7 +238,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
-  deletes one), the agent's memory (`AgentAnalyzer(memory=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/memory.sqlite`
+  deletes one), a View's `to_excel()` (`_kit/workbook.py`'s `write_workbook`: one .xlsx, written to `<name>.part`
+  then renamed, under a free name in `aws-analyzer-exports/` beside the notebook, or at the path given, which it may
+  replace; it never deletes one), the agent's memory (`AgentAnalyzer(memory=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/memory.sqlite`
   or the path given, holding its notes about each account; only the model's writes to `/memories/AGENTS.md` and the
   user's `forget()` / `forget_all()` change it, and nothing deletes the file), the agent's saved chats
   (`AgentAnalyzer(chats=True)`: one SQLite file, `~/.cache/aws-analyzer/agent/chats.sqlite` or the path given, holding
@@ -548,6 +557,17 @@ How the View layer works:
     in them are stressed. So write a finding as "what's wrong: why it matters. What to do (the call)", and keep
     other colons out of its first clause ("The most common error happened twice (the last 1h ago): KeyError: 'x'",
     not "The most common error, KeyError: 'x', happened twice").
+- **Reports as data** (`_kit/dataview.py`, being added service by service; Lambda first): a View that subclasses
+  `_DataCommands` before `_BaseView` shows a report with `self._show(self._with_data(blocks, data))`, where `data` is
+  a `ReportData` its service builds, pure, from what the command read (`lambda_functions/analysis/datasets.py`'s
+  `errors_data`, `performance_data`, ...), with `source=` the command's call (`_call("errors", name, ...)`).
+  `_with_data` fills the summary from the blocks (`_with_summary`: title, verdict, cards, findings), keeps it as
+  `_last_data` and appends the `_DataGuide`, after `_Next`. `data()` returns it; `data("errors", ...)` runs the command
+  with `_quiet` on (the mixin's `_show` keeps the blocks instead of drawing them) and returns what it read; `to_excel()`
+  writes it. Explorer windows draw the `_<command>_blocks` and never get the fold. A new service adds a
+  `<service>/analysis/datasets.py`, the mixin, `"🐼 As data": ("data", "to_excel")` in its `_GROUPS` and `to_excel`
+  in `_CHANGES`; every column gets a meaning, times stay aware (UTC in pandas, the reports' zone in Excel), shares are
+  0 to 1, and a table's name is its key and sheet name.
 - Every public View method is decorated with `@_friendly_errors` (`_kit/view.py`), which turns `ClientError` /
   `BotoCoreError` / data-decoding errors into a warning note instead of a traceback, and asks the View what to
   say: `_explain(code, message)` adds what an AWS error means and what to do (the windows call it too), and

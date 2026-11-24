@@ -57,7 +57,7 @@ dependencies = [
 
 # Everything else is optional: a command that needs a missing package says what to install.
 [project.optional-dependencies]
-data = ["pandas>=2", "pyarrow"]  # DataFrames, table previews, Parquet / ORC / Feather / Arrow
+data = ["pandas>=2", "pyarrow", "openpyxl"]  # DataFrames, table previews, Parquet / ORC / Feather / Arrow, to_excel()
 files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and snappy Avro
     "openpyxl",
     "xlrd",
