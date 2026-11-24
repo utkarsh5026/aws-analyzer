@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 📊 **DynamoDB: reports as pandas tables and an Excel workbook** ([#284](https://github.com/utkarsh5026/aws-analyzer/pull/284))
+  - Every report ends with **🐼 This report as data**; `ui.data()` and `ui.to_excel()` as in the other services.
+  - A page of items becomes `data["items"]`: keys first, maps as `address.city` columns, numbers as int or float.
+  - `schema()` gives each attribute's types and fill rate; `tables()` each table's cost by part.
 - 🔀 **Step Functions: reports as pandas tables and an Excel workbook, Lambda runs joined in** ([#283](https://github.com/utkarsh5026/aws-analyzer/pull/283))
   - Every report ends with **🐼 This report as data**; `sfn.data()` and `sfn.to_excel()` as in Lambda and S3.
   - `execution()`'s `lambda_runs` puts each Lambda step beside its run: the code's time, the time around it, memory and cost.

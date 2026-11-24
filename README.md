@@ -757,7 +757,16 @@ ui.schema("orders")          # what the items look like
 ui.get("orders", "USER#42", "ORDER#0017")
 ui.query("orders", "USER#42", sort=("begins_with", "ORDER#"))
 ui.explore("orders")         # all of it in a window, by clicking (below)
+data = ui.data()             # the last report's tables as pandas DataFrames, each column explained
+ui.to_excel()                # the last report as an Excel workbook: summary, charts, tables
 ```
+
+Every report ends with a folded **🐼 This report as data**, as Lambda's, S3's and Step Functions' do. A page of
+items (`scan()`, `query()`, `sample()`, `sql()`, `largest()`) becomes `data["items"]`: keys first, nested maps as
+`address.city` columns, numbers as int or float (not Decimal), with each item's `_size_bytes` and `_read_units`.
+`schema()` gives `attributes` (types, fill rate, distinct values), `key_patterns` and `size_bands`;
+`value_counts()` a row per value; `tables()` a row per table with its cost by part (storage, capacity, requests,
+backups); `table_info()` the table and its indexes with the `query()` call for each.
 
 > [!NOTE]
 > Tables are regional: `DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))` looks at another region.
@@ -780,6 +789,13 @@ ui.explore("orders", tab="items")   # or explore(), explore("orders", tab="schem
 ### Commands (`DynamoDBView`)
 
 Grouped the way `ui.help()` lists them.
+
+#### As data
+
+| Command | Shows |
+| :-- | :-- |
+| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("query", "orders", "USER#42")` reads one without showing it |
+| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
 
 #### Tables
 

@@ -522,6 +522,9 @@ def _dress_chart(shape: Any, chart: DataChart, table: DataTable) -> None:
     if x_column is not None and x_column.kind == "time":
         shape.x_axis.number_format = "mm-dd hh:mm"
         shape.x_axis.majorTimeUnit = "hours" if chart.kind != "scatter" else None
+    is_share = all(getattr(table.column(name), "kind", "") == "share" for name in chart.ys)
+    if is_share:
+        shape.y_axis.scaling.max = 1
     if chart.kind == "bar":
         shape.x_axis.scaling.orientation = "maxMin"
     if len(chart.ys) == 1:

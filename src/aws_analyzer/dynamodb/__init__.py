@@ -54,10 +54,24 @@ from .analysis import (
     key_pattern, parse_table, profile_findings, profile_items, request_cost, table_findings, table_monthly_cost,
 )
 from .analyzer import DynamoDBAnalyzer
+from .datasets import (
+    items_data,
+    plain_value,
+    schema_data,
+    table_info_data,
+    tables_data,
+    value_counts_data,
+)
 from .view import DynamoDBView
 from .explorer.window import DynamoDBExplorer, explore
 
 __all__ = [
+    "items_data",
+    "plain_value",
+    "schema_data",
+    "table_info_data",
+    "tables_data",
+    "value_counts_data",
     "DISTINCT_CAP",
     "DYNAMODB_PRICES",
     "GB",
