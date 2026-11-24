@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 📊 **DynamoDB: reports as pandas tables and an Excel workbook**
+- 📊 **DynamoDB: reports as pandas tables and an Excel workbook** ([#284](https://github.com/utkarsh5026/aws-analyzer/pull/284))
   - Every report ends with **🐼 This report as data**; `ui.data()` and `ui.to_excel()` as in the other services.
   - A page of items becomes `data["items"]`: keys first, maps as `address.city` columns, numbers as int or float.
   - `schema()` gives each attribute's types and fill rate; `tables()` each table's cost by part.
