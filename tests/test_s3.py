@@ -3730,6 +3730,107 @@ def run(capsys, fn, *args, **kwargs):
     return capsys.readouterr().out
 
 
+def overview_reports(configs):
+    """
+    What core.bucket_reports gives the overview for these configs: each with a size from CloudWatch, the first the
+    biggest.
+    """
+    reports = []
+    for i, cfg in enumerate(configs):
+        usage = s3mod.BucketMetrics(cfg.name, object_count=10, size_by_storage_type={"StandardStorage": (i + 1) * GB},
+                                    as_of=datetime(2026, 11, 23, tzinfo=timezone.utc))
+        reports.append(s3mod.BucketReport(s3mod.BucketInfo(cfg.name, region=cfg.region), cfg, usage))
+    return reports
+
+
+def overview_of(monkeypatch, ui, configs, account_block=None):
+    monkeypatch.setattr(ui.core, "bucket_reports", lambda **kwargs: overview_reports(configs))
+    monkeypatch.setattr(ui, "_account_block", lambda: account_block)
+    monkeypatch.setattr(ui.core, "account_id", lambda: "123456789012")
+
+
+def test_ui_overview_of_the_acme_buckets_leads_with_the_public_one(ui, capsys, monkeypatch):
+    overview_of(monkeypatch, ui, acme_buckets(), account_block={})
+
+    out = run(capsys, ui.overview)
+
+    lines = out.splitlines()
+    assert lines.index(">> acme-ml-data is open to anyone on the internet (!)") < lines.index(
+        "-- 4 fixes clear all 7 warnings --")
+    assert "Open to the internet: 1 bucket (!)   Need attention: 3 of 4 (!)" in out
+    assert "  1  Stop sharing acme-ml-data with the internet (!)" in out
+    assert "  2  Turn on Block Public Access for the account" in out
+    assert "clears 3 warnings in 3 buckets: acme-ml-data, acme-eu-exports, sagemaker-us-east-1-123456789012" in out
+    assert "✓ 1 bucket passes every check: acme-logs" in out
+    grid = out[out.index("-- Buckets, worst first"):out.index("✓ 1 bucket")]
+    assert [line.split()[0] for line in grid.splitlines()[3:]] == [
+        "acme-ml-data", "acme-eu-exports", "sagemaker-us-east-1-123456789012",
+    ]
+    assert "policy('acme-ml-data')" in out.split("Next:")[1]
+
+
+def test_ui_overview_of_healthy_buckets_says_so(ui, capsys, monkeypatch):
+    on = {"BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True}
+    configs = [BucketConfig(name=name, region="us-east-1", encryption="AES256", versioning="Disabled")
+               for name in ("alpha", "beta")]
+    overview_of(monkeypatch, ui, configs, account_block=on)
+
+    out = run(capsys, ui.overview)
+
+    assert ">>" not in out and "fixes" not in out
+    assert "Open to the internet: none   Need attention: none" in out
+    assert "[ok] Every bucket passes these checks (2 buckets)." in out
+    assert "-- Buckets, worst first" in out and "✓ 2 buckets pass every check: beta, alpha" in out
+
+
+def test_ui_overview_says_what_it_could_not_read(ui, capsys, monkeypatch):
+    cfg = BucketConfig(name="locked", region="us-east-1", versioning="Disabled",
+                       errors={"encryption": "AccessDenied"})
+    overview_of(monkeypatch, ui, [cfg], account_block={"A": True, "B": True})
+
+    out = run(capsys, ui.overview)
+
+    assert "Couldn't fully check: 1 bucket" in out
+    assert "No problems found, but 1 bucket couldn't be fully read" in out
+    grid_row = next(line for line in out.splitlines() if line.startswith("locked "))
+    assert grid_row.split()[2:7] == ["No", "policy", "On", "(account)", "?"]
+
+
+def test_ui_overview_with_no_buckets(ui, capsys, monkeypatch):
+    overview_of(monkeypatch, ui, [])
+
+    out = run(capsys, ui.overview)
+
+    assert "All buckets (0)" in out and "Next:" not in out and "worst first" not in out
+
+
+def test_ui_overview_grid_shows_the_worst_buckets_and_counts_the_rest(ui, capsys, monkeypatch):
+    configs = [BucketConfig(name=f"plain-{i:02}", region="us-east-1", versioning="Disabled") for i in range(30)]
+    overview_of(monkeypatch, ui, configs, account_block={})
+
+    out = run(capsys, ui.overview)
+
+    assert "and 5 more with problems" in out
+    assert "clears 30 warnings in 30 buckets: plain-29, plain-28, plain-27, +27 more" in out
+
+
+def test_ui_overview_html_draws_the_grid_and_the_fixes(core, monkeypatch):
+    shown = []
+    view = S3View(core, mode="html")
+    overview_of(monkeypatch, view, acme_buckets(), account_block={})
+    monkeypatch.setattr(view, "_show", shown.extend)
+
+    view.overview()
+    html = _render_html(shown, 50)
+
+    assert '<div class="vd bad"><b>acme-ml-data is open to anyone on the internet</b>' in html
+    assert '<div class="cgc bad" title="Statement PublicSamples lets anyone on the internet' in html
+    assert '<div class="cgc warn" title="No default encryption.">None</div>' in html
+    assert '<li class="bad"><span class="fx-n">1</span>' in html
+    assert '<details class="cgp"><summary>1 bucket passes every check: acme-logs</summary>' in html
+    assert "<script" not in html
+
+
 def test_ui_text_reports(ui, capsys, aws):
     root = f"s3://{BUCKET}/"
     assert "S3 buckets (1)" in run(capsys, ui.buckets)
@@ -3795,11 +3896,10 @@ def test_ui_cost_policy_overview_what_if_deleted(ui, capsys, aws):
     )
     assert "PublicRead" in run(capsys, ui.bucket_info, BUCKET)
     overview = run(capsys, ui.overview)
-    assert (
-        "All buckets (1)" in overview
-        and "Buckets by size" in overview
-        and "Warnings" in overview
-    )
+    assert "All buckets (1)" in overview
+    assert f">> {BUCKET} is open to anyone on the internet (!)" in overview
+    assert "3 fixes clear all 4 warnings" in overview and f"policy('{BUCKET}')" in overview
+    assert "Buckets, worst first" in overview and "Public (!)" in overview
     what_if = run(capsys, ui.what_if, root, move_after=0, to="GLACIER")
     assert (
         "move to GLACIER" in what_if

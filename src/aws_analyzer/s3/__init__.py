@@ -24,7 +24,7 @@ Quick start
     ui.tree("s3://my-bucket/data/", depth=2)        # folder sizes as a tree
     ui.find("s3://my-bucket/data/", pattern="*.parquet", min_size="100MB")
     ui.preview("s3://my-bucket/data/part-0.csv.gz")
-    ui.overview()                                   # every bucket: size, cost, security warnings
+    ui.overview()                                   # every bucket: what to fix first, size, cost
     ui.policy("my-bucket")                          # bucket policy in plain English
     ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
     ui.deleted("s3://my-bucket/data/")              # deleted files you can still restore

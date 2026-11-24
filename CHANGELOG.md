@@ -18,6 +18,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- 🪣 **S3: overview() says what to fix first** ([#280](https://github.com/utkarsh5026/aws-analyzer/pull/280))
+  - A bucket open to anyone on the internet leads the report, in red, with the statement that opens it.
+  - The warnings come as numbered fixes, each one change with its command: one account setting can clear a warning in every bucket.
+  - A grid shows each bucket's policy, Block Public Access, encryption and old versions, worst first; `bucket_checks()` and `overview_fixes()` return the same in Python.
+
 - ⚡ **Lambda: function_info() shows how its cost is worked out** ([#279](https://github.com/utkarsh5026/aws-analyzer/pull/279))
   - Under the monthly cost bar, a table gives each part's measured usage, the price used and the sum: `31.3 GB x $0.50 = $15.66`.
   - `cost_workings()` returns the same rows in Python.

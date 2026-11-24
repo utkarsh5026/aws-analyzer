@@ -161,7 +161,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/s3/readers/office.py": 12,
     "src/aws_analyzer/s3/readers/pdf.py": 12,
     "src/aws_analyzer/s3/style.py": 3,
-    "src/aws_analyzer/s3/view/buckets.py": 2,
+    "src/aws_analyzer/s3/view/buckets.py": 1,
     "src/aws_analyzer/s3/view/downloads.py": 2,
     "src/aws_analyzer/s3/view/files.py": 7,
     "src/aws_analyzer/s3/view/folders.py": 3,

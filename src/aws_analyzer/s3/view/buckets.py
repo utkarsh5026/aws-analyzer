@@ -6,19 +6,24 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Verdict
 from ..._kit.fmt import _fmt_dt, _plural, _share, _tz_label, human_age, human_money, human_size
 from ..._kit.render import _call
 from ..._kit.view import _friendly_errors
 
 from ..helpers import parse_s3_uri, s3_uri
-from ..models import BucketConfig, PolicyStatement
+from ..blocks import _CheckGrid, _Fixes, _GridRow
+from ..models import BucketChecks, BucketConfig, BucketReport, Fix, PolicyStatement
 from ..analysis.cost import cloudwatch_cost
 from ..analysis.bucket import block_label, bucket_findings, encryption_label, public_exposure, rule_actions, rule_scope
+from ..analysis.overview import (
+    BAD, CHECK_COLUMNS, OK, UNKNOWN, bucket_checks, overview_fixes, overview_verdict, state_rank,
+)
 from ..analysis.policy import explain_policy, policy_findings
 
 
@@ -49,6 +54,67 @@ def _public_access_label(cfg: BucketConfig) -> str:
 
 def _section(cfg: BucketConfig, section: str, text: str) -> str:
     return f"? ({cfg.errors[section]})" if section in cfg.errors else text
+
+
+_GRID_ROWS = 25
+
+_NO_METRICS_LISTED = 10
+
+
+@dataclass
+class _OverviewRow:
+    """
+    One bucket in the overview: its report, its checks, and its size, object count and storage cost (None
+    without CloudWatch numbers).
+    """
+
+    report: BucketReport
+    checks: BucketChecks
+    size: int | None = None
+    objects: int | None = None
+    cost: float | None = None
+
+    @property
+    def name(self) -> str:
+        return self.report.config.name
+
+
+def _worst_first(row: _OverviewRow) -> tuple[int, int]:
+    """
+    The overview's order: public buckets, then warnings, then unread, then fine; the biggest first within each.
+    """
+    return state_rank(row.checks.worst), -(row.size or 0)
+
+
+def _overview_title(rows: list[_OverviewRow], match: str | None, *, metrics: bool) -> _Title:
+    """
+    'All buckets (4)', over the objects and regions they hold and the names asked for.
+    """
+    regions = {row.report.config.region for row in rows if row.report.config.region}
+    parts = [f"names matching {match!r}"] if match else []
+    if metrics:
+        objects = sum(row.objects or 0 for row in rows)
+        parts.append(f"{objects:,} objects")
+    parts.append(_plural(len(regions), "region"))
+    return _Title(f"All buckets ({len(rows)})", " · ".join(parts) if rows else "")
+
+
+def _missing_metrics(rows: list[_OverviewRow]) -> list[Any]:
+    """
+    A note naming the buckets CloudWatch has no size for (with why, when the read failed), if any.
+    """
+    missing = []
+    for row in rows:
+        if row.size is None:
+            error = row.report.metrics_error
+            missing.append(f"{row.name} ({error})" if error else row.name)
+    if not missing:
+        return []
+    listed = ", ".join(missing[:_NO_METRICS_LISTED]) + (" …" if len(missing) > _NO_METRICS_LISTED else "")
+    return [_Note(
+        f"No CloudWatch size for {_plural(len(missing), 'bucket')}: {listed}. "
+        "Metrics arrive once a day; new or empty buckets have none."
+    )]
 
 
 class _BucketCommands:
@@ -311,164 +377,150 @@ class _BucketCommands:
         )
         self._show(blocks)
 
+    def _overview_row(
+        self, report: BucketReport, account_block: dict[str, bool] | None, account: str | None
+    ) -> _OverviewRow:
+        """
+        One bucket of the overview: its checks, and its size, object count and storage cost from CloudWatch (None
+        when CloudWatch has no numbers for it).
+        """
+        checks = bucket_checks(report.config, account_block, account=account)
+        usage = report.metrics
+        if usage is None or usage.as_of is None:
+            return _OverviewRow(report, checks)
+        costs = cloudwatch_cost(usage.size_by_storage_type, self.core.prices).values()
+        cost = sum(amount for amount in costs if amount)
+        return _OverviewRow(report, checks, size=usage.total_size, objects=usage.object_count, cost=cost)
+
+    def _overview_grid(self, rows: list[_OverviewRow], *, metrics: bool) -> _CheckGrid:
+        """
+        The grid of buckets against checks: the ones with problems first (at most _GRID_ROWS), those that pass
+        every check folded under one line.
+        """
+        total = sum(row.size or 0 for row in rows)
+
+        def grid_row(row: _OverviewRow) -> _GridRow:
+            size = human_size(row.size) if metrics else "-"
+            cost = human_money(row.cost) if metrics else "-"
+            share = _share(row.size or 0, total)
+            return _GridRow(row.name, row.report.config.region or "?", row.checks.checks, size, cost, share)
+
+        problems = [row for row in rows if row.checks.worst != OK]
+        passing = [grid_row(row) for row in rows if row.checks.worst == OK]
+        shown = [grid_row(row) for row in problems[:_GRID_ROWS]]
+        basis = f"sizes from CloudWatch, all versions; cost {self._price_basis()}" if metrics else "no sizes asked for"
+        title = f"Buckets, worst first ({basis})"
+        return _CheckGrid(CHECK_COLUMNS, shown, passing, title=title, more=len(problems) - len(shown))
+
+    @staticmethod
+    def _overview_cards(rows: list[_OverviewRow], *, metrics: bool) -> list[tuple[str, ...]]:
+        """
+        The four numbers that matter: buckets open to the internet, buckets that need attention, the space stored
+        and what it costs, and how many couldn't be fully checked when some couldn't.
+        """
+        public = sum(row.checks.worst == BAD for row in rows)
+        attention = sum(bool(row.checks.problems) for row in rows)
+        unread = sum(row.checks.worst == UNKNOWN for row in rows)
+        size = sum(row.size or 0 for row in rows)
+        cost = sum(row.cost or 0.0 for row in rows)
+        cards: list[tuple[str, ...]] = [
+            ("Open to the internet", _plural(public, "bucket"), "bad") if public else ("Open to the internet", "none"),
+            ("Need attention", f"{attention:,} of {len(rows):,}", "warn") if attention else ("Need attention", "none"),
+            ("Stored", human_size(size) if metrics else "-"),
+            ("Est. cost / month", human_money(cost) if metrics else "-"),
+        ]
+        if unread:
+            cards.append(("Couldn't fully check", _plural(unread, "bucket")))
+        return cards
+
+    @staticmethod
+    def _overview_fixes(fixes: list[Fix], rows: list[_OverviewRow]) -> list[Any]:
+        """
+        The changes that clear the warnings, or a note that there's nothing to fix (and what couldn't be read).
+        """
+        if fixes:
+            warnings = sum(fix.clears for fix in fixes)
+            cleared = "the warning" if warnings == 1 else f"all {warnings:,} warnings"
+            fixes_word = "1 fix clears" if len(fixes) == 1 else f"{len(fixes)} fixes clear"
+            title = f"{fixes_word} {cleared}"
+            return [_Fixes(fixes, title=title)]
+        if not rows:
+            return []
+        unread = [row.name for row in rows if row.checks.worst == UNKNOWN]
+        if unread:
+            return [_Note(
+                f"No problems found, but {_plural(len(unread), 'bucket')} couldn't be fully read: a ? in the grid "
+                "names the setting and the error, usually a missing s3:Get* permission (README lists them).",
+                "warn",
+            )]
+        return [_Note(f"Every bucket passes these checks ({_plural(len(rows), 'bucket')}).", "ok")]
+
+    def _overview_settings(self, rows: list[_OverviewRow], account_block: dict[str, bool] | None) -> _Table:
+        """
+        Each bucket's settings as they are, folded: what the grid's words come from.
+        """
+        table_rows = []
+        for row in rows:
+            cfg = row.report.config
+            enabled_rules = sum(rule.get("Status") == "Enabled" for rule in cfg.lifecycle_rules)
+            table_rows.append([
+                row.name,
+                cfg.region or "?",
+                "-" if row.objects is None else f"{row.objects:,}",
+                human_size(row.size),
+                human_money(row.cost),
+                _section(cfg, "versioning", cfg.versioning or "?"),
+                encryption_label(cfg),
+                public_exposure(cfg, account_block),
+                _section(cfg, "lifecycle", str(enabled_rules)),
+            ])
+        headers = ["Bucket", "Region", "Objects", "Size", "Est. $/month", "Versioning", "Encryption",
+                   "Public access", "Lifecycle rules"]
+        return _Table(headers, table_rows, title="Every setting per bucket", max_rows=0, collapsed=True)
+
+    @staticmethod
+    def _overview_next(rows: list[_OverviewRow], fixes: list[Fix]) -> list[Any]:
+        """
+        The fix to look at first (its own call, or bucket_info on its first bucket), and what's in the biggest bucket.
+        """
+        if not rows:
+            return []
+        steps = []
+        first_look = next((fix for fix in fixes if not fix.call.startswith("aws ")), None)
+        if first_look:
+            steps.append((first_look.call, "the first thing to change, in detail"))
+        elif fixes:
+            steps.append((_call("bucket_info", fixes[0].buckets[0]), "why it's flagged, and what to change"))
+        biggest = max(rows, key=lambda row: row.size or 0).name
+        steps.append((_call("summary", s3_uri(biggest)), "what's in the biggest bucket"))
+        return [_Next(steps)]
+
     @_friendly_errors
     def overview(self, match: str | None = None, *, metrics: bool = True) -> None:
         """
-        Every bucket in one table: size, estimated cost, versioning, encryption, public access,
-        lifecycle and warnings. match='sagemaker-*' checks only matching bucket names.
+        Every bucket at a glance: what to fix first, the changes that clear its warnings, and a grid of each
+        bucket's policy, Block Public Access, encryption and old versions with its size and estimated cost.
+        match='sagemaker-*' checks only matching bucket names.
         """
         with self._progress("Checking buckets", unit="buckets") as tick:
-            reports = self.core.bucket_reports(
-                match=match, metrics=metrics, progress=tick
-            )
+            reports = self.core.bucket_reports(match=match, metrics=metrics, progress=tick)
         account_block, account = self._account_block(), self.core.account_id()
-        rows: list[
-            tuple[int, list[Any]]
-        ] = []  # cells are text, or _Tone for a coloured status
-        warnings: list[list[str]] = []
-        objects = size = 0
-        cost = 0.0
-        missing_metrics: list[str] = []
-        for report in reports:
-            cfg, usage = report.config, report.metrics
-            found = bucket_findings(cfg, account_block) + policy_findings(
-                explain_policy(cfg.policy, account)
-            )
-            bucket_warnings = [message for level, message in found if level == "warn"]
-            warnings += [[cfg.name, message] for message in bucket_warnings]
-            bucket_size = bucket_cost = bucket_objects = None
-            if usage is not None and usage.as_of is not None:
-                bucket_size, bucket_objects = usage.total_size, usage.object_count
-                bucket_cost = sum(
-                    c
-                    for c in cloudwatch_cost(
-                        usage.size_by_storage_type, self.core.prices
-                    ).values()
-                    if c
-                )
-                size, cost, objects = (
-                    size + bucket_size,
-                    cost + bucket_cost,
-                    objects + (bucket_objects or 0),
-                )
-            elif metrics:
-                missing_metrics.append(
-                    f"{cfg.name} ({report.metrics_error})"
-                    if report.metrics_error
-                    else cfg.name
-                )
-            enabled_rules = sum(
-                rule.get("Status") == "Enabled" for rule in cfg.lifecycle_rules
-            )
-            exposure, encryption = public_exposure(cfg, account_block), encryption_label(cfg)
-            exposed = {"blocked": "ok", "not blocked": "warn"}.get(
-                exposure, "bad" if "PUBLIC" in exposure else ""
-            )
-            rows.append(
-                (
-                    -1 if bucket_size is None else bucket_size,
-                    [
-                        cfg.name,
-                        cfg.region or "?",
-                        "-" if bucket_objects is None else f"{bucket_objects:,}",
-                        human_size(bucket_size),
-                        human_money(bucket_cost),
-                        _section(cfg, "versioning", cfg.versioning or "?"),
-                        _Tone(encryption, "warn" if encryption == "none" else ""),
-                        _Tone(exposure, exposed),
-                        _section(cfg, "lifecycle", str(enabled_rules)),
-                        _Tone(
-                            str(len(bucket_warnings)), "warn" if bucket_warnings else ""
-                        ),
-                    ],
-                )
-            )
-        rows.sort(key=lambda row: row[0], reverse=True)
-        blocks: list[Any] = [
-            _Title(
-                f"All buckets ({len(reports)})",
-                f"names matching {match!r}" if match else "",
-            ),
-            _Cards(
-                [
-                    ("Buckets", f"{len(reports):,}"),
-                    ("Objects", f"{objects:,}" if metrics else "-"),
-                    ("Total size", human_size(size if metrics else None)),
-                    ("Est. cost / month", human_money(cost if metrics else None)),
-                    (
-                        "Buckets with warnings",
-                        f"{len({bucket for bucket, _ in warnings}):,}",
-                        "warn" if warnings else "ok",
-                    ),
-                    (
-                        "Account block public access",
-                        "?" if account_block is None else block_label(account_block),
-                    ),
-                    (
-                        "Regions",
-                        f"{len({r.config.region for r in reports if r.config.region}):,}",
-                    ),
-                ]
-            ),
-        ]
-        if missing_metrics:
-            blocks.append(
-                _Note(
-                    f"No CloudWatch size for {_plural(len(missing_metrics), 'bucket')}: "
-                    f"{', '.join(missing_metrics[:10])}{' …' if len(missing_metrics) > 10 else ''}. "
-                    "Metrics arrive once a day; new or empty buckets have none."
-                )
-            )
-        blocks.append(
-            _Table(
-                [
-                    "Bucket",
-                    "Region",
-                    "Objects",
-                    "Size",
-                    "Est. $/month",
-                    "Versioning",
-                    "Encryption",
-                    "Public access",
-                    "Lifecycle rules",
-                    "Warnings",
-                ],
-                [row for _, row in rows],
-                title=f"Buckets by size (CloudWatch, all versions; cost {self._price_basis()})",
-                bars=[_share(max(s, 0), size) for s, _ in rows],
-                bar_label="% of size",
-                max_rows=0,
-            )
+        rows = sorted(
+            (self._overview_row(report, account_block, account) for report in reports), key=_worst_first
         )
-        if warnings:
-            blocks.append(
-                _Table(
-                    ["Bucket", "Warning"],
-                    warnings,
-                    prose_cols=(1,),
-                    title="Warnings (bucket_info(name) shows every finding for one bucket)",
-                )
-            )
+        checks = [row.checks for row in rows]
+        fixes = overview_fixes(checks, account=account)
+        verdict = overview_verdict(checks)
+
+        blocks: list[Any] = [_overview_title(rows, match, metrics=metrics)]
+        if verdict:
+            blocks.append(_Verdict(verdict.headline, verdict.detail, verdict.tone))
+        blocks.append(_Cards(self._overview_cards(rows, metrics=metrics)))
+        blocks += _missing_metrics(rows) if metrics else []
+        blocks += self._overview_fixes(fixes, rows)
         if rows:
-            flagged = Counter(bucket for bucket, _ in warnings).most_common(1)
-            biggest = rows[0][1][0]
-            look = flagged[0][0] if flagged else biggest
-            blocks.append(
-                _Next(
-                    [
-                        (
-                            _call("bucket_info", look),
-                            "why it's flagged, and what to change"
-                            if flagged
-                            else "its settings, policy and cost",
-                        ),
-                        (
-                            _call("summary", s3_uri(biggest)),
-                            "what's in the biggest bucket",
-                        ),
-                    ]
-                )
-            )
+            blocks += [self._overview_grid(rows, metrics=metrics), self._overview_settings(rows, account_block)]
+        blocks += self._overview_next(rows, fixes)
         self._show(blocks)
 
     @_friendly_errors

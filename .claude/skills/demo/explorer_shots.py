@@ -105,7 +105,7 @@ FIGURES = [
         Step("act:More ▾", "Largest files", where=".s3x-actions"),
         Step("act:Largest files", "Largest 20 objects"),
     )),
-    Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
+    Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets, worst first"),)),
     Figure("explorer-recent", RECENT, "Your buckets"),
     Figure("explorer-changes", CHANGES, "Since your last visit"),
     Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'

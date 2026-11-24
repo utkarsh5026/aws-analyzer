@@ -35,7 +35,7 @@ _STATE_ORDER = (BAD, WARN, UNKNOWN, OK)
 
 _UNREAD = "?"
 
-_BLOCK_ALL = "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+_BLOCK_ALL = "'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'"
 
 _SSE_S3 = json.dumps(
     {"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}, separators=(",", ":")
@@ -102,7 +102,7 @@ def _encryption_check(cfg: BucketConfig) -> Check:
         return Check(ENCRYPTION, UNKNOWN, _UNREAD, reason=f"Couldn't read encryption ({cfg.errors['encryption']}).")
     if not cfg.encryption:
         return Check(ENCRYPTION, WARN, "None", fix=ENCRYPT, warnings=1, reason="No default encryption.")
-    return Check(ENCRYPTION, OK, encryption_label(cfg))
+    return Check(ENCRYPTION, OK, encryption_label(cfg).removesuffix(" + bucket key"))
 
 
 def _versions_check(cfg: BucketConfig) -> Check:
@@ -138,8 +138,7 @@ def bucket_checks(
     return BucketChecks(bucket=cfg.name, region=cfg.region, checks=checks)
 
 
-def _fix_words(key: str, buckets: list[str], reasons: list[str], *, account: str | None,
-               shares_publicly: bool) -> tuple[str, str, str]:
+def _fix_words(key: str, buckets: list[str], *, account: str | None, shares_publicly: bool) -> tuple[str, str, str]:
     """
     The fix's title, why it matters and the call or command that does it, for the buckets it covers (the first one
     named in the command when it takes one bucket).
@@ -147,7 +146,11 @@ def _fix_words(key: str, buckets: list[str], reasons: list[str], *, account: str
     first = buckets[0]
     for_each = f" The command is for {first}: run it for each." if len(buckets) > 1 else ""
     if key.startswith(POLICY_FIX):
-        return f"Stop sharing {first} with the internet", reasons[0], _call("policy", first)
+        why = (
+            "Remove or narrow the statement that lets everyone in, or move what it shares to a bucket meant to be "
+            "public."
+        )
+        return f"Stop sharing {first} with the internet", why, _call("policy", first)
     if key == ACCOUNT_BLOCK:
         caution = (
             " It also stops what a bucket's policy shares with everyone, so check first that nothing relies on that."
@@ -190,8 +193,7 @@ def overview_fixes(buckets: list[BucketChecks], *, account: str | None = None) -
     fixes = []
     for key, found in grouped.items():
         names = [bucket for bucket, _ in found]
-        reasons = [check.reason for _, check in found]
-        title, why, call = _fix_words(key, names, reasons, account=account, shares_publicly=shares_publicly)
+        title, why, call = _fix_words(key, names, account=account, shares_publicly=shares_publicly)
         severity = BAD if any(check.state == BAD for _, check in found) else WARN
         clears = sum(check.warnings for _, check in found)
         fixes.append(Fix(key=key, title=title, why=why, call=call, severity=severity, buckets=names, clears=clears))

@@ -266,12 +266,12 @@ The buttons above the right pane change with where you are: a summary of a folde
 | Anywhere | **↗ S3 console** | Opens this folder, or your list of buckets, in the AWS console in a new tab, to change what the explorer only reads (`x.console_url` is the link) |
 | In a folder | **More ▾** | A second row of reports on the folder ([see below](#more)). It stays open as you move, until **Fewer ▴** |
 | At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
-| On your buckets | **🪣 Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
+| On your buckets | **🪣 Every bucket** | What to fix first, then each bucket's risks, size and monthly cost (the [`overview`](s3.md#buckets) report) |
 
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="579" loading=lazy }
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report: a red line saying acme-ml-data is open to anyone on the internet, cards for buckets open to the internet, buckets that need attention, the space stored and its monthly cost, and the first of the fixes](images/explorer-buckets-light.webp#only-light){ width="984" height="579" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket and S3 console buttons over the Every bucket report: a red line saying acme-ml-data is open to anyone on the internet, cards for buckets open to the internet, buckets that need attention, the space stored and its monthly cost, and the first of the fixes](images/explorer-buckets-dark.webp#only-dark){ width="984" height="579" loading=lazy }
 /// caption
-`S3Explorer()` starts from your buckets; **🪣 Every bucket** compares their size, cost and security settings.
+`S3Explorer()` starts from your buckets; **🪣 Every bucket** says what to fix first, then each bucket's risks, size and cost.
 ///
 
 ### More reports on a folder { #more }
