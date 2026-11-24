@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone
+from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone, _Verdict
 from ..._kit.charts import _Meter, _Part
 from ..._kit.fmt import _count, _fmt_dt, _plural, _tz_label, human_money
 
@@ -22,7 +22,6 @@ from ..analysis.performance import (
     performance_verdict, run_cost, run_groups, run_stats, run_time_bins, short_stream, slice_counts, slowdown, time_slices,
     timed_out,
 )
-from .causes import _Verdict
 from .run_charts import _ColdWarm, _RunHistogram, _RunMark, _RunTimeline, _Spark
 
 _SLOWEST_SHOWN = 10

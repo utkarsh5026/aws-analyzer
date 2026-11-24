@@ -24,7 +24,7 @@ Quick start
     ui.tree("s3://my-bucket/data/", depth=2)        # folder sizes as a tree
     ui.find("s3://my-bucket/data/", pattern="*.parquet", min_size="100MB")
     ui.preview("s3://my-bucket/data/part-0.csv.gz")
-    ui.overview()                                   # every bucket: size, cost, security warnings
+    ui.overview()                                   # every bucket: what to fix first, size, cost
     ui.policy("my-bucket")                          # bucket policy in plain English
     ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
     ui.deleted("s3://my-bucket/data/")              # deleted files you can still restore
@@ -51,11 +51,11 @@ from .prices import (
     S3_TRANSITION_PRICES, TRANSITION_ORDER,
 )
 from .models import (
-    ArchiveEntry, ArchiveListing, BucketConfig, BucketInfo, BucketMetrics, BucketReport, CompareResult, DeletedFiles,
-    DeletedObject, Document, DownloadsCleanup, DownloadsFolder, DuplicateFolder, DuplicateGroup, DuplicateReport,
-    FileDetailsReport, FolderDownload, FolderTree, LifecycleImpact, Listing, LocalDownload, MultipartUpload,
-    ObjectInfo, ObjectVersion, PdfLine, PdfPage, Picture, PolicyStatement, PrefixSummary, Preview, VersionStats,
-    ZipDownload, objects_to_df,
+    ArchiveEntry, ArchiveListing, BucketChecks, BucketConfig, BucketInfo, BucketMetrics, BucketReport, Check,
+    CompareResult, DeletedFiles, DeletedObject, Document, DownloadsCleanup, DownloadsFolder, DuplicateFolder,
+    DuplicateGroup, DuplicateReport, FileDetailsReport, Fix, FolderDownload, FolderTree, LifecycleImpact, Listing,
+    LocalDownload, MultipartUpload, ObjectInfo, ObjectVersion, OverviewVerdict, PdfLine, PdfPage, Picture,
+    PolicyStatement, PrefixSummary, Preview, VersionStats, ZipDownload, objects_to_df,
 )
 from .readers.formats import detect_format, sniff_format
 from .readers.avro import parse_avro
@@ -73,6 +73,7 @@ from .analysis.duplicates import (
 )
 from .analysis.downloads import DOWNLOADS, ZipPlan, downloads_findings, zip_checks, zip_findings
 from .analysis.lifecycle import simulate_lifecycle_objects
+from .analysis.overview import CHECK_COLUMNS, bucket_checks, overview_fixes, overview_verdict
 from .analysis.policy import explain_policy, policy_findings
 from .analysis.notifications import EventNotification, parse_notifications
 from .analysis.documents import pdf_flow, pdf_furniture
@@ -86,6 +87,7 @@ __all__ = [
     "AGE_BANDS",
     "ARCHIVE_CLASSES",
     "ARCHIVE_INDEX_BYTES",
+    "CHECK_COLUMNS",
     "DETAILS_BLOCK",
     "DETAILS_FILE_MAX",
     "DOWNLOADS",
@@ -104,10 +106,12 @@ __all__ = [
     "TRANSITION_ORDER",
     "ArchiveEntry",
     "ArchiveListing",
+    "BucketChecks",
     "BucketConfig",
     "BucketInfo",
     "BucketMetrics",
     "BucketReport",
+    "Check",
     "CompareResult",
     "DeletedFiles",
     "DeletedObject",
@@ -120,6 +124,7 @@ __all__ = [
     "EventNotification",
     "FileDetails",
     "FileDetailsReport",
+    "Fix",
     "FolderDownload",
     "FolderTree",
     "LifecycleImpact",
@@ -128,6 +133,7 @@ __all__ = [
     "MultipartUpload",
     "ObjectInfo",
     "ObjectVersion",
+    "OverviewVerdict",
     "PdfLine",
     "PdfPage",
     "Picture",
@@ -144,6 +150,7 @@ __all__ = [
     "ZipPlan",
     "base_prefix",
     "block_label",
+    "bucket_checks",
     "bucket_findings",
     "build_folder_tree",
     "cloudwatch_cost",
@@ -168,6 +175,8 @@ __all__ = [
     "object_monthly_cost",
     "objects_to_df",
     "office_kind",
+    "overview_fixes",
+    "overview_verdict",
     "parse_avro",
     "parse_docx",
     "parse_notifications",

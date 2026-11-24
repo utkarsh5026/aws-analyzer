@@ -1,22 +1,23 @@
 """
-The render blocks only S3's reports draw (frames, pictures, links, media, PDF pages, Word documents),
-each with its HTML and text drawings.
+The render blocks only S3's reports draw (frames, pictures, links, media, PDF pages, Word documents, and the
+overview's fixes and grid of checks), each with its HTML and text drawings.
 """
 
 from __future__ import annotations
 
 import base64
 import os
+import textwrap
 from dataclasses import dataclass
 from typing import Any
 
-from .._kit.blocks import _Report, _draws
+from .._kit.blocks import _TEXT, _Report, _Table, _draws
 from .._kit.deps import _require
 from .._kit.fmt import human_size
 from .._kit.render import _prose
 from .._kit.text import _esc
 
-from .models import Picture
+from .models import Check, Fix, Picture
 from .readers.media import _image_info
 from .analysis.documents import _LIST_NUMBER
 
@@ -254,3 +255,171 @@ def _media_html(block: _Media, report: _Report) -> str:
 @_draws(_Media, "text")
 def _media_lines(block: _Media, report: _Report) -> list[str]:
     return [f"({block.kind}: open this link in a browser to play it)", block.url]
+
+
+_FIX_BUCKETS = 3
+
+_FIX_TEXT_WIDTH = 96
+
+_TEXT_MARKS = {"bad": " (!)", "warn": " (!)"}
+
+_GRID_COLUMNS = "minmax(150px,1.6fr) repeat({checks},minmax(84px,1fr)) minmax(120px,1fr)"
+
+
+@dataclass
+class _Fixes:
+    """
+    The overview's warnings as the changes that clear them, numbered, most urgent first: each with why, the call or
+    command to copy, how many warnings it clears and the buckets it covers.
+    """
+
+    fixes: list[Fix]
+    title: str = ""
+
+
+@dataclass
+class _GridRow:
+    """
+    One bucket in the overview's grid: its checks (cells), its size and cost as text, and its share of the
+    account's size (0..1) for the bar.
+    """
+
+    bucket: str
+    region: str
+    checks: list[Check]
+    size: str
+    cost: str
+    share: float = 0.0
+
+
+@dataclass
+class _CheckGrid:
+    """
+    Buckets against checks: a coloured cell per check (bad, warn, unknown or ok, the reason on hover), worst
+    buckets first, with each one's size and cost. `passing` (every check ok) fold under one line; `more` counts
+    buckets with problems left out.
+    """
+
+    columns: tuple[str, ...]
+    rows: list[_GridRow]
+    passing: list[_GridRow]
+    title: str = ""
+    more: int = 0
+
+
+def _bucket_list(buckets: list[str]) -> list[str]:
+    """
+    The first _FIX_BUCKETS bucket names, and '+N more' for the rest.
+    """
+    shown = buckets[:_FIX_BUCKETS]
+    left = len(buckets) - len(shown)
+    return shown + ([f"+{left} more"] if left else [])
+
+
+def _clears(fix: Fix) -> str:
+    """
+    'clears 3 warnings in 3 buckets'.
+    """
+    warnings = f"{fix.clears} warning{'' if fix.clears == 1 else 's'}"
+    buckets = f"{len(fix.buckets)} bucket{'' if len(fix.buckets) == 1 else 's'}"
+    return f"clears {warnings} in {buckets}"
+
+
+def _fix_html(number: int, fix: Fix) -> str:
+    names = "".join(f'<span class="fx-k">{_esc(name)}</span>' for name in _bucket_list(fix.buckets))
+    return (
+        f'<li class="{_esc(fix.severity)}"><span class="fx-n">{number}</span>'
+        f'<div><b class="fx-t">{_esc(fix.title)}</b><div class="fx-w">{_prose(fix.why)}</div>'
+        f'<div class="fx-c">{_prose(fix.call)}</div></div>'
+        f'<div class="fx-s">{_esc(_clears(fix))}<br>{names}</div></li>'
+    )
+
+
+@_draws(_Fixes, "html")
+def _fixes_html(block: _Fixes, report: _Report) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    items = "".join(_fix_html(number, fix) for number, fix in enumerate(block.fixes, 1))
+    return f'<div class="fx">{title}<ol>{items}</ol></div>'
+
+
+@_draws(_Fixes, "text")
+def _fixes_lines(block: _Fixes, report: _Report) -> list[str]:
+    lines = ["", f"-- {block.title} --"] if block.title else [""]
+    for number, fix in enumerate(block.fixes, 1):
+        mark = " (!)" if fix.severity == "bad" else ""
+        lines.append(f"{number:>3}  {fix.title}{mark}")
+        lines.append(f"     {_clears(fix)}: {', '.join(_bucket_list(fix.buckets))}")
+        lines += textwrap.wrap(fix.why, _FIX_TEXT_WIDTH, initial_indent="     ", subsequent_indent="     ",
+                               break_long_words=False, break_on_hyphens=False)
+        lines.append(f"     -> {fix.call}")
+    return lines
+
+
+def _share_bar(share: float) -> str:
+    """
+    A bucket's share of the account's size as a bar: at least a sliver when it holds anything.
+    """
+    percent = max(share * 100, 1.0) if share > 0 else 0.0
+    return f'<span class="bar"><b style="width:{percent:.1f}%"></b></span>'
+
+
+def _grid_cells(row: _GridRow) -> str:
+    cells = [f'<div class="cgb"><b title="{_esc(row.bucket)}">{_esc(row.bucket)}</b><span>{_esc(row.region)}</span></div>']
+    for check in row.checks:
+        tip = f' title="{_esc(check.reason)}"' if check.reason else ""
+        cells.append(f'<div class="cgc {_esc(check.state)}"{tip}>{_esc(check.word)}</div>')
+    cells.append(f'<div class="cgs">{_share_bar(row.share)}<span>{_esc(row.size)} · {_esc(row.cost)}</span></div>')
+    return "".join(cells)
+
+
+def _grid_html(columns: tuple[str, ...], rows: list[_GridRow], *, headers: bool) -> str:
+    template = _GRID_COLUMNS.format(checks=len(columns))
+    head = ""
+    if headers:
+        names = ["Bucket", *columns, "Size · $/month"]
+        head = "".join(f'<div class="cgh">{_esc(name)}</div>' for name in names)
+    body = "".join(_grid_cells(row) for row in rows)
+    return f'<div class="cg" style="grid-template-columns:{template}">{head}{body}</div>'
+
+
+def _passing_line(passing: list[_GridRow]) -> str:
+    """
+    '1 bucket passes every check: acme-logs'.
+    """
+    names = ", ".join(_bucket_list([row.bucket for row in passing]))
+    verb = "passes" if len(passing) == 1 else "pass"
+    return f"{len(passing)} bucket{'' if len(passing) == 1 else 's'} {verb} every check: {names}"
+
+
+@_draws(_CheckGrid, "html")
+def _check_grid_html(block: _CheckGrid, report: _Report) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    grid = _grid_html(block.columns, block.rows, headers=True) if block.rows else ""
+    more = f'<div class="more">and {block.more:,} more with problems</div>' if block.more else ""
+    passing = ""
+    if block.passing:
+        folded = _grid_html(block.columns, block.passing, headers=not block.rows)
+        passing = f'<details class="cgp"><summary>{_esc(_passing_line(block.passing))}</summary>{folded}</details>'
+    return f"{title}{grid}{more}{passing}"
+
+
+def _grid_table(block: _CheckGrid) -> _Table:
+    """
+    The grid as a plain table for text mode, a problem marked (!).
+    """
+    rows = []
+    for row in block.rows:
+        words = [f"{check.word}{_TEXT_MARKS.get(check.state, '')}" for check in row.checks]
+        rows.append([row.bucket, row.region, *words, row.size, row.cost])
+    headers = ["Bucket", "Region", *block.columns, "Size", "$/month"]
+    return _Table(headers, rows, title=block.title, max_rows=0, sortable=False)
+
+
+@_draws(_CheckGrid, "text")
+def _check_grid_lines(block: _CheckGrid, report: _Report) -> list[str]:
+    lines = _TEXT[_Table](_grid_table(block), report) if block.rows else ["", f"-- {block.title} --"]
+    if block.more:
+        lines.append(f"and {block.more:,} more with problems")
+    if block.passing:
+        lines.append(f"✓ {_passing_line(block.passing)}")
+    return lines

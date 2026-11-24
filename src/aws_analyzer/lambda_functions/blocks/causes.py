@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from ..._kit.blocks import _Report, _Table, _draws
+from ..._kit.blocks import _Report, _Table, _Verdict, _draws
 from ..._kit.fmt import _fmt_dt, _in_zone, _tz_label, _utcnow, human_age
 from ..._kit.render import _prose
 from ..._kit.text import _clip, _esc
@@ -41,30 +41,6 @@ _SPARKS = " ▁▂▃▄▅▆▇█"
 _SMALLEST_BAR = 2.0
 
 _STATE_TONES = {STOPPED: "ok", NEW: "bad"}
-
-
-
-@dataclass
-class _Verdict:
-    """
-    The report's answer in one sentence, the numbers behind it under it, in a band coloured by `tone`.
-    """
-
-    headline: str
-    detail: str = ""
-    tone: str = "bad"
-
-
-@_draws(_Verdict, "html")
-def _verdict_html(block: _Verdict, report: _Report) -> str:
-    detail = f'<span class="vd-d">{_prose(block.detail)}</span>' if block.detail else ""
-    return f'<div class="vd {_esc(block.tone)}"><b>{_esc(block.headline)}</b>{detail}</div>'
-
-
-@_draws(_Verdict, "text")
-def _verdict_lines(block: _Verdict, report: _Report) -> list[str]:
-    mark = " (!)" if block.tone == "bad" else ""
-    return ["", f">> {block.headline}{mark}"] + ([f"   {block.detail}"] if block.detail else [])
 
 
 

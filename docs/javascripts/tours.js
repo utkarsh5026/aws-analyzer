@@ -67,7 +67,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 12.9,
+    "dur": 14.5,
     "chapter": "Every bucket",
     "step": 1,
     "steps": 6,
@@ -77,7 +77,7 @@ window.AA_TOURS = {
      {
       "img": "overview",
       "w": 1476,
-      "h": 1481
+      "h": 1711
      }
     ],
     "captions": [
@@ -87,11 +87,11 @@ window.AA_TOURS = {
      ],
      [
       4.08,
-      "Four buckets, 4.3 TB, about <b>$86.50 a month</b>, and three with something to fix."
+      "The public bucket leads, then <b>four fixes clear all seven warnings</b>."
      ],
      [
-      9.3,
-      "Sizes come from CloudWatch's daily storage metrics, so no bucket is listed."
+      10.9,
+      "Four buckets, 4.3 TB, about <b>$86.50 a month</b>, from CloudWatch: no bucket is listed."
      ]
     ]
    },

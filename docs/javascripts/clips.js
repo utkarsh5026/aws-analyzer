@@ -7,7 +7,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.8,
+    "dur": 12.4,
     "chapter": "Amazon S3",
     "label": "Amazon S3",
     "code": "ui.overview()",
@@ -15,7 +15,7 @@ window.AA_CLIPS = {
      {
       "img": "overview",
       "w": 1476,
-      "h": 1481
+      "h": 1711
      }
     ],
     "captions": [
@@ -3086,7 +3086,7 @@ window.AA_CLIPS = {
  },
  "explorer-buckets": {
   "notebook": "acme-ml-data.ipynb",
-  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): S3Explorer() starts from your buckets; 🪣 Every bucket compares their size, cost and security settings.",
+  "summary": "x = S3Explorer(\"s3://acme-ml-data/\"): S3Explorer() starts from your buckets; 🪣 Every bucket says what to fix first, then each bucket's risks, size and cost.",
   "video": "",
   "scenes": [
    {
@@ -3109,7 +3109,7 @@ window.AA_CLIPS = {
      ],
      [
       3.33,
-      "Starts from your buckets; <b>🪣 Every bucket</b> compares their size, cost and security settings."
+      "Starts from your buckets; <b>🪣 Every bucket</b> says what to fix first, then each bucket's risks, size and cost."
      ]
     ]
    }

@@ -34,10 +34,10 @@ checked.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.webp">
-  <img src="docs/images/overview-light.webp" alt="ui.overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, a list of warnings, and the commands to run next">
+  <img src="docs/images/overview-light.webp" alt="ui.overview(): a red line saying acme-ml-data is open to anyone on the internet, four cards, four numbered fixes that clear all seven warnings, and a grid of buckets against their policy, Block Public Access, encryption and old versions, with each one's size and cost, and the commands to run next">
 </picture>
 
-<p align="center"><sub><code>ui.overview()</code>: every bucket's size, estimated monthly cost and security settings, what's wrong with each, and what to run next.</sub></p>
+<p align="center"><sub><code>ui.overview()</code>: what to fix first, the changes that clear every warning, and each bucket's risks, size and estimated monthly cost.</sub></p>
 
 ## Why aws-analyzer
 
@@ -148,7 +148,7 @@ from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
-ui.overview()          # every bucket: size, monthly cost, security warnings
+ui.overview()          # every bucket: what to fix first, size, monthly cost
 s3 = ui.core           # the analyzer behind the view: returns data instead of a report
 ```
 
@@ -332,7 +332,7 @@ ui = S3View()                # uses the notebook's execution role
 ui.help()                    # every command, grouped by task
 ui.help("summary")           # one command in full
 
-ui.overview()                # every bucket: size, monthly cost, security warnings
+ui.overview()                # every bucket: what to fix first, size, monthly cost
 ui.bucket_info("my-bucket")
 ui.summary("s3://my-bucket/data/")
 ui.preview("s3://my-bucket/data/part-0.parquet")
@@ -438,7 +438,7 @@ Grouped the way `ui.help()` lists them.
 | Command                | Shows                                                                                                                                                                                                                                                                                                                                 |
 | :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `buckets()`            | All buckets with region, creation date, age                                                                                                                                                                                                                                                                                           |
-| `overview(match=None)` | Every bucket in one table: objects, size, estimated monthly cost, versioning, encryption, public access, lifecycle rules, and a list of warnings. `match="sagemaker-*"` checks only matching names                                                                                                                                    |
+| `overview(match=None)` | Every bucket at a glance: a public bucket first, the fixes that clear its warnings (one account setting can cover many buckets), and a grid of each bucket's policy, Block Public Access, encryption and old versions, with its size and estimated monthly cost. `match="sagemaker-*"` checks only matching names |
 | `bucket_info(bucket)`  | Versioning, encryption, public access (bucket and account level), bucket policy and lifecycle rules in plain English, ownership, object lock, replication, logging, inventory, tags, **plus CloudWatch object count, size and estimated monthly cost per storage type** (instant, even for billion-object buckets), and flagged risks |
 | `policy(bucket)`       | The bucket policy in plain English (who can do what, on which files, under which conditions), its risks (public access, other accounts, no HTTPS requirement) and the raw JSON                                                                                                                                                        |
 
@@ -554,7 +554,7 @@ s3.clean_downloads(older_than="30d").freed          # DownloadsCleanup; dry_run=
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
 `make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
-`bucket_findings`, `explain_policy`, `policy_findings`, `parse_notifications`, `object_monthly_cost`, `cloudwatch_cost`,
+`bucket_findings`, `bucket_checks`, `overview_fixes`, `overview_verdict`, `explain_policy`, `policy_findings`, `parse_notifications`, `object_monthly_cost`, `cloudwatch_cost`,
 the duplicate finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
 have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
 file parsers `parse_docx` (`pictures=True` for its pictures), `parse_pptx`, `parse_pdf` (`layout=True` keeps where

@@ -29,8 +29,8 @@ from collections import Counter
 from typing import Any, Callable, NamedTuple
 
 from .blocks import (
-    _CELLS, _HTML, _TEXT, _Cards, _Findings, _Next, _Note, _Report, _Table, _Tabs, _Text, _Title, _Tone, _drawer,
-    _draws,
+    _CELLS, _HTML, _TEXT, _Cards, _Findings, _Next, _Note, _Report, _Table, _Tabs, _Text, _Title, _Tone, _Verdict,
+    _drawer, _draws,
 )
 from .fmt import _plural, file_extension
 from .text import _clip, _esc, _pad, _text_bar, _width
@@ -156,6 +156,12 @@ _BASE_RULES = """\
 .{root} .fi .dt{grid-column:2;margin:2px 0 0;opacity:.9}
 .{root} .fi ul.dt{padding-left:16px}
 .{root} .fi ul.dt li{margin:1px 0}
+.{root} .vd{margin:0 0 14px;padding:12px 16px;border:1px solid rgba(127,127,127,.3);border-left:4px solid #ef4444;border-radius:8px;background:rgba(239,68,68,.05);max-width:980px;line-height:1.5}
+.{root} .vd.ok{border-left-color:#10b981;background:rgba(16,185,129,.05)}
+.{root} .vd.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.07)}
+.{root} .vd b{display:block;font-size:15px;font-weight:650}
+.{root} .vd.bad b{color:#b91c1c}
+.{root} .vd .vd-d{display:block;font-size:12.5px;opacity:.75;margin-top:2px}
 .{root} .m{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .{root} code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
 .{root} code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
@@ -650,6 +656,12 @@ def _findings_html(block: _Findings, report: _Report) -> str:
     return f'<div class="fd">{head}{"".join(_finding_html(level, msg) for level, msg in items)}</div>'
 
 
+@_draws(_Verdict, "html")
+def _verdict_html(block: _Verdict, report: _Report) -> str:
+    detail = f'<span class="vd-d">{_prose(block.detail)}</span>' if block.detail else ""
+    return f'<div class="vd {_esc(block.tone)}"><b>{_esc(block.headline)}</b>{detail}</div>'
+
+
 @_draws(_Next, "html")
 def _next_html(block: _Next, report: _Report) -> str:
     """
@@ -954,6 +966,12 @@ def _findings_lines(block: _Findings, report: _Report) -> list[str]:
             _MARKS.get(level, _INFO_MARK) + message for level, message in items
         ]
     return ["[ok] " + block.empty] if block.empty else []
+
+
+@_draws(_Verdict, "text")
+def _verdict_lines(block: _Verdict, report: _Report) -> list[str]:
+    mark = " (!)" if block.tone == "bad" else ""
+    return ["", f">> {block.headline}{mark}"] + ([f"   {block.detail}"] if block.detail else [])
 
 
 @_draws(_Next, "text")

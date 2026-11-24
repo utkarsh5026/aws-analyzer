@@ -12,6 +12,27 @@ from ..._kit.fmt import human_size
 from ..models import BucketConfig
 
 
+def block_public_access_off(cfg: BucketConfig, account_block: dict[str, bool] | None) -> bool:
+    """
+    Whether Block Public Access is fully on neither for the bucket nor for the account (account_block: {} = not
+    set, None = unknown). False when the bucket's setting couldn't be read: that's not known.
+    """
+    account_on = bool(account_block) and all(account_block.values())
+    bucket_on = bool(cfg.public_access_block) and all(cfg.public_access_block.values())
+    return not account_on and not bucket_on and "public_access_block" not in cfg.errors
+
+
+def versions_kept_forever(cfg: BucketConfig) -> bool:
+    """
+    Whether versioning is on and no enabled lifecycle rule expires noncurrent versions, so every overwritten or
+    deleted object is kept and billed. False when the lifecycle rules couldn't be read.
+    """
+    if "lifecycle" in cfg.errors or cfg.versioning != "Enabled":
+        return False
+    enabled = [rule for rule in cfg.lifecycle_rules if rule.get("Status") == "Enabled"]
+    return not any("NoncurrentVersionExpiration" in rule for rule in enabled)
+
+
 def bucket_findings(
     cfg: BucketConfig, account_block: dict[str, bool] | None = None
 ) -> list[tuple[str, str]]:
@@ -20,13 +41,7 @@ def bucket_findings(
     account_block: the account-level Block Public Access settings ({} = not set, None = unknown).
     """
     found: list[tuple[str, str]] = []
-    pab = cfg.public_access_block
-    account_on = bool(account_block) and all(account_block.values())
-    if (
-        not account_on
-        and "public_access_block" not in cfg.errors
-        and not (pab and all(pab.values()))
-    ):
+    if block_public_access_off(cfg, account_block):
         where = (
             "this bucket or the account"
             if account_block is not None
@@ -37,20 +52,16 @@ def bucket_findings(
         found.append(("warn", "The bucket policy grants public access."))
     if "encryption" not in cfg.errors and not cfg.encryption:
         found.append(("warn", "No default encryption configured."))
-    if "lifecycle" not in cfg.errors:
-        enabled = [
-            rule for rule in cfg.lifecycle_rules if rule.get("Status") == "Enabled"
-        ]
-        if cfg.versioning == "Enabled" and not any(
-            "NoncurrentVersionExpiration" in rule for rule in enabled
-        ):
-            found.append(
-                (
-                    "warn",
-                    "Versioning is on but no lifecycle rule expires noncurrent versions: every "
-                    "overwritten or deleted object is kept (and billed) forever.",
-                )
+    if versions_kept_forever(cfg):
+        found.append(
+            (
+                "warn",
+                "Versioning is on but no lifecycle rule expires noncurrent versions: every "
+                "overwritten or deleted object is kept (and billed) forever.",
             )
+        )
+    if "lifecycle" not in cfg.errors:
+        enabled = [rule for rule in cfg.lifecycle_rules if rule.get("Status") == "Enabled"]
         if not any("AbortIncompleteMultipartUpload" in rule for rule in enabled):
             found.append(
                 (
