@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-11-24
+
 ### Added
 
 - 📊 **DynamoDB: reports as pandas tables and an Excel workbook** ([#284](https://github.com/utkarsh5026/aws-analyzer/pull/284))
@@ -1538,7 +1540,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.61.0...v0.62.0
 [0.61.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.60.0...v0.61.0
