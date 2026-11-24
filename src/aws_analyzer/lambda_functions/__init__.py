@@ -124,6 +124,7 @@ from .analysis.codemap.graph import CodeGraph, GraphEdge, GraphNode, code_graph
 from .analyzer import LambdaAnalyzer
 from .view import LambdaView
 from .explorer.window import LambdaExplorer, explore
+from .explorer.tester import LambdaTester
 
 __all__ = [
     "Activity",
@@ -208,6 +209,7 @@ __all__ = [
     "Invocation",
     "LambdaAnalyzer",
     "LambdaExplorer",
+    "LambdaTester",
     "LambdaView",
     "Layer",
     "LibraryChange",

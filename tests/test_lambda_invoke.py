@@ -17,6 +17,7 @@ from botocore.validate import ParamValidator
 
 from aws_analyzer.lambda_functions import LAMBDA_PRICES, Function, LambdaAnalyzer, LambdaView
 from aws_analyzer.lambda_functions.explorer.window import LambdaExplorer
+from aws_analyzer.lambda_functions.explorer.tester import LambdaTester
 from aws_analyzer.lambda_functions import invoke as invoke_mod
 from aws_analyzer.lambda_functions.analysis.invoke import (
     EVENT_SAMPLES, TAIL_STREAM, Invoked, call_cost, check_event, code_lines, decode_tail, event_payload,
@@ -442,22 +443,22 @@ def test_the_report_shows_everything_else(fn_role, capsys):
     assert "Everything else Lambda returned" in out and "1-6743a1b2-aaaa" in out and "X-Ray trace header" in out
 
 
-def open_test_tab(core):
-    return LambdaExplorer("orders-api", tab="test", core=core, mode="widgets")
+def open_tester(core, event=None):
+    return LambdaTester("orders-api", event, core=core, mode="widgets")
 
 
-def test_the_test_tab_checks_formats_and_runs(fn_role):
-    old = seed_old_run()
+def test_the_test_window_checks_formats_and_runs(fn_role):
     calls = []
-    x = open_test_tab(analyzer({"statusCode": 200, "body": {"saved": 42}}, calls=calls))
-    assert x._tab == "test" and x.test_box.value == "{}" and "Test orders-api" in plain_text(x.test_head.value)
+    x = open_tester(analyzer({"statusCode": 200, "body": {"saved": 42}}, calls=calls))
+    assert x.function.name == "orders-api" and x.test_box.value == "{}" and not x.test_run_button.disabled
+    assert "Test orders-api" in plain_text(x.title.value) and "3 s timeout" in plain_text(x.title.value)
     x.test_box.value = '{\n  "order_id": 42,\n  "x": \n}'
     assert x.test_run_button.disabled and "line 4, column 1" in plain_text(x.test_said.value)
     assert '<tr class="bad"><td class="ln">4</td>' in x.test_preview.value
     x.test_box.value = '{"order_id":42,"items":[{"sku":"A-1"}]}'
     assert not x.test_run_button.disabled and '<span class="jk">' in x.test_preview.value
-    next(b for b in x.pages["test"].children[-1].children[0].children[1].children
-         if getattr(b, "description", "") == "{ } Format").click()
+    format_button = next(b for b in x.tool_row.children if getattr(b, "description", "") == "{ } Format")
+    format_button.click()
     assert x.test_box.value.startswith('{\n  "order_id": 42,\n  "items": [')
     x.sample_pick.value = "SQS message"
     assert json.loads(x.test_box.value)["Records"][0]["eventSource"] == "aws:sqs" and x.sample_pick.value == ""
@@ -468,35 +469,52 @@ def test_the_test_tab_checks_formats_and_runs(fn_role):
     assert "orders-api ran" in result and "Everything else Lambda returned" in result and '"saved"' in result
     assert "loading order 42" in result and "1-6743a1b2-0123456789abcdef01234567" in result
     assert plain_text(x.status.value) == "orders-api ran in 312 ms · what it returned and logged is below"
-    assert x.test_runs_pick.layout.display == "" and x.test_logs_button.layout.display == ""
-    x.test_logs_button.click()
-    assert x._tab == "logs" and [run.request_id for run in x._visible_runs()] == [RID, old]
-    assert "you ran" in plain_text(x._run_rows[0].face.value)
+    assert x.test_runs_pick.layout.display == "" and len(x.runs) == 1
 
 
-def test_the_test_tab_keeps_earlier_runs_and_the_box(fn_role):
-    seed_old_run()
-    x = open_test_tab(analyzer(FAILURE, tail=FAILED_TAIL, error="Unhandled"))
-    x.test_box.value = '{"order_id": 1}'
-    x.test_run_button.click()
+def test_the_test_window_keeps_earlier_runs(fn_role):
+    x = open_tester(analyzer(FAILURE, tail=FAILED_TAIL, error="Unhandled"), {"order_id": 1})
+    assert json.loads(x.test_box.value) == {"order_id": 1} and x.test_box.value.startswith('{\n  "order_id"')
+    x.run()
     assert plain_text(x.status.value).startswith("orders-api failed with KeyError in 12 ms")
     assert "KeyError" in plain_text(x.test_result.value)
-    x.test_box.value = '{"order_id": 2}'
-    x.test_run_button.click()
+    x.run({"order_id": 2})
     assert [label for label, _ in x.test_runs_pick.options][0].startswith("Run 2 · ✕ failed")
     x.test_runs_pick.value = 0
     assert json.loads(x.test_box.value) == {"order_id": 1}
-    x._show_tab("overview")
-    x._show_tab("test")
-    assert json.loads(x.test_box.value) == {"order_id": 1}
 
 
-def test_x_test_puts_an_event_in_the_box(fn_role):
-    seed_old_run()
+def test_the_test_window_runs_an_alias_and_dry_runs(fn_role):
+    boto3.client("lambda", region_name=REGION).create_alias(
+        FunctionName="orders-api", Name="live", FunctionVersion="$LATEST")
     calls = []
-    x = LambdaExplorer("orders-api", core=analyzer({}, calls=calls), mode="widgets")
-    x.test(event={"order_id": 9, "lines": [1]})
-    assert x._tab == "test" and json.loads(x.test_box.value) == {"order_id": 9, "lines": [1]}
-    assert x.test_box.value.startswith('{\n  "order_id": 9') and calls == []
-    x.test(event='{"pasted": true}')
-    assert json.loads(x.test_box.value) == {"pasted": True}
+    x = LambdaTester("orders-api:live", core=analyzer({}, calls=calls), mode="widgets")
+    x.dry_button.click()
+    assert calls[0]["InvocationType"] == "DryRun" and calls[0]["Qualifier"] == "live"
+    assert "nothing ran" in plain_text(x.status.value)
+    x.event("{order_id: }")
+    assert "looks like JSON but isn't" in plain_text(x.status.value) and calls[1:] == []
+
+
+def test_the_test_window_says_a_denied_invoke(fn_role):
+    def denied(region):
+        client = invoking({})["lambda"](region)
+
+        def invoke(**params):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform "
+                                         "lambda:InvokeFunction"}}, "Invoke")
+        client._handlers["invoke"] = invoke
+        return client
+
+    x = open_tester(LambdaAnalyzer(region=REGION, clients={"lambda": denied}))
+    x.test_run_button.click()
+    assert "lambda:InvokeFunction" in plain_text(x.test_said.value) and not x.test_run_button.disabled
+
+
+def test_ui_test_opens_the_window(fn_role, capsys):
+    ui = LambdaView(analyzer({}), mode="html", progress="off")
+    ui.test("orders-api", {"order_id": 9})
+    assert isinstance(ui.tester, LambdaTester) and json.loads(ui.tester.test_box.value) == {"order_id": 9}
+    text = LambdaView(analyzer({}), mode="text", progress="off")
+    out = run(capsys, text.test, "orders-api")
+    assert "invoke('orders-api', event)" in out and text.tester is None

@@ -380,7 +380,23 @@ ui.invoke("orders-etl:prod", '{"order_id": 42}')  # an alias, with the event as 
 ui.invoke("orders-etl", dry_run=True)             # only check that you may invoke it
 ```
 
-The report opens with whether it ran or failed, then cards for its run time against the timeout, the memory it used, a cold start and what the call cost (and what a million like it would). Findings say what to change: a failure with the error that made it, a timeout with the command that raises it, memory close to running out with the command that adds more. Then what it returned (a failure as its traceback), its log lines as one run, opened, and the event it was sent, folded. Next steps run it again or open the run in `logs()`.
+The report opens with whether it ran or failed, then cards for its run time against the timeout, the memory it used, a cold start and what the call cost (and what a million like it would). Findings say what to change: a failure with the error that made it, a timeout with the command that raises it, memory close to running out with the command that adds more. Then what it returned (a failure as its traceback), its log lines as one run, opened, **everything else Lambda returned** (the request ID, the version that ran, the X-Ray trace, billed and start-up times, the lines Lambda and its extensions wrote, the response headers) and the event it was sent, folded. Next steps run it again or open the run in `logs()`.
+
+### A window to test it { #test }
+
+`test()` opens a window on one function, like the Lambda console's Test page: paste an event, check it, run it, read everything that came back.
+{ .gist }
+
+```python
+ui.test("orders-etl")                        # an empty event to start from
+ui.test("orders-etl", {"order_id": 42})      # ...or with this one in the box
+```
+
+Paste the event on the left, or pick one under **Start from…**, shaped like what S3, SQS, SNS, API Gateway or EventBridge send. On the right is the event as it will be sent: indented, in colour, with line numbers. JSON that breaks is shown as typed, with the broken line marked and a caret under the column, and **▶ Run** stays off until it's fixed. **{ } Format** tidies the box and **Compact** puts it on one line. **▶ Run** draws the same report as `invoke()` under the box, and earlier runs stay in a menu on the right.
+
+??? more "From code"
+
+    `ui.tester` is the window: `ui.tester.run()` runs it as ▶ Run does, `ui.tester.run({"order_id": 7})` with another event, `ui.tester.event(...)` only puts an event in the box, and `ui.tester.runs` holds every call made (oldest first). `LambdaTester("orders-etl")` opens one without a View. Nothing runs until you ask.
 
 !!! tip "Worth knowing"
 

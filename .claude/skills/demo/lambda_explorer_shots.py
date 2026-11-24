@@ -43,11 +43,11 @@ import shots  # noqa: E402  (the image size, where images go, and set_height)
 from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLab plumbing)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
+TESTER = ("lambda-tester-broken", "lambda-tester", "lambda-tester-extras")
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
            "lambda-explorer-recent", "lambda-explorer-live", "lambda-explorer-live-follow", "lambda-explorer-changed",
-           "lambda-explorer-changes", "lambda-explorer-invoke", "lambda-explorer-test-broken", "lambda-explorer-test",
-           "lambda-explorer-test-extras")
+           "lambda-explorer-changes", "lambda-explorer-invoke", *TESTER)
 LIVE = ("lambda-explorer-live", "lambda-explorer-live-follow")
 SECOND_WINDOW = ("lambda-explorer-changed", "lambda-explorer-changes")
 
@@ -135,6 +135,33 @@ def open_second_window(page: Any) -> Any:
                            timeout=90_000)
     window.scroll_into_view_if_needed()
     return window
+
+
+def shoot_tester(page: Any, shot: Any) -> None:
+    """
+    Opens ui.test('orders-etl') in a cell of its own, types an event with a broken line, then a good one, formats it
+    and runs it (demo.py answers Invoke), and scrolls to what else Lambda returned.
+    """
+    run_cell(page, 'lambda_functions.LambdaView(core).test("orders-etl", height=620)')
+    page.wait_for_function("[...document.querySelectorAll('.lmx-app .lmx-status')].some(el => "
+                           "el.innerText.includes('Paste an event'))", timeout=90_000)
+    window = page.locator(".lmx-app:has(.lmx-tst)")
+    window.scroll_into_view_if_needed()
+    box = window.locator(".lmx-tst-grid textarea")
+    box.fill('{\n  "key": "batch-042.json",\n  "customer_id": "c-1042",\n  "items": [{"sku": "A-1", "qty": }]\n}')
+    time.sleep(0.4)
+    page.mouse.move(1, 1)
+    shot("lambda-tester-broken", window)
+    box.fill('{"key":"batch-042.json","customer_id":"c-1042","items":[{"sku":"A-1","qty":2}]}')
+    window.locator(".lmx-tst-tools button", has_text="Format").click()
+    window.locator(".lmx-tst-foot button.lmx-invoke").click()
+    page.wait_for_function("[...document.querySelectorAll('.lmx-app .lmx-status')].some(el => "
+                           "el.innerText.includes('what it returned and logged'))", timeout=60_000)
+    page.mouse.move(1, 1)
+    shot("lambda-tester", window)
+    window.locator(".lmx-scroll :text('Everything else Lambda returned')").first.scroll_into_view_if_needed()
+    time.sleep(0.4)
+    shot("lambda-tester-extras", window)
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:
@@ -241,24 +268,6 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         settled()
         page.mouse.move(1, 1)
         shot("lambda-explorer-invoke")
-    if any(name.startswith("lambda-explorer-test") for name in wanted):
-        tab("Test")
-        settled()
-        box = page.locator(".lmx-app .lmx-tst-grid textarea")
-        box.fill('{\n  "key": "batch-042.json",\n  "customer_id": "c-1042",\n  "items": [{"sku": "A-1", "qty": }]\n}')
-        time.sleep(0.4)
-        page.mouse.move(1, 1)
-        shot("lambda-explorer-test-broken")
-        box.fill('{"key":"batch-042.json","customer_id":"c-1042","items":[{"sku":"A-1","qty":2}]}')
-        page.locator(".lmx-app .lmx-tst-tools button", has_text="Format").click()
-        page.locator(".lmx-app .lmx-tst-foot button.lmx-invoke").click()
-        page.wait_for_selector(".lmx-app .lmx-tst-foot button:has-text('Open this run')", timeout=30_000)
-        settled()
-        page.mouse.move(1, 1)
-        shot("lambda-explorer-test")
-        page.locator(".lmx-app .lmx-scroll :text('Everything else Lambda returned')").first.scroll_into_view_if_needed()
-        time.sleep(0.4)
-        shot("lambda-explorer-test-extras")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON
         page.locator(".lmx-app .lmx-trig-b").first.click()
         page.locator(".lmx-app .lmx-pop input").fill("report")
@@ -299,6 +308,8 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
                                timeout=60_000)
         page.mouse.move(1, 1)
         shot("lambda-explorer-changes", later)
+    if set(TESTER) & set(wanted):
+        shoot_tester(page, shot)
     return taken
 
 
