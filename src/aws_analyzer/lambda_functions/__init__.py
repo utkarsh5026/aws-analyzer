@@ -76,7 +76,13 @@ from .models import (
 from .analysis.functions import (
     masked_config, parse_event_source_mapping, parse_function, parse_policy, parse_version, runtime_status,
 )
-from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
+from .analysis.cost import (
+    CostWorking,
+    cost_workings,
+    function_monthly_cost,
+    log_storage_monthly_cost,
+    provisioned_monthly_cost,
+)
 from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, change_effect, function_findings, secret_like
 from .analysis.errors import (
@@ -253,6 +259,8 @@ __all__ = [
     "function_changes",
     "function_look",
     "function_monthly_cost",
+    "cost_workings",
+    "CostWorking",
     "failing_frame",
     "time_slots",
     "CauseAdvice",

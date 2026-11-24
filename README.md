@@ -2068,7 +2068,7 @@ lam.diff("orders-etl", 3).files                        # FileChange per changed 
 
 The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
 already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
-`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect`, `cause_search`, `code_frames`, `failing_frame`, `parse_report`, `split_runs`, `run_timeline`, `slow_cutoff`, `run_console_url`, `run_insights_query`
+`function_monthly_cost`, `cost_workings`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect`, `cause_search`, `code_frames`, `failing_frame`, `parse_report`, `split_runs`, `run_timeline`, `slow_cutoff`, `run_console_url`, `run_insights_query`
 (log lines grouped into runs), `run_table`, `run_fields`, `logged_event`, `parse_query`, `looks_like_query` (runs as
 rows of fields, and the query language `runs(where=)` reads), `runs_findings`, `line_level`, `percentile`, `suggest_memory`, `run_stats`, `run_cost`,
 `performance_verdict`, `run_groups` and `slowdown` (runs by version or around the last change), `time_slices`, `run_time_bins`,

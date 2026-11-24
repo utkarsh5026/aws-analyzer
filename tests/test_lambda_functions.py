@@ -108,6 +108,7 @@ from aws_analyzer.lambda_functions import (
     error_findings,
     find_symbol_in,
     function_findings,
+    cost_workings,
     function_monthly_cost,
     failing_frame,
     group_errors,
@@ -425,6 +426,20 @@ def test_findings_from_cloudwatch_numbers():
     triggered = FunctionDetail(fn(), triggers=[Trigger("SQS queue", "orders")])
     assert function_findings(fn(), metrics(invocations=0), triggered, now=NOW)[0][1] == (
         "It wasn't called in the last 30 days.")
+
+
+def test_cost_workings_show_how_each_part_is_worked_out():
+    m = FunctionMetrics("f", days=10, invocations=1_000_000, duration_sum=100_000_000, log_bytes=2 * 1024**3)
+    held = [ProvisionedConcurrency("live", 2, 2, 2, "READY")]
+    workings = cost_workings(fn(memory=1024), m, held)
+    assert {w.part: w.cost for w in workings} == function_monthly_cost(fn(memory=1024), m, held)
+    by_part = {w.part: w for w in workings}
+    assert by_part["requests"].price == "$0.20 per million calls"
+    assert "1,000,000 calls in 10 days" in by_part["requests"].measured
+    assert by_part["compute"].price == "$0.0000166667 per GB-second (x86_64)"
+    assert "x 1 GB x $0.0000166667" in by_part["compute"].sum
+    assert "2 copies kept ready" in by_part["provisioned"].measured
+    assert cost_workings(fn(), None) == []
 
 
 def test_cost_findings():
@@ -2718,12 +2733,14 @@ def test_function_info_report(ui, capsys):
 def test_function_info_shows_its_charts_wiring_and_cost_before_its_settings(ui, capsys):
     out = run(capsys, ui.function_info, "etl-nightly")
     titles = ["-- Findings", "-- Calls a day, the failed part in red", "-- Failed calls a day, on their own scale",
-              "-- Run time a day", "-- How it's wired", "-- Estimated monthly cost:", "-- What it runs --",
+              "-- Run time a day", "-- How it's wired", "-- Estimated monthly cost:", "-- How it's worked out",
+              "-- What it runs --",
               "-- What it can reach --", "-- The last 30 days (CloudWatch"]
     places = [out.index(title) for title in titles]
     assert places == sorted(places)
     assert "Called by: SQS queue orders" in out and "Logs: /aws/lambda/etl-nightly" in out
     assert "From us-east-1 list prices; usage over the last 30 days scaled to a month" in out
+    assert "per GB-second (x86_64)" in out and "per million calls" in out
 
 
 def test_function_info_cards_say_when_calls_were_throttled(ui, capsys):

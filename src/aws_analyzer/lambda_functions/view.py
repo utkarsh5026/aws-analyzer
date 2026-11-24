@@ -40,7 +40,7 @@ from .models import (
 )
 from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
-from .analysis.cost import function_monthly_cost, provisioned_monthly_cost
+from .analysis.cost import cost_workings, function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _errors_level, _times, account_findings, function_findings
 from .analysis.errors import (
     _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings, window_findings,
@@ -61,7 +61,7 @@ from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
 from .blocks.walk import _Walk
-from .blocks.info import cost_split, day_charts, wiring_block
+from .blocks.info import cost_split, cost_workings_table, day_charts, wiring_block
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
@@ -759,6 +759,8 @@ class LambdaView(_BaseView):
             basis = (f"{self._price_basis()}; usage over the last {days} days scaled to a month" if m is not None
                      else self._price_basis())
             sections["cost"].append(cost_split(cost, _PARTS, basis=basis))
+            workings = cost_workings(fn, m, detail.provisioned, detail.log_group, prices=prices)
+            sections["cost"].append(cost_workings_table(workings, _PARTS))
         if fn.tags:
             sections["tags"].append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())],
                                            title="Tags", collapsed=True, max_rows=0))
