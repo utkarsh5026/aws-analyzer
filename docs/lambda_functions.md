@@ -394,9 +394,11 @@ ui.test("orders-etl", {"order_id": 42})      # ...or with this one in the box
 
 Paste the event on the left, or pick one under **Start from…**, shaped like what S3, SQS, SNS, API Gateway or EventBridge send. On the right is the event as it will be sent: indented, in colour, with line numbers. JSON that breaks is shown as typed, with the broken line marked and a caret under the column, and **▶ Run** stays off until it's fixed. **{ } Format** tidies the box and **Compact** puts it on one line. **▶ Run** draws the same report as `invoke()` under the box, and earlier runs stay in a menu on the right.
 
+**Live logs**, beside the result, watches the function's log group while you test: every 5 seconds, its runs newest first as they come, yours opened. That's where a long run's every line shows once CloudWatch has it, and what happens after: a retry, the function run again by what it wrote to a queue, other callers' runs. ▶ Run starts watching; **Watch logs** turns it on or off, and it stops by itself after 15 minutes.
+
 ??? more "From code"
 
-    `ui.tester` is the window: `ui.tester.run()` runs it as ▶ Run does, `ui.tester.run({"order_id": 7})` with another event, `ui.tester.event(...)` only puts an event in the box, and `ui.tester.runs` holds every call made (oldest first). `LambdaTester("orders-etl")` opens one without a View. Nothing runs until you ask.
+    `ui.tester` is the window: `ui.tester.run()` runs it as ▶ Run does, `ui.tester.run({"order_id": 7})` with another event, `ui.tester.event(...)` only puts an event in the box, `ui.tester.watch()` / `ui.tester.watch(False)` watches the logs or stops, `ui.tester.runs` holds every call made (oldest first) and `ui.tester.watched` the log lines read. `LambdaTester("orders-etl")` opens one without a View. Nothing runs until you ask.
 
 !!! tip "Worth knowing"
 

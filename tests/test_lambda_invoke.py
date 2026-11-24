@@ -518,3 +518,76 @@ def test_ui_test_opens_the_window(fn_role, capsys):
     text = LambdaView(analyzer({}), mode="text", progress="off")
     out = run(capsys, text.test, "orders-api")
     assert "invoke('orders-api', event)" in out and text.tester is None
+
+
+def seed_run(request_id, *, ago, message="working"):
+    now = datetime.now(timezone.utc) - ago
+    put_logs("/aws/lambda/orders-api", stream=f"2026/11/24/[$LATEST]{request_id[:8]}", events=[
+        (now, f"START RequestId: {request_id} Version: $LATEST"),
+        (now + timedelta(milliseconds=1), f"[INFO]\t{now:%Y-%m-%dT%H:%M:%S}.001Z\t{request_id}\t{message}"),
+        (now + timedelta(milliseconds=5), f"END RequestId: {request_id}"),
+        (now + timedelta(milliseconds=6), f"REPORT RequestId: {request_id}\tDuration: 5.00 ms\tBilled Duration: 5 ms\t"
+                                          "Memory Size: 128 MB\tMax Memory Used: 40 MB"),
+    ])
+
+
+def test_the_test_window_watches_the_logs(fn_role):
+    old = seed_old_run()
+    x = open_tester(analyzer({}))
+    assert x.logs_view.layout.display == "none" and "not watching" in plain_text(x.watch_said.value)
+    x.watch()
+    assert x._watching and x.logs_view.layout.display == "" and x.test_result.layout.display == "none"
+    assert x.logs_chip.description == "Live logs · 1" and old[:8] in plain_text(x.logs_view.value)
+    assert "watching every 5 s" in plain_text(x.watch_said.value)
+    later = "1a7e0000-0000-4000-8000-000000000001"
+    seed_run(later, ago=timedelta(seconds=30), message="a later call")
+    x._look_now()
+    assert x.logs_chip.description == "Live logs · 2" and "1 new run" in plain_text(x.watch_said.value)
+    assert "a later call" in plain_text(x.logs_view.value)
+    x._look_now()
+    assert len(x.watched) == 7
+    x.watch(False)
+    assert not x._watching and x.watch_button.description == "Watch logs"
+
+
+def test_running_starts_watching_and_marks_your_run(fn_role):
+    seed_old_run()
+    x = open_tester(analyzer({}))
+    x.run({"order_id": 1})
+    assert x._watching and x._view == "result" and x.logs_chip.description == "Live logs · 1"
+    seed_run(RID, ago=timedelta(seconds=1), message="your own run")
+    x._look_now()
+    x.logs_chip.click()
+    assert x.shown["logs"][0].opened == {next(r.key for r in x.shown["logs"][0].runs if r.request_id == RID)}
+    assert "your runs are open" in plain_text(x.logs_view.value)
+
+
+def test_watching_a_function_that_never_logged(fn_role):
+    x = open_tester(analyzer({}))
+    x.watch()
+    assert x._watching and "Nothing logged in the last 10 minutes yet" in plain_text(x.logs_view.value)
+
+
+def test_the_watch_loop_runs_in_the_background(fn_role, monkeypatch):
+    from aws_analyzer.lambda_functions.explorer import tester_logs
+    import asyncio
+
+    monkeypatch.setattr(tester_logs, "_WATCH_SECONDS", 0.05)
+    seed_old_run()
+
+    async def scenario():
+        x = open_tester(analyzer({}))
+        await asyncio.gather(*x._tasks.values())
+        x.watch()
+        await asyncio.sleep(0.3)
+        seed_run("1a7e0000-0000-4000-8000-000000000002", ago=timedelta(seconds=1), message="came in live")
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if "came in live" in plain_text(x.logs_view.value):
+                break
+        assert "came in live" in plain_text(x.logs_view.value)
+        x.watch(False)
+        await asyncio.sleep(0.1)
+        assert "watch" not in x._tasks
+
+    asyncio.run(scenario())

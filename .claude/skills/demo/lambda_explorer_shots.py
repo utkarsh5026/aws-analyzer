@@ -43,7 +43,7 @@ import shots  # noqa: E402  (the image size, where images go, and set_height)
 from chat_shots import api, chrome, free_port  # noqa: E402  (the same JupyterLab plumbing)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-TESTER = ("lambda-tester-broken", "lambda-tester", "lambda-tester-extras")
+TESTER = ("lambda-tester-broken", "lambda-tester", "lambda-tester-extras", "lambda-tester-logs")
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
            "lambda-explorer-recent", "lambda-explorer-live", "lambda-explorer-live-follow", "lambda-explorer-changed",
@@ -162,6 +162,17 @@ def shoot_tester(page: Any, shot: Any) -> None:
     window.locator(".lmx-scroll :text('Everything else Lambda returned')").first.scroll_into_view_if_needed()
     time.sleep(0.4)
     shot("lambda-tester-extras", window)
+    run_cell(page, 'exec(open("live_seed.py").read())')
+    time.sleep(2)
+    window.scroll_into_view_if_needed()
+    window.locator(".lmx-tst-views button", has_text="Live logs").click()
+    window.locator(".lmx-tst-views").scroll_into_view_if_needed()
+    page.wait_for_function("[...document.querySelectorAll('.lmx-app .lmx-tst-views')].some(el => "
+                           "/Live logs · [2-9]/.test(el.innerText))", timeout=60_000)
+    window.locator(".lmx-tst-views").evaluate("el => el.scrollIntoView({block: 'start'})")
+    time.sleep(0.6)
+    page.mouse.move(1, 1)
+    shot("lambda-tester-logs", window)
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:

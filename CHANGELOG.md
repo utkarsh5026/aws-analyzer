@@ -14,7 +14,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - ⚡ **Lambda: a window to test a function** ([#277](https://github.com/utkarsh5026/aws-analyzer/pull/277))
   - `ui.test("orders-etl")` opens it: paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one), see it as tidy JSON in colour, the broken line marked.
   - ▶ Run shows what it returned, every line it logged and everything else Lambda returned: request ID, version, X-Ray trace, headers.
-  - `ui.invoke()` reports show those extras too.
+  - Live logs watches its log group every 5 seconds while you test, runs newest first, yours opened; `ui.invoke()` shows the extras too.
 
 ### Changed
 

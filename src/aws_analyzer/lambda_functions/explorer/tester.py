@@ -32,6 +32,7 @@ from ..style import _CSS, _ROOT, _render_html
 from ..view import LambdaView
 from .frame import _EXPLORER_CSS
 from .function import _LOGO
+from .tester_logs import _WATCH_SECONDS, _TesterLogs
 
 _EDITOR_LINES = 12
 
@@ -78,6 +79,9 @@ white-space:nowrap}
 .lmx-app.lmx-app button.lmx-invoke{flex:0 0 auto;height:32px;padding:0 14px;border-radius:999px;font-weight:700;
 border-color:var(--lx-accent);color:var(--lx-accent)}
 .lmx-app .lmx-tst-foot{align-items:center;gap:8px}
+.lmx-app .lmx-tst-views{align-items:center;gap:6px;margin:4px 0 8px;padding-top:8px;border-top:1px solid var(--lx-line)}
+.lmx-app .lmx-tst-ws{font-size:12px;opacity:.65;padding:0 6px}
+.lmx-app .lmx-tst-ws.on{opacity:1;color:var(--lx-ink-ok)}
 .lmx-app .lmx-tst-foot .ic{font-size:12px}
 .lmx-app .lmx-tst-foot .ic.ok{color:var(--lx-ink-ok)}
 .lmx-app .lmx-tst-foot .ic.bad{color:var(--lx-ink-bad)}
@@ -155,7 +159,7 @@ def _same_words(text: str) -> str:
     return text
 
 
-class LambdaTester(_Explorer):
+class LambdaTester(_TesterLogs, _Explorer):
     """
     The test window for one function, like the Lambda console's Test page: paste an event on the left (or pick one
     under Start from…, shaped like what S3, SQS, SNS, API Gateway or EventBridge send), and see it on the right as it
@@ -166,11 +170,15 @@ class LambdaTester(_Explorer):
     X-Ray trace, billed and start-up times, the lines Lambda and its extensions wrote, and the response headers.
     Dry run only checks that you may invoke it. Earlier runs stay in a menu on the right.
 
+    Live logs, beside the Result, watches the function's log group while you test it: every few seconds, its runs
+    newest first as they come, yours open, so a long run's every line, retries and what other callers run show as
+    they happen. ▶ Run starts watching; Watch logs turns it on or off, and it stops by itself after 15 minutes.
+
     It really runs the function, once per click and never retried, with whatever its code writes or sends; it needs
     lambda:InvokeFunction. name: its name, 'name:alias' (runs that alias), an ARN or a console link. event: what the
     box starts with (a dict, a list or JSON text). x.run() runs it as ▶ Run does (x.run(event) with another event),
-    x.event(value) puts an event in the box, x.runs are the calls made (Invoked, oldest first) and x.function the
-    function.
+    x.event(value) puts an event in the box, x.watch() / x.watch(False) watches the logs or stops, x.runs are the
+    calls made (Invoked, oldest first), x.watched the log lines read and x.function the function.
     """
 
     _PREFIX, _THREADS = "lmx", "lambda-tester"
@@ -205,6 +213,7 @@ class LambdaTester(_Explorer):
         self._sent_last: str | None = None
         self._testing = 0.0
         self._shown_test: Invoked | None = None
+        self._init_watch()
         note = self._load_widgets(mode)
         if self._w is None:
             self._without_window(note)
@@ -281,7 +290,8 @@ class LambdaTester(_Explorer):
         editor = w.VBox([warn, self.tool_row, grid, foot], layout=layout(width="100%"))
         editor.add_class("lmx-tst")
         self.test_result = w.HTML(layout=layout(width="100%"))
-        scroller = w.VBox([editor, self.test_result], layout=layout(width="100%"))
+        views = self._view_row()
+        scroller = w.VBox([editor, views, self.test_result, self.logs_view], layout=layout(width="100%"))
         scroller.add_class("lmx-scroll")
         return w.VBox([scroller])
 
@@ -434,7 +444,9 @@ class LambdaTester(_Explorer):
         self.runs.append(invoked)
         self._draw_test_runs()
         self._show_test(invoked)
+        self._show_view("result")
         self._status(self._tested_line(invoked), "" if invoked.ok else "warn")
+        self._watch_after_run(invoked)
 
     def _tested_line(self, invoked: Invoked) -> str:
         name = invoked.function.name
@@ -505,3 +517,17 @@ class LambdaTester(_Explorer):
         if self.function is None:
             raise ValueError(f"{self.ref}'s settings are still being read: run it again in a moment")
         self._run_test()
+
+    @_window_errors
+    def watch(self, on: bool = True) -> None:
+        """
+        Watches the function's logs in Live logs (every few seconds, for up to 15 minutes), or stops (on=False).
+        """
+        if self._w is None:
+            return
+        if self.function is None:
+            raise ValueError(f"{self.ref}'s settings are still being read: watch again in a moment")
+        self._toggle_watch(on)
+        if on:
+            self._show_view("logs")
+            self._status(f"Watching {self.function.name}'s logs every {_WATCH_SECONDS} seconds")
