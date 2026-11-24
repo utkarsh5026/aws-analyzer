@@ -95,6 +95,7 @@ Find items
 -   [Everything for one customer.](#query) `ui.query("acme-app", "CUSTOMER#1042")`{ .long }
 -   [Which items match a condition?](#filters) `ui.scan("acme-app", where={"status": "failed"})`{ .long }
 -   [I want them in pandas.](#python) `df = ui.core.scan("acme-app", n=5000).to_df()`{ .long }
+-   [Can I have this report in pandas, or as a spreadsheet?](#as-data) `ui.data()` `ui.to_excel()`
 
 Rather click?
 { .qgroup }
@@ -317,6 +318,35 @@ ui.explore()                             # or explore("acme-app"), explore("acme
 
 The [DynamoDB explorer guide](dynamodb_explorer.md) covers every tab.
 
+## Take a report into pandas or Excel { #as-data }
+
+Every report ends with **🐼 This report as data**: the items or numbers it shows, each column explained, for pandas, and a workbook to share.
+{ .gist }
+
+```python
+ui.query("acme-app", "CUSTOMER#1042")
+data = ui.data()
+df = data["items"]          # keys first, maps as 'address.city' columns, numbers as int or float, _size_bytes per item
+data.guide("items")         # each attribute: in how many items, and its kind
+ui.schema("acme-app")
+ui.data()["attributes"]     # each attribute's types, fill rate and distinct values
+ui.to_excel()               # aws-analyzer-exports/dynamodb-schema-acme-app.xlsx
+```
+
+The items are the ones the report read, nothing more: `more()` reads the next page, and `data()` then holds that page. For thousands of items at once, `ui.core.scan("acme-app", n=5000).to_df()` is still the way.
+
+??? more "Which tables each report gives"
+
+    | Report | Tables |
+    |---|---|
+    | `scan()`, `query()`, `sample()`, `sql()`, `largest()` | `items`: a row per item, with `_size_bytes` and `_read_units` |
+    | `schema()` | `attributes`, `key_patterns` (how the keys are shaped), `size_bands` |
+    | `value_counts()` | `values`: a row per value, with its share of the items and of the size |
+    | `tables()` | `tables`: each table's items, size, billing, throttles and cost by part |
+    | `table_info()` | `indexes`: the table and each index, with the `query()` call that reads it |
+
+    `ui.data("schema", "acme-app")` reads a report without showing it; `ui.to_excel("tables")` saves its workbook. Item attributes are named as they are; the two columns the report adds start with `_`, so they never clash with yours.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, large tables and cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -474,6 +504,8 @@ Every `DynamoDBView` command. `ui.help()` prints the same list grouped by task, 
 | `largest(table, n=10, limit=10_000, where=, index=)` | The biggest items |
 | `count(table, where=, index=)` | Exact item count, next to DynamoDB's estimate |
 | `explore(what=None, tab=None, height=None)` | The explorer window: tables, items and schema by clicking ([guide](dynamodb_explorer.md)) |
+| `data(command=None, *args, **kwargs)` | [The last report's tables](#as-data) as pandas DataFrames, each column explained |
+| `to_excel(command=None, *args, path=None, **kwargs)` | [The last report as an Excel workbook](#as-data): summary, charts, a sheet per table and how to read them |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

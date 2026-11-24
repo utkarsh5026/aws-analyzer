@@ -1192,3 +1192,54 @@ def test_explorer_without_widgets_shows_the_reports(core, capsys):
     assert "DynamoDB tables in us-east-1 (2)" in capsys.readouterr().out
     view = DynamoDBView(core, mode="text", progress="off")
     assert "needs Jupyter" in run(capsys, view.explore)
+
+
+def test_plain_values_for_pandas():
+    from decimal import Decimal
+
+    from aws_analyzer.dynamodb.datasets import plain_value
+
+    assert plain_value(Decimal("42")) == 42 and isinstance(plain_value(Decimal("42")), int)
+    assert plain_value(Decimal("10.5")) == 10.5
+    assert plain_value({Decimal("2"), Decimal("1")}) == [1, 2]
+    assert plain_value([{"qty": Decimal("3")}]) == [{"qty": 3}]
+    assert plain_value("x") == "x" and plain_value(None) is None
+
+
+def test_reports_give_their_tables_for_pandas(ui, capsys, tmp_path, monkeypatch):
+    out = run(capsys, ui.query, TABLE, "USER#1", ("begins_with", "ORDER#"))
+    assert "-- This report as data (pandas, Excel) --" in out
+    data = ui.data()
+    assert data.again == "data('query', 'orders', 'USER#1', ('begins_with', 'ORDER#'))"
+    items = data["items"]
+    assert list(items.columns[:2]) == ["pk", "sk"] and len(items) == 8
+    assert items.total.dtype.kind == "f" and items.total.sum() == pytest.approx(sum(o * 10.5 for o in range(8)))
+    assert (items._size_bytes > 0).all()
+    guide = str(data.guide("items"))
+    assert "pk" in guide and "the partition key" in guide and "in 8 of the 8 items" in guide
+
+    profile = ui.data("query", TABLE, "USER#1", "PROFILE")["items"]
+    assert profile.loc[0, "address.city"] == "Pune" and profile.loc[0, "tags"] == ["new", "promo"]
+    assert bool(profile.loc[0, "vip"])
+
+    schema = ui.data("schema", TABLE)
+    assert capsys.readouterr().out == ""
+    attributes = schema["attributes"].set_index("attribute")
+    assert attributes.loc["amount", "types"].count("(") == 2 and attributes.loc["pk", "fill_rate"] == 1.0
+    assert set(schema["key_patterns"].key) == {"pk", "sk"}
+
+    values = ui.data("value_counts", TABLE, "status")["values"]
+    assert values["items"].iloc[0] >= values["items"].iloc[-1] and values["share"].sum() == pytest.approx(1.0)
+
+    tables = ui.data("tables")["tables"]
+    assert set(tables.table) == {"orders", "counters"} and tables.est_monthly_usd.is_monotonic_decreasing
+    assert tables.set_index("table").loc["counters", "capacity_usd"] > 0
+    assert list(ui.data("table_info", TABLE)["indexes"]["index"]) == ["(table)", "by-status"]
+
+    monkeypatch.chdir(tmp_path)
+    run(capsys, ui.scan, TABLE, 5)
+    run(capsys, ui.more)
+    assert ui.data().source == "" and ui.data().again == ""
+    ui.to_excel()
+    saved = capsys.readouterr().out
+    assert "Saved Scan orders" in saved and "(page 2)" in saved

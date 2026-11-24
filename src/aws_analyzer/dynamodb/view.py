@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import difflib
 from collections import Counter
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any, Callable, Iterable
 
@@ -17,6 +18,7 @@ from .._kit.errors import _Hint, _error_name, _why
 from .._kit.fmt import _as_count, _as_int, _count, _fmt_dt, _plural, _share, human_age, human_money, human_size
 from .._kit.render import _call
 from .._kit.text import _clip
+from .._kit.dataview import _DataCommands
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import KB, TYPE_NAMES, _units, dynamo_type, format_value, item_size, read_units, to_json, write_units
@@ -29,6 +31,7 @@ from .analysis import (
     table_monthly_cost,
 )
 from .analyzer import _FROM_RE, DynamoDBAnalyzer
+from .datasets import items_data, schema_data, table_info_data, tables_data, value_counts_data
 from .style import _render_html
 
 
@@ -179,7 +182,15 @@ def _item_rows(
     return rows
 
 
-class DynamoDBView(_BaseView):
+
+def _given(**options: tuple[Any, Any]) -> dict[str, Any]:
+    """
+    A command's options as its call writes them: each (value, default) pair kept only when it isn't the default.
+    """
+    return {name: value for name, (value, default) in options.items() if value != default}
+
+
+class DynamoDBView(_DataCommands, _BaseView):
     """
     Notebook UI over DynamoDBAnalyzer. Each method renders a report and returns nothing;
     for the underlying data call the same-named method on `view.core` (a DynamoDBAnalyzer).
@@ -197,13 +208,18 @@ class DynamoDBView(_BaseView):
         "👀 Look at items": ("sample", "scan", "query", "get", "sql", "more"),
         "🔬 Understand the data": ("schema", "value_counts", "largest", "count"),
         "🖱️ Explore by clicking": ("explore",),
+        "🐼 As data": ("data", "to_excel"),
         "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"to_excel"})
     _START = (
         ("tables()", "every table: items, size, cost and warnings"),
         ("table_info('table')", "keys, indexes and how to query each"),
         ("sample('table')", "a few items from across the table"),
     )
+
+    def _data_example(self) -> str:
+        return "data('sample', 'my-table')"
 
     def __init__(
         self,
@@ -303,6 +319,7 @@ class DynamoDBView(_BaseView):
         empty: str,
         start: Any = None,
         number: int = 1,
+        source: str = "",
     ) -> None:
         """
         Fetch one page of items, show it, and remember how to continue for more().
@@ -314,7 +331,8 @@ class DynamoDBView(_BaseView):
             if page.has_more
             else None
         )
-        self._show(self._page_blocks(page, title, sub, empty=empty, number=number))
+        data = replace(items_data(page, title=title), source=source if number == 1 else "")
+        self._show(self._with_data(self._page_blocks(page, title, sub, empty=empty, number=number), data))
 
     def _page_blocks(self, page: ItemPage, title: str, sub: str, *, empty: str, number: int = 1) -> list[Any]:
         """
@@ -390,7 +408,8 @@ class DynamoDBView(_BaseView):
         """
         with self._progress("Checking tables", unit="tables") as tick:
             reports = self.core.table_reports(match=match, metrics=metrics, progress=tick)
-        self._show(self._tables_blocks(reports, match=match, metrics=metrics))
+        data = replace(tables_data(reports, self.core.prices), source=_call("tables", **_given(match=(match, None))))
+        self._show(self._with_data(self._tables_blocks(reports, match=match, metrics=metrics), data))
 
     def _tables_blocks(self, reports: list[TableReport], *, match: str | None, metrics: bool) -> list[Any]:
         """
@@ -545,7 +564,8 @@ class DynamoDBView(_BaseView):
                 usage = self.core.table_metrics(table, hours=hours)
             except (ClientError, BotoCoreError) as exc:
                 usage_error = _error_name(exc)
-        self._show(self._table_info_blocks(info, usage, hours=hours, usage_error=usage_error))
+        blocks = self._table_info_blocks(info, usage, hours=hours, usage_error=usage_error)
+        self._show(self._with_data(blocks, replace(table_info_data(info), source=_call("table_info", table))))
 
     def _table_info_blocks(
         self, info: TableInfo, usage: TableMetrics | None, *, hours: int = 24, usage_error: str | None = None
@@ -769,6 +789,8 @@ class DynamoDBView(_BaseView):
         empty = "The table is empty." if where is None else _NO_MATCH
         if where is not None and scan_limit:
             empty += f" Each page reads at most {scan_limit:,} items (scan_limit); pass scan_limit=None to read on."
+        asked = _given(where=(where, None), index=(index, None), attributes=(attributes, None),
+                       scan_limit=(scan_limit, 100_000))
         self._page(
             f"Scan {_target(table, index)}",
             f"where {describe_filter(where)}"
@@ -776,6 +798,7 @@ class DynamoDBView(_BaseView):
             else "from the start of the table",
             fetch,
             empty=empty,
+            source=_call("scan", table, *([n] if n != 20 else []), **asked),
         )
 
     @_friendly_errors
@@ -830,8 +853,11 @@ class DynamoDBView(_BaseView):
             + ". Keys are case-sensitive and typed: "
             "'42' (a string) and 42 (a number) are different keys."
         )
+        asked = _given(n=(n, 20), where=(where, None), index=(index, None), attributes=(attributes, None),
+                       descending=(descending, False))
+        source = _call("query", table, partition, *([sort] if sort is not None else []), **asked)
         self._page(
-            f"Query {_target(table, index)}: {condition}", sub, fetch, empty=empty
+            f"Query {_target(table, index)}: {condition}", sub, fetch, empty=empty, source=source
         )
 
     @_friendly_errors
@@ -863,11 +889,14 @@ class DynamoDBView(_BaseView):
         sub = "spread across the table" + (
             f" · where {describe_filter(where)}" if where else ""
         )
+        asked = _given(where=(where, None), index=(index, None), attributes=(attributes, None),
+                       scan_limit=(scan_limit, 100_000))
         self._page(
             f"Sample of {_target(table, index)}",
             sub,
             fetch,
             empty="The table is empty." if where is None else _NO_MATCH,
+            source=_call("sample", table, *([n] if n != 20 else []), **asked),
         )
 
     @_friendly_errors
@@ -985,7 +1014,8 @@ class DynamoDBView(_BaseView):
         sub = _clip(" ".join(statement.split()), 200) + (
             f"  with {list(parameters)!r}" if parameters else ""
         )
-        self._page("PartiQL", sub, fetch, empty="No items came back.")
+        source = _call("sql", statement, *parameters, **_given(n=(n, 50)))
+        self._page("PartiQL", sub, fetch, empty="No items came back.", source=source)
 
     # ---------------------------------------------------------------- analysis
 
@@ -1014,7 +1044,10 @@ class DynamoDBView(_BaseView):
                 max_depth=max_depth,
                 progress=tick,
             )
-        self._show(self._schema_blocks(p, where=where, spread=spread))
+        asked = _given(where=(where, None), index=(index, None), spread=(spread, True), max_depth=(max_depth, 2))
+        source = _call("schema", table, *([n] if n != 1000 else []), **asked)
+        blocks = self._schema_blocks(p, where=where, spread=spread)
+        self._show(self._with_data(blocks, replace(schema_data(p), source=source)))
 
     def _schema_blocks(self, p: TableProfile, *, where: Any = None, spread: bool = True) -> list[Any]:
         """
@@ -1170,7 +1203,10 @@ class DynamoDBView(_BaseView):
             vc = self.core.value_counts(
                 table, attribute, limit=limit, where=where, index=index, progress=tick
             )
-        self._show(self._value_counts_blocks(vc, index=index, limit=limit, where=where, top=top))
+        asked = _given(limit=(limit, 10_000), where=(where, None), index=(index, None))
+        data = replace(value_counts_data(vc), source=_call("value_counts", table, attribute, **asked))
+        blocks = self._value_counts_blocks(vc, index=index, limit=limit, where=where, top=top)
+        self._show(self._with_data(blocks, data))
 
     def _value_counts_blocks(
         self, vc: ValueCounts, *, index: str | None = None, limit: int | None = None, where: Any = None, top: int = 30
@@ -1317,7 +1353,10 @@ class DynamoDBView(_BaseView):
         )
         blocks.append(_Note("Sizes are estimates using DynamoDB's sizing rules."))
         blocks.append(_Next(self._item_steps(page)))
-        self._show(blocks)
+        asked = _given(limit=(limit, 10_000), where=(where, None), index=(index, None))
+        source = _call("largest", table, *([n] if n != 10 else []), **asked)
+        title = f"Largest items in {_target(table, index)}"
+        self._show(self._with_data(blocks, replace(items_data(page, title=title), source=source)))
 
     @_friendly_errors
     def count(self, table: str, *, where: Any = None, index: str | None = None) -> None:
