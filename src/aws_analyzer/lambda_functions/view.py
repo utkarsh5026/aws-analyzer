@@ -10,6 +10,7 @@ import math
 import os
 from collections import Counter, defaultdict
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generator
 
@@ -23,6 +24,7 @@ from .._kit.fmt import (
     human_size,
 )
 from .._kit.charts import _Part, _Split
+from .._kit.dataview import _DataCommands
 from .._kit.jsontree import _JsonTree
 from .._kit.render import _call
 from .._kit.text import _clip
@@ -44,6 +46,14 @@ from .analysis.cost import cost_workings, function_monthly_cost, provisioned_mon
 from .analysis.findings import _errors_level, _times, account_findings, function_findings
 from .analysis.errors import (
     _LIFECYCLE_RE, _filter_pattern, _phrase, classify_error, error_findings, window_findings,
+)
+from .analysis.datasets import (
+    errors_data,
+    function_data,
+    functions_data,
+    logs_data,
+    performance_data,
+    runs_data,
 )
 from .analysis.fates import fate_findings
 from .analysis.fleet import (
@@ -242,7 +252,7 @@ def _since_arg(since: Any, default: str) -> dict[str, Any]:
     return {"since": since} if isinstance(since, str) and since != default else {}
 
 
-class LambdaView(_BaseView):
+class LambdaView(_DataCommands, _BaseView):
     """
     Notebook UI over LambdaAnalyzer. Each method renders a report and returns nothing; for the underlying data
     call the matching method on `view.core` (a LambdaAnalyzer): functions() -> overview(), function_info() ->
@@ -261,9 +271,10 @@ class LambdaView(_BaseView):
         "🩺 When something goes wrong": ("errors", "logs", "runs", "performance"),
         "▶ Run it": ("test", "invoke"),
         "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
+        "🐼 As data": ("data", "to_excel"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"download", "how_it_works_page", "invoke", "test"})
+    _CHANGES = frozenset({"download", "how_it_works_page", "invoke", "test", "to_excel"})
     _START = (
         ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),
@@ -401,7 +412,9 @@ class LambdaView(_BaseView):
                 f"{human_money(cost)})."
             ))
         blocks.append(_Next(self._functions_next(rows, multi=multi, regions=regions)))
-        self._show(blocks)
+        asked = {"match": match, "regions": regions}
+        source = _call("functions", **{key: value for key, value in asked.items() if value})
+        self._show(self._with_data(blocks, replace(functions_data(ov), source=source)))
 
     @staticmethod
     def _functions_title(ov: Any, multi: bool) -> str:
@@ -576,7 +589,8 @@ class LambdaView(_BaseView):
         with self._progress("Reading the function", unit="parts") as tick, self._named(name, region):
             detail = self.core.describe(name, region=region, days=days, progress=tick)
         sections = self._function_sections(detail, name=name, days=days)
-        self._show([block for part in _INFO_ORDER for block in sections[part]])
+        data = replace(function_data(detail), source=_call("function_info", name))
+        self._show(self._with_data([block for part in _INFO_ORDER for block in sections[part]], data))
 
     def _function_sections(self, detail: FunctionDetail, *, name: str | None = None, days: int = 30,
                            ) -> dict[str, list[Any]]:
@@ -790,7 +804,8 @@ class LambdaView(_BaseView):
         limit = _as_count(limit, "limit")
         with self._progress("Reading error lines", unit="lines") as tick, self._named(name, region):
             report = self.core.errors(name, since=since, region=region, limit=limit, progress=tick)
-        self._show(self._errors_blocks(report, since=since, limit=limit))
+        data = replace(errors_data(report), source=_call("errors", name, **_since_arg(since, "24h")))
+        self._show(self._with_data(self._errors_blocks(report, since=since, limit=limit), data))
 
     def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
                        for_window: bool = False) -> list[Any]:
@@ -899,12 +914,15 @@ class LambdaView(_BaseView):
         if n < 1:
             raise ValueError("n= is how many lines to show: 1 or more")
         blocks = self._logs_blocks(name, since=since, search=search, request_id=request_id, n=n, region=region)
-        if request_id or not _can_search_here(self.use_html):
-            self._show(blocks)
+        asked = {"since": since, "search": search, "request_id": request_id}
+        source = _call("logs", name, **{key: value for key, value in asked.items() if value})
+        data = replace(logs_data(self._logs_page), source=source)
+        if request_id or self._quiet or not _can_search_here(self.use_html):
+            self._show(self._with_data(blocks, data))
             return
         from .explorer.log_search import _LogsAsked, _LogSearch
 
-        _LogSearch(self, blocks, _LogsAsked(name, since, n, region), search or "").show()
+        _LogSearch(self, self._with_data(blocks, data), _LogsAsked(name, since, n, region), search or "").show()
 
     def _logs_blocks(self, name: str, *, since: Any, search: str | None, request_id: str | None, n: int,
                      region: str | None) -> list[Any]:
@@ -924,6 +942,7 @@ class LambdaView(_BaseView):
             else:
                 page = self.core.log_events(name, since=since, pattern=pattern, request_id=request_id, limit=limit,
                                             region=region, progress=tick)
+        self._logs_page = page
         fn = page.function
         window = _window((page.until - page.since).total_seconds())
         events = page.events
@@ -1063,7 +1082,10 @@ class LambdaView(_BaseView):
             table, call=lambda command, **kwargs: self._call_for(command, fn, **kwargs),
             since_arg=_since_arg(since, "24h"), layout=_RunsLayout(chosen, group_by, n))
         blocks[1:1] = self._log_notes(table.errors, fn, fn.log_group)
-        self._show(blocks)
+        asked = {"since": since, "where": where, "sort": sort, "fields": fields}
+        chosen_options = {key: value for key, value in asked.items() if value and key != "since"}
+        source = _call("runs", name, **_since_arg(since, "24h"), **chosen_options)
+        self._show(self._with_data(blocks, replace(runs_data(table), source=source)))
 
     @_friendly_errors
     def performance(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 5_000,
@@ -1079,7 +1101,8 @@ class LambdaView(_BaseView):
         with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
             perf = self.core.performance(name, since=since, region=region, limit=limit, compare=compare,
                                          progress=tick)
-        self._show(self._performance_blocks(perf, since=since, limit=limit))
+        data = replace(performance_data(perf), source=_call("performance", name, **_since_arg(since, "24h")))
+        self._show(self._with_data(self._performance_blocks(perf, since=since, limit=limit), data))
 
     def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
                             for_window: bool = False) -> list[Any]:

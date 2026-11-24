@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import boto3
+import openpyxl
 import pytest
 from botocore import xform_name
 from botocore.exceptions import ClientError
@@ -4849,3 +4850,41 @@ def test_live_tab_watches_in_the_background(core):
         asyncio.run(main())
     finally:
         live_tab._WATCH_SECONDS = seconds
+
+
+
+def test_each_report_gives_its_tables_for_pandas(ui, capsys):
+    run(capsys, ui.errors, "etl-nightly")
+    data = ui.data()
+    assert data.names[:2] == ["causes", "error_lines"] and data.source == "errors('etl-nightly')"
+    causes = data["causes"]
+    assert causes.loc[0, "kind"] == "KeyError" and causes["share"].sum() == pytest.approx(1.0)
+    assert "-- This report as data (pandas, Excel) --" in run(capsys, ui.performance, "etl-nightly")
+    runs = ui.data()["runs"]
+    assert runs.loc[0, "request_id"] == RID and bool(runs.loc[0, "cold_start"])
+    assert ui.data()["hours"].loc[0, "runs"] == 1
+    run(capsys, ui.functions)
+    functions = ui.data()["functions"]
+    assert set(functions.function) == {"etl-nightly", "api-handler"}
+    assert functions.est_monthly_usd.is_monotonic_decreasing
+    run(capsys, ui.runs, "etl-nightly")
+    assert {"status", "duration", "request_id"} <= set(ui.data()["runs"].columns)
+    run(capsys, ui.logs, "etl-nightly", since="24h")
+    assert ui.data()["lines"].message.str.contains("customer_id").any()
+    run(capsys, ui.function_info, "etl-nightly")
+    assert ui.data()["days"].invocations.sum() > 0
+
+
+def test_a_report_is_read_quietly_for_its_tables_and_saved_as_a_workbook(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data = ui.data("performance", "etl-nightly", since="7d")
+    assert capsys.readouterr().out == "" and data.again == "data('performance', 'etl-nightly', since='7d')"
+    assert "How to read it" in str(data.guide("runs"))
+    ui.to_excel()
+    out = capsys.readouterr().out
+    assert "Saved Performance of etl-nightly as a workbook" in out
+    book = openpyxl.load_workbook(tmp_path / "aws-analyzer-exports" / "lambda-performance-etl-nightly.xlsx")
+    assert book.sheetnames == ["Summary", "Charts", "runs", "hours", "How to read"]
+    assert len(book["Charts"]._charts) == 3
+    ui.to_excel("errors", "nope-not-here")
+    assert "No function 'nope-not-here'" in capsys.readouterr().out

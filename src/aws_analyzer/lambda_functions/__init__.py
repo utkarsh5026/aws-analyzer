@@ -89,6 +89,15 @@ from .analysis.errors import (
     cause_search, classify_error, code_frames, error_findings, failing_frame, group_errors, request_id_of,
     time_slots, window_findings,
 )
+from .analysis.datasets import (
+    errors_data,
+    function_data,
+    functions_data,
+    logs_data,
+    overview_rows,
+    performance_data,
+    runs_data,
+)
 from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
 from .analysis.causes import (
     CauseAdvice, CauseState, ChartColumns, Verdict, calls_after, cause_advice, cause_state, chart_columns,
@@ -251,6 +260,13 @@ __all__ = [
     "error_findings",
     "event_fates",
     "fate_findings",
+    "errors_data",
+    "function_data",
+    "functions_data",
+    "logs_data",
+    "overview_rows",
+    "performance_data",
+    "runs_data",
     "parse_async_config",
     "parse_redrive",
     "explore",

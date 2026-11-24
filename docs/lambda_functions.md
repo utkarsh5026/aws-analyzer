@@ -101,6 +101,11 @@ Try it
 
 -   [Run it now and see what it logged.](#invoke) `ui.invoke("orders-etl", {"order_id": 42})`{ .long }
 
+Take it further
+{ .qgroup }
+
+-   [Can I have this report in pandas, or as a spreadsheet?](#as-data) `ui.data()` `ui.to_excel()`
+
 Rather click?
 { .qgroup }
 
@@ -565,6 +570,37 @@ ui.download("orders-etl", "~/packages/")      # into a folder of your own (or a 
 
     Without a path it goes in `lambda-downloads/`, next to the notebook, and replaces an earlier download of the same function. When that folder is new, it gets a `.gitignore` that keeps it out of git, because a package can hold secrets. To get the file on your computer, right-click it in JupyterLab's file browser and pick **Download**. To unzip it next to the notebook, the report's **Next** row has the line to run: `import shutil; shutil.unpack_archive('lambda-downloads/orders-etl.zip', 'lambda-downloads/orders-etl')`. The explorer's Code tab has the same as a **Download .zip** button, which saves the package the tab already read.
 
+## Take a report into pandas or Excel { #as-data }
+
+Every report ends with **🐼 This report as data**: the tables it was drawn from, each column explained, for pandas, and a workbook to share.
+{ .gist }
+
+Open the fold at the bottom of `errors()`, `performance()`, `runs()`, `logs()`, `functions()` or `function_info()`: it lists the tables, what one row is, what each column holds and its unit, how to read it ("over 0.8 is close to being stopped"), and pandas lines worth running. `ui.data()` hands you those tables without reading AWS again.
+
+```python
+ui.performance("orders-etl")
+data = ui.data()                        # the tables behind the report above
+df = data["runs"]                       # a row per run: duration_ms, timeout_share, memory_share, cold_start, timed_out...
+data.guide("runs")                      # each column in plain words, and what to run on it
+df.groupby("cold_start").duration_ms.median()    # how much a cold start adds
+ui.to_excel()                           # aws-analyzer-exports/lambda-performance-orders-etl.xlsx
+```
+
+The workbook reads like the report: a **Summary** sheet with the verdict, the numbers as cards and the findings (warnings first), **Charts** drawn by Excel itself (run times over time, errors by cause, the bill by function), **a sheet per table** with a filter on every column, numbers formatted as milliseconds, money or percentages, data bars and failures in red, and **How to read**, every column in plain words.
+
+??? more "Which tables each report gives, and reading another report without showing it"
+
+    | Report | Tables |
+    |---|---|
+    | `functions()` | `functions`: a row per function, the costliest first |
+    | `function_info()` | `days`: calls, errors, run time and concurrency a day |
+    | `errors()` | `causes`, `error_lines`, `calls` (CloudWatch's failed calls per hour) |
+    | `performance()` | `runs` (a row per run), `hours` (median and p95 run time, timeouts, cold starts) |
+    | `runs()` | `runs` (every field, the ones its JSON logs carry too), `hours` |
+    | `logs()` | `lines`, `hours` |
+
+    `ui.data("errors", "orders-etl", since="7d")` runs a report without showing it and gives its tables; `ui.to_excel("errors", "orders-etl", since="7d")` saves its workbook. A workbook gets a new name in `aws-analyzer-exports/`, beside the notebook, and never replaces a file; `path=` saves it where you say. It needs `openpyxl`, in the `data` extra: `%pip install "aws-analyzer[data]"`.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -744,6 +780,8 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |
 | `how_it_works_page(name, path=None, region=None, max_size="50MB")` | The same report as a page of its own, saved in `lambda-downloads/` (or at `path=`), with a link that opens it in a tab |
 | `download(name, path=None, region=None)` | Its deployment package saved on the notebook's disk, in `lambda-downloads/` (or at `path=`), checked against Lambda's SHA-256 |
+| `data(command=None, *args, **kwargs)` | [The last report's tables](#as-data) as pandas DataFrames, each column explained; `data("errors", "etl")` reads that report's |
+| `to_excel(command=None, *args, path=None, **kwargs)` | [The last report as an Excel workbook](#as-data): summary, charts, a sheet per table and how to read them |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

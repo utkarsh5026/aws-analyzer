@@ -6,6 +6,7 @@ what each costs and how its runtime stands.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..._kit.deps import _require
 from ..._kit.fmt import _total
@@ -88,6 +89,13 @@ class Overview:
         One row per function: its settings, what CloudWatch counted and the estimated monthly cost.
         """
         pd = _require("pandas", "Overview.to_df()")
+        return pd.DataFrame(self.rows())
+
+    def rows(self) -> list[dict[str, Any]]:
+        """
+        One dict per function, in the order listed: its settings, what CloudWatch counted and the estimated monthly
+        cost (to_df()'s rows).
+        """
         rows = []
         for fn in self.functions:
             m = self.metrics.get(fn.arn)
@@ -114,4 +122,4 @@ class Overview:
                 "est_monthly_usd": _total(cost),
                 "description": fn.description,
             })
-        return pd.DataFrame(rows)
+        return rows
