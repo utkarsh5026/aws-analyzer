@@ -70,12 +70,13 @@ class _InvokeRuns:
         meta = response.get("ResponseMetadata") or {}
         tail = decode_tail(response.get("LogResult"))
         request_id = str(meta.get("RequestId") or "")
+        headers = {str(name).lower(): str(value) for name, value in (meta.get("HTTPHeaders") or {}).items()}
         return Invoked(
             fn, payload, qualifier=qualifier, started=started, ended=ended,
             status_code=int(response.get("StatusCode") or 0), request_id=request_id,
             executed_version=str(response.get("ExecutedVersion") or ""),
             function_error=response.get("FunctionError"), payload=data, tail=tail, dry_run=dry_run,
-            events=tail_events(tail, request_id=request_id, started=started),
+            events=tail_events(tail, request_id=request_id, started=started), headers=headers,
         )
 
     def _whole_run(self, invoked: Invoked, wait: float) -> list[LogEvent] | None:

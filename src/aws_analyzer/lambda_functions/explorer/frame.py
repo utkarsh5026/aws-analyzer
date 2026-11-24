@@ -31,6 +31,9 @@ _EXPLORER_TABS = (
      "<path d='M3.5 12.5h3.8l2.4-6.5 4.6 12 2.4-5.5h3.8'/>"),
     ("logs", "Logs", "What it logged, run by run: click a run for its lines, search them, or watch new runs live",
      "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/><path d='M7.5 9.5l3 2.5-3 2.5M12.5 15h4'/>"),
+    ("test", "Test", "Paste an event and run the function once with it: what it returned, every line it logged, and "
+     "everything else Lambda sent back",
+     "<path d='M8 5.5v13l11-6.5z'/>"),
     ("errors", "Errors", "Its errors grouped by cause, with what to do, and the runs that failed",
      "<path d='M12 4.2 20.8 19.5H3.2z'/><path d='M12 10v4.2M12 17h.01'/>"),
     ("performance", "Performance", "Run times, memory used and cold starts, and the slowest runs",
@@ -43,7 +46,7 @@ _EXPLORER_TABS = (
      "<circle cx='8.5' cy='16.5' r='2.5'/>"),
 )
 
-_FUNCTION_TABS = ("overview", "logs", "errors", "performance", "code", "settings")  # the tabs about one function
+_FUNCTION_TABS = ("overview", "logs", "test", "errors", "performance", "code", "settings")  # the tabs about one function
 
 _PANEL = "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/>"
 

@@ -43,10 +43,11 @@ from .focus import _FocusReads
 from .plain import _PLAIN_CSS, _PlainSearch
 from .terms import _TERMS_CSS, _SearchTerms
 from .invoke import _INVOKE_CSS, _InvokeBox
-from ..analysis.invoke import Invoked
+from .test import _TEST_CSS, _TestTab
+from ..analysis.invoke import Invoked, event_payload, format_event
 
 
-class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox, _Timeline, _ErrorsTab,
+class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox, _TestTab, _Timeline, _ErrorsTab,
                      _PerformanceTab, _CodeTab, _PlainSearch, _SearchTerms, _FocusReads, _Explorer):
     """
     The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
@@ -67,6 +68,11 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
                      time range, show only failed runs or cold starts, and turn on Live to see new runs as they come.
                      ▶ Invoke runs it once with an event you write: your run comes first, opened, with what was sent
                      and what it returned above its lines
+        Test         the Lambda console's Test page: paste an event (or start from one shaped like what S3, SQS, API
+                     Gateway, SNS or EventBridge send), see it as tidy JSON in colour beside the box, with the line
+                     where it breaks when it isn't valid, and ▶ Run runs it once. Below: whether it worked, what it
+                     returned, run time, memory and cost, every line it logged, and everything else Lambda returned
+                     (request ID, version, X-Ray trace, billed and start-up times, headers). Earlier runs stay in a menu
         Errors       its errors grouped by cause, with what to do about each, and the runs that failed: click one to
                      read every line of it
         Performance  run times against the timeout, memory used against what it has, cold starts, and the slowest
@@ -76,7 +82,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
                      width, and Show files brings the tree back. Download .zip saves the package next to the notebook
         Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
 
-    name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
+    name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs', 'test',
     'errors', 'performance', 'code' or 'settings'; 'live' follows it on the Live tab, which tab='live' opens without
     a name). since / until: the time range of the Logs, Errors and Performance tabs ('3h', '7d', '2026-10-27 09:00';
     until is now when left out). search: text to find in the logs (opens the Logs tab). region: the region to list,
@@ -91,8 +97,8 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
     "why does this fail?" means the function, run or file you have open (x.attach(agent) does it later, and
     aws_analyzer.set_assistant(agent) for every explorer).
 
-    Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
-    command. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
+    Nothing here changes a function: the window reads, and where a change would help it shows the command. The one
+    thing that runs one is ▶ Run (the Test tab) or ▶ Invoke (the Logs tab), once per click, never retried. The files it writes are the package Download .zip saves, on the notebook's disk, and its recent
     functions (history=). x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function,
     x.detail, x.logs_page, x.package and x.saved hold the data behind what's shown, and x.board what the Live tab read
     (function ARN -> LiveFunction). x.focus is what you're looking at, as data: the function, the tab, its time range
@@ -181,6 +187,10 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
         self._mine: dict[str, Invoked] = {}
         self._sent_events: dict[str, str] = {}
         self._invoking = 0.0
+        self._tests: dict[str, list[Invoked]] = {}
+        self._test_texts: dict[str, str] = {}
+        self._testing = 0.0
+        self._shown_test: Invoked | None = None
         self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
         self._error_rows: list[_Row] = []
         self._cause_rows: list[_Row] = []
@@ -259,7 +269,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
     def open(self, name: str, *, tab: str | None = None) -> None:
         """
         Opens a function (its name, 'name:alias', an ARN or a console link), as picking it in the function field
-        does: its Overview, or tab= ('logs', 'errors', 'performance', 'code', 'settings').
+        does: its Overview, or tab= ('logs', 'test', 'errors', 'performance', 'code', 'settings').
         """
         if tab is not None and tab not in _FUNCTION_TABS:
             raise ValueError(f"tab= is one of {', '.join(map(repr, _FUNCTION_TABS))}; got {tab!r}")
@@ -316,6 +326,32 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
         else:
             self._show_tab("logs", load=False)
             self._load_logs()
+
+    @_window_errors
+    def test(self, name: str | None = None, event: Any = None) -> None:
+        """
+        Opens the Test tab for a function (the one picked, or name=) with event= in its box, shown as tidy JSON: a
+        dict, a list or JSON text you paste (one it can't send is said before anything changes). Nothing runs until
+        ▶ Run is clicked.
+        """
+        if event is not None:
+            event_payload(event)
+        if self._w is None:
+            raise _Hint("The Test tab is the explorer window's (it needs ipywidgets in Jupyter): without it, "
+                        "x.ui.invoke('my-function', event) runs a function and shows what came back.")
+        if name is not None:
+            if self._listing:
+                raise _Hint(f"The functions are still being listed: run x.test({name!r}, ...) again in a moment.")
+            self._open_named(name, "test")
+            if self.function is None or self.function.name != parse_function_ref(name)[0]:
+                raise _Hint(f"{name} is being looked up: run x.test({name!r}, ...) again once it's open.")
+        if self.function is None:
+            raise _Hint("Pick a function first: click one in the Functions tab, or x.test('my-function', event).")
+        self._show_tab("test")
+        if event is not None:
+            text = event if isinstance(event, str) else event_payload(event).decode()
+            self.test_box.value = format_event(text)
+        self._status(f"The event is in the Test tab's box · ▶ Run runs {self.function.name} once with it")
 
     @_window_errors
     def run(self, request_id: str) -> None:
@@ -505,11 +541,13 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
         self.settings_view = w.HTML(layout=layout(width="100%"))
         self._theme = _theme_name()
         self._theme_style = _theme_css(_ROOT, self._theme)
-        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + _TERMS_CSS + _INVOKE_CSS + self._theme_style, head, tabs, {
+        self._frame(_CSS + _EXPLORER_CSS + _LIVE_CSS + _PLAIN_CSS + _TERMS_CSS + _INVOKE_CSS + _TEST_CSS
+                    + self._theme_style, head, tabs, {
             "functions": self._functions_page(),
             "live": self._live_page(),
             "overview": self._scroll_page([self.overview_view]),
             "logs": self._logs_page(),
+            "test": self._test_page(),
             "errors": self._errors_page(),
             "performance": self._performance_page(),
             "code": self._code_page(),
@@ -594,7 +632,7 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
             self._need_function(key)
         elif load and key in _FUNCTION_TABS and key not in self._asked:
             {"logs": self._load_logs, "errors": self._load_errors, "performance": self._load_perf,
-             "code": self._load_code}.get(key, lambda: None)()
+             "code": self._load_code, "test": self._load_test}.get(key, lambda: None)()
         if not self._said[2] and self._said[1] != "warn":  # the line under the tabs says what this one does
             self._status(self._live_line() if key == "live" else self._tab_line(key))
 
@@ -605,7 +643,8 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
         hint = ('<div class="lmx-hint">👆 <div><b>Pick a function first.</b> Click one in the <b>Functions</b> tab, or '
                 "in the function field above (it searches as you type).</div></div>")
         widget = {"overview": self.overview_view, "settings": self.settings_view, "errors": self.errors_view,
-                  "performance": self.perf_view, "code": self.code_view, "logs": self.run_head}[key]
+                  "performance": self.perf_view, "code": self.code_view, "logs": self.run_head,
+                  "test": self.test_head}[key]
         self._set(widget, hint)
 
     def _tab_line(self, key: str) -> str:
@@ -622,8 +661,9 @@ class LambdaExplorer(_FunctionsTab, _LiveTab, _FunctionTab, _LogsTab, _InvokeBox
                     + " · click one to open it, or Logs on its line for its logs")
         if fn is None:
             return "Pick a function: click one in the Functions tab, or in the field above."
-        if key == "logs":
-            return self._logs_line()
+        line_of = {"logs": self._logs_line, "test": self._test_line}.get(key)
+        if line_of is not None:
+            return line_of()
         if key == "overview" and self.detail is not None:
             warnings = sum(level == "warn" for level, _ in function_findings(
                 self.detail.function, self.detail.metrics, self.detail, prices=self.core.prices))
@@ -707,7 +747,7 @@ def explore(
 
         explore()                                   # every function in the notebook's region
         explore("orders-etl")                       # straight to one function (a name, an ARN or a console link)
-        explore("orders-etl", tab="logs")           # ...on its logs ('errors', 'performance', 'code', 'settings')
+        explore("orders-etl", tab="logs")           # ...on its logs ('test', 'errors', 'performance', 'code', ...)
         explore("orders-etl", tab="logs", since="3h", search="KeyError")  # ...its last 3 hours, searched
         explore(tab="live")                         # what's running now, looked at every few seconds
         explore("orders-etl", tab="live")           # ...following one function's runs as they come

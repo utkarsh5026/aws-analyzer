@@ -1,7 +1,7 @@
 """
 invoke()'s report, answer first: whether the call worked and what it returned, then how long it ran, the memory it
-used and what it cost, then its log lines as one run you can read top to bottom, with the event that was sent folded
-at the end.
+used and what it cost, then its log lines as one run you can read top to bottom, everything else Lambda returned (its
+request ID, version, X-Ray trace, billed and start-up times, headers), with the event that was sent folded at the end.
 """
 
 from __future__ import annotations
@@ -10,12 +10,12 @@ import json
 import math
 from typing import Any, Callable
 
-from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Text, _Title
+from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title
 from ..._kit.fmt import _fmt_dt, human_money
 from ..._kit.jsontree import _JsonTree
 
 from ..helpers import human_ms
-from ..analysis.invoke import Invoked, invoke_findings, memory_tight, time_tight
+from ..analysis.invoke import Invoked, invoke_extras, invoke_findings, lambda_lines, memory_tight, time_tight
 from .logs import _LogRuns
 
 _ANSWER_ITEMS = 50
@@ -127,6 +127,20 @@ def _log_blocks(invoked: Invoked) -> list[Any]:
     return blocks
 
 
+def _extras_blocks(invoked: Invoked) -> list[Any]:
+    """
+    Everything else that came back with the call, as a table of plain names and values, then the lines Lambda and
+    its extensions wrote (start-up, extensions, the REPORT line with its X-Ray trace), folded.
+    """
+    rows = [[what, value] for what, value in invoke_extras(invoked)]
+    blocks: list[Any] = [_Table(["What", "Value"], rows, title="Everything else Lambda returned", sortable=False)]
+    platform = lambda_lines(invoked)
+    if platform:
+        text = "\n".join(event.message.rstrip() for event in platform)
+        blocks.append(_Text(text, title="The lines Lambda and its extensions wrote", collapsed=True))
+    return blocks
+
+
 def _event_arg(invoked: Invoked) -> Any:
     """
     The event for the next steps' invoke(...) call: the event itself when it's short, else the word `event`.
@@ -173,6 +187,7 @@ def invoke_blocks(invoked: Invoked, *, call: Callable[..., str]) -> list[Any]:
     blocks.append(_Findings(findings, empty="It ran cleanly: no error, and well within its memory and timeout."))
     blocks += _answer_blocks(invoked)
     blocks += _log_blocks(invoked)
+    blocks += _extras_blocks(invoked)
     blocks += _event_blocks(invoked)
     blocks.append(_Next(_invoke_next(invoked, call)))
     return blocks

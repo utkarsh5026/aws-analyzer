@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- ⚡ **Lambda: a Test tab in the explorer** ([#277](https://github.com/utkarsh5026/aws-analyzer/pull/277))
+  - Paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one), see it as tidy JSON in colour, with the broken line marked.
+  - ▶ Run shows what it returned, every line it logged and everything else Lambda returned: request ID, version, X-Ray trace, headers.
+  - `x.test("orders-etl", {"order_id": 42})` opens it with that event in the box; `ui.invoke()` shows the extras too.
+
 ### Changed
 
 - ⚡ **Lambda: functions() shows what needs you first** ([#276](https://github.com/utkarsh5026/aws-analyzer/pull/276))

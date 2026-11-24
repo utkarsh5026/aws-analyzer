@@ -19,8 +19,9 @@ from aws_analyzer.lambda_functions import LAMBDA_PRICES, Function, LambdaAnalyze
 from aws_analyzer.lambda_functions.explorer.window import LambdaExplorer
 from aws_analyzer.lambda_functions import invoke as invoke_mod
 from aws_analyzer.lambda_functions.analysis.invoke import (
-    TAIL_STREAM, Invoked, call_cost, decode_tail, event_payload, invoke_findings, read_answer, tail_events,
-    tail_is_whole,
+    EVENT_SAMPLES, TAIL_STREAM, Invoked, call_cost, check_event, code_lines, decode_tail, event_payload,
+    format_event, invoke_extras, invoke_findings, lambda_lines, read_answer, sample_event, tail_events,
+    tail_is_whole, xray_trace,
 )
 from aws_analyzer.lambda_functions.blocks import invoke as invoke_block
 
@@ -76,7 +77,9 @@ def invoking(answer, *, tail=OK_TAIL, error=None, calls=None):
                 reply["FunctionError"] = error
             found = ParamValidator().validate(reply, model.output_shape)
             assert not found.has_errors(), found.generate_report()
-            return {**reply, "ResponseMetadata": {"RequestId": RID, "HTTPStatusCode": 200}}
+            headers = {"X-Amzn-Trace-Id": "Root=1-6743a1b2-0123456789abcdef01234567;Parent=53995c3f42cd8ad8;Sampled=1",
+                       "X-Amz-Executed-Version": "$LATEST"}
+            return {**reply, "ResponseMetadata": {"RequestId": RID, "HTTPStatusCode": 200, "HTTPHeaders": headers}}
 
         client._handlers["invoke"] = invoke
         return client
@@ -390,3 +393,110 @@ def test_explorer_invoke_shows_your_run_during_a_cloudwatch_search(fn_role):
     assert x.found is None and x.log_find.value == ""
     assert [run.request_id for run in x._visible_runs()][:1] == [RID] and len(x._visible_runs()) == 2
     assert plain_text(x.status.value).endswith("the search was cleared to show it")
+
+
+def test_check_event_says_where_json_breaks():
+    good = check_event('{"order_id": 42, "items": [1, 2]}')
+    assert good.ok and good.message.startswith("Valid JSON") and json.loads(good.pretty) == {"order_id": 42,
+                                                                                            "items": [1, 2]}
+    assert good.pretty.startswith('{\n  "order_id": 42')
+    python = check_event("{'paid': True}")
+    assert python.ok and "Python dict" in python.message and json.loads(python.pretty) == {"paid": True}
+    broken = check_event('{\n  "order_id": 42,\n  "x": \n}')
+    assert not broken.ok and broken.line == 4 and broken.column == 1 and "line 4, column 1" in broken.message
+    assert check_event("").ok and check_event("").pretty == "{}"
+    assert format_event('{"b":1,"a":[]}') == '{\n  "b": 1,\n  "a": []\n}' and format_event("{oops") == "{oops"
+
+
+def test_samples_are_events():
+    assert {sample.name for sample in EVENT_SAMPLES} >= {"Empty", "S3 upload", "SQS message", "API Gateway (HTTP API)"}
+    assert json.loads(sample_event("S3 upload"))["Records"][0]["eventSource"] == "aws:s3"
+    with pytest.raises(KeyError):
+        sample_event("nothing")
+
+
+XRAY_TAIL = OK_TAIL.replace("Init Duration: 401.02 ms\n", "Init Duration: 401.02 ms\t\nXRAY TraceId: "
+                            "1-6743a1b2-aaaa SegmentId: 1a2b3c Sampled: true\n")
+EXTENSION_TAIL = f"EXTENSION\tName: datadog-agent\tState: Ready\tEvents: [INVOKE, SHUTDOWN]\n{XRAY_TAIL}"
+
+
+def test_extras_say_everything_else_lambda_returned():
+    invoked = _invoked(EXTENSION_TAIL, answer={"ok": True})
+    invoked.executed_version, invoked.status_code = "7", 200
+    invoked.headers = {"x-amzn-trace-id": "Root=1-ffff;Parent=0;Sampled=0", "content-type": "application/json"}
+    extras = dict(invoke_extras(invoked))
+    assert extras["Request ID"] == RID and extras["Version that ran"] == "7" and extras["HTTP status"] == "200 OK"
+    assert extras["X-Ray trace"] == "1-6743a1b2-aaaa · sampled: true"
+    assert extras["Billed duration"] == "313 ms" and extras["Init duration (cold start)"] == "401 ms"
+    assert extras["Log lines"].startswith("1 from its code, ") and extras["Content type"] == "application/json"
+    assert [e.message.split()[0] for e in lambda_lines(invoked)] == ["EXTENSION", "START", "END", "REPORT", "XRAY"]
+    assert [e.message for e in code_lines(invoked)] == [OK_TAIL.split("\n")[1]]
+    header_only = _invoked(OK_TAIL, answer={})
+    header_only.headers = {"x-amzn-trace-id": "Root=1-ffff;Parent=0;Sampled=0"}
+    assert xray_trace(header_only).trace_id == "1-ffff" and xray_trace(header_only).sampled == "false"
+
+
+def test_the_report_shows_everything_else(fn_role, capsys):
+    ui = LambdaView(analyzer({"ok": True}, tail=EXTENSION_TAIL), mode="text", progress="off")
+    out = run(capsys, ui.invoke, "orders-api", {"order_id": 42})
+    assert "Everything else Lambda returned" in out and "1-6743a1b2-aaaa" in out and "X-Ray trace header" in out
+
+
+def open_test_tab(core):
+    return LambdaExplorer("orders-api", tab="test", core=core, mode="widgets")
+
+
+def test_the_test_tab_checks_formats_and_runs(fn_role):
+    old = seed_old_run()
+    calls = []
+    x = open_test_tab(analyzer({"statusCode": 200, "body": {"saved": 42}}, calls=calls))
+    assert x._tab == "test" and x.test_box.value == "{}" and "Test orders-api" in plain_text(x.test_head.value)
+    x.test_box.value = '{\n  "order_id": 42,\n  "x": \n}'
+    assert x.test_run_button.disabled and "line 4, column 1" in plain_text(x.test_said.value)
+    assert '<tr class="bad"><td class="ln">4</td>' in x.test_preview.value
+    x.test_box.value = '{"order_id":42,"items":[{"sku":"A-1"}]}'
+    assert not x.test_run_button.disabled and '<span class="jk">' in x.test_preview.value
+    next(b for b in x.pages["test"].children[-1].children[0].children[1].children
+         if getattr(b, "description", "") == "{ } Format").click()
+    assert x.test_box.value.startswith('{\n  "order_id": 42,\n  "items": [')
+    x.sample_pick.value = "SQS message"
+    assert json.loads(x.test_box.value)["Records"][0]["eventSource"] == "aws:sqs" and x.sample_pick.value == ""
+    x.test_box.value = '{"order_id": 42}'
+    x.test_run_button.click()
+    assert calls[0]["Payload"] == b'{"order_id": 42}' and calls[0]["InvocationType"] == "RequestResponse"
+    result = plain_text(x.test_result.value)
+    assert "orders-api ran" in result and "Everything else Lambda returned" in result and '"saved"' in result
+    assert "loading order 42" in result and "1-6743a1b2-0123456789abcdef01234567" in result
+    assert plain_text(x.status.value) == "orders-api ran in 312 ms · what it returned and logged is below"
+    assert x.test_runs_pick.layout.display == "" and x.test_logs_button.layout.display == ""
+    x.test_logs_button.click()
+    assert x._tab == "logs" and [run.request_id for run in x._visible_runs()] == [RID, old]
+    assert "you ran" in plain_text(x._run_rows[0].face.value)
+
+
+def test_the_test_tab_keeps_earlier_runs_and_the_box(fn_role):
+    seed_old_run()
+    x = open_test_tab(analyzer(FAILURE, tail=FAILED_TAIL, error="Unhandled"))
+    x.test_box.value = '{"order_id": 1}'
+    x.test_run_button.click()
+    assert plain_text(x.status.value).startswith("orders-api failed with KeyError in 12 ms")
+    assert "KeyError" in plain_text(x.test_result.value)
+    x.test_box.value = '{"order_id": 2}'
+    x.test_run_button.click()
+    assert [label for label, _ in x.test_runs_pick.options][0].startswith("Run 2 · ✕ failed")
+    x.test_runs_pick.value = 0
+    assert json.loads(x.test_box.value) == {"order_id": 1}
+    x._show_tab("overview")
+    x._show_tab("test")
+    assert json.loads(x.test_box.value) == {"order_id": 1}
+
+
+def test_x_test_puts_an_event_in_the_box(fn_role):
+    seed_old_run()
+    calls = []
+    x = LambdaExplorer("orders-api", core=analyzer({}, calls=calls), mode="widgets")
+    x.test(event={"order_id": 9, "lines": [1]})
+    assert x._tab == "test" and json.loads(x.test_box.value) == {"order_id": 9, "lines": [1]}
+    assert x.test_box.value.startswith('{\n  "order_id": 9') and calls == []
+    x.test(event='{"pasted": true}')
+    assert json.loads(x.test_box.value) == {"pasted": True}

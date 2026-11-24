@@ -94,7 +94,7 @@ What's wrong
 -   [Why did this run fail?](#explorer-logs) <span class="how">Click a function, then Logs, then a ✕ run</span>
 -   [Which runs logged this error?](#explorer-logs) <span class="how">Type it in the Logs search box, press Enter</span>
 -   [What are its errors, by cause?](#explorer-more) <span class="how">Open the Errors tab</span>
--   [What happens if I run it now?](#explorer-invoke) <span class="how">Logs, then ▶ Invoke</span>
+-   [What happens if I run it now?](#explorer-test) <span class="how">Open the Test tab, paste an event, ▶ Run</span>
 
 Right now, and since last time
 { .qgroup }
@@ -242,6 +242,23 @@ The box starts with the event you sent last, or the newest one a run logged, and
     - **The You ran chip** shows only the runs you made from the window. They stay first when the time range is read again, even before CloudWatch has their lines. Running it while a search is in the box clears the search, so your run shows.
     - **It runs for real**: whatever the code writes, sends or deletes happens. It's sent once and never retried, even when the answer is slow, so it never runs twice. It needs `lambda:InvokeFunction` on the function, on top of the read-only permissions; without it, the box says so. In a cell, [`ui.invoke(name, event)`](lambda_functions.md#invoke) draws the same as a report.
 
+## Test it with an event { #explorer-test }
+
+The **Test** tab is the Lambda console's Test page in the window: paste an event, check it, run the function once with it, and read everything that came back.
+{ .gist }
+
+Paste the event in the box on the left, or pick one under **Start from…**, shaped like what S3, SQS, SNS, API Gateway or EventBridge send. Beside it, the event as it will be sent: indented, in colour, with line numbers. JSON that breaks is shown as typed, with the broken line marked and a caret under the column, and ▶ Run stays off until it's fixed. **{ } Format** tidies the box, **Compact** puts it on one line. A Python dict (`{'paid': True}`) is fine too: it's sent as JSON.
+
+**▶ Run** runs it once. Under the box comes the whole report: whether it worked, cards for run time against the timeout, memory, cold start and cost, what to change, what it returned (JSON you can fold, or the traceback), every line it logged, and **everything else Lambda returned**: the request ID, the version that ran, the X-Ray trace, billed and start-up times, the log lines Lambda and its extensions wrote, the sizes and the response headers.
+
+??? more "Earlier runs, and the Logs tab"
+
+    - **Earlier runs** stay in the menu on the right of the tools, newest first, for this session. Picking one shows its report again and puts its event back in the box.
+    - **Open this run in the Logs tab** shows it among the function's other runs, opened and marked *you ran*.
+    - What you typed stays in the box for each function, so you can move between tabs and functions and come back to it.
+    - From code, `x.test("orders-etl", {"order_id": 42})` opens the tab with that event in the box. Nothing runs until you click ▶ Run.
+    - It runs for real, once, never retried, and needs `lambda:InvokeFunction`, like **▶ Invoke** below.
+
 ## How it's doing { #explorer-overview }
 
 The **Overview** tab has what to fix first, then **how it's wired**: what calls the function and where its results, failed events and logs go. Then its days as charts (calls, failed calls on their own scale, run time against the timeout) and its cost as one bar.
@@ -303,9 +320,10 @@ Everything is read in the background: a click shows what's known at once and fil
 | Command | What it does |
 |---|---|
 | `explore(name=None, tab=None, since=None, until=None, search=None, region=None, profile=None, height=None, history=True, assistant=None)` | Opens the window and returns it; `ui.explore(...)` on a `LambdaView` takes the same |
-| `x.open(name, tab=None)` | Opens a function (a name, `"name:alias"`, an ARN or a console link), on its Overview or `tab=` (`"logs"`, `"errors"`, `"performance"`, `"code"`, `"settings"`) |
+| `x.open(name, tab=None)` | Opens a function (a name, `"name:alias"`, an ARN or a console link), on its Overview or `tab=` (`"logs"`, `"test"`, `"errors"`, `"performance"`, `"code"`, `"settings"`) |
 | `x.logs(name=None, search=None, since=None, until=None)` | Its Logs tab, for a time range (`"15m"`, `"24h"`, `"7d"`, a date) and a search, as typing it and pressing Enter does |
 | `x.run(request_id)` | One run, every line of it, by its request ID |
+| `x.test(name=None, event=None)` | The Test tab with `event=` (a dict, a list or JSON text) in its box, as tidy JSON; nothing runs until ▶ Run |
 | `x.live(name=None)` | The Live tab: what ran in the last 10 minutes, or one function followed |
 | `x.recent` / `x.forget_recent(name="")` | The functions you've opened before; forget one, or all of them |
 | `x.refresh()` | Reads everything again (the ↻ button) |

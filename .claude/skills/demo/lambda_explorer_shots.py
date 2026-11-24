@@ -46,7 +46,8 @@ WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs", "lambda-explorer-search",
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code", "lambda-explorer-failed-line",
            "lambda-explorer-recent", "lambda-explorer-live", "lambda-explorer-live-follow", "lambda-explorer-changed",
-           "lambda-explorer-changes", "lambda-explorer-invoke")
+           "lambda-explorer-changes", "lambda-explorer-invoke", "lambda-explorer-test-broken", "lambda-explorer-test",
+           "lambda-explorer-test-extras")
 LIVE = ("lambda-explorer-live", "lambda-explorer-live-follow")
 SECOND_WINDOW = ("lambda-explorer-changed", "lambda-explorer-changes")
 
@@ -240,6 +241,24 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         settled()
         page.mouse.move(1, 1)
         shot("lambda-explorer-invoke")
+    if any(name.startswith("lambda-explorer-test") for name in wanted):
+        tab("Test")
+        settled()
+        box = page.locator(".lmx-app .lmx-tst-grid textarea")
+        box.fill('{\n  "key": "batch-042.json",\n  "customer_id": "c-1042",\n  "items": [{"sku": "A-1", "qty": }]\n}')
+        time.sleep(0.4)
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-test-broken")
+        box.fill('{"key":"batch-042.json","customer_id":"c-1042","items":[{"sku":"A-1","qty":2}]}')
+        page.locator(".lmx-app .lmx-tst-tools button", has_text="Format").click()
+        page.locator(".lmx-app .lmx-tst-foot button.lmx-invoke").click()
+        page.wait_for_selector(".lmx-app .lmx-tst-foot button:has-text('Open this run')", timeout=30_000)
+        settled()
+        page.mouse.move(1, 1)
+        shot("lambda-explorer-test")
+        page.locator(".lmx-app .lmx-scroll :text('Everything else Lambda returned')").first.scroll_into_view_if_needed()
+        time.sleep(0.4)
+        shot("lambda-explorer-test-extras")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON
         page.locator(".lmx-app .lmx-trig-b").first.click()
         page.locator(".lmx-app .lmx-pop input").fill("report")
