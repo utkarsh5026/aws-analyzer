@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🪣 **S3: reports as pandas tables and an Excel workbook**
+- 🪣 **S3: reports as pandas tables and an Excel workbook** ([#282](https://github.com/utkarsh5026/aws-analyzer/pull/282))
   - `summary()`, `overview()`, `ls()`, `find()`, `duplicates()`, `versions()`, `deleted()`, `compare()` and more end with **🐼 This report as data**.
   - `ui.data()` gives their tables as DataFrames, each row with its file's s3:// path, ready for `ui.core.read_df()`.
   - `preview()` of a table gives its rows and schema; `ui.to_excel()` saves any of them as a workbook.
