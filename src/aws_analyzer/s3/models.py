@@ -807,3 +807,74 @@ def objects_to_df(objects: Iterable[ObjectInfo]):
         ],
         columns=columns,
     )
+
+
+@dataclass
+class Check:
+    """
+    One cell of the overview's grid: a bucket's state for one check ('bad', 'warn', 'unknown' when it couldn't be
+    read, or 'ok'), the word in the cell, the key of the fix a problem needs, how many of the bucket's warnings it
+    stands for, and why, in a sentence (see bucket_checks).
+    """
+
+    column: str
+    state: str
+    word: str
+    fix: str = ""
+    warnings: int = 0
+    reason: str = ""
+
+
+@dataclass
+class BucketChecks:
+    """
+    A bucket's row in the overview: its Check per column, in CHECK_COLUMNS order (see bucket_checks).
+    """
+
+    bucket: str
+    region: str | None
+    checks: list[Check]
+
+    def check(self, column: str) -> Check:
+        return next(check for check in self.checks if check.column == column)
+
+    @property
+    def problems(self) -> list[Check]:
+        return [check for check in self.checks if check.state in ("bad", "warn")]
+
+    @property
+    def warnings(self) -> int:
+        return sum(check.warnings for check in self.checks)
+
+    @property
+    def worst(self) -> str:
+        states = {check.state for check in self.checks}
+        return next(state for state in ("bad", "warn", "unknown", "ok") if state in states)
+
+
+@dataclass
+class Fix:
+    """
+    One change that clears some of the overview's warnings: what to do, why, the call or command, its severity
+    ('bad' for a public bucket, else 'warn'), the buckets it covers and how many warnings it clears (see
+    overview_fixes).
+    """
+
+    key: str
+    title: str
+    why: str
+    call: str
+    severity: str
+    buckets: list[str]
+    clears: int
+
+
+@dataclass
+class OverviewVerdict:
+    """
+    The overview's answer in a sentence when a bucket is open to the internet, with what does it under it.
+    """
+
+    headline: str
+    detail: str = ""
+    tone: str = "bad"

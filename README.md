@@ -554,7 +554,7 @@ s3.clean_downloads(older_than="30d").freed          # DownloadsCleanup; dry_run=
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
 `make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
-`bucket_findings`, `explain_policy`, `policy_findings`, `parse_notifications`, `object_monthly_cost`, `cloudwatch_cost`,
+`bucket_findings`, `bucket_checks`, `overview_fixes`, `overview_verdict`, `explain_policy`, `policy_findings`, `parse_notifications`, `object_monthly_cost`, `cloudwatch_cost`,
 the duplicate finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
 have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
 file parsers `parse_docx` (`pictures=True` for its pictures), `parse_pptx`, `parse_pdf` (`layout=True` keeps where

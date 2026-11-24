@@ -60,6 +60,7 @@ from aws_analyzer.s3 import (
     KB,
     MB,
     TB,
+    CHECK_COLUMNS,
     BucketConfig,
     Document,
     DownloadsFolder,
@@ -75,6 +76,7 @@ from aws_analyzer.s3 import (
     Stat,
     ZipPlan,
     build_folder_tree,
+    bucket_checks,
     bucket_findings,
     cloudwatch_cost,
     compare_objects,
@@ -95,6 +97,8 @@ from aws_analyzer.s3 import (
     make_filter,
     object_monthly_cost,
     objects_to_df,
+    overview_fixes,
+    overview_verdict,
     parse_avro,
     parse_docx,
     parse_pdf,
@@ -814,6 +818,179 @@ def test_bucket_findings_uses_account_block_public_access():
         for _, m in bucket_findings(cfg, {"A": True, "B": True})
     )
     assert any("this bucket or the account" in m for _, m in bucket_findings(cfg, {}))
+
+
+PUBLIC_SAMPLES = {
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Sid": "PublicSamples", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject",
+        "Resource": "arn:aws:s3:::acme-ml-data/public-samples/*",
+    }],
+}
+
+
+def acme_buckets():
+    """
+    The docs' four buckets, as the overview reads them: a public, versioned one; one with everything on; one with
+    no encryption; one that's only missing Block Public Access. The account's own setting isn't set.
+    """
+    return [
+        BucketConfig(name="acme-ml-data", region="us-east-1", versioning="Enabled", encryption="aws:kms",
+                     policy=PUBLIC_SAMPLES, has_policy=True, policy_is_public=True),
+        BucketConfig(name="acme-logs", region="us-east-1", versioning="Disabled", encryption="AES256",
+                     public_access_block={"BlockPublicAcls": True, "IgnorePublicAcls": True,
+                                          "BlockPublicPolicy": True, "RestrictPublicBuckets": True}),
+        BucketConfig(name="sagemaker-us-east-1-123456789012", region="us-east-1", versioning="Disabled"),
+        BucketConfig(name="acme-eu-exports", region="eu-west-1", versioning="Disabled", encryption="AES256"),
+    ]
+
+
+def overview_warnings(configs, account_block, account="123456789012"):
+    """
+    How many warnings the overview has today: what bucket_findings and policy_findings say at 'warn'.
+    """
+    count = 0
+    for cfg in configs:
+        found = bucket_findings(cfg, account_block) + policy_findings(explain_policy(cfg.policy, account))
+        count += sum(level == "warn" for level, _ in found)
+    return count
+
+
+def test_bucket_checks_give_each_cell_a_state_and_a_fix():
+    ml, logs, sagemaker, eu = [bucket_checks(cfg, {}, account="123456789012") for cfg in acme_buckets()]
+
+    assert [check.column for check in ml.checks] == list(CHECK_COLUMNS)
+    assert [(check.state, check.word) for check in ml.checks] == [
+        ("bad", "Public"), ("warn", "Off"), ("ok", "SSE-KMS"), ("warn", "Kept forever"),
+    ]
+    assert ml.check("Bucket policy").fix == "policy:acme-ml-data"
+    assert ml.check("Bucket policy").warnings == 2
+    assert "PublicSamples lets anyone on the internet" in ml.check("Bucket policy").reason
+    assert ml.check("Block Public Access").fix == "account-block"
+    assert (ml.worst, ml.warnings) == ("bad", 4)
+
+    assert logs.worst == "ok" and not logs.problems
+    assert logs.check("Block Public Access").word == "On"
+    assert logs.check("Bucket policy").word == "No policy"
+    assert [check.word for check in sagemaker.problems] == ["Off", "None"]
+    assert eu.worst == "warn" and eu.warnings == 1
+
+
+def test_overview_fixes_group_warnings_by_what_clears_them():
+    configs = acme_buckets()
+    rows = [bucket_checks(cfg, {}, account="123456789012") for cfg in configs]
+
+    fixes = overview_fixes(rows, account="123456789012")
+
+    assert [fix.key for fix in fixes] == ["policy:acme-ml-data", "account-block", "versions", "encryption"]
+    assert [fix.clears for fix in fixes] == [2, 3, 1, 1]
+    assert sum(fix.clears for fix in fixes) == overview_warnings(configs, {}) == 7
+    public, account, versions, encryption = fixes
+    assert public.severity == "bad" and public.call == "policy('acme-ml-data')"
+    assert account.buckets == ["acme-ml-data", "sagemaker-us-east-1-123456789012", "acme-eu-exports"]
+    assert "--account-id 123456789012" in account.call and "BlockPublicPolicy=true" in account.call
+    assert "check first that nothing relies on that" in account.why
+    assert versions.call == "versions('s3://acme-ml-data/')"
+    assert encryption.call.startswith("aws s3api put-bucket-encryption --bucket sagemaker-us-east-1-123456789012 ")
+    assert '"SSEAlgorithm":"AES256"' in encryption.call
+    assert render._CALL_RE.search(encryption.call).group(0) == encryption.call
+
+
+def test_overview_fixes_block_each_bucket_when_the_account_setting_is_unknown():
+    rows = [bucket_checks(cfg, None) for cfg in acme_buckets()]
+
+    fixes = {fix.key: fix for fix in overview_fixes(rows)}
+
+    assert "account-block" not in fixes
+    assert fixes["bucket-block"].buckets == ["acme-ml-data", "sagemaker-us-east-1-123456789012", "acme-eu-exports"]
+    assert "run it for each" in fixes["bucket-block"].why
+    assert "aws s3api put-public-access-block --bucket acme-ml-data " in fixes["bucket-block"].call
+
+
+def test_overview_fixes_name_a_placeholder_when_the_account_id_is_unknown():
+    rows = [bucket_checks(cfg, {}) for cfg in acme_buckets()]
+
+    account = next(fix for fix in overview_fixes(rows) if fix.key == "account-block")
+
+    assert "--account-id <account-id>" in account.call
+
+
+def test_bucket_checks_with_the_account_blocked_have_no_block_fix():
+    on = {"BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True}
+    rows = [bucket_checks(cfg, on) for cfg in acme_buckets()]
+
+    assert {row.check("Block Public Access").word for row in rows} == {"On (account)"}
+    assert all(not fix.key.endswith("block") for fix in overview_fixes(rows))
+
+
+def test_bucket_checks_say_what_they_could_not_read():
+    cfg = BucketConfig(name="locked", versioning="Disabled", errors={
+        "encryption": "AccessDenied", "public_access_block": "AccessDenied",
+        "policy": "AccessDenied", "policy_document": "AccessDenied",
+    })
+
+    row = bucket_checks(cfg, {})
+
+    assert [(check.state, check.word) for check in row.checks] == [
+        ("unknown", "?"), ("unknown", "?"), ("unknown", "?"), ("ok", "Not versioned"),
+    ]
+    assert row.worst == "unknown" and overview_fixes([row]) == []
+    assert row.check("Encryption").reason == "Couldn't read encryption (AccessDenied)."
+
+
+def test_bucket_checks_call_a_broad_policy_too_broad():
+    policy = {"Statement": [{
+        "Sid": "AllButAudit", "Effect": "Allow", "NotPrincipal": {"AWS": "arn:aws:iam::123456789012:role/audit"},
+        "Action": "s3:GetObject", "Resource": "arn:aws:s3:::b/*",
+        "Condition": {"StringEquals": {"aws:PrincipalOrgID": "o-abc"}},
+    }]}
+    cfg = BucketConfig(name="b", encryption="AES256", policy=policy, has_policy=True, policy_is_public=False)
+
+    check = bucket_checks(cfg, {"A": True}).check("Bucket policy")
+
+    assert (check.state, check.word, check.fix) == ("warn", "Too broad", "policy:b")
+    assert "NotPrincipal" in check.reason
+
+
+@pytest.mark.parametrize("account_block", [None, {}, {"BlockPublicAcls": True}])
+def test_overview_fixes_clear_exactly_the_warnings_the_findings_give(account_block):
+    toggles = itertools.product(
+        (None, "AES256"), ("Enabled", "Suspended", "Disabled"), (False, True), (None, {"A": True, "B": True}),
+    )
+    configs = [
+        BucketConfig(name=f"b{i}", encryption=encryption, versioning=versioning, public_access_block=block,
+                     policy=PUBLIC_SAMPLES if public else None, has_policy=public, policy_is_public=public)
+        for i, (encryption, versioning, public, block) in enumerate(toggles)
+    ]
+    rows = [bucket_checks(cfg, account_block) for cfg in configs]
+
+    fixes = overview_fixes(rows)
+
+    assert sum(fix.clears for fix in fixes) == overview_warnings(configs, account_block, account=None)
+    assert sum(row.warnings for row in rows) == overview_warnings(configs, account_block, account=None)
+    assert [fix.severity for fix in fixes] == sorted((fix.severity for fix in fixes), key=["bad", "warn"].index)
+
+
+def test_overview_verdict_leads_only_when_a_bucket_is_public():
+    rows = [bucket_checks(cfg, {}) for cfg in acme_buckets()]
+
+    verdict = overview_verdict(rows)
+
+    assert verdict.headline == "acme-ml-data is open to anyone on the internet"
+    assert "PublicSamples" in verdict.detail and verdict.tone == "bad"
+    assert overview_verdict(rows[1:]) is None
+
+
+def test_overview_verdict_names_a_few_public_buckets():
+    configs = [
+        BucketConfig(name=f"open-{i}", encryption="AES256", policy=PUBLIC_SAMPLES, policy_is_public=True)
+        for i in range(5)
+    ]
+
+    verdict = overview_verdict([bucket_checks(cfg, {}) for cfg in configs])
+
+    assert verdict.headline == "5 buckets are open to anyone on the internet"
+    assert verdict.detail.startswith("open-0, open-1, open-2 and 2 more: ")
 
 
 def details(key, fmt, size=1000, **facts):
