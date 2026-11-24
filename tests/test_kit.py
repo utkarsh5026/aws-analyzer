@@ -92,7 +92,7 @@ def test_code_to_copy_has_a_copy_button():
 
 
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 198
+    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 204
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")

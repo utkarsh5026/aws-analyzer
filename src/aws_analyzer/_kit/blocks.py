@@ -105,6 +105,18 @@ class _Findings:
 
 
 @dataclass
+class _Verdict:
+    """
+    The report's answer in one sentence, the numbers behind it under it, in a band coloured by `tone` ('bad',
+    'warn' or 'ok').
+    """
+
+    headline: str
+    detail: str = ""
+    tone: str = "bad"
+
+
+@dataclass
 class _Next:
     """
     The commands worth running next, as (call, what it shows), with their arguments filled in. A View that can run

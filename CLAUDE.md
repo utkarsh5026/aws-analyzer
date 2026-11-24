@@ -123,7 +123,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   times `parse_time` reads are in that zone; `tests/conftest.py` sets UTC back after each test), `text.py` (`_esc`,
   `_clip`, `_pad`, `_width`, `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
   (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
-  render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
+  render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Verdict` (a report's answer in one coloured sentence), `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
   `_prose`, `_lead`, `_call`, `_signature`, the shared blocks' drawers with the tables' sorting, filters and key
   columns, `_report_html`, `_render_text`, `_blocks_html`),

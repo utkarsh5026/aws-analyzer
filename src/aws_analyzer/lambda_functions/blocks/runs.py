@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Sequence
 
-from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone
+from ..._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title, _Tone, _Verdict
 from ..._kit.fmt import _count, _fmt_dt, _plural, _share, _tz_label
 
 from ..helpers import human_ms
@@ -19,7 +19,7 @@ from ..analysis.causes import STOPPED, CauseState, cause_advice, cause_state, ru
 from ..analysis.logs import LogRun
 from ..analysis.performance import percentile, slice_counts, time_slices
 from ..analysis.runs import DEFAULT_COLUMNS, RunGroup, RunTable, failure_groups, format_value, runs_findings
-from .causes import _CaseFacts, _Causes, _Verdict, _cause
+from .causes import _CaseFacts, _Causes, _cause
 from .run_charts import _RunMark, _RunTimeline
 
 _STATUS_TONES = {"failed": "bad", "timeout": "bad", "logged": "warn"}

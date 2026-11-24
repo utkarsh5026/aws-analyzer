@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Generator
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone, _Verdict
 from .._kit.deps import _in_notebook, _require
 from .._kit.errors import _Hint, _error_code, _why
 from .._kit.fmt import (
@@ -67,7 +67,7 @@ from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
 from .blocks.runs import _RunsLayout, _runs_blocks
 from .blocks.performance import _PerformanceSetup, performance_blocks
-from .blocks.causes import _Verdict, _cause_blocks
+from .blocks.causes import _cause_blocks
 from .blocks.fleet import _FunctionList, _Todo
 from .blocks.fates import _fates_blocks, lost_events
 from .blocks.logs import _LogRuns, _marked_words, _opened_runs, _runs_holding
