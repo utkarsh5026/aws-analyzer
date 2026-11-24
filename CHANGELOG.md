@@ -18,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- ⚡ **Lambda: function_info() shows how its cost is worked out**
+- ⚡ **Lambda: function_info() shows how its cost is worked out** ([#279](https://github.com/utkarsh5026/aws-analyzer/pull/279))
   - Under the monthly cost bar, a table gives each part's measured usage, the price used and the sum: `31.3 GB x $0.50 = $15.66`.
   - `cost_workings()` returns the same rows in Python.
 
