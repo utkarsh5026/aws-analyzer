@@ -5,6 +5,7 @@ The Cut cost commands.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -19,6 +20,7 @@ from ..._kit.view import _friendly_errors
 from ..helpers import base_prefix, parse_s3_uri, relative_key, s3_uri
 from ..models import ObjectInfo
 from ..analysis.cost import object_monthly_cost
+from ..analysis.datasets import duplicates_data
 from ..analysis.duplicates import _folders_text, duplicate_findings, duplicate_folders
 from .cells import _folder_label
 
@@ -227,7 +229,8 @@ class _CostCommands:
                     ]
                 )
             )
-        self._show(blocks)
+        data = replace(duplicates_data(report), source=_call("duplicates", uri))
+        self._show(self._with_data(blocks, data))
 
     @_friendly_errors
     def uploads(self, uri: str, *, with_sizes: bool = True) -> None:

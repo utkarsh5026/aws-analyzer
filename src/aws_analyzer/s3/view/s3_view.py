@@ -4,6 +4,7 @@ S3View, made of its commands' mixins: its look, help()'s groups and the plumbing
 
 from __future__ import annotations
 
+from ..._kit.dataview import _DataCommands
 from ..._kit.view import _BaseView
 
 from ..readers.formats import _DATA_ERRORS
@@ -17,7 +18,7 @@ from .files import _FileCommands
 from .downloads import _DownloadCommands
 
 
-class S3View(_BucketCommands, _FolderCommands, _CostCommands, _VersionCommands, _FileCommands, _DownloadCommands, _BaseView):
+class S3View(_DataCommands, _BucketCommands, _FolderCommands, _CostCommands, _VersionCommands, _FileCommands, _DownloadCommands, _BaseView):
     """
     Notebook UI over S3Analyzer. Each method renders a report and returns nothing;
     for the underlying data call the same-named method on `view.core` (an S3Analyzer).
@@ -50,9 +51,10 @@ class S3View(_BucketCommands, _FolderCommands, _CostCommands, _VersionCommands, 
         "🕘 Versions and deleted files": ("versions", "history", "deleted"),
         "📄 Open a file": ("head", "preview", "document", "link"),
         "⬇ Download": ("download", "download_zip", "downloads", "clean_downloads"),
+        "🐼 As data": ("data", "to_excel"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"download", "download_zip", "clean_downloads"})
+    _CHANGES = frozenset({"download", "download_zip", "clean_downloads", "to_excel"})
     _START = (
         ("overview()", "every bucket: size, cost and warnings"),
         ("summary('s3://bucket/prefix/')", "what's in a folder and what it costs"),
@@ -73,6 +75,9 @@ class S3View(_BucketCommands, _FolderCommands, _CostCommands, _VersionCommands, 
             self.core.downloads = downloads
 
     # ------------------------------------------------------------------ plumbing
+
+    def _data_example(self) -> str:
+        return "data('summary', 's3://my-bucket/folder/')"
 
     def _explain(self, code: str, message: str) -> str:
         """

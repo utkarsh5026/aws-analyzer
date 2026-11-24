@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -20,6 +20,7 @@ from ..helpers import parse_s3_uri, s3_uri
 from ..blocks import _CheckGrid, _Fixes, _GridRow
 from ..models import BucketChecks, BucketConfig, BucketReport, Fix, PolicyStatement
 from ..analysis.cost import cloudwatch_cost
+from ..analysis.datasets import BucketLine, buckets_data, overview_data
 from ..analysis.bucket import block_label, bucket_findings, encryption_label, public_exposure, rule_actions, rule_scope
 from ..analysis.overview import (
     BAD, CHECK_COLUMNS, OK, UNKNOWN, bucket_checks, overview_fixes, overview_verdict, state_rank,
@@ -142,40 +143,17 @@ class _BucketCommands:
             self.core.list_buckets(with_region=with_region), key=lambda b: b.name
         )
         regions = Counter(b.region or "unknown" for b in buckets)
-        self._show(
-            [
-                _Title(
-                    f"S3 buckets ({len(buckets)})",
-                    " · ".join(f"{r}: {n}" for r, n in regions.most_common()),
-                ),
-                _Table(
-                    ["Bucket", "Region", f"Created ({_tz_label()})", "Age"],
-                    [
-                        [
-                            b.name,
-                            b.region or "-",
-                            _fmt_dt(b.created),
-                            human_age(b.created),
-                        ]
-                        for b in buckets
-                    ],
-                    max_rows=0,
-                ),
-                _Next(
-                    [("overview()", "size, cost and warnings of every bucket")]
-                    + (
-                        [
-                            (
-                                _call("bucket_info", buckets[0].name),
-                                "one bucket's settings and risks",
-                            )
-                        ]
-                        if buckets
-                        else []
-                    )
-                ),
-            ]
-        )
+        steps = [("overview()", "size, cost and warnings of every bucket")]
+        if buckets:
+            steps.append((_call("bucket_info", buckets[0].name), "one bucket's settings and risks"))
+        rows = [[b.name, b.region or "-", _fmt_dt(b.created), human_age(b.created)] for b in buckets]
+        blocks = [
+            _Title(f"S3 buckets ({len(buckets)})", " · ".join(f"{r}: {n}" for r, n in regions.most_common())),
+            _Table(["Bucket", "Region", f"Created ({_tz_label()})", "Age"], rows, max_rows=0),
+            _Next(steps),
+        ]
+        data = replace(buckets_data(buckets), source=_call("buckets"))
+        self._show(self._with_data(blocks, data))
 
     @_friendly_errors
     def bucket_info(self, bucket: str, *, metrics: bool = True) -> None:
@@ -521,7 +499,9 @@ class _BucketCommands:
         if rows:
             blocks += [self._overview_grid(rows, metrics=metrics), self._overview_settings(rows, account_block)]
         blocks += self._overview_next(rows, fixes)
-        self._show(blocks)
+        lines = [BucketLine(row.report, row.checks, row.size, row.objects, row.cost) for row in rows]
+        source = _call("overview", match) if match else _call("overview")
+        self._show(self._with_data(blocks, replace(overview_data(lines), source=source)))
 
     @_friendly_errors
     def policy(self, bucket: str) -> None:

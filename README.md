@@ -337,6 +337,8 @@ ui.bucket_info("my-bucket")
 ui.summary("s3://my-bucket/data/")
 ui.preview("s3://my-bucket/data/part-0.parquet")
 ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")  # preview a lifecycle rule
+data = ui.data()             # the last report's tables as pandas DataFrames: data["largest"], data.guide()
+ui.to_excel()                # the last report as an Excel workbook: summary, charts, tables, how to read
 ```
 
 > [!TIP]
@@ -433,6 +435,13 @@ URLs), `breadcrumbs`, `parent_uri`, `sort_entries` (folders first, `part-2` befo
 
 Grouped the way `ui.help()` lists them.
 
+#### As data
+
+| Command | Shows |
+| :-- | :-- |
+| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("summary", "s3://b/p/")` reads a report's without showing it |
+| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
+
 #### Buckets
 
 | Command                | Shows                                                                                                                                                                                                                                                                                                                                 |
@@ -498,6 +507,32 @@ ui.download("s3://my-bucket/data/")        # ~/scratch/s3/data/
 ui.downloads()                             # what's there, how much disk it takes
 ui.clean_downloads(older_than="7d")        # delete what was downloaded before this week
 ```
+
+### Your reports as data: pandas and Excel
+
+Most reports end with a folded **🐼 This report as data**: the tables behind them, every column explained, with
+pandas lines worth running. `ui.data()` gives them as DataFrames without reading S3 again, and `ui.to_excel()` saves
+them as a workbook in `aws-analyzer-exports/` (a summary, Excel charts, a formatted sheet per table and how to read
+them). Lambda's reports work the same way.
+
+```python
+ui.summary("s3://my-bucket/data/")
+data = ui.data()
+data["folders"]                       # space by folder: files, size_gb, share_of_size
+data["largest"].uri                   # their s3:// paths, ready for ui.core.read_df(...)
+data = ui.data("find", "s3://my-bucket/", pattern="*.parquet")   # another report's tables, not shown
+ui.to_excel()
+```
+
+| Report | Tables |
+| :-- | :-- |
+| `buckets()`, `overview()` | `buckets` (in `overview()`: size, estimated cost, each check's result and why) |
+| `ls()`, `find()`, `largest()`, `newest()`, `oldest()` | `entries` / `files`: a row per file with its size, age, storage class, estimated monthly cost and s3:// path |
+| `summary()` | `folders`, `file_types`, `storage_classes`, `size_bands`, `ages`, `largest` |
+| `duplicates()` | `groups` (what each group's copies take and cost), `copies` (a row per file, keep or copy) |
+| `versions()`, `history()`, `deleted()` | `keys`, `versions`, `deleted` |
+| `compare()` | `differences`: a row per key that differs, only in A or only in B |
+| `preview()` of a table | `rows` (the rows read; `ui.core.read_df(uri)` reads them all) and its `schema` |
 
 ### Reference
 

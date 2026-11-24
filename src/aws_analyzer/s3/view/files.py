@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import posixpath
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -20,10 +21,13 @@ from ..._kit.view import _friendly_errors
 from ..helpers import KB, MB, _MAX_PICTURES, _PREVIEW_PAGES, _PREVIEW_PICTURES, parse_s3_uri
 from ..models import Document, Picture
 from ..readers.pdf import _encode_picture
+from ..analysis.datasets import preview_data
 from ..analysis.documents import pdf_flow, pdf_furniture
 from ..blocks import _Flow, _Frame, _Image, _Link, _Media, _Pages
 from .cells import _FORMAT_LABELS
 
+
+_PREVIEW_ROWS = 20
 
 _INFO_CARDS = {  # Preview.info key -> card label, in display order
     "rows": "Rows",
@@ -321,7 +325,7 @@ class _FileCommands:
         self._show(blocks)
 
     @_friendly_errors
-    def preview(self, uri: str, n: int = 20) -> None:
+    def preview(self, uri: str, n: int = _PREVIEW_ROWS) -> None:
         """
         Peek inside a file: tables (csv, tsv, psv, json, jsonl, parquet, orc, feather, avro, excel, npy)
         with their schema, archive contents (zip, tar, tar.gz, model.tar.gz, npz, .pt), safetensors tensors,
@@ -452,7 +456,11 @@ class _FileCommands:
                 steps + [(_call("download", p.uri), "a copy on the notebook's disk, in s3-downloads")]
             )
         )
-        self._show(blocks)
+        data = preview_data(p)
+        if data is None:
+            return self._show(blocks)
+        source = _call("preview", uri, n) if n != _PREVIEW_ROWS else _call("preview", uri)
+        self._show(self._with_data(blocks, replace(data, source=source)))
 
     @_friendly_errors
     def document(
