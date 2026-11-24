@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from ..._kit.blocks import _Table
 from ..._kit.charts import _Part, _Split
 from ..._kit.fmt import _count, _plural, _total, human_money, human_size
 
 from ..helpers import MB, _midnight, _pct, human_ms
 from ..models import FunctionDetail
+from ..prices import DAYS_PER_MONTH
+from ..analysis.cost import CostWorking
 from ..analysis.functions import _source_name
 from .logs import _short_day
 from .wiring import _Columns, _Wiring
@@ -175,3 +178,15 @@ def cost_split(cost: dict[str, float | None], names: dict[str, str], *, basis: s
     left_out = f" Not priced, so left out: {', '.join(unknown)}." if unknown else ""
     return _Split(parts, total, title=f"Estimated monthly cost: {total}",
                   note=f"From {basis}, before the free tier.{left_out}")
+
+
+def cost_workings_table(workings: list[CostWorking], names: dict[str, str]) -> _Table:
+    """
+    How each part of the estimate was worked out, under its bar and in the same order: what CloudWatch measured, scaled to a month, the
+    price it was multiplied by and the sum, so a reader can check every number (or redo it with their own prices).
+    """
+    largest_first = sorted(workings, key=lambda working: -working.cost)
+    rows = [[names.get(w.part, w.part), w.measured, w.price, w.sum, human_money(w.cost)] for w in largest_first]
+    return _Table(["Part", "Measured", "Price", "Worked out", "Cost"], rows, max_rows=0, sortable=False,
+                  title=f"How it's worked out: what was measured, times its price (a month is "
+                        f"{DAYS_PER_MONTH:.1f} days)")
