@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🚪 **API Gateway: reports as pandas tables and an Excel workbook** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🚪 **API Gateway: reports as pandas tables and an Excel workbook** ([#287](https://github.com/utkarsh5026/aws-analyzer/pull/287))
   - Every report ends with **🐼 This report as data**; `apigw.data()` and `apigw.to_excel()` as in the other services.
   - Each call's row names the Lambda function behind its route and its run's `lambda_request`.
   - `performance()` splits every call's time into backend, authorizer and gateway; `errors()` gives each cause's share.
