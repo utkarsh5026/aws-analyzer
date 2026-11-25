@@ -261,6 +261,21 @@ Its Graph tab draws the workflow with an execution's path on it, and its Failure
 Every report ends with **🐼 This report as data**: its tables for pandas, each column explained, and a workbook to share. An execution's tables put each step beside the Lambda run behind it.
 { .gist }
 
+A minute in a notebook: the executions, the same rows in pandas, the failed one step by step, and the workbook.
+
+<div class="aa-tour" data-tour="stepfunctions_data">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=stepfunctions_data">Full screen</a> · <a href="videos/stepfunctions_data-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
+![The end of executions("order-pipeline", since="30d"): the fold This report as data opened, with the code to copy and the executions table's columns](images/sfn-data-fold-light.webp#only-light){ width="984" height="803" loading=lazy }
+![The end of executions("order-pipeline", since="30d"): the fold This report as data opened, with the code to copy and the executions table's columns](images/sfn-data-fold-dark.webp#only-dark){ width="984" height="803" loading=lazy }
+/// caption
+The end of `sfn.executions("order-pipeline", since="30d")`, opened: a row per execution, and each column in plain words.
+///
+
 ```python
 sfn.execution("order-pipeline/ord-7f3a")
 data = sfn.data()
@@ -271,6 +286,30 @@ sfn.to_excel()           # aws-analyzer-exports/stepfunctions-execution-ord-7f3a
 ```
 
 `outside_ms` is the step's time the function's code didn't account for: a cold start, throttling or Step Functions itself. A step whose `outside_ms` is large beside its `lambda_ms` isn't slow code. `lambda_cost_usd` plus the steps' `est_cost_usd` is what the execution cost.
+
+![sfn.to_excel() saying it saved stepfunctions-execution-ord-7f3a.xlsx, then the workbook opened: the Summary sheet, the Charts sheet and the steps sheet](images/sfn-data-excel-light.webp#only-light){ width="984" height="1613" loading=lazy }
+![sfn.to_excel() saying it saved stepfunctions-execution-ord-7f3a.xlsx, then the workbook opened: the Summary sheet, the Charts sheet and the steps sheet](images/sfn-data-excel-dark.webp#only-dark){ width="984" height="1613" loading=lazy }
+/// caption
+`sfn.to_excel()` after an execution: its summary, Excel's own charts, and its steps, tries and Lambda runs as sheets.
+///
+
+??? more "What each line gives back, in a notebook"
+
+    The executions as a DataFrame:
+
+    ![A DataFrame of ten executions of order-pipeline: one running, three succeeded, five failed and one timed out, with when each started and how many seconds it took](images/sfn-data-frame-light.webp#only-light){ width="984" height="331" loading=lazy }
+    ![A DataFrame of ten executions of order-pipeline: one running, three succeeded, five failed and one timed out, with when each started and how many seconds it took](images/sfn-data-frame-dark.webp#only-dark){ width="984" height="331" loading=lazy }
+    /// caption
+    `sfn.data()["executions"]`: five failed and one timed out, with when and how long.
+    ///
+
+    Each row's `ref` reads that execution as data:
+
+    ![The steps of the newest failed execution: ChargeCard took 3.995 s, 0.65 of the execution, over 3 tries, and LoadOrders failed after 1.75 s](images/sfn-data-steps-light.webp#only-light){ width="984" height="218" loading=lazy }
+    ![The steps of the newest failed execution: ChargeCard took 3.995 s, 0.65 of the execution, over 3 tries, and LoadOrders failed after 1.75 s](images/sfn-data-steps-dark.webp#only-dark){ width="984" height="218" loading=lazy }
+    /// caption
+    `sfn.data("execution", failed)["steps"]`: ChargeCard took 65% of the time, and LoadOrders failed.
+    ///
 
 ??? more "Which tables each report gives"
 

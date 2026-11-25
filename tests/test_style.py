@@ -25,7 +25,7 @@ COMMENTS_LEFT = {
     ".claude/skills/demo/explorer_shots.py": 17,
     ".claude/skills/demo/kb_explorer_shots.py": 5,
     ".claude/skills/demo/lambda_explorer_shots.py": 5,
-    ".claude/skills/demo/shots.py": 23,
+    ".claude/skills/demo/shots.py": 22,
     ".claude/skills/release/release.py": 4,
     "src/aws_analyzer/__init__.py": 3,
     "src/aws_analyzer/bedrock_chat/analysis/batches.py": 26,

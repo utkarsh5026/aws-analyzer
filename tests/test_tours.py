@@ -59,10 +59,26 @@ def test_each_cell_shows_a_figure_in_both_themes(service: str) -> None:
 
 @pytest.mark.parametrize("service", SERVICES)
 def test_each_guide_embeds_its_tour(service: str) -> None:
-    guide = (tours.DOCS / f"{service}.md").read_text(encoding="utf-8")
+    tour = next(tour for tour in tours.TOURS if tour.service == service)
+    page, _, section = tour.page.partition("#")
+    guide = (tours.DOCS / page.replace(".html", ".md")).read_text(encoding="utf-8")
     assert f'<div class="aa-tour" data-tour="{service}">' in guide
     assert f"videos/{service}-tour-light.mp4" in guide
-    assert (tours.DOCS / "images" / "aws" / f"{next(t for t in tours.TOURS if t.service == service).icon}.svg").exists()
+    if section:
+        heading = guide.index(f"{{ #{section} }}")
+        assert guide.index(f'data-tour="{service}"') > heading, "a section's tour is in that section"
+    assert (tours.DOCS / "images" / "aws" / f"{tour.icon}.svg").exists()
+
+
+def test_a_data_tour_installs_the_extra_continues_its_cells_and_links_its_section() -> None:
+    scenes = written_tours()["lambda_functions_data"]["scenes"]
+    assert scenes[1]["code"] == '%pip install "aws-analyzer[data]"'
+    assert scenes[2]["code"] == 'from aws_analyzer import LambdaView\n\nui = LambdaView()\nui.performance("orders-etl")'
+    assert scenes[3]["code"].startswith('data = ui.data()\ndf = data["runs"]')
+    assert scenes[4]["code"] == 'data.guide("runs")'
+    assert scenes[-1]["calls"] == ["ui.performance(…)", "ui.data()", "ui.to_excel()", "ui.help()"]
+    assert scenes[-1]["url"].endswith("/lambda_functions.html#as-data")
+    assert written_tours()["stepfunctions_data"]["scenes"][4]["code"].startswith('failed = df[df.status == "FAILED"]')
 
 
 def test_cells_type_the_figures_calls_with_the_guides_variable() -> None:

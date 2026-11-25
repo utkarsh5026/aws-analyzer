@@ -575,18 +575,65 @@ ui.download("orders-etl", "~/packages/")      # into a folder of your own (or a 
 Every report ends with **🐼 This report as data**: the tables it was drawn from, each column explained, for pandas, and a workbook to share.
 { .gist }
 
+A minute in a notebook: a report, its runs in pandas, a question answered with them, and the workbook.
+
+<div class="aa-tour" data-tour="lambda_functions_data">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=lambda_functions_data">Full screen</a> · <a href="videos/lambda_functions_data-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
 Open the fold at the bottom of `errors()`, `performance()`, `runs()`, `logs()`, `functions()` or `function_info()`: it lists the tables, what one row is, what each column holds and its unit, how to read it ("over 0.8 is close to being stopped"), and pandas lines worth running. `ui.data()` hands you those tables without reading AWS again.
+
+![The end of performance("orders-etl"): the fold This report as data opened, with the code to copy (ui.data(), data['runs'], data.guide(), ui.to_excel(), and ui.data('performance', 'orders-etl') to read it again), then the runs table's columns, each with what it holds and its unit, how to read it, and four pandas lines worth running](images/lambda-data-fold-light.webp#only-light){ width="984" height="919" loading=lazy }
+![The end of performance("orders-etl"): the fold This report as data opened, with the code to copy (ui.data(), data['runs'], data.guide(), ui.to_excel(), and ui.data('performance', 'orders-etl') to read it again), then the runs table's columns, each with what it holds and its unit, how to read it, and four pandas lines worth running](images/lambda-data-fold-dark.webp#only-dark){ width="984" height="919" loading=lazy }
+/// caption
+The end of `ui.performance("orders-etl")`, opened: the code to copy, each column of the runs table in plain words with its unit, and pandas lines worth running.
+///
 
 ```python
 ui.performance("orders-etl")
 data = ui.data()                        # the tables behind the report above
 df = data["runs"]                       # a row per run: duration_ms, timeout_share, memory_share, cold_start, timed_out...
 data.guide("runs")                      # each column in plain words, and what to run on it
-df.groupby("cold_start").duration_ms.median()    # how much a cold start adds
+df.groupby("cold_start")[["duration_ms", "init_ms"]].median()   # a cold start adds its init_ms, not run time
 ui.to_excel()                           # aws-analyzer-exports/lambda-performance-orders-etl.xlsx
 ```
 
 The workbook reads like the report: a **Summary** sheet with the verdict, the numbers as cards and the findings (warnings first), **Charts** drawn by Excel itself (run times over time, errors by cause, the bill by function), **a sheet per table** with a filter on every column, numbers formatted as milliseconds, money or percentages, data bars and failures in red, and **How to read**, every column in plain words.
+
+![ui.to_excel() saying it saved aws-analyzer-exports/lambda-performance-orders-etl.xlsx with 5 sheets, 94 rows and 3 charts, then the workbook opened: its Summary sheet with the verdict, the cards and the findings, its Charts sheet with every run's time as dots and three at the 60,000 ms timeout, and the runs sheet with a data bar on each run time](images/lambda-data-excel-light.webp#only-light){ width="984" height="1813" loading=lazy }
+![ui.to_excel() saying it saved aws-analyzer-exports/lambda-performance-orders-etl.xlsx with 5 sheets, 94 rows and 3 charts, then the workbook opened: its Summary sheet with the verdict, the cards and the findings, its Charts sheet with every run's time as dots and three at the 60,000 ms timeout, and the runs sheet with a data bar on each run time](images/lambda-data-excel-dark.webp#only-dark){ width="984" height="1813" loading=lazy }
+/// caption
+`ui.to_excel()`: the workbook, as a spreadsheet opens it. The Summary sheet leads with the verdict, Excel draws the charts itself, and each table is a sheet with data bars.
+///
+
+??? more "What each line gives back, in a notebook"
+
+    `data["runs"]` is an ordinary DataFrame, so the slowest runs are one line away:
+
+    ![A DataFrame of the six slowest runs: three at 60,000 ms with a timeout_share of 1.0 and status timeout, then three around 8,500 ms](images/lambda-data-frame-light.webp#only-light){ width="984" height="218" loading=lazy }
+    ![A DataFrame of the six slowest runs: three at 60,000 ms with a timeout_share of 1.0 and status timeout, then three around 8,500 ms](images/lambda-data-frame-dark.webp#only-dark){ width="984" height="218" loading=lazy }
+    /// caption
+    `df.nlargest(6, "duration_ms")`: three runs hit the 60 s timeout, and the next slowest took 8.7 s.
+    ///
+
+    `data.guide()` prints what the fold says, for when the report has scrolled away:
+
+    ![data.guide("runs") printed as text: what one row is, each column with its unit and how to read it, notes, and the pandas lines worth running](images/lambda-data-guide-light.webp#only-light){ width="984" height="646" loading=lazy }
+    ![data.guide("runs") printed as text: what one row is, each column with its unit and how to read it, notes, and the pandas lines worth running](images/lambda-data-guide-dark.webp#only-dark){ width="984" height="646" loading=lazy }
+    /// caption
+    `data.guide("runs")`: every column in plain words, its unit, and how to read it.
+    ///
+
+    And your own questions are plain pandas. Here, how long the runs that finished took:
+
+    ![describe() of the finished runs' duration_ms: 67 runs, median 4,806 ms, 99th percentile 8,571 ms and the longest 8,660 ms](images/lambda-data-pandas-light.webp#only-light){ width="984" height="196" loading=lazy }
+    ![describe() of the finished runs' duration_ms: 67 runs, median 4,806 ms, 99th percentile 8,571 ms and the longest 8,660 ms](images/lambda-data-pandas-dark.webp#only-dark){ width="984" height="196" loading=lazy }
+    /// caption
+    Every finished run took under 8.7 s, so the three timeouts hung rather than ran slow.
+    ///
 
 ??? more "Which tables each report gives, and reading another report without showing it"
 

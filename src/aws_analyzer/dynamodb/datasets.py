@@ -252,7 +252,7 @@ _ATTRIBUTE_COLUMNS = [
     DataColumn("attribute", "the attribute ('address.city' for a field of a map)", "id"),
     DataColumn("depth", "0 for a top-level attribute, 1 for a field of a map, ...", "count"),
     DataColumn("type", "its most common type: S text, N number, BOOL, M map, L list, SS / NS sets, B binary"),
-    DataColumn("types", "every type it has, with how many items: more than one is worth a look"),
+    DataColumn("types", "every type it has, with how many items, separated by '; ': more than one is worth a look"),
     DataColumn("items", "items that have it", "count"),
     DataColumn("fill_rate", "items that have it / items read", "share", bar=True,
                read="Under 1 means some items don't have it: code reading it must expect that."),
@@ -267,12 +267,15 @@ _ATTRIBUTE_COLUMNS = [
 ]
 
 
+_TYPES_JOINER = "; "
+
+
 def _attribute_rows(profile: TableProfile) -> list[dict[str, Any]]:
     rows = []
     for attribute in profile.attributes.values():
         rows.append({
             "attribute": attribute.path, "depth": attribute.depth, "type": attribute.main_type,
-            "types": ", ".join(f"{kind} ({count:,})" for kind, count in attribute.types.most_common()),
+            "types": _TYPES_JOINER.join(f"{kind} ({count:,})" for kind, count in attribute.types.most_common()),
             "items": attribute.count, "fill_rate": _fraction(attribute.count, profile.items),
             "distinct": attribute.distinct, "min": plain_value(attribute.low), "max": plain_value(attribute.high),
             "min_len": attribute.min_len, "max_len": attribute.max_len, "empty": attribute.empty,
@@ -290,7 +293,7 @@ def schema_data(profile: TableProfile) -> ReportData:
         _attribute_rows(profile),
         notes=[f"From {profile.items:,} items read, spread across the table."],
         recipes=[Recipe("df[df.fill_rate < 1].sort_values('fill_rate')", "attributes some items don't have"),
-                 Recipe("df[df.types.str.contains(',')]", "attributes with more than one type")])
+                 Recipe(f"df[df.types.str.contains({_TYPES_JOINER.strip()!r})]", "attributes with more than one type")])
     patterns = [{"key": key, "pattern": pattern, "items": count, "share": _fraction(count, profile.items)}
                 for key, shapes in profile.key_patterns.items() for pattern, count in shapes.items()]
     keys = DataTable(

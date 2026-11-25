@@ -3808,5 +3808,909 @@ window.AA_TOURS = {
     "url": "utkarsh5026.github.io/aws-analyzer/bedrock_kb_explorer.html"
    }
   ]
+ },
+ "lambda_functions_data": {
+  "eyebrow": "AWS Lambda",
+  "notebook": "lambda.ipynb",
+  "summary": "A notebook tour of aws-analyzer's Lambda reports as data: the fold at the end of performance(), its runs as a pandas DataFrame, what each column means, a question answered in pandas, and the report as an Excel workbook.",
+  "guide": "lambda_functions.html#as-data",
+  "video": "videos/lambda_functions_data-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "AWS Lambda",
+    "icon": "images/aws/lambda.svg",
+    "heading": "Take a Lambda report into pandas or Excel",
+    "text": "Every report ends with the tables it was drawn from: no new read from AWS, and every column explained.",
+    "ahead": [
+     "The report",
+     "In pandas",
+     "What it means",
+     "Ask it",
+     "Excel"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 4.1,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install \"aws-analyzer[data]\"",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.64.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.64.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it with its data extra</b>: pandas for the tables, openpyxl for the workbook. Read-only, like the rest."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 15.4,
+    "chapter": "The report",
+    "step": 1,
+    "steps": 5,
+    "label": "1 of 5 · The report",
+    "code": "from aws_analyzer import LambdaView\n\nui = LambdaView()\nui.performance(\"orders-etl\")",
+    "outputs": [
+     {
+      "img": "lambda-data-fold",
+      "w": 1476,
+      "h": 1378
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Run a report as usual</b>: how long orders-etl's runs take."
+     ],
+     [
+      4.6,
+      "It ends with <b>🐼 This report as data</b>: the tables it was drawn from."
+     ],
+     [
+      8.2,
+      "Each column in plain words, with its unit and <b>how to read it</b>."
+     ],
+     [
+      11.8,
+      "Then pandas lines worth running, ready to copy."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "In pandas",
+    "step": 2,
+    "steps": 5,
+    "label": "2 of 5 · In pandas",
+    "code": "data = ui.data()\ndf = data[\"runs\"]\ndf.nlargest(6, \"duration_ms\")[[\"time\", \"duration_ms\", \"timeout_share\", \"memory_share\", \"status\"]]",
+    "outputs": [
+     {
+      "img": "lambda-data-frame",
+      "w": 1476,
+      "h": 327
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.data()</code></b>: the report's tables as pandas DataFrames."
+     ],
+     [
+      4.6,
+      "<b>No new read from AWS</b>: a row per run, with its run time and its share of the timeout."
+     ],
+     [
+      8.2,
+      "The six slowest: <b>three runs hit the 60 s timeout</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 10.0,
+    "chapter": "What it means",
+    "step": 3,
+    "steps": 5,
+    "label": "3 of 5 · What it means",
+    "code": "data.guide(\"runs\")",
+    "outputs": [
+     {
+      "img": "lambda-data-guide",
+      "w": 1476,
+      "h": 969
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>data.guide()</code></b>: every column in plain words, in the notebook."
+     ],
+     [
+      2.76,
+      "Its unit, and how to read it: over 0.8 of the timeout runs <b>close to being stopped</b>."
+     ],
+     [
+      6.4,
+      "So you never have to guess what a column holds."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.4,
+    "chapter": "Ask it",
+    "step": 4,
+    "steps": 5,
+    "label": "4 of 5 · Ask it",
+    "code": "df[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99])",
+    "outputs": [
+     {
+      "img": "lambda-data-pandas",
+      "w": 1476,
+      "h": 294
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Your own question, in pandas</b>: how long do the finished runs take?"
+     ],
+     [
+      4.23,
+      "Every finished run took <b>under 8.7 s</b>, against a 60 s timeout."
+     ],
+     [
+      7.8,
+      "So the three timeouts <b>hung</b>: a longer timeout would only cost more."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 14.7,
+    "chapter": "Excel",
+    "step": 5,
+    "steps": 5,
+    "label": "5 of 5 · Excel",
+    "code": "ui.to_excel()",
+    "outputs": [
+     {
+      "img": "lambda-data-excel",
+      "w": 1476,
+      "h": 2720
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.to_excel()</code></b>: the same report as a workbook to share."
+     ],
+     [
+      2.7,
+      "A <b>Summary</b> sheet with the verdict, the numbers and the findings."
+     ],
+     [
+      6.9,
+      "<b>Charts</b> Excel draws itself: the three hung runs stand out at 60 s."
+     ],
+     [
+      11.1,
+      "Then a sheet per table, with filters and data bars. <b>It never replaces a file.</b>"
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "AWS Lambda",
+    "icon": "images/aws/lambda.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.performance(…)",
+     "ui.data()",
+     "ui.to_excel()",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/lambda_functions.html#as-data"
+   }
+  ]
+ },
+ "s3_data": {
+  "eyebrow": "Amazon S3",
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "A notebook tour of aws-analyzer's S3 reports as data: the fold at the end of summary(), space by folder as a pandas DataFrame, a search for Parquet files as data, one of them read into pandas, and the summary as an Excel workbook.",
+  "guide": "s3.html#as-data",
+  "video": "videos/s3_data-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Amazon S3",
+    "icon": "images/aws/s3.svg",
+    "heading": "Take an S3 report into pandas or Excel",
+    "text": "Every report ends with the tables it was drawn from, each file with its s3:// path, ready for pandas.",
+    "ahead": [
+     "The report",
+     "In pandas",
+     "Any report",
+     "Read a file",
+     "Excel"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 4.1,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install \"aws-analyzer[data]\"",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.64.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.64.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it with its data extra</b>: pandas for the tables, openpyxl for the workbook. Read-only, like the rest."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "The report",
+    "step": 1,
+    "steps": 5,
+    "label": "1 of 5 · The report",
+    "code": "from aws_analyzer import S3View\n\nui = S3View()\nui.summary(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "s3-data-fold",
+      "w": 1476,
+      "h": 1171
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Run a report as usual</b>: a summary of everything in the bucket."
+     ],
+     [
+      4.6,
+      "It ends with <b>🐼 This report as data</b>: six tables, from folders to the largest files."
+     ],
+     [
+      8.2,
+      "Each column explained, and <b>nothing is read from S3 again</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "In pandas",
+    "step": 2,
+    "steps": 5,
+    "label": "2 of 5 · In pandas",
+    "code": "data = ui.data()\ndata[\"folders\"][[\"folder\", \"files\", \"size_gb\", \"share_of_size\"]].round(3)",
+    "outputs": [
+     {
+      "img": "s3-data-frame",
+      "w": 1476,
+      "h": 499
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.data()</code></b>: the summary's tables as pandas DataFrames."
+     ],
+     [
+      4.6,
+      "Space by folder: <b>training/ holds 80%</b> of the 1.3 TB."
+     ],
+     [
+      8.2,
+      "Sizes in GB and shares from 0 to 1, ready to sort, filter or chart."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "Any report",
+    "step": 3,
+    "steps": 5,
+    "label": "3 of 5 · Any report",
+    "code": "files = ui.data(\"find\", \"s3://acme-ml-data/curated/\", pattern=\"*.parquet\")[\"files\"]\nfiles[[\"file_name\", \"size_mb\", \"age_days\", \"uri\"]].round(1)",
+    "outputs": [
+     {
+      "img": "s3-data-find",
+      "w": 1476,
+      "h": 594
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Any report, without drawing it</b>: <code>ui.data(\"find\", ...)</code> gives its tables."
+     ],
+     [
+      4.6,
+      "199 Parquet files under curated/, <b>each with its s3:// path</b>."
+     ],
+     [
+      8.2,
+      "Sizes in MB and ages in days, as numbers you can sort."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "Read a file",
+    "step": 4,
+    "steps": 5,
+    "label": "4 of 5 · Read a file",
+    "code": "train = files[files.file_name == \"train.parquet\"].uri.iloc[0]\nui.core.read_df(train).head()",
+    "outputs": [
+     {
+      "img": "s3-data-read",
+      "w": 1476,
+      "h": 300
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Open one of them in pandas</b>, by the path in its row."
+     ],
+     [
+      4.6,
+      "<code>read_df</code> reads Parquet, CSV, JSON and more <b>straight from S3</b>."
+     ],
+     [
+      8.2,
+      "No download step and no boto3 code to write."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 15.5,
+    "chapter": "Excel",
+    "step": 5,
+    "steps": 5,
+    "label": "5 of 5 · Excel",
+    "code": "ui.to_excel(\"summary\", \"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "s3-data-excel",
+      "w": 1476,
+      "h": 2431
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.to_excel(\"summary\", ...)</code></b>: a report as a workbook, named and read in one line."
+     ],
+     [
+      3.58,
+      "A <b>Summary</b> sheet with the numbers and the findings, each priced."
+     ],
+     [
+      11.9,
+      "<b>Charts</b> Excel draws itself, then a sheet per table with data bars."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Amazon S3",
+    "icon": "images/aws/s3.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.summary(…)",
+     "ui.data()",
+     "ui.data(…)",
+     "ui.to_excel(…)",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/s3.html#as-data"
+   }
+  ]
+ },
+ "dynamodb_data": {
+  "eyebrow": "Amazon DynamoDB",
+  "notebook": "acme-app.ipynb",
+  "summary": "A notebook tour of aws-analyzer's DynamoDB reports as data: the fold at the end of a query, the items as a pandas DataFrame, totals by status, the attributes that hold two types, and the schema as an Excel workbook.",
+  "guide": "dynamodb.html#as-data",
+  "video": "videos/dynamodb_data-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "Amazon DynamoDB",
+    "icon": "images/aws/dynamodb.svg",
+    "heading": "Take DynamoDB items into pandas or Excel",
+    "text": "Items as plain rows, maps as columns, and a table's schema as data: no {\"S\": ...} anywhere.",
+    "ahead": [
+     "The report",
+     "In pandas",
+     "Ask it",
+     "The schema",
+     "Excel"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 4.1,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install \"aws-analyzer[data]\"",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.64.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.64.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it with its data extra</b>: pandas for the tables, openpyxl for the workbook. Read-only, like the rest."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 12.1,
+    "chapter": "The report",
+    "step": 1,
+    "steps": 5,
+    "label": "1 of 5 · The report",
+    "code": "from aws_analyzer import DynamoDBView\n\nui = DynamoDBView()\nui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"))",
+    "outputs": [
+     {
+      "img": "dynamodb-data-fold",
+      "w": 1476,
+      "h": 1286
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Run a report as usual</b>: one customer's orders."
+     ],
+     [
+      4.6,
+      "It ends with <b>🐼 This report as data</b>: the items as a table."
+     ],
+     [
+      8.5,
+      "Each attribute explained: <b>what it holds, and in how many items</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "In pandas",
+    "step": 2,
+    "steps": 5,
+    "label": "2 of 5 · In pandas",
+    "code": "df = ui.data()[\"items\"]\ndf[[\"sk\", \"status\", \"total\", \"currency\", \"shipping.method\", \"coupon\"]].head(8)",
+    "outputs": [
+     {
+      "img": "dynamodb-data-frame",
+      "w": 1476,
+      "h": 414
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.data()</code></b>: the items as a pandas DataFrame, keys first."
+     ],
+     [
+      4.6,
+      "Plain values, not <code>{\"S\": ...}</code>, and maps as <b>dotted columns</b>: <code>shipping.method</code>."
+     ],
+     [
+      8.2,
+      "An attribute an item doesn't have is an empty cell, not an error."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.4,
+    "chapter": "Ask it",
+    "step": 3,
+    "steps": 5,
+    "label": "3 of 5 · Ask it",
+    "code": "df.groupby(\"status\").total.agg([\"count\", \"sum\", \"mean\"]).round(2)",
+    "outputs": [
+     {
+      "img": "dynamodb-data-pandas",
+      "w": 1476,
+      "h": 342
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Then it's just pandas</b>: this customer's orders by status."
+     ],
+     [
+      4.23,
+      "Ten delivered, and <b>three failed: $1,798.89</b> that never went through."
+     ],
+     [
+      7.8,
+      "Counted, summed and averaged in one line, on the items the query already read."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "The schema",
+    "step": 4,
+    "steps": 5,
+    "label": "4 of 5 · The schema",
+    "code": "attributes = ui.data(\"schema\", \"acme-app\")[\"attributes\"]\nattributes[attributes.types.str.contains(\";\")][[\"attribute\", \"types\", \"items\", \"fill_rate\", \"examples\"]]",
+    "outputs": [
+     {
+      "img": "dynamodb-data-schema",
+      "w": 1476,
+      "h": 131
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Any report, without drawing it</b>: the table's schema, as data."
+     ],
+     [
+      4.6,
+      "One attribute holds <b>two types</b>: 142 zip codes as text, 20 as numbers."
+     ],
+     [
+      8.2,
+      "A filter on one type <b>silently misses</b> the others."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 14.7,
+    "chapter": "Excel",
+    "step": 5,
+    "steps": 5,
+    "label": "5 of 5 · Excel",
+    "code": "ui.to_excel()",
+    "outputs": [
+     {
+      "img": "dynamodb-data-excel",
+      "w": 1476,
+      "h": 2719
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>ui.to_excel()</code></b>: the schema as a workbook to share."
+     ],
+     [
+      2.7,
+      "A <b>Summary</b> sheet with the numbers and the findings."
+     ],
+     [
+      11.1,
+      "<b>Charts</b> Excel draws itself, then a sheet per table."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "Amazon DynamoDB",
+    "icon": "images/aws/dynamodb.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "ui.query(…)",
+     "ui.data()",
+     "ui.data(…)",
+     "ui.to_excel()",
+     "ui.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/dynamodb.html#as-data"
+   }
+  ]
+ },
+ "stepfunctions_data": {
+  "eyebrow": "AWS Step Functions",
+  "notebook": "workflows.ipynb",
+  "summary": "A notebook tour of aws-analyzer's Step Functions reports as data: the fold at the end of executions(), the executions as a pandas DataFrame, the failed one's steps read by its ref, and that execution as an Excel workbook.",
+  "guide": "stepfunctions.html#as-data",
+  "video": "videos/stepfunctions_data-tour-light.mp4",
+  "scenes": [
+   {
+    "kind": "title",
+    "dur": 3.2,
+    "chapter": "Intro",
+    "eyebrow": "AWS Step Functions",
+    "icon": "images/aws/stepfunctions.svg",
+    "heading": "Take your workflows' executions into pandas or Excel",
+    "text": "Every execution as a row, a failed one step by step, and a workbook to share: no new read from AWS.",
+    "ahead": [
+     "The report",
+     "In pandas",
+     "One execution",
+     "Excel"
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 4.1,
+    "chapter": "Install",
+    "label": "Install",
+    "runs": 1.2,
+    "code": "%pip install \"aws-analyzer[data]\"",
+    "outputs": [
+     {
+      "lines": [
+       {
+        "at": 0.05,
+        "html": "Collecting aws-analyzer"
+       },
+       {
+        "at": 0.2,
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.64.0-py3-none-any.whl"
+       },
+       {
+        "at": 0.3,
+        "html": "&nbsp;&nbsp;<span class=\"bar\"></span>",
+        "bar": true
+       },
+       {
+        "at": 0.8,
+        "html": "Installing collected packages: aws-analyzer"
+       },
+       {
+        "at": 1.05,
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.64.0"
+       }
+      ]
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Install it with its data extra</b>: pandas for the tables, openpyxl for the workbook. Read-only, like the rest."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "The report",
+    "step": 1,
+    "steps": 4,
+    "label": "1 of 4 · The report",
+    "code": "from aws_analyzer import StepFunctionsView\n\nsfn = StepFunctionsView()\nsfn.executions(\"order-pipeline\", since=\"30d\")",
+    "outputs": [
+     {
+      "img": "sfn-data-fold",
+      "w": 1476,
+      "h": 1204
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Run a report as usual</b>: order-pipeline's executions."
+     ],
+     [
+      4.6,
+      "It ends with <b>🐼 This report as data</b>: a row per execution, and a row per day."
+     ],
+     [
+      8.2,
+      "Each column explained, and <b>nothing is read from AWS again</b>."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "In pandas",
+    "step": 2,
+    "steps": 4,
+    "label": "2 of 4 · In pandas",
+    "code": "df = sfn.data()[\"executions\"]\ndf[[\"execution\", \"status\", \"started\", \"seconds\"]]",
+    "outputs": [
+     {
+      "img": "sfn-data-frame",
+      "w": 1476,
+      "h": 496
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>sfn.data()</code></b>: the executions as a pandas DataFrame."
+     ],
+     [
+      4.6,
+      "<b>Five failed and one timed out</b>, with when each started and how long it took."
+     ],
+     [
+      8.2,
+      "Each row's <code>ref</code> opens that execution as data."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 11.8,
+    "chapter": "One execution",
+    "step": 3,
+    "steps": 4,
+    "label": "3 of 4 · One execution",
+    "code": "failed = df[df.status == \"FAILED\"].ref.iloc[0]\nsteps = sfn.data(\"execution\", failed)[\"steps\"]\nsteps[[\"step\", \"status\", \"seconds\", \"share_of_execution\", \"tries\", \"est_cost_usd\"]]",
+    "outputs": [
+     {
+      "img": "sfn-data-steps",
+      "w": 1476,
+      "h": 327
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b>Drill into the newest failure</b>, by its <code>ref</code>."
+     ],
+     [
+      4.6,
+      "Its steps: <b>ChargeCard took 65%</b> of the time, over three tries."
+     ],
+     [
+      8.2,
+      "And <b>LoadOrders failed</b>: the step to look at."
+     ]
+    ]
+   },
+   {
+    "kind": "cell",
+    "dur": 14.7,
+    "chapter": "Excel",
+    "step": 4,
+    "steps": 4,
+    "label": "4 of 4 · Excel",
+    "code": "sfn.to_excel()",
+    "outputs": [
+     {
+      "img": "sfn-data-excel",
+      "w": 1476,
+      "h": 2419
+     }
+    ],
+    "captions": [
+     [
+      0,
+      "<b><code>sfn.to_excel()</code></b>: that execution as a workbook to share."
+     ],
+     [
+      2.7,
+      "A <b>Summary</b> sheet with the verdict, the numbers and the findings."
+     ],
+     [
+      11.1,
+      "<b>Charts</b> Excel draws itself, then its steps, tries and Lambda runs as sheets."
+     ]
+    ]
+   },
+   {
+    "kind": "end",
+    "dur": 6.5,
+    "chapter": "Your turn",
+    "eyebrow": "AWS Step Functions",
+    "icon": "images/aws/stepfunctions.svg",
+    "heading": "Your turn: one line each.",
+    "calls": [
+     "sfn.executions(…)",
+     "sfn.data()",
+     "sfn.data(…)",
+     "sfn.to_excel()",
+     "sfn.help()"
+    ],
+    "url": "utkarsh5026.github.io/aws-analyzer/stepfunctions.html#as-data"
+   }
+  ]
  }
 };

@@ -1972,6 +1972,523 @@ window.AA_CLIPS = {
    }
   ]
  },
+ "lambda-data-fold": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.performance(\"orders-etl\"): The end of ui.performance(\"orders-etl\"), opened: the code to copy, each column of the runs table in plain words with its unit, and pandas lines worth running.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 10.5,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.performance(\"orders-etl\")",
+    "outputs": [
+     {
+      "img": "lambda-data-fold",
+      "w": 1476,
+      "h": 1378
+     }
+    ],
+    "captions": [
+     [
+      3.08,
+      "The end of <code>ui.performance(\"orders-etl\")</code>, opened: the code to copy, each column of the runs table in plain words with its unit, and pandas lines worth running."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-data-frame": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.performance(\"orders-etl\")\ndata = ui.data()\ndf = data[\"runs\"]\ndf.nlargest(6, \"duration_ms\")[[\"time\", \"duration_ms\", \"timeout_share\", \"memory_share\", \"status\"]]: df.nlargest(6, \"duration_ms\"): three runs hit the 60 s timeout, and the next slowest took 8.7 s.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.performance(\"orders-etl\")\ndata = ui.data()\ndf = data[\"runs\"]\ndf.nlargest(6, \"duration_ms\")[[\"time\", \"duration_ms\", \"timeout_share\", \"memory_share\", \"status\"]]",
+    "outputs": [
+     {
+      "img": "lambda-data-frame",
+      "w": 1476,
+      "h": 327
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "Three runs hit the 60 s timeout, and the next slowest took 8.7 s."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-data-guide": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.performance(\"orders-etl\"); data = ui.data()\ndata.guide(\"runs\"): data.guide(\"runs\"): every column in plain words, its unit, and how to read it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.1,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.performance(\"orders-etl\"); data = ui.data()\ndata.guide(\"runs\")",
+    "outputs": [
+     {
+      "img": "lambda-data-guide",
+      "w": 1476,
+      "h": 969
+     }
+    ],
+    "captions": [
+     [
+      4.23,
+      "Every column in plain words, its unit, and how to read it."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-data-pandas": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.performance(\"orders-etl\"); df = ui.data()[\"runs\"]\ndf[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99]): Every finished run took under 8.7 s, so the three timeouts hung rather than ran slow.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.performance(\"orders-etl\"); df = ui.data()[\"runs\"]\ndf[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99])",
+    "outputs": [
+     {
+      "img": "lambda-data-pandas",
+      "w": 1476,
+      "h": 294
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "Every finished run took under 8.7 s, so the three timeouts hung rather than ran slow."
+     ]
+    ]
+   }
+  ]
+ },
+ "lambda-data-excel": {
+  "notebook": "lambda.ipynb",
+  "summary": "ui.performance(\"orders-etl\")\nui.to_excel(): ui.to_excel(): the workbook, as a spreadsheet opens it. The Summary sheet leads with the verdict, Excel draws the charts itself, and each table is a sheet with data bars.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.5,
+    "chapter": "AWS Lambda",
+    "label": "AWS Lambda",
+    "code": "ui.performance(\"orders-etl\")\nui.to_excel()",
+    "outputs": [
+     {
+      "img": "lambda-data-excel",
+      "w": 1476,
+      "h": 2720
+     }
+    ],
+    "captions": [
+     [
+      3.51,
+      "The workbook, as a spreadsheet opens it."
+     ],
+     [
+      7.11,
+      "The Summary sheet leads with the verdict, Excel draws the charts itself, and each table is a sheet with data bars."
+     ]
+    ]
+   }
+  ]
+ },
+ "s3-data-fold": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "ui.summary(\"s3://acme-ml-data/\"): The end of ui.summary(\"s3://acme-ml-data/\"), opened: six tables, the code to copy, and each column in plain words.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.2,
+    "chapter": "Amazon S3",
+    "label": "Amazon S3",
+    "code": "ui.summary(\"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "s3-data-fold",
+      "w": 1476,
+      "h": 1171
+     }
+    ],
+    "captions": [
+     [
+      3.2,
+      "The end of <code>ui.summary(\"s3://acme-ml-data/\")</code>, opened: six tables, the code to copy, and each column in plain words."
+     ]
+    ]
+   }
+  ]
+ },
+ "s3-data-frame": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "ui.summary(\"s3://acme-ml-data/\")\ndata = ui.data()\ndata[\"folders\"][[\"folder\", \"files\", \"size_gb\", \"share_of_size\"]].round(3): data[\"folders\"]: training/ holds 80% of the space; raw/ has the most files and almost none of it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon S3",
+    "label": "Amazon S3",
+    "code": "ui.summary(\"s3://acme-ml-data/\")\ndata = ui.data()\ndata[\"folders\"][[\"folder\", \"files\", \"size_gb\", \"share_of_size\"]].round(3)",
+    "outputs": [
+     {
+      "img": "s3-data-frame",
+      "w": 1476,
+      "h": 499
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "<code>data[\"folders\"]</code>: training/ holds 80% of the space; raw/ has the most files and almost none of it."
+     ]
+    ]
+   }
+  ]
+ },
+ "s3-data-find": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "files = ui.data(\"find\", \"s3://acme-ml-data/curated/\", pattern=\"*.parquet\")[\"files\"]\nfiles[[\"file_name\", \"size_mb\", \"age_days\", \"uri\"]].round(1): ui.data(\"find\", ...): 199 Parquet files, each row with the path that opens it.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon S3",
+    "label": "Amazon S3",
+    "code": "files = ui.data(\"find\", \"s3://acme-ml-data/curated/\", pattern=\"*.parquet\")[\"files\"]\nfiles[[\"file_name\", \"size_mb\", \"age_days\", \"uri\"]].round(1)",
+    "outputs": [
+     {
+      "img": "s3-data-find",
+      "w": 1476,
+      "h": 594
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "199 Parquet files, each row with the path that opens it."
+     ]
+    ]
+   }
+  ]
+ },
+ "s3-data-read": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "files = ui.data(\"find\", \"s3://acme-ml-data/curated/\", pattern=\"*.parquet\")[\"files\"]\ntrain = files[files.file_name == \"train.parquet\"].uri.iloc[0]\nui.core.read_df(train).head(): ui.core.read_df(train): a Parquet file read straight from S3 into a DataFrame.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon S3",
+    "label": "Amazon S3",
+    "code": "files = ui.data(\"find\", \"s3://acme-ml-data/curated/\", pattern=\"*.parquet\")[\"files\"]\ntrain = files[files.file_name == \"train.parquet\"].uri.iloc[0]\nui.core.read_df(train).head()",
+    "outputs": [
+     {
+      "img": "s3-data-read",
+      "w": 1476,
+      "h": 300
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "A Parquet file read straight from S3 into a DataFrame."
+     ]
+    ]
+   }
+  ]
+ },
+ "s3-data-excel": {
+  "notebook": "acme-ml-data.ipynb",
+  "summary": "ui.to_excel(\"summary\", \"s3://acme-ml-data/\"): ui.to_excel(\"summary\", \"s3://acme-ml-data/\") reads the summary and saves it in one line: cards and findings, Excel's own charts, and a sheet per table.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.5,
+    "chapter": "Amazon S3",
+    "label": "Amazon S3",
+    "code": "ui.to_excel(\"summary\", \"s3://acme-ml-data/\")",
+    "outputs": [
+     {
+      "img": "s3-data-excel",
+      "w": 1476,
+      "h": 2431
+     }
+    ],
+    "captions": [
+     [
+      3.58,
+      "Reads the summary and saves it in one line: cards and findings, Excel's own charts, and a sheet per table."
+     ]
+    ]
+   }
+  ]
+ },
+ "dynamodb-data-fold": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\")): The end of ui.query(...), opened: the items as a table, and each attribute with how often it's set.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 11.2,
+    "chapter": "Amazon DynamoDB",
+    "label": "Amazon DynamoDB",
+    "code": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"))",
+    "outputs": [
+     {
+      "img": "dynamodb-data-fold",
+      "w": 1476,
+      "h": 1286
+     }
+    ],
+    "captions": [
+     [
+      4.36,
+      "The end of <code>ui.query(...)</code>, opened: the items as a table, and each attribute with how often it's set."
+     ]
+    ]
+   }
+  ]
+ },
+ "dynamodb-data-frame": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"))\ndf = ui.data()[\"items\"]\ndf[[\"sk\", \"status\", \"total\", \"currency\", \"shipping.method\", \"coupon\"]].head(8): ui.data()[\"items\"]: plain values, not {\"S\": ...}, and shipping.method as its own column.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon DynamoDB",
+    "label": "Amazon DynamoDB",
+    "code": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\"))\ndf = ui.data()[\"items\"]\ndf[[\"sk\", \"status\", \"total\", \"currency\", \"shipping.method\", \"coupon\"]].head(8)",
+    "outputs": [
+     {
+      "img": "dynamodb-data-frame",
+      "w": 1476,
+      "h": 414
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "Plain values, not <code>{\"S\": ...}</code>, and <code>shipping.method</code> as its own column."
+     ]
+    ]
+   }
+  ]
+ },
+ "dynamodb-data-pandas": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\")); df = ui.data()[\"items\"]\ndf.groupby(\"status\").total.agg([\"count\", \"sum\", \"mean\"]).round(2): Three failed orders: $1,798.89 that never went through.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon DynamoDB",
+    "label": "Amazon DynamoDB",
+    "code": "ui.query(\"acme-app\", \"CUSTOMER#1042\", sort=(\"begins_with\", \"ORDER#\")); df = ui.data()[\"items\"]\ndf.groupby(\"status\").total.agg([\"count\", \"sum\", \"mean\"]).round(2)",
+    "outputs": [
+     {
+      "img": "dynamodb-data-pandas",
+      "w": 1476,
+      "h": 342
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "Three failed orders: $1,798.89 that never went through."
+     ]
+    ]
+   }
+  ]
+ },
+ "dynamodb-data-schema": {
+  "notebook": "acme-app.ipynb",
+  "summary": "attributes = ui.data(\"schema\", \"acme-app\")[\"attributes\"]\nattributes[attributes.types.str.contains(\";\")][[\"attribute\", \"types\", \"items\", \"fill_rate\", \"examples\"]]: address.zip is text in 142 items and a number in 20: a filter on one type misses the other.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "Amazon DynamoDB",
+    "label": "Amazon DynamoDB",
+    "code": "attributes = ui.data(\"schema\", \"acme-app\")[\"attributes\"]\nattributes[attributes.types.str.contains(\";\")][[\"attribute\", \"types\", \"items\", \"fill_rate\", \"examples\"]]",
+    "outputs": [
+     {
+      "img": "dynamodb-data-schema",
+      "w": 1476,
+      "h": 131
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "<code>address.zip</code> is text in 142 items and a number in 20: a filter on one type misses the other."
+     ]
+    ]
+   }
+  ]
+ },
+ "dynamodb-data-excel": {
+  "notebook": "acme-app.ipynb",
+  "summary": "ui.schema(\"acme-app\")\nui.to_excel(): ui.to_excel() after the schema: the summary, Excel's own charts, and every attribute as a row.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.3,
+    "chapter": "Amazon DynamoDB",
+    "label": "Amazon DynamoDB",
+    "code": "ui.schema(\"acme-app\")\nui.to_excel()",
+    "outputs": [
+     {
+      "img": "dynamodb-data-excel",
+      "w": 1476,
+      "h": 2719
+     }
+    ],
+    "captions": [
+     [
+      3.29,
+      "After the schema: the summary, Excel's own charts, and every attribute as a row."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-data-fold": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.executions(\"order-pipeline\", since=\"30d\"): The end of sfn.executions(\"order-pipeline\", since=\"30d\"), opened: a row per execution, and each column in plain words.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 9.9,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.executions(\"order-pipeline\", since=\"30d\")",
+    "outputs": [
+     {
+      "img": "sfn-data-fold",
+      "w": 1476,
+      "h": 1204
+     }
+    ],
+    "captions": [
+     [
+      3.61,
+      "The end of <code>sfn.executions(\"order-pipeline\", since=\"30d\")</code>, opened: a row per execution, and each column in plain words."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-data-frame": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.executions(\"order-pipeline\", since=\"30d\")\ndf = sfn.data()[\"executions\"]\ndf[[\"execution\", \"status\", \"started\", \"seconds\"]]: sfn.data()[\"executions\"]: five failed and one timed out, with when and how long.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.executions(\"order-pipeline\", since=\"30d\")\ndf = sfn.data()[\"executions\"]\ndf[[\"execution\", \"status\", \"started\", \"seconds\"]]",
+    "outputs": [
+     {
+      "img": "sfn-data-frame",
+      "w": 1476,
+      "h": 496
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "Five failed and one timed out, with when and how long."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-data-steps": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.executions(\"order-pipeline\", since=\"30d\"); df = sfn.data()[\"executions\"]\nfailed = df[df.status == \"FAILED\"].ref.iloc[0]\nsteps = sfn.data(\"execution\", failed)[\"steps\"]\nsteps[[\"step\", \"status\", \"seconds\", \"share_of_execution\", \"tries\", \"est_cost_usd\"]]: sfn.data(\"execution\", failed)[\"steps\"]: ChargeCard took 65% of the time, and LoadOrders failed.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 8.2,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.executions(\"order-pipeline\", since=\"30d\"); df = sfn.data()[\"executions\"]\nfailed = df[df.status == \"FAILED\"].ref.iloc[0]\nsteps = sfn.data(\"execution\", failed)[\"steps\"]\nsteps[[\"step\", \"status\", \"seconds\", \"share_of_execution\", \"tries\", \"est_cost_usd\"]]",
+    "outputs": [
+     {
+      "img": "sfn-data-steps",
+      "w": 1476,
+      "h": 327
+     }
+    ],
+    "captions": [
+     [
+      4.6,
+      "ChargeCard took 65% of the time, and LoadOrders failed."
+     ]
+    ]
+   }
+  ]
+ },
+ "sfn-data-excel": {
+  "notebook": "workflows.ipynb",
+  "summary": "sfn.execution(\"order-pipeline/ord-7f3a\")\nsfn.to_excel(): sfn.to_excel() after an execution: its summary, Excel's own charts, and its steps, tries and Lambda runs as sheets.",
+  "video": "",
+  "scenes": [
+   {
+    "kind": "cell",
+    "dur": 15.9,
+    "chapter": "AWS Step Functions",
+    "label": "AWS Step Functions",
+    "code": "sfn.execution(\"order-pipeline/ord-7f3a\")\nsfn.to_excel()",
+    "outputs": [
+     {
+      "img": "sfn-data-excel",
+      "w": 1476,
+      "h": 2419
+     }
+    ],
+    "captions": [
+     [
+      3.92,
+      "After an execution: its summary, Excel's own charts, and its steps, tries and Lambda runs as sheets."
+     ]
+    ]
+   }
+  ]
+ },
  "agent-chat": {
   "notebook": "agent.ipynb",
   "summary": "agent.chat(): The answer first, with its plan as it left it and the steps folded above it into one line that names the services they read.",
