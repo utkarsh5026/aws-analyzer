@@ -166,7 +166,7 @@ FIGURES = [
     Figure("theme-brand", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="brand", guide="index.md"),
     Figure("theme-classic", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="classic", guide="index.md"),
     Figure("lambda-functions", "lambda_functions", 'ui.functions(regions="all")'),
-    Figure("lambda-function-info", "lambda_functions", 'ui.function_info("orders-etl")', crop=2150),
+    Figure("lambda-function-info", "lambda_functions", 'ui.function_info("orders-etl")', crop=2560),
     Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
     Figure("lambda-logs", "lambda_functions", 'ui.logs("orders-etl", since="24h")'),
     Figure("lambda-runs", "lambda_functions",

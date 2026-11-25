@@ -43,6 +43,8 @@ _SLICE_CAP = 20_000
 
 _LOG_PAD = timedelta(minutes=2)
 
+_MOST_FUNCTIONS = 20
+
 _COUNTS = {
     "REST": {"requests": "Count", "errors_4xx": "4XXError", "errors_5xx": "5XXError"},
     "HTTP": {"requests": "Count", "errors_4xx": "4xx", "errors_5xx": "5xx"},
@@ -392,7 +394,32 @@ class APIGatewayAnalyzer(_BaseAnalyzer):
                 report.metrics_read += routes_read
         except (ClientError, BotoCoreError) as exc:
             report.errors["metrics"] = _error_code(exc) if isinstance(exc, ClientError) else type(exc).__name__
+        report.function_timeouts = self._function_timeouts(api, report.errors)
         return report
+
+    def _function_timeouts(self, api: Api, errors: dict[str, str]) -> dict[str, int]:
+        """
+        The timeout of each Lambda function the API's routes call (GetFunction through the Lambda analyzer, side by
+        side, at most _MOST_FUNCTIONS), so it can be held against how long API Gateway waits. A function that can't
+        be read is left out, with its error code in errors['functions'].
+        """
+        regions = {}
+        for route in api.routes:
+            if route.integration is not None and route.integration.function:
+                regions.setdefault(route.integration.function, route.integration.function_region or None)
+        names = list(regions)[:_MOST_FUNCTIONS]
+
+        def timeout(name: str) -> int | None:
+            try:
+                return self.lambda_core.function(name, region=regions[name]).timeout
+            except ClientError as exc:
+                errors["functions"] = _error_code(exc)
+            except BotoCoreError as exc:
+                errors["functions"] = type(exc).__name__
+            return None
+
+        found = dict(zip(names, self._map(timeout, names)))
+        return {name: seconds for name, seconds in found.items() if seconds is not None}
 
 
     def calls(  # noqa: PLR0913

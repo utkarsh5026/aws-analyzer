@@ -23,7 +23,7 @@ _ASYNC_METRICS = (("received", "AsyncEventsReceived"), ("dropped", "AsyncEventsD
                   ("dead_letter_errors", "DeadLetterErrors"), ("destination_failures", "DestinationDeliveryFailures"))
 
 _QUEUE_ATTRIBUTES = ["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible", "MessageRetentionPeriod",
-                     "RedrivePolicy"]
+                     "RedrivePolicy", "VisibilityTimeout"]
 
 _OLDEST_LOOKBACK = timedelta(hours=1)
 
@@ -51,6 +51,7 @@ def _queue_state(arn: str, attributes: dict[str, str]) -> QueueState:
         in_flight=int(attributes.get("ApproximateNumberOfMessagesNotVisible") or 0),
         retention=int(attributes.get("MessageRetentionPeriod") or 4 * 86400),
         dead_letter_arn=dead_letter, max_receives=receives,
+        visibility=int(attributes.get("VisibilityTimeout") or 30),
     )
 
 

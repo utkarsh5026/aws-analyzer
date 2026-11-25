@@ -99,6 +99,7 @@ from .analysis.datasets import (
     runs_data,
 )
 from .analysis.fates import event_fates, fate_findings, parse_async_config, parse_redrive
+from .analysis.limits import ConnectionLimit, connection_limits, limit_findings
 from .analysis.causes import (
     CauseAdvice, CauseState, ChartColumns, Verdict, calls_after, cause_advice, cause_state, chart_columns,
     column_counts, errors_verdict, failure_pattern, runs_verdict,
@@ -259,6 +260,9 @@ __all__ = [
     "diff_settings",
     "error_findings",
     "event_fates",
+    "ConnectionLimit",
+    "connection_limits",
+    "limit_findings",
     "fate_findings",
     "errors_data",
     "function_data",

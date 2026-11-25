@@ -33,6 +33,7 @@ from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as gr
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.blocks.info import cost_split
 from aws_analyzer.lambda_functions.analysis.performance import short_stream
+from aws_analyzer.lambda_functions.analysis.limits import raising_timeout_note
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
 from aws_analyzer.lambda_functions.explorer import plain as plain_search
@@ -4893,3 +4894,116 @@ def test_a_report_is_read_quietly_for_its_tables_and_saved_as_a_workbook(ui, cap
     assert len(book["Charts"]._charts) == 3
     ui.to_excel("errors", "nope-not-here")
     assert "No function 'nope-not-here'" in capsys.readouterr().out
+
+
+def _queue_state(**kwargs):
+    defaults = dict(name="orders", arn=f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders", visibility=30)
+    return QueueState(**{**defaults, **kwargs})
+
+
+def test_api_gateway_stops_waiting_before_a_long_timeout():
+    api = Trigger("API Gateway", "a1b2c3", via="resource policy")
+    slow = FunctionDetail(fn(timeout=300), triggers=[api], metrics=metrics(longest=40_000.0))
+    [limit] = lfmod.connection_limits(slow)
+    assert (limit.tone, limit.level, limit.topic) == ("warn", "warn", "timeout")
+    assert "after 29 s the caller gets a 504" in limit.effect and "up to 300 s" in limit.effect
+    assert "already happens" in limit.effect and "--timeout 29" in limit.fix
+    quick = FunctionDetail(fn(timeout=300), triggers=[api], metrics=metrics(longest=2_000.0))
+    assert lfmod.connection_limits(quick)[0].level == "info"
+    fitting = FunctionDetail(fn(timeout=20), triggers=[api])
+    [fits] = lfmod.connection_limits(fitting)
+    assert (fits.tone, fits.finding) == ("ok", None)
+
+
+def test_cognito_and_load_balancer_wait_less_than_the_timeout():
+    detail = FunctionDetail(fn(timeout=90), triggers=[Trigger("Cognito user pool", "users", via="resource policy"),
+                                                      Trigger("Load balancer", "web", via="resource policy")])
+    cognito, balancer = lfmod.connection_limits(detail)
+    assert "waits 5 s for a trigger" in cognito.effect and "--timeout 5" in cognito.fix
+    assert "unless its idle timeout was raised" in balancer.effect and balancer.level == "info"
+
+
+def test_a_queue_that_hands_a_message_out_again_is_a_clash():
+    sqs = Trigger("SQS queue", "orders", arn=f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders", batch_window=5, uuid="u-1")
+    detail = FunctionDetail(fn(timeout=60), triggers=[sqs])
+    [short] = lfmod.connection_limits(detail, {sqs.arn: _queue_state(visibility=30)})
+    assert (short.tone, short.level, short.topic) == ("warn", "warn", "queue")
+    assert "come back while they're still being worked on" in short.effect
+    assert f"https://sqs.{REGION}.amazonaws.com/{ACCOUNT}/orders --attributes VisibilityTimeout=365" in short.fix
+    [below_advice] = lfmod.connection_limits(detail, {sqs.arn: _queue_state(visibility=120)})
+    assert (below_advice.tone, below_advice.level) == ("", "info")
+    [enough] = lfmod.connection_limits(detail, {sqs.arn: _queue_state(visibility=400)})
+    assert enough.tone == "ok"
+    [unread] = lfmod.connection_limits(detail, {sqs.arn: _queue_state(error="AccessDenied")})
+    assert "Couldn't read the queue (AccessDenied)" in unread.effect and unread.finding is None
+
+
+def test_a_mapping_that_runs_more_than_the_function_may_is_a_clash():
+    sqs = Trigger("SQS queue", "orders", arn=f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders", uuid="u-1")
+    queues = {sqs.arn: _queue_state(visibility=900, max_receives=2)}
+    detail = FunctionDetail(fn(timeout=60, reserved_concurrency=10), triggers=[sqs])
+    limits = lfmod.connection_limits(detail, queues)
+    concurrency = next(limit for limit in limits if limit.topic == "concurrency")
+    assert concurrency.tone == "warn" and "MaximumConcurrency=10" in concurrency.fix
+    receives = next(limit for limit in limits if "receive" in limit.limit)
+    assert "after 2 receives" in receives.effect and receives.level == "info"
+    capped = replace(sqs, max_concurrency=5)
+    limits = lfmod.connection_limits(replace(detail, triggers=[capped]), queues)
+    assert next(limit for limit in limits if limit.topic == "concurrency").tone == "ok"
+
+
+def test_a_stream_retried_until_its_records_expire_stops_its_shard():
+    stream = Trigger("Kinesis stream", "clicks", uuid="u-2", max_retries=-1, max_record_age=-1)
+    [endless] = lfmod.connection_limits(FunctionDetail(fn(), triggers=[stream]))
+    assert endless.level == "warn" and "One bad record can stop clicks" in endless.effect
+    assert "--maximum-retry-attempts 2 --bisect-batch-on-function-error" in endless.fix
+    [lossy] = lfmod.connection_limits(FunctionDetail(fn(), triggers=[replace(stream, max_retries=2)]))
+    assert "its records are lost" in lossy.effect and lossy.level == "info"
+    kept = replace(stream, max_retries=2, failure_destination="arn:aws:sqs:us-east-1:1:failed")
+    assert lfmod.connection_limits(FunctionDetail(fn(), triggers=[kept]))[0].tone == "ok"
+
+
+def test_asynchronous_callers_share_a_line_and_clashes_come_first():
+    triggers = [Trigger("Function URL", "https://x", via="function URL"), Trigger("S3 bucket", "uploads"),
+                Trigger("SNS topic", "alerts"), Trigger("API Gateway", "a1b2c3", via="resource policy")]
+    limits = lfmod.connection_limits(FunctionDetail(fn(timeout=120), triggers=triggers, async_config=AsyncConfig()))
+    assert [limit.tone for limit in limits] == ["warn", "", "ok"]
+    assert limits[1].caller == "S3 bucket uploads, SNS topic alerts" and "3 tries" in limits[1].effect
+    assert lfmod.limit_findings(limits) == [limits[0].finding]
+
+
+def test_a_longer_timeout_says_what_else_it_needs():
+    sqs = Trigger("SQS queue", "orders", arn=f"arn:aws:sqs:{REGION}:{ACCOUNT}:orders")
+    detail = FunctionDetail(fn(timeout=20), triggers=[sqs, Trigger("API Gateway", "a1b2c3", via="resource policy")],
+                            queues={sqs.arn: _queue_state(visibility=200)})
+    note = raising_timeout_note(detail, 40)
+    assert "API Gateway a1b2c3 stops waiting after 29 s whatever the timeout" in note
+    assert "raise orders's visibility timeout with it, to 240 s" in note
+    assert raising_timeout_note(FunctionDetail(fn()), 40) == ""
+    near = function_findings(fn(timeout=20), metrics(longest=19_500.0), detail, now=NOW)
+    assert any("stops waiting after 29 s whatever the timeout" in text for _, text in near)
+
+
+def test_an_event_source_mapping_keeps_its_settings():
+    trigger = lfmod.parse_event_source_mapping({
+        "EventSourceArn": "arn:aws:kinesis:us-east-1:1:stream/clicks", "UUID": "u-3", "BatchSize": 100,
+        "MaximumBatchingWindowInSeconds": 5, "MaximumRetryAttempts": -1, "MaximumRecordAgeInSeconds": -1,
+        "BisectBatchOnFunctionError": True, "ScalingConfig": {"MaximumConcurrency": 4},
+        "DestinationConfig": {"OnFailure": {"Destination": "arn:aws:sqs:us-east-1:1:failed"}}})
+    assert (trigger.batch_size, trigger.batch_window, trigger.max_concurrency) == (100, 5, 4)
+    assert (trigger.max_retries, trigger.max_record_age, trigger.split_batches) == (-1, -1, True)
+    assert trigger.failure_destination == "arn:aws:sqs:us-east-1:1:failed"
+
+
+def test_describe_reads_each_trigger_queue(core, seeded):
+    detail = core.describe("etl-nightly", metrics=False)
+    assert detail.queues[seeded["queue"]].visibility == 30 and "queues" not in detail.errors
+
+
+def test_function_info_shows_how_what_is_connected_limits_it(ui, capsys):
+    out = run(capsys, ui.function_info, "etl-nightly")
+    assert "-- How what's connected limits it" in out
+    assert out.index("-- How it's wired") < out.index("-- How what's connected limits it")
+    assert "SQS queue orders" in out and "hides a message 30 s while it's read" in out
+    assert "Messages from orders come back while they're still being worked on" in out
+    assert "VisibilityTimeout=5400" in out and "Timeout: 900 s" in out

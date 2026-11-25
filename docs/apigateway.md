@@ -111,7 +111,7 @@ The numbers are CloudWatch's (`AWS/ApiGateway`), in whole UTC days. **Auth** say
 
 !!! tip "Worth knowing"
 
-    API Gateway gives up on a request after **29 seconds** (30 for an HTTP API) and answers `504`, even when the Lambda function behind it is still working and will finish the job. A route whose slowest calls come close to that is a warning, and `performance()` shows which.
+    API Gateway gives up on a request after **29 seconds** (30 for an HTTP API) and answers `504`, even when the Lambda function behind it is still working and will finish the job. A route whose slowest calls come close to that is a warning, and `performance()` shows which. `api_info()` also reads the timeout of each Lambda function behind a route: one longer than API Gateway waits is a note, since past that the function runs on, billed, for an answer nobody gets.
 
 ## One API { #api-info }
 
@@ -123,8 +123,8 @@ apigw.api_info("orders-api")              # its main stage: prod, $default, or t
 apigw.api_info("orders-api/dev")          # another stage
 ```
 
-![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-light.webp#only-light){ width="984" height="1244" loading=lazy }
-![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, then the stages and routes](images/apigw-api-info-dark.webp#only-dark){ width="984" height="1244" loading=lazy }
+![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, a note that orders-etl's 60 s timeout outlasts the 29 s API Gateway waits for it, then the stages and routes](images/apigw-api-info-light.webp#only-light){ width="984" height="1401" loading=lazy }
+![api_info('orders-api'): cards with requests, 5xx, p95, routes, stages and cost, warnings that POST /orders runs out of time and fails 9.6% of its calls, a note that orders-etl's 60 s timeout outlasts the 29 s API Gateway waits for it, then the stages and routes](images/apigw-api-info-dark.webp#only-dark){ width="984" height="1401" loading=lazy }
 /// caption
 `apigw.api_info("orders-api")`: `POST /orders` runs out of time, while `orders-etl` may still be working.
 ///

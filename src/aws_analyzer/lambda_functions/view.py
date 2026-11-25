@@ -57,6 +57,7 @@ from .analysis.datasets import (
     runs_data,
 )
 from .analysis.fates import fate_findings
+from .analysis.limits import connection_limits, limit_findings
 from .analysis.fleet import (
     FleetIssue, FleetRow, bill_note, bill_parts, first_issues, fleet_issues, fleet_rows, fleet_verdict,
 )
@@ -72,7 +73,7 @@ from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
 from .blocks.walk import _Walk
-from .blocks.info import cost_split, cost_workings_table, day_charts, wiring_block
+from .blocks.info import cost_split, cost_workings_table, day_charts, limits_table, wiring_block
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 from .blocks.diff import _diff_blocks
@@ -585,8 +586,9 @@ class LambdaView(_DataCommands, _BaseView):
     def function_info(self, name: str, *, region: str | None = None, days: int = 30) -> None:
         """
         One function in plain English: what it runs (the runtime and when it loses support, memory and the CPU
-        it buys, timeout), what triggers it and who may call it, what happens to failed events, what it can reach
-        (role, network, environment variable names: values stay hidden), versions, aliases and provisioned
+        it buys, timeout), what triggers it and who may call it, how those callers' own limits meet its settings
+        (API Gateway gives up after 29 s, a queue hands a message out again), what happens to failed events, what
+        it can reach (role, network, environment variable names: values stay hidden), versions, aliases and provisioned
         concurrency, its last 30 days day by day, the estimated monthly cost, and findings with the command for
         each. name can also be 'name:alias', an ARN or a console link.
         """
@@ -601,13 +603,15 @@ class LambdaView(_DataCommands, _BaseView):
         """
         function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
         on different tabs: 'head' (title, cards, findings), 'charts' (calls and run time a day), 'wiring' (what calls
-        it and where its results go), 'cost', 'runs', 'access', 'triggers', 'async', 'versions', 'days', 'tags', 'raw'
-        and 'next'.
+        it, where its results go, and how what's connected limits it), 'cost', 'runs', 'access', 'triggers', 'async',
+        'versions', 'days', 'tags', 'raw' and 'next'.
         """
         fn, m = detail.function, detail.metrics
         now = _utcnow()
         prices = self.core.prices
-        found = function_findings(fn, m, detail, prices=prices, now=now)
+        limits = connection_limits(detail, detail.queues)
+        found = function_findings(fn, m, detail, prices=prices, now=now) + limit_findings(limits)
+        caller_gives_up = any(limit.level == "warn" and limit.topic == "timeout" for limit in limits)
         status = runtime_status(fn.runtime, package_type=fn.package_type, today=now.date())
         cost = function_monthly_cost(fn, m, detail.provisioned, detail.log_group, prices=prices)
         level = _errors_level(m, now)
@@ -618,7 +622,7 @@ class LambdaView(_DataCommands, _BaseView):
         cards: list[tuple[str, ...]] = [
             ("Runtime", status.label, status.tone),
             ("Memory", _mb(fn.memory)),
-            ("Timeout", f"{fn.timeout} s", "warn" if near_timeout else ""),
+            ("Timeout", f"{fn.timeout} s", "warn" if near_timeout or caller_gives_up else ""),
             ("Architecture", fn.architecture),
         ]
         if m is not None:
@@ -646,6 +650,9 @@ class LambdaView(_DataCommands, _BaseView):
         head.append(_Findings(found, empty=f"No problems found in its settings or its last {days} days."))
         sections["charts"] += day_charts(detail, days=days, now=now)
         sections["wiring"].append(wiring_block(detail))
+        limits_block = limits_table(limits)
+        if limits_block is not None:
+            sections["wiring"].append(limits_block)
 
         package = (f"{fn.package_type}, {human_size(fn.code_size)}" if fn.package_type == "Zip"
                    else f"container image {fn.image_uri or ''}".strip())

@@ -20,6 +20,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Open it for calls to copy (`ui.performance('etl', since='7d')`), the report's own suggestions first, and every option.
   - `ui.help('performance')` still has the whole description.
 
+- ⚡ **Lambda: when its callers give up before it does** ([#289](https://github.com/utkarsh5026/aws-analyzer/pull/289))
+  - `function_info()` holds each caller's own rules against the function's settings: API Gateway's 29 s, an SQS queue's visibility timeout, a stream that stops at a bad batch.
+  - Each clash is a finding with the command that lines them up; advice to raise the timeout says what else must change.
+  - 🚪 API Gateway's `api_info()` notes a Lambda function whose timeout outlasts how long API Gateway waits for it.
+
 ### Fixed
 
 - 📊 **DynamoDB: the schema's mixed-type recipe finds only mixed types** ([#286](https://github.com/utkarsh5026/aws-analyzer/pull/286))
