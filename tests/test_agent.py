@@ -743,7 +743,7 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert "You cover:\n- AWS Lambda: which functions exist" in text and "\n- the user's notes: what" in text
     assert text.index("\nAWS Lambda\n") < text.index("\nNotes\n- Read a note") < text.index("How to answer")
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 14" in out
+    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 15" in out
     assert "secrets files (.env, keys) are never read. Notes marked private are never read." in out
     assert viewmod._look_closer([("NotesView().note('plan', region='eu-west-1')", "the note"),
                                  ("LambdaView().errors('etl')", "errors")]) == (
@@ -2650,7 +2650,7 @@ def test_transcript_and_new_conversation(view, capsys):
 def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
     out = run(capsys, view.tools)
     for name in ("find_functions", "function_health", "function_errors", "function_logs", "function_performance",
-                 "function_details", "function_code", "function_source", "search_code", "find_symbol", "diff_versions",
+                 "function_details", "caller_limits", "function_code", "function_source", "search_code", "find_symbol", "diff_versions",
                  "find_buckets", "bucket_details", "list_folder", "find_files",
                  "folder_summary", "file_info", "s3_triggers"):
         assert name in out
@@ -4678,3 +4678,19 @@ def test_setup_report_shows_the_cells_and_never_a_key(monkeypatch, capsys):
     out = run(capsys, view.setup, "azur")
     assert "Did you mean 'azure'" in out and "Traceback" not in out
     assert "setup" in AgentView._GROUPS["🔑 Set up"]
+
+
+def test_caller_limits_says_when_a_queue_hands_a_message_out_again(core):
+    sqs = boto3.client("sqs", region_name=REGION)
+    url = sqs.create_queue(QueueName="orders")["QueueUrl"]
+    queue = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+    boto3.client("lambda", region_name=REGION).create_event_source_mapping(EventSourceArn=queue,
+                                                                           FunctionName="etl-nightly")
+    out = tool(core, "caller_limits")("etl-nightly")
+    assert out["clashes"] == 1 and out["timeout_s"] == 60 and out["longest_run_ms_30d"] == 58_000
+    [queue_row] = out["connections"]
+    assert queue_row["caller"] == "SQS queue orders" and queue_row["together"] == "clash"
+    assert "VisibilityTimeout=360" in queue_row["fix"] and out["complete"] is True
+    assert "sqs:GetQueueAttributes" in core.toolkit("lambda").reads["caller_limits"]
+    details = tool(core, "function_details")("etl-nightly")
+    assert any("come back while they're still being worked on" in f["message"] for f in details["findings"])

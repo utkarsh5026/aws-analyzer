@@ -129,6 +129,12 @@ def _labels(body: dict[str, Any]) -> dict[str, str]:
     return labels
 
 
+def _is_distributed(body: dict[str, Any]) -> bool:
+    processor = body.get("ItemProcessor")
+    config = processor.get("ProcessorConfig") if isinstance(processor, dict) else None
+    return isinstance(config, dict) and config.get("Mode") == "DISTRIBUTED"
+
+
 def _state(name: str, body: dict[str, Any], path: str, depth: int, branch: int = 0) -> StateDef:
     resource = str(body.get("Resource") or "")
     parameters = body.get("Parameters") or body.get("Arguments") or {}
@@ -149,6 +155,8 @@ def _state(name: str, body: dict[str, Any], path: str, depth: int, branch: int =
         labels=_labels(body),
         branch=branch,
         starts=[str(inner.get("StartAt") or "") for inner in _inner_machines(body)],
+        max_concurrency=body.get("MaxConcurrency") if isinstance(body.get("MaxConcurrency"), int) else None,
+        distributed=_is_distributed(body),
     )
 
 

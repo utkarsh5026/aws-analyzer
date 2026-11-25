@@ -1731,7 +1731,7 @@ window.AA_CLIPS = {
  },
  "sfn-state-machine": {
   "notebook": "workflows.ipynb",
-  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.",
+  "summary": "sfn.state_machine(\"order-pipeline\"): sfn.state_machine(\"order-pipeline\"): its failures jumped three days ago, the day outlined in the bars, LoadOrders has no Retry for Lambda's own errors (the finding gives the rule to paste), and ProcessItems runs more of resize-image at once than the function may run.",
   "video": "",
   "scenes": [
    {
@@ -1744,13 +1744,13 @@ window.AA_CLIPS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 2213
+      "h": 2798
      }
     ],
     "captions": [
      [
       3.29,
-      "Its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste."
+      "Its failures jumped three days ago, the day outlined in the bars, LoadOrders has no Retry for Lambda's own errors (the finding gives the rule to paste), and ProcessItems runs more of resize-image at once than the function may run."
      ]
     ]
    }

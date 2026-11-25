@@ -125,9 +125,10 @@ IAM_ACTION = {
     "lambda:Invoke": "lambda:InvokeFunction",
 }
 # boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:,
-# OpenSearch Service as es:, OpenSearch Serverless as aoss: and Step Functions as states:).
+# OpenSearch Service as es:, OpenSearch Serverless as aoss:, Step Functions as states: and ELB v2 as elasticloadbalancing:).
 IAM_PREFIX = {"bedrock-agent": "bedrock", "bedrock-agent-runtime": "bedrock", "bedrock-runtime": "bedrock",
-              "opensearch": "es", "opensearchserverless": "aoss", "stepfunctions": "states"}
+              "opensearch": "es", "opensearchserverless": "aoss", "stepfunctions": "states",
+              "elbv2": "elasticloadbalancing"}
 
 
 def iam_action(candidate: str) -> str | None:

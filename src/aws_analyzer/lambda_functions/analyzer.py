@@ -37,7 +37,7 @@ from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime
 from .models import (
     AccountLimits, Alias, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, ProvisionedConcurrency,
-    QueueState, SavedPage, SymbolReport, Trigger, Version, VersionDiff,
+    LoadBalancerWait, QueueState, SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
@@ -48,6 +48,7 @@ from .analysis.errors import _filter_pattern, classify_error, group_errors, requ
 from .analysis.logs import LogPage, LogRun, split_runs
 from .analysis.runs import RunTable, run_table
 from .analysis.word_search import runs_matching, search_hits, word_search
+from .analysis.limits import LOAD_BALANCER_IDLE_S
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.source import find_symbol_in, read_sources, search_package
 from .analysis.versions import diff_packages, nothing_before, version_before
@@ -256,6 +257,7 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
                         "logs": lambda: self.session.client("logs", region_name=region, config=self._config),
                         "ec2": lambda: self.session.client("ec2", region_name=region, config=self._config),
                         "sqs": lambda: self.session.client("sqs", region_name=region, config=self._config),
+                        "elbv2": lambda: self.session.client("elbv2", region_name=region, config=self._config),
                     }
                     try:
                         self._clients[(name, region)] = makers[name]()
@@ -701,7 +703,7 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
         detail = FunctionDetail(fn)
         client = self._service("lambda", where)
         qualified = {"Qualifier": qualifier} if qualifier else {}
-        steps = 10 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
+        steps = 11 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
         done = [1]
 
         def read(section: str, call: Callable[[], Any], missing: Any = None) -> Any:
@@ -765,6 +767,7 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
                 detail.runtime_version = runtime.get("RuntimeVersionArn")
         detail.log_group = read("log_group", lambda: self.log_group(fn.log_group, where))
         detail.queues = read("queues", lambda: self._trigger_queues(detail.triggers)) or {}
+        detail.load_balancers = read("load_balancers", lambda: self._trigger_load_balancers(detail.triggers)) or {}
         if metrics:
             until = _utcnow()
             since = _midnight(until) - timedelta(days=days - 1)
@@ -779,6 +782,32 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
         """
         arns = list(dict.fromkeys(t.arn for t in triggers if t.kind == "SQS queue" and t.arn))
         return dict(zip(arns, self._map(self._one_queue, arns)))
+
+    def _trigger_load_balancers(self, triggers: list[Trigger]) -> dict[str, LoadBalancerWait]:
+        """
+        For each load balancer target group that calls the function (its resource policy's SourceArn), the load
+        balancer in front of it that waits the least (DescribeTargetGroups, then DescribeLoadBalancerAttributes'
+        idle_timeout.timeout_seconds), by target group ARN.
+        """
+        groups = list(dict.fromkeys(t.arn for t in triggers
+                                    if t.kind == "Load balancer" and t.arn and ":targetgroup/" in t.arn))
+        found: dict[str, LoadBalancerWait] = {}
+        for group in groups:
+            region = group.split(":")[3]
+            elbv2 = self._service("elbv2", region)
+            described = elbv2.describe_target_groups(TargetGroupArns=[group]).get("TargetGroups") or [{}]
+            waits = [self._load_balancer_wait(elbv2, arn) for arn in described[0].get("LoadBalancerArns") or []]
+            if waits:
+                found[group] = min(waits, key=lambda wait: wait.idle_timeout)
+        return found
+
+    @staticmethod
+    def _load_balancer_wait(elbv2: Any, arn: str) -> LoadBalancerWait:
+        attributes = elbv2.describe_load_balancer_attributes(LoadBalancerArn=arn).get("Attributes") or []
+        values = {a.get("Key"): a.get("Value") for a in attributes}
+        idle = values.get("idle_timeout.timeout_seconds")
+        return LoadBalancerWait(arn.split("/")[-2] if arn.count("/") >= 2 else arn, arn,
+                                int(idle) if idle and idle.isdigit() else LOAD_BALANCER_IDLE_S)
 
     # ------------------------------------------------------------------ logs
 

@@ -9,7 +9,7 @@ import boto3
 import pytest
 from fake_stepfunctions import (
     FAILED_RUN, ORDER_PIPELINE, RESIZE_FAILED_RUN, express_arn, express_log_lines, express_runs, REFUND_APPROVALS, FakeCloudWatch, FakeStepFunctions, History, Try, clients,
-    lambda_error, lambda_lines, machine_arn, run_arn, scene, story_logs,
+    invoke, lambda_error, lambda_lines, machine_arn, run_arn, scene, story_logs,
 )
 from moto import mock_aws
 from test_lambda_functions import create, lambda_clients, put_logs
@@ -23,6 +23,7 @@ from aws_analyzer.stepfunctions import (
     can_redrive, definition_findings, fill_detail, group_failures, lambda_name, logging_findings, machine_name,
     mermaid, monthly_cost, parse_definition, parse_execution_ref, parse_state_machine, request_id_of_cause,
     request_id_of_output, short_cause, transitions_per_execution, unbounded_waits, unretried_lambda_states,
+    LambdaSettings, state_limit_findings, state_limits,
 )
 from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
@@ -1649,3 +1650,62 @@ def test_reports_give_their_tables_for_pandas(ui, capsys, tmp_path, monkeypatch)
     ui.data("execution", "order-pipeline/ord-7f3a", logs=False)
     ui.to_excel()
     assert "Saved Execution ord-7f3a as a workbook" in capsys.readouterr().out
+
+
+def _machine_with(states, *, kind="STANDARD", settings=None):
+    machine = parse_state_machine(described("limits", {"StartAt": next(iter(states)), "States": states}))
+    machine.type = kind
+    machine.lambda_settings = settings or {}
+    return machine
+
+
+def test_a_task_that_gives_up_before_its_function_does():
+    retried = _machine_with({"Load": invoke("orders-etl", TimeoutSeconds=30, End=True, Retry=[
+        {"ErrorEquals": ["States.Timeout"], "MaxAttempts": 2}])}, settings={"orders-etl": LambdaSettings(60)})
+    [clash] = state_limits(retried)
+    assert (clash.tone, clash.level, clash.state, clash.function) == ("warn", "warn", "Load", "orders-etl")
+    assert "after 30 s it fails with States.Timeout, while the run goes on for up to 60 s" in clash.effect
+    assert "the work is done twice" in clash.effect and '"TimeoutSeconds": 65' in clash.fix
+    quiet = _machine_with({"Load": invoke("orders-etl", TimeoutSeconds=30, End=True)},
+                          settings={"orders-etl": LambdaSettings(60)})
+    assert state_limits(quiet)[0].level == "info"
+    roomy = _machine_with({"Load": invoke("orders-etl", TimeoutSeconds=90, End=True)},
+                          settings={"orders-etl": LambdaSettings(60)})
+    assert state_limits(roomy)[0].tone == "ok" and state_limit_findings(roomy) == []
+    assert state_limits(_machine_with({"Load": invoke("orders-etl", TimeoutSeconds=30, End=True)})) == []
+
+
+def test_an_express_workflow_stops_before_a_long_function():
+    machine = _machine_with({"Load": invoke("backfill", End=True)}, kind="EXPRESS",
+                            settings={"backfill": LambdaSettings(900)})
+    [limit] = state_limits(machine)
+    assert "which stops at 5 minutes, but backfill may run 900 s" in limit.effect and "--timeout 300" in limit.fix
+
+
+def test_a_map_runs_more_of_a_function_than_it_may():
+    def mapped(**map_settings):
+        inner = {"StartAt": "Resize", "States": {"Resize": invoke("resize", End=True)}}
+        return {"Items": {"Type": "Map", "ItemProcessor": inner, "End": True, **map_settings}}
+
+    reserved = _machine_with(mapped(MaxConcurrency=10), settings={"resize": LambdaSettings(30, 4)})
+    [limit] = state_limits(reserved)
+    assert limit.level == "warn" and "up to 10 items against its reserved concurrency of 4" in limit.effect
+    assert "a throttle fails the item" in limit.effect and '{"MaxConcurrency": 4} on Items' in limit.fix
+    inline = _machine_with(mapped(), settings={"resize": LambdaSettings(30, 100)})
+    assert state_limits(inline)[0].tone == "ok"
+    distributed = {"ItemProcessor": {"ProcessorConfig": {"Mode": "DISTRIBUTED"}, "StartAt": "Resize",
+                                     "States": {"Resize": invoke("resize", End=True)}}}
+    pool = _machine_with({"Items": {"Type": "Map", "End": True, **distributed}},
+                         settings={"resize": LambdaSettings(30, None, 1_000)})
+    [flood] = state_limits(pool)
+    assert "up to 10,000 runs of resize at once, as many as the region's whole Lambda pool (1,000)" in flood.effect
+    assert '{"MaxConcurrency": 100}' in flood.fix and pool.states[0].distributed
+
+
+def test_state_machine_reads_its_functions_settings_and_shows_the_clash(ui, capsys, fakes):
+    out = run(capsys, ui.state_machine, "order-pipeline")
+    assert "-- How its states and the Lambda functions they call limit each other --" in out
+    assert "ProcessItems runs more of resize-image at once than it may run" in out
+    assert "runs 4 items at once (MaxConcurrency)" in out and "reserved concurrency 2" in out
+    called = [name for name, _ in fakes["lambda"].calls]
+    assert "get_account_settings" not in called and called.count("get_function") == 4

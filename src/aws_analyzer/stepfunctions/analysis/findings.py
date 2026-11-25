@@ -15,6 +15,7 @@ from ..helpers import STATUS_WORDS, execution_ref, short_cause
 from ..models import ExecutionDetail, FailureReport, MachineNumbers, Overview, StateMachine
 from .cost import monthly_cost
 from .definition import lambda_retry_block, unbounded_waits, unretried_lambda_states
+from .lambda_limits import state_limit_findings
 from .failures import REDRIVE_DAYS, can_redrive
 from .trend import trend_findings
 
@@ -143,10 +144,11 @@ def idle_findings(machine: StateMachine, numbers: MachineNumbers | None) -> list
 
 def machine_findings(machine: StateMachine, numbers: MachineNumbers | None) -> list[Finding]:
     """
-    Every finding about one state machine: its numbers, its logging and its definition.
+    Every finding about one state machine: its numbers, its logging, its definition, and how its states and the
+    Lambda functions they call limit each other (once their settings are read).
     """
     return (numbers_findings(machine, numbers) + idle_findings(machine, numbers) + logging_findings(machine)
-            + definition_findings(machine))
+            + definition_findings(machine) + state_limit_findings(machine))
 
 
 def overview_findings(overview: Overview, prices: dict[str, float]) -> list[Finding]:

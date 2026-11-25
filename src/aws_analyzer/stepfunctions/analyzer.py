@@ -19,8 +19,8 @@ from .._kit.fmt import _as_count, _utcnow, parse_time
 
 from .helpers import EXECUTION_ARN_RE, FAILED_STATUSES, STATE_MACHINE_ARN_RE, execution_arn, parse_execution_ref
 from .models import (
-    Attempt, Execution, ExecutionDetail, ExecutionPage, FailureReport, MachineNumbers, Overview, StateMachine,
-    StepRun, TimingReport,
+    Attempt, Execution, ExecutionDetail, ExecutionPage, FailureReport, LambdaSettings, MachineNumbers, Overview,
+    StateMachine, StepRun, TimingReport,
 )
 from .prices import STEPFUNCTIONS_PRICES
 from .changes import _ChangeReads
@@ -62,6 +62,8 @@ _TIME_MATCH_LINES = 2_000
 
 _STORY_STEPS = 12
 
+_MOST_FUNCTIONS = 20
+
 TIMING_SAMPLE = 20
 
 TIMING_EVENTS = 5_000
@@ -91,6 +93,15 @@ def _run_lines(story_run: StoryRun) -> list[LogLine]:
         kind = "error" if id(event) in failing else ("report" if is_report else "")
         lines.append(LogLine(event.time, step.function, lambda_functions.readable_line(event.message), step.name, kind))
     return lines
+
+
+def _functions_in_maps(machine: StateMachine) -> set[str]:
+    """
+    The Lambda functions called from inside a Map state, whose items run side by side.
+    """
+    maps = [state.path for state in machine.states if state.type == "Map"]
+    return {state.function for state in machine.states
+            if state.function and any(state.path.startswith(f"{path} > ") for path in maps)}
 
 
 def _midnight_after(now: datetime) -> datetime:
@@ -202,6 +213,44 @@ class StepFunctionsAnalyzer(_ChangeReads, _CompareReads, _ExpressReads, _BaseAna
             described = self.client.describe_state_machine(stateMachineArn=arn)
             self._machines[arn] = parse_state_machine(described)
         return self._machines[arn]
+
+    def read_lambda_settings(self, machine: StateMachine) -> StateMachine:
+        """
+        The settings of the Lambda functions the state machine calls that meet its states' own: each one's timeout and
+        reserved concurrency (GetFunction, side by side, at most _MOST_FUNCTIONS), and the region's concurrency
+        when a Map state runs one that has none (GetAccountSettings), kept in machine.lambda_settings. A read that fails is named in
+        machine.errors['lambda'], and the rest of the report still works.
+        """
+        names = [name for name in machine.functions if name not in machine.lambda_settings][:_MOST_FUNCTIONS]
+        if not names:
+            return machine
+        functions = dict(zip(names, self._map(lambda name: self._lambda_function(name, machine), names)))
+        in_maps = _functions_in_maps(machine)
+        shares_pool = any(f is not None and not f.reserved_concurrency and name in in_maps
+                          for name, f in functions.items())
+        pool = self._region_concurrency(machine) if shares_pool else None
+        for name, function in functions.items():
+            if function is not None:
+                machine.lambda_settings[name] = LambdaSettings(function.timeout, function.reserved_concurrency, pool)
+        return machine
+
+    def _lambda_function(self, name: str, machine: StateMachine) -> Any:
+        try:
+            return self.lambda_core.function(name)
+        except ClientError as exc:
+            machine.errors["lambda"] = _error_code(exc)
+        except BotoCoreError as exc:
+            machine.errors["lambda"] = type(exc).__name__
+        return None
+
+    def _region_concurrency(self, machine: StateMachine) -> int | None:
+        try:
+            return self.lambda_core.account().concurrency
+        except ClientError as exc:
+            machine.errors["lambda_account"] = _error_code(exc)
+        except BotoCoreError as exc:
+            machine.errors["lambda_account"] = type(exc).__name__
+        return None
 
     def state_machines(self) -> tuple[list[StateMachine], dict[str, str]]:
         """

@@ -500,7 +500,8 @@ class StepFunctionsExplorer(_MachinesTab, _GraphTab, _FailuresTab, _CompareSlot,
         self._draw_pager()
         self._draw_cut_note()
         self._status(f"Reading {name}…", busy=True, owner="machine")
-        self._later("machine", lambda: self.core.state_machine(arn), self._described, self._machine_failed)
+        self._later("machine", lambda: self.core.read_lambda_settings(self.core.state_machine(arn)), self._described,
+                    self._machine_failed)
 
     def _machine_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)

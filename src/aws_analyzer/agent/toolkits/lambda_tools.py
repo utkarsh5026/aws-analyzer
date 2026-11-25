@@ -53,7 +53,13 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
     "function_details": ("lambda:GetFunction", "lambda:ListEventSourceMappings", "lambda:GetPolicy",
                          "lambda:GetFunctionUrlConfig", "lambda:GetFunctionEventInvokeConfig", "lambda:ListAliases",
                          "lambda:ListVersionsByFunction", "lambda:ListProvisionedConcurrencyConfigs",
-                         "lambda:GetRuntimeManagementConfig", "logs:DescribeLogGroups", "cloudwatch:GetMetricData"),
+                         "lambda:GetRuntimeManagementConfig", "logs:DescribeLogGroups", "cloudwatch:GetMetricData",
+                         "sqs:GetQueueUrl", "sqs:GetQueueAttributes", "elasticloadbalancing:DescribeTargetGroups",
+                         "elasticloadbalancing:DescribeLoadBalancerAttributes"),
+    "caller_limits": ("lambda:GetFunction", "lambda:ListEventSourceMappings", "lambda:GetPolicy",
+                      "lambda:GetFunctionEventInvokeConfig", "cloudwatch:GetMetricData", "sqs:GetQueueUrl",
+                      "sqs:GetQueueAttributes", "elasticloadbalancing:DescribeTargetGroups",
+                      "elasticloadbalancing:DescribeLoadBalancerAttributes"),
     "function_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
     "function_source": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
     "search_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
@@ -418,6 +424,15 @@ def summarize_performance(perf: Performance, prices: dict[str, float] | None = N
     return out
 
 
+def _detail_findings(detail: FunctionDetail, prices: dict[str, float] | None) -> list[tuple[str, str]]:
+    """
+    Every finding function_info() shows: the function's own, then how what's connected to it limits it.
+    """
+    lf = _lambda_module()
+    found = lf.function_findings(detail.function, detail.metrics, detail, prices=prices)
+    return found + lf.limit_findings(lf.connection_limits(detail, detail.queues))
+
+
 def summarize_detail(detail: FunctionDetail, prices: dict[str, float] | None = None) -> dict[str, Any]:
     """
     function_details()'s answer: settings, what triggers it, its last 30 days from CloudWatch, the estimated
@@ -443,11 +458,40 @@ def summarize_detail(detail: FunctionDetail, prices: dict[str, float] | None = N
                              "total": round(sum(known), 2) if known else None,
                              "basis": "estimate: the last 30 days scaled to a month, us-east-1 list prices, "
                                       "before the free tier"},
-        "findings": [{"level": level, "message": text} for level, text in lf.function_findings(
-            fn, detail.metrics, detail, prices=prices)],
+        "findings": [{"level": level, "message": text} for level, text in _detail_findings(detail, prices)],
     }
     if detail.errors:
         out["errors"] = dict(detail.errors)
+    return out
+
+
+def summarize_limits(detail: FunctionDetail) -> dict[str, Any]:
+    """
+    caller_limits()'s answer: for each thing connected to the function, its own rule against the function setting
+    it meets (API Gateway's 29 s against the timeout, an SQS queue's visibility timeout, a stream's retries...),
+    whether they clash, what happens and what to change, clashes first. The function's longest run in the last 30
+    days says whether a clash already happens.
+    """
+    lf = _lambda_module()
+    fn, metrics = detail.function, detail.metrics
+    limits = lf.connection_limits(detail, detail.queues)
+    together = {"warn": "clash", "ok": "fits", "": "worth knowing"}
+    out: dict[str, Any] = {
+        "function": fn.name,
+        "timeout_s": fn.timeout,
+        "reserved_concurrency": fn.reserved_concurrency,
+        "longest_run_ms_30d": round(metrics.duration_max) if metrics and metrics.duration_max else None,
+        "clashes": sum(1 for limit in limits if limit.tone == "warn"),
+        "connections": [{"caller": limit.caller, "its_rule": limit.limit, "meets": limit.setting,
+                         "together": together.get(limit.tone, ""), "what_happens": limit.effect,
+                         "fix": limit.fix or None} for limit in limits],
+    }
+    if not detail.triggers:
+        out["note"] = ("Nothing in its resource policy or event source mappings calls it. Callers that use their own "
+                       "role (Step Functions, an SDK) leave no trace on the function, so they can't be checked here.")
+    unread = {k: v for k, v in detail.errors.items() if k in ("policy", "triggers", "queues", "load_balancers")}
+    if unread:
+        out["errors"] = unread
     return out
 
 
@@ -730,7 +774,9 @@ class LambdaToolkit(Toolkit):
     reads = TOOL_READS
     service = "lambda"
     services = {"FilterLogEvents": "logs", "DescribeLogGroups": "logs", "DescribeLogStreams": "logs",
-                "GetMetricData": "cloudwatch", "DescribeRegions": "ec2"}
+                "GetMetricData": "cloudwatch", "DescribeRegions": "ec2", "GetQueueUrl": "sqs",
+                "GetQueueAttributes": "sqs", "DescribeTargetGroups": "elasticloadbalancing",
+                "DescribeLoadBalancerAttributes": "elasticloadbalancing"}
     view = "LambdaView"
     client_factory = "_service"
     asks = frozenset({"function_errors", "function_logs", "function_performance", "save_logs"})
@@ -777,6 +823,9 @@ AWS Lambda
   default $LATEST against the newest published version with other code). Read a version's code with
   function_source('name:3', ...). Lambda keeps only published versions' code: if diff_versions has nothing to
   compare, say so and use when the code last changed instead.
+- For 504s, a caller that gives up or retries, or messages handled twice or reaching a dead-letter queue without
+  failing, caller_limits holds each caller's own limits (API Gateway's 29 s, a queue's visibility timeout, a
+  stream's retries, reserved concurrency) against the function's settings.
 - Name functions exactly as the tools return them.{self._python_rule()}"""
 
     def _python_rule(self) -> str:
@@ -794,12 +843,12 @@ AWS Lambda
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_functions, function_health, function_errors, function_logs, function_performance, function_details,
-        function_code, function_source, search_code, find_symbol and diff_versions, and save_function_code and
+        caller_limits, function_code, function_source, search_code, find_symbol and diff_versions, and save_function_code and
         save_logs when the agent has a Python workspace: methods whose type hints and docstrings tell the model how to call them,
         each reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
         tools = [self.find_functions, self.function_health, self.function_errors, self.function_logs,
-                 self.function_performance, self.function_details, self.function_code, self.function_source,
+                 self.function_performance, self.function_details, self.caller_limits, self.function_code, self.function_source,
                  self.search_code, self.find_symbol, self.diff_versions]
         if self.peer("python") is not None:
             tools += [self.save_function_code, self.save_logs]
@@ -920,6 +969,25 @@ AWS Lambda
                            f"{detail.function.timeout}s; {_plural(len(out['findings']), 'finding')}"
                            + (f"; about {human_money(total)}/month" if total is not None else ""))
         out["_next"] = [(self._next_for(detail.function, "function_info"), "the function in plain English")]
+        return out
+
+    def caller_limits(self, function: str, region: str = "") -> dict[str, Any]:
+        """
+        Whether what calls a function gives up, retries or floods it before the function is done: each caller's own
+        rule against the setting it meets (API Gateway waits 29 s whatever the timeout, a load balancer its idle
+        timeout, an SQS queue hands a message out again after its visibility timeout, a stream retries a bad batch
+        until it expires, a mapping runs more calls at once than reserved concurrency allows), whether they clash,
+        what happens and the command that fixes it. Use it for "will my callers time out?", 504s, messages handled
+        twice or landing in a dead-letter queue unexpectedly. region: empty for the default region.
+        """
+        core = self.analyzer
+        detail = core.describe(function, region=region or None, days=30)
+        out = summarize_limits(detail)
+        clashes = out["clashes"]
+        out["_summary"] = (f"{_plural(len(out['connections']), 'connection')}, "
+                           f"{clashes:,} {'clash' if clashes == 1 else 'clashes'}")
+        out["_next"] = [(self._next_for(detail.function, "function_info"),
+                         "the function, with how what's connected limits it")]
         return out
 
     def function_code(self, function: str, region: str = "") -> dict[str, Any]:

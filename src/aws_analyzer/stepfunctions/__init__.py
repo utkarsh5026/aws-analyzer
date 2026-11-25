@@ -40,8 +40,8 @@ from __future__ import annotations
 from .prices import STEPFUNCTIONS_PRICES
 from .helpers import console_url, execution_name, lambda_name, machine_name, parse_execution_ref, short_cause
 from .models import (
-    Attempt, Change, Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, MachineNumbers, Overview,
-    StateDef, StateMachine, StateTiming, StepRun, TimingReport,
+    Attempt, Change, Execution, ExecutionDetail, ExecutionPage, FailureGroup, FailureReport, LambdaSettings,
+    MachineNumbers, Overview, StateDef, StateMachine, StateTiming, StepRun, TimingReport,
 )
 from .analysis import (
     LAMBDA_SERVICE_ERRORS, REDRIVE_DAYS, can_redrive, catch_label, definition_findings, execution_findings,
@@ -54,7 +54,7 @@ from .analysis import (
     ExecutionComparison, InputDifference, StepDifference, compare_executions, compare_inputs, compare_steps,
     comparison_findings, RetryAdvice, advice_finding, error_kind, matching_retry, retry_advice, retry_findings,
     ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings,
-    timing_marks, timing_report,
+    timing_marks, timing_report, StateLimit, state_limit_findings, state_limits,
 )
 from .analysis.datasets import (
     execution_data, executions_data, failures_data, machine_data, overview_data, timings_data,
@@ -130,6 +130,10 @@ __all__ = [
     "lambda_name",
     "logging_findings",
     "machine_findings",
+    "StateLimit",
+    "state_limits",
+    "state_limit_findings",
+    "LambdaSettings",
     "machine_name",
     "merge_log",
     "mermaid",
