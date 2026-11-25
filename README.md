@@ -6,14 +6,8 @@
 
 **Understand your AWS data from a SageMaker notebook.**
 
-Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
-OpenSearch vector indexes, Lambda functions, Step Functions workflows, API Gateway APIs, Athena queries, SQS queues,
-SNS topics and EventBridge rules, and the SageMaker notebook itself: what's there,
-what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
-knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
-your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
-last night?" or "Were last night's uploads to acme-raw processed?" from the same read-only tools, and says what it
-checked.
+Readable reports on your buckets, tables, knowledge bases, functions, workflows, APIs, queries and queues:<br>
+what's there, what it costs, and what to do next. Windows you click through. An agent you can just ask.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -21,12 +15,8 @@ checked.
 [![Read-only](https://img.shields.io/badge/AWS%20access-read--only-0f766e)](#why-aws-analyzer)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-**[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
-[DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
-[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Step Functions](#aws-step-functions) · [API Gateway](#amazon-api-gateway) · [Athena](#amazon-athena) ·
-[SQS, SNS and EventBridge](#sqs-sns-and-eventbridge) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
-[Changelog](CHANGELOG.md)
+**[📖 Read the guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [Services](#services) · [See it](#see-it) ·
+[Permissions](#permissions) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -45,3412 +35,346 @@ checked.
 <tr>
 <td width="33%" valign="top">
 <b>🧭 The answer first</b><br>
-Each report starts with the few numbers that matter, then explains the rest in plain English: bucket policies,
-lifecycle rules, knowledge base settings. The raw JSON is still there, folded away.
+The few numbers that matter, then the rest in plain English: policies, lifecycle rules, settings. Raw JSON stays
+folded away.
 </td>
 <td width="33%" valign="top">
 <b>💵 Findings you can act on</b><br>
-Each warning says what's wrong, why it matters and what it costs ("costing $12.40/month"), then the next step.
-Reports end with the commands worth running next, arguments filled in.
+Each warning says what's wrong, what it costs ("$12.40/month") and the next step, with the call or command to copy.
 </td>
 <td width="33%" valign="top">
-<b>🧾 Honest about cost</b><br>
-Estimates are labelled as estimates, with the prices used. Expensive scans stop early by default and say so, and
-show what they read or cost.
+<b>🔒 Read-only</b><br>
+Nothing writes to your account. Where a change would help, the report shows the command instead of running it.
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
-<b>📦 One install</b><br>
-<code>%pip install aws-analyzer</code> in a notebook cell gives you every service and the agent. The reports need
-only boto3; pandas, pyarrow and the rest are optional.
+<b>🧾 Honest about cost</b><br>
+Estimates are labelled, with the prices used. Expensive scans stop early and say what they read.
 </td>
 <td width="33%" valign="top">
-<b>🔒 Read-only</b><br>
-Nothing writes to a bucket, table or knowledge base. Where a change would help, the report shows the command (a
-restore, a sync, a lifecycle rule) instead of running it.
+<b>📦 One install</b><br>
+<code>%pip install aws-analyzer</code> gives you every service and the agent. Only boto3 is needed for reports.
 </td>
 <td width="33%" valign="top">
 <b>💬 Notes, not tracebacks</b><br>
-A missing permission, package or broken file becomes a short note that says how to fix it, and the rest of the
-report still renders.
+A missing permission or package becomes a short note on how to fix it, and the rest of the report still renders.
 </td>
 </tr>
 </table>
 
 ## Services
 
-| Service                            | What it shows you                                                                                                                                                                                                                                       | File and guide                                                                                                                            |
-| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3/`](src/aws_analyzer/s3/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                                     |
-| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip<br>• The code that loads a file in your next cell | [`s3/explorer/`](src/aws_analyzer/s3/explorer/) (in `s3/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)          |
-| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb/`](src/aws_analyzer/dynamodb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
-| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **DynamoDB explorer**              | • Every table with what it costs and what to fix, by clicking<br>• Click a table for its keys, indexes and how to query each<br>• Its items as plain values: a sample, or one partition key's<br>• Every attribute's types and fill rate; click one to count its values | [`dynamodb/`](src/aws_analyzer/dynamodb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb_explorer.html) |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb/`](src/aws_analyzer/bedrock_kb/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb_explorer.html)              |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
-| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Its Python environments, and a new one (Python 3.11, say) with its own kernel in one call<br>• Everything running and billing in the region, and what looks forgotten<br>• Why a training job failed, in plain words, with its log<br>• Which endpoints nobody calls, and what each costs a month<br>• Where a pipeline run broke, as a graph and a waterfall              | [`sagemaker_env/`](src/aws_analyzer/sagemaker_env/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
-| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
-| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **OpenSearch explorer**             | • Every domain and Serverless collection and how it is, warnings first: click one to open it<br>• Its indexes, vector indexes first: each vector field, the memory it needs and the query to copy<br>• A sample of an index's documents, the ones without a vector first: click one for its text and fields<br>• The documents nearest a question or a document, each a click away | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch_explorer.html) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• What's running now, every few seconds: runs in flight and their lines<br>• Its logs run by run, failed runs in red: search them, pick a time range (or any From and To), or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking<br>• ▶ Invoke: run it with an event, and your run shows first with its answer and log lines | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_explorer.html) |
-| <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions**             | • Every state machine's executions, failures, cost and logging<br>• Where and why executions fail, grouped by the state they stopped at<br>• One execution step by step: each state, its tries and how long it took<br>• For a failed Lambda step, the log lines of that very run<br>• What a definition risks: Lambda tasks with no retry, waits with no timeout | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) |
-| <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **Step Functions explorer**          | • Every state machine and how it's doing, failing ones first: click one to open it<br>• Its executions: filter by outcome, search, pick a time range<br>• An execution's waterfall: each state on one time axis, tries and back-off in place<br>• One log of what happened: Step Functions' events and every Lambda run's lines, merged by time<br>• The flow as a graph, coloured by an execution's path or by where executions stop | [`stepfunctions/`](src/aws_analyzer/stepfunctions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/stepfunctions_explorer.html) |
-| <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway**             | • Every REST, HTTP and WebSocket API's requests, 4xx and 5xx, latency and cost<br>• Routes anyone can call, and routes that run out of time (the 29 s limit)<br>• Which calls fail and why, from the stage's access log<br>• For a failed call, the log lines of the Lambda run behind it<br>• Stages without throttling or an access log, with the command that fixes each | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) |
-| <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **API Gateway explorer**             | • Every API and how it's doing, failing ones first: click one to open it<br>• Its routes as a tree: where a request goes, the step that fails marked<br>• Its calls one by one: where each call's time went, and the Lambda run behind it<br>• How long calls take, route by route, and each stage's settings | [`apigateway/`](src/aws_analyzer/apigateway/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/apigateway_explorer.html) |
-| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Athena**                  | • Every past query's scan and cost, the same query's runs added up<br>• Why queries failed, in plain words, with the fix<br>• Tables whose S3 folder is empty or gone, or that every query reads in full<br>• Crawlers that failed or stopped running<br>• The Python to run a new query yourself, and the most it could cost | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena.html) |
-| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Athena explorer**                | • The queries, what they cost and why they fail, with a time range and workgroup to pick<br>• Click a query for its SQL, numbers and saved rows<br>• Every Glue table, with chips for what's wrong: empty or gone, no partitions loaded, read in full<br>• The crawlers, failed or stopped ones first | [`athena/`](src/aws_analyzer/athena/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/athena_explorer.html) |
-| <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **SQS, SNS and EventBridge**      | • Where a message went: a topic, queue or rule followed hop by hop to the function that reads it<br>• Queues backing up, and messages close to being deleted unread<br>• Dead-letter queues holding failed messages, with the command that moves them back<br>• Deliveries that fail, and the policy or key that keeps a sender out, with the command that lets it in | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging.html) |
-| <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **Messaging explorer**            | • Every queue, topic and rule, the failed messages first: click one to open it<br>• Its report, and where its messages go as a map whose hops you click<br>• The dead-letter queues, the fullest first<br>• Live: a queue's backlog every few seconds, and when it would be empty | [`messaging/`](src/aws_analyzer/messaging/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/messaging_explorer.html) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Step Functions and API Gateway, joined to Lambda: which step or call failed, and the run behind it<br>• SageMaker jobs and endpoints, DynamoDB tables and OpenSearch vector indexes<br>• Is it normal? Each number against the same hour yesterday and last week, since when it's off, and the alarms on it<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/`, `bedrock_kb/`, `stepfunctions/`, `apigateway/`, `sagemaker_env/`, `dynamodb/` and `opensearch/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| Service | What it shows you | Docs |
+| :------ | :---------------- | :--- |
+| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3** | Every bucket's size, cost and risks; folders, search and previews of CSV, Parquet, JSON, Excel, PDF and Word; what you could save | [Guide](https://utkarsh5026.github.io/aws-analyzer/s3.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html) |
+| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB** | Every table's keys, size and cost; scans and queries as plain tables; the attributes items hold; the read units each report used | [Guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/dynamodb_explorer.html) |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock Knowledge Bases** | Settings in plain English, sync health, how each file was indexed; search and answers with every claim linked to its source | [Guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb_explorer.html) |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base chat** | A chat window with every RetrieveAndGenerate setting in reach; test a list of questions and see which setup does better | [Guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html) |
+| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker** | The notebook you're in: cost, CPU, memory, disk, GPU; its Python environments; what's running and billing; why a job or pipeline failed | [Guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html) |
+| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch** | Every vector field in plain English; whether the graphs fit in memory; documents without a vector; nearest neighbours | [Guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/opensearch_explorer.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda** | Every function's triggers, calls, errors and cost; errors grouped by cause; cold starts and memory; logs run by run; how its code works | [Guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/lambda_explorer.html) |
+| <img src="docs/images/aws/stepfunctions.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Step Functions** | Where and why executions fail; one execution step by step, with the Lambda lines of the run that broke it | [Guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/stepfunctions_explorer.html) |
+| <img src="docs/images/aws/apigateway.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon API Gateway** | Requests, errors, latency and cost per API; routes anyone can call; failed calls from the access log, and the Lambda run behind each | [Guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/apigateway_explorer.html) |
+| <img src="docs/images/aws/athena.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Athena** | What past queries scanned and cost; why they failed, with the fix; tables whose folder is empty or gone; failed crawlers | [Guide](https://utkarsh5026.github.io/aws-analyzer/athena.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/athena_explorer.html) |
+| <img src="docs/images/aws/messaging.svg" width="20" height="20" alt="" align="absmiddle"> **SQS, SNS and EventBridge** | Where a message went, hop by hop; queues backing up; dead-letter queues; the policy or key that keeps a sender out | [Guide](https://utkarsh5026.github.io/aws-analyzer/messaging.html) · [Explorer](https://utkarsh5026.github.io/aws-analyzer/messaging_explorer.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English** | An agent that answers "Which Lambda failed last night?" from the same read-only tools, says what it checked, and on the model you pick | [Guide](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
-The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
-SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/). Each service's guide
-opens with a short video tour, its calls typed and run in a notebook cell with the reports they draw (for example
-[Lambda's](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#video)), which you can also download as an
-MP4 from [`docs/videos/`](docs/videos/) for Slack or a slide.
+Each guide walks through a service with screenshots and a short video tour: setting up, every command, and a
+ready-made IAM policy.
 
 ## Get started
 
 **1. Install it**, in a notebook cell:
 
 ```python
-%pip install aws-analyzer             # every service and the agent (Python 3.11+): boto3, deepagents, LangChain, mcp
-%pip install "aws-analyzer[all]"      # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
-%pip install "aws-analyzer[sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
+%pip install aws-analyzer             # every service and the agent (Python 3.11+)
+%pip install "aws-analyzer[all]"      # plus pandas, pyarrow, the PDF and Excel readers, progress bars
 ```
 
-A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
-download the package and copy it to a bucket the notebook can read, once:
-
-```bash
-pip download aws-analyzer --no-deps -d wheels
-aws s3 cp --recursive wheels/ s3://your-bucket/tools/wheels/
-```
-
-Then install it in the notebook from there:
+**2. Look around.** It uses the notebook's IAM role, so there's nothing to configure:
 
 ```python
-!aws s3 cp --recursive s3://your-bucket/tools/wheels/ wheels/
-%pip install --no-index --find-links wheels aws-analyzer
+from aws_analyzer import S3View, LambdaView, AgentView
+
+ui = S3View()
+ui.help()                             # every command, grouped by task
+ui.overview()                         # every bucket: what to fix first, size, monthly cost
+
+LambdaView().explore()                # a window: every function, its logs run by run, errors and code
+AgentView().ask("Which Lambda failed last night?")
 ```
+
+Every service has a View (`DynamoDBView`, `BedrockKBView`, `SageMakerView`, `OpenSearchView`, `StepFunctionsView`,
+`APIGatewayView`, `AthenaView`, `MessagingView`, ...), and each View's `.core` is the analyzer behind it, which returns
+plain Python data instead of a report.
 
 > [!TIP]
-> Rather start from a notebook? [`notebooks/aws_analyzer_commands.ipynb`](notebooks/aws_analyzer_commands.ipynb) has
-> every command of every service in a cell of its own, grouped by task: fill in your bucket, function and table names
-> once at the top, then run any cell (Lambda logs, the explorer windows, Step Functions executions, ...).
-
-**2. Import it and look around.** It uses the notebook's IAM execution role, so there's nothing to configure:
-
-```python
-from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView,
-                                 # S3Explorer, KBExplorer, LambdaExplorer, OpenSearchExplorer, chat
-
-ui = S3View()          # uses the notebook's IAM role
-ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
-ui.overview()          # every bucket: what to fix first, size, monthly cost
-s3 = ui.core           # the analyzer behind the view: returns data instead of a report
-```
-
-> [!NOTE]
-> Only boto3 is required, and SageMaker already has it. pandas, pyarrow and the other packages are optional: a
-> command that needs one that isn't installed says which to install instead of failing.
->
-> Each service is a module of the package: `aws_analyzer.s3`, `aws_analyzer.dynamodb`, `aws_analyzer.bedrock_kb`,
-> `aws_analyzer.bedrock_chat`, `aws_analyzer.sagemaker_env`, `aws_analyzer.opensearch`,
-> `aws_analyzer.lambda_functions` and `aws_analyzer.s3_explorer`, and the agent is `aws_analyzer.agent`. The Analyzer
-> and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer`, `OpenSearchExplorer` and `chat` also come straight
-> from `aws_analyzer`.
+> [`notebooks/aws_analyzer_commands.ipynb`](notebooks/aws_analyzer_commands.ipynb) has every command of every service
+> in a cell of its own: fill in your names once at the top, then run any cell.
 
 <details>
-<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone, freeing the disk</summary>
+<summary><b>More</b>: no internet in the notebook, another profile or region, your time zone, themes</summary>
+
+<br>
 
 ```python
-from aws_analyzer import S3Analyzer, S3View
-
 ui = S3View(S3Analyzer(profile="dev", region="eu-west-1"))   # another AWS profile or region
-ui = S3View(mode="text")          # plain text, e.g. in a terminal or a script
-ui = S3View(max_rows=0)           # show every row of long tables (default: 50)
-ui = S3View(progress="plain")     # a plain progress line instead of tqdm bars ("off" for none)
+ui = S3View(mode="text", max_rows=0)                          # plain text, every row
+
+from aws_analyzer import set_timezone, set_theme
+set_timezone("Asia/Kolkata")          # times in your zone (or AWS_ANALYZER_TZ)
+set_theme("soft")                     # console, soft, editorial, brand or classic (or AWS_ANALYZER_THEME)
 ```
 
-Every View takes the same options. Commands that take a while show a progress bar as they run: a
-[tqdm](https://github.com/tqdm/tqdm) bar (a widget in Jupyter when `ipywidgets` is installed) with the rate and the
-time left, when tqdm is installed, as it usually is on SageMaker. Without it you get a plain line with the same
-numbers.
-
-Times are in UTC until you pick a zone. Then every report and window shows its times in your zone, and says which
-one in its columns and sentences (`Last modified (IST)`, `since 2024-05-01 14:02 IST`):
-
-```python
-from aws_analyzer import set_timezone
-
-set_timezone("Asia/Kolkata")      # or its city, "kolkata"; "America/New_York", "+05:30", "UTC" to go back
-set_timezone("local")             # this machine's own zone: on SageMaker that's UTC, so name yours there
-```
-
-Dates you type in (`since="2024-05-01 10:00"`, `older_than="2024-05-01"`) are read in the same zone. To pick it for
-every notebook, set the `AWS_ANALYZER_TZ` environment variable (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily
-numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
-
-Reports come in five themes, each made for a light or a dark notebook: `console` (the default: boxed panels, WARN and
-INFO tags, numbers in a monospace font), `soft` (rounded tiles on a light fill), `editorial` (a serif title, large
-figures, almost no boxes), `brand` (the guide site's navy, indigo and amber highlighter) and `classic` (thin borders
-and tinted boxes, the look before themes). Every report from then on uses the one you pick, and the ones already in
-the notebook keep theirs ([see them side by side](https://utkarsh5026.github.io/aws-analyzer/index.html#themes)):
-
-```python
-from aws_analyzer import set_theme
-
-set_theme("soft")                 # None goes back to the default
-```
-
-To pick it for every notebook, set the `AWS_ANALYZER_THEME` environment variable (`AWS_ANALYZER_THEME=editorial`).
-The explorer windows draw their reports in the theme too (the one set when the window opens). The chat windows keep
-their own look, and text output reads the same in every theme.
-
-To free the disk, `local_files()` lists what aws-analyzer saved on this machine (the `s3-downloads/` and
-`lambda-downloads/` folders beside the notebook, `agent-charts/`, and the agent sandbox's Pyodide files in
-`~/.cache/aws-analyzer`), with each one's size, and `clean_up()` removes them:
-
-```python
-from aws_analyzer import clean_up, local_files
-
-local_files()                     # what's there, how big, and how each comes back
-clean_up(dry_run=True)            # what clean_up() would remove, removing nothing
-clean_up()                        # the downloads and the sandbox's cache: everything that comes back by itself
-clean_up("charts")                # the agent's charts too ("s3", "lambda", "sandbox", "charts" or "all")
-```
-
-It removes only what aws-analyzer made: a downloads folder without the `.gitignore` aws-analyzer writes in one, or
-one that holds the notebook, stays (the report says why), and only chart pictures leave `agent-charts/`. It never
-touches Python environments `new_env()` made, the agent's notes and saved chats (`~/.cache/aws-analyzer/agent/`), the
-explorers' recent folders and functions and what each looked like then (`~/.cache/aws-analyzer/history/`, which their
-`forget_recent()` clears), or
-files you saved to a path of your own. `downloads=["~/scratch/s3"]`
-adds a downloads folder you moved elsewhere.
+A notebook without internet access can install from a bucket: `pip download aws-analyzer --no-deps -d wheels` on a
+machine that has it, copy `wheels/` to S3, then `%pip install --no-index --find-links wheels aws-analyzer` in the
+notebook. The [guides](https://utkarsh5026.github.io/aws-analyzer/) cover each option in full.
 
 </details>
 
-## How it works
+## See it
 
-Every file has the same two layers:
+<table>
+<tr>
+<td width="50%" valign="top">
 
-| Layer     | Class                                                                                             | What it does                                                                                                                  |
-| :-------- | :------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------- |
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer`, `OpenSearchAnalyzer`, `LambdaAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
-| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView`, `OpenSearchView`, `LambdaView`                             | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
-
-### Reading a report
-
-Every report has the same shape, so the answer is always in the same place:
-
-1. **Title and cards**: the few numbers that matter. A card turns amber (or red) when a finding below is about it,
-   such as `Encryption: none` or `Point-in-time recovery: off`. In text mode those cards end in `(!)`.
-2. **Findings**: what's wrong or worth knowing, warnings first. Each leads with a bold headline, then says why it
-   matters, what it costs when that can be priced, and the next step, as points. When every check passes, the report
-   says so.
-3. **Tables of detail.** Status cells such as `FAILED` or `PUBLIC` are coloured. Long tables scroll under a fixed
-   header, and secondary views (tags, the raw policy JSON) are folded: click to open them. Click a column's header to
-   sort by it (again for the other way, a third time for the original order), pick a value in a column's filter to
-   see only those rows (a storage class, a region, a status), and untick the columns you don't need under
-   **Columns**. In S3 reports, long keys keep the file name in view: the folder is shortened from the left, and the
-   whole key shows when you hover over it.
-4. **Next**: two or three commands worth running next, with the arguments filled in from this report, such as
-   `get('orders', 'USER#0', 'ORDER#0000')` after a scan or `chunk(1)` after a search.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dynamodb-table-info-dark.webp">
-  <img src="docs/images/dynamodb-table-info-light.webp" alt="table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage">
-</picture>
-
-<p align="center"><sub><code>ui.table_info("acme-app")</code>: the point-in-time recovery card is amber because the finding below is about it, and the finding ends in the command that turns it on.</sub></p>
-
-In the notebook, one click on a command anywhere in a report (`documents(status='FAILED')`,
-`aws dynamodb update-table ...`) or on a code block (a restore call, a lifecycle rule, a sync command) selects all of
-it, ready to copy. The HTML is plain HTML and CSS, with no JavaScript, so a report still works when the notebook is
-reopened. `ui.help()` lists every command grouped by task, with a few to start with; `ui.help("summary")` shows one
-command's full description.
-
-A report ends with **Next**: two or three numbered calls with the arguments filled in, written with the name your
-notebook keeps the View under (`ui.errors('orders-etl')`), so they run as pasted. `ui.next(1)` runs the first
-without copying anything, `ui.next('errors')` the one calling `errors()`, and `ui.next()` puts them all in a new
-cell below to edit and run. A step that writes files or changes something (`download`, `clean_downloads`,
-`new_env`, ...) is never run by `next()`: it goes in a cell for you to check first.
-
-## Amazon S3
-
-<img src="docs/images/aws/s3.svg" width="22" height="22" alt="" align="absmiddle"> **Buckets and the files in them.** Every bucket's size, cost and risks, what's in a folder, a look inside the files,
-and what you could save.
-
-📄 [`src/aws_analyzer/s3/`](src/aws_analyzer/s3/) · 📖 [S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-parquet-dark.webp">
-  <img src="docs/images/preview-parquet-light.webp" alt="preview() of a Parquet file: row, column and row-group counts, the first rows, and the schema">
-</picture>
-
-<p align="center"><sub><code>ui.preview()</code> of a Parquet file: row, column and row-group counts, the first rows and the schema, reading only what it needs.</sub></p>
-
-### Quick start
-
-Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker, pandas and pyarrow are
-already installed, so `aws-analyzer` alone is enough, and the optional packages only for the file types they read.
-
-```python
-%pip install aws-analyzer pandas pyarrow    # the commands below
-# optional: Excel, PDF text and pages, .zst, snappy Avro, progress bars
-%pip install openpyxl xlrd pypdf pypdfium2 pillow zstandard python-snappy tqdm
-# or all of the above in one go
-%pip install "aws-analyzer[all]"
-```
-
-<details>
-<summary><b>What each package is for</b></summary>
-
-| Package                | Needed for                                                                                                                                                                        |
-| :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boto3`                | Every command (required)                                                                                                                                                          |
-| `pandas`               | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`, `to_df()`. Installs `numpy` for `.npy` / `.npz`                                                  |
-| `pyarrow`              | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview`, `read_df` and `file_details`, and `parquet_info`                                                                           |
-| `openpyxl` / `xlrd`    | Excel `.xlsx` / `.xlsm` and old `.xls`                                                                                                                                            |
-| `pypdf`                | PDF text in `preview`, `document`, `read_pdf`, and page counts in `file_details`                                                                                                  |
-| `pypdfium2` + `pillow` | PDF pages drawn as pictures, the way they print (scanned pages too), in `preview`, `document`, `render_pdf`. `pillow` also shrinks big pictures in Word files before showing them |
-| `zstandard`            | `.zst` files before Python 3.14                                                                                                                                                   |
-| `python-snappy`        | Avro files compressed with snappy                                                                                                                                                 |
-| `tqdm`                 | Progress bars with the time left while long commands run (`ipywidgets` makes them notebook widgets). Without it, a plain progress line                                            |
-
-IPython, used for the HTML output, comes with Jupyter. If a package is missing, the command tells you which one to
-install instead of failing; install it and run the cell again.
-
-</details>
-
-```python
-from aws_analyzer import S3View
-
-ui = S3View()                # uses the notebook's execution role
-ui.help()                    # every command, grouped by task
-ui.help("summary")           # one command in full
-
-ui.overview()                # every bucket: what to fix first, size, monthly cost
-ui.bucket_info("my-bucket")
-ui.summary("s3://my-bucket/data/")
-ui.preview("s3://my-bucket/data/part-0.parquet")
-ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")  # preview a lifecycle rule
-data = ui.data()             # the last report's tables as pandas DataFrames: data["largest"], data.guide()
-ui.to_excel()                # the last report as an Excel workbook: summary, charts, tables, how to read
-```
-
-> [!TIP]
-> Anywhere a location is expected you can pass `s3://bucket/prefix` or `bucket/prefix`. Sizes accept `1024`,
-> `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-01"`, or relative `"7d"`, `"12h"`.
-
-### Browse like a file explorer
-
-[`S3Explorer`](src/aws_analyzer/s3/explorer/) turns a cell into a small file explorer for S3. Folders and files are
-listed on the left. Click a folder to open it, or click a file to see what's inside it on the right, drawn by the
-same `preview` as above: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
-
-📄 [`src/aws_analyzer/s3/explorer/`](src/aws_analyzer/s3/explorer/) · 📖 [Explorer guide](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)
+<b>S3 explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-tour-dark.webp">
   <img src="docs/images/explorer-tour-light.webp" alt="S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points; last it opens training, turns on Include subfolders and clicks the .tar chip, and the list shows each model.tar.gz below with the training run it came from">
 </picture>
 
-<p align="center"><sub><code>S3Explorer()</code>: from your buckets to a Parquet file's first rows, a Word document, and every model file below a folder, one click at a time.</sub></p>
+<sub><code>S3Explorer()</code>: buckets to a Parquet file's first rows, one click at a time.</sub>
 
-It builds on `s3.py`, which comes with it in the package. Clicking needs `ipywidgets`, which SageMaker notebooks
-already have.
+</td>
+<td width="50%" valign="top">
 
-```python
-from aws_analyzer import S3Explorer
+<b>S3 preview</b>
 
-S3Explorer()                                   # start from your buckets
-S3Explorer("s3://my-bucket/data/")             # or in a folder; S3 console links work too
-S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file shown
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-parquet-dark.webp">
+  <img src="docs/images/preview-parquet-light.webp" alt="preview() of a Parquet file: row, column and row-group counts, the first rows, and the schema">
+</picture>
 
-| To                   | Do this                                                                                                                                                                                                               |
-| :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Open a folder        | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder                                                                                                           |
-| See what's in a file | Click it. **🏷️ Details** shows its metadata and tags, **📖 Read all** a whole PDF, Word or PowerPoint file, **📄 Text** a PDF's words laid out to read, **⬇ Download** saves a copy in `s3-downloads` next to your notebook, and **↗ Open in new tab** opens the file in your browser (PDFs, pictures, video and text show there). On a JSON file, **▾ Expand all** opens every object and array at once (and stays on for the next ones). Clicking through files doesn't wait: each click shows its file as soon as it's read, and files you clicked past are skipped |
-| Read a PDF           | Click **📖 Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
-| Read a PDF's text    | Click **📄 Text**: its words, 50 pages at a time, laid out to read like a web page: headings, paragraphs joined back up from the PDF's lines, bullet and numbered lists, and a line where each page starts. The running headers, footers and page numbers are left out (a note says which), and a page with no text (a scan) says so; **📖 Read all** shows it as a picture |
-| Load a file in code  | Click it, then **🐍 Use in Python**: the lines that load it in your next cell, written for its format (`pd.read_csv`, `pd.read_parquet`, `json.load`, ...), with the explorer's AWS credentials. Tick several tables of one format and **🐍 Use in Python** in the bar under the list loads them into one DataFrame |
-| Step through files   | **‹** **›** beside **✕** show the file before and after in the list, the same way (its preview, details or code), without going back to the list |
-| Open it in the console | **↗ S3 console**, above the right pane, opens the file or folder you're on in the AWS console, in a new tab, to change what the explorer only reads (`x.console_url` is the link) |
-| Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
-| Go back to a folder  | Click its chip in the **Recent** row over your list of buckets (or under **✎**): **↩** is the folder you were in last, then the ones you open most and most lately, remembered between sessions |
-| See what's new       | Open a folder you've been in before: its overview counts the files new or changed since your last visit and how its file count moved, and **●** marks them in the list |
-| Find files           | Type part of a name, or a file type such as `.csv` (`.csv .json` for either; it also finds `.csv.gz`), in the search box over the list, or click a type's chip under it. **Folders** and **Files** show only one kind, and **Include subfolders** searches everything below the folder, not only its first level. Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first |
-| Add up a folder      | Open it and click **📊 What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
-| Dig into a folder    | Click **More ▾**: **🐘 Largest files**, **🆕 Newest** and **🕰️ Oldest files**, **🔍 Inside the files** (rows and columns of each table), **📑 Copies**, **🧩 Unfinished uploads**, and in a versioned bucket **🕘 Old versions** and **🗑️ Deleted files**; a file there gets **🕘 Versions** |
-| Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` in `s3-downloads` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder downloads go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
-| Download some files  | Tick them (a checkbox shows when you point at a row, and the one in the header ticks everything listed, such as every `.csv` the search found), then click **⬇ Download selected** in the bar under the list. The right shows what goes in and suggests a name, such as `churn-12-files.zip`, which you can change; **⬇ Download** makes it, after the same checks |
+<sub><code>ui.preview()</code>: a Parquet file's counts, first rows and schema.</sub>
 
-A big folder shows its first 1,000 entries at once and lists the rest in the background, up to 10,000, so the
-search, the sort and the counts cover the whole folder; the list shows 100 rows a page, with **«** **‹** **›** **»**
-under it. Past 10,000 entries, **Load more from S3** lists the next 10,000, and **Look up** asks S3 for the names that
-start with what you typed in the search box. **Include subfolders** lists 10,000 files below the folder at a time. Files in GLACIER or DEEP_ARCHIVE are marked ❄,
-and opening one shows the command that restores it. Like `s3.py`, it only reads: browsing needs
-`s3:ListAllMyBuckets` and `s3:ListBucket`, and opening files `s3:GetObject`.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-<details>
-<summary><b>Options, and using it from code</b></summary>
+<b>DynamoDB table</b>
 
-```python
-from aws_analyzer import S3Analyzer
-from aws_analyzer import S3Explorer, S3Navigator
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dynamodb-table-info-dark.webp">
+  <img src="docs/images/dynamodb-table-info-light.webp" alt="table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage">
+</picture>
 
-S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
-S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
-S3Explorer(height=720, page_size=200)                 # 720px panes (else they fill the window), 200 rows a page
-S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (x.zip_max_files too)
-S3Explorer(downloads="~/scratch/s3")                  # where ⬇ Download and the zips save (x.downloads)
-S3Explorer(history=False)                             # remember no folders for the Recent row (x.recent lists them)
+<sub><code>ui.table_info("acme-app")</code>: keys, indexes, cost, and the fix for what's off.</sub>
 
-x = S3Explorer("s3://my-bucket/")
-x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, from code
-x.filter(".parquet", subfolders=True)                 # the search box: every Parquet file below this folder
-x.filter(kind="folders")                              # only the folders here; x.filter() shows everything again
-x.ui.download_zip(x.picked)                           # what's ticked in the list, as one .zip
-x.focus.chips()                                       # what you're looking at: ['my-bucket/raw/', '12 files · 3.4 GB']
-x.ui.summary(x.location)                              # any S3View report about where you are, in its own cell
+</td>
+<td width="50%" valign="top">
 
-nav = S3Navigator()                                   # the same navigation as data, with no UI
-folder = nav.open("s3://my-bucket/data/")             # Folder: entries, more, error
-nav.more(), nav.back(), nav.up(), nav.lookup("2024-")
-nav.below()                                           # everything below the folder, 10,000 files at a time
-```
-
-Outside Jupyter, without `ipywidgets`, or with `mode="text"`, each folder prints as a table and `open(...)` moves
-around. The pure functions work on their own: `parse_location` (s3:// paths, `bucket/key`, console links and object
-URLs), `breadcrumbs`, `parent_uri`, `sort_entries` (folders first, `part-2` before `part-10`), `filter_entries` and
-`parse_filter` (what a search like `"churn .csv .json"` asks for), `count_types` and `folder_stats`.
-
-</details>
-
-### Commands (`S3View`)
-
-Grouped the way `ui.help()` lists them.
-
-#### As data
-
-| Command | Shows |
-| :-- | :-- |
-| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("summary", "s3://b/p/")` reads a report's without showing it |
-| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
-
-#### Buckets
-
-| Command                | Shows                                                                                                                                                                                                                                                                                                                                 |
-| :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `buckets()`            | All buckets with region, creation date, age                                                                                                                                                                                                                                                                                           |
-| `overview(match=None)` | Every bucket at a glance: a public bucket first, the fixes that clear its warnings (one account setting can cover many buckets), and a grid of each bucket's policy, Block Public Access, encryption and old versions, with its size and estimated monthly cost. `match="sagemaker-*"` checks only matching names |
-| `bucket_info(bucket)`  | Versioning, encryption, public access (bucket and account level), bucket policy and lifecycle rules in plain English, ownership, object lock, replication, logging, inventory, tags, **plus CloudWatch object count, size and estimated monthly cost per storage type** (instant, even for billion-object buckets), and flagged risks |
-| `policy(bucket)`       | The bucket policy in plain English (who can do what, on which files, under which conditions), its risks (public access, other accounts, no HTTPS requirement) and the raw JSON                                                                                                                                                        |
-
-#### Explore a folder
-
-| Command                                                                                                               | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| :-------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ls(uri, details=False)`                                                                                              | One level of folders and files, like `aws s3 ls`. `details=True` adds what's inside each file: a PDF's pages, a table's rows and columns, a picture's size                                                                                                                                                                                                                                                                                                                                       |
-| `tree(uri, depth=2, files=10)`                                                                                        | Folder tree with count, size and share at every level, and the files in each folder (the first `files` by name, then one "… N more files" row; `files=0` for folders only)                                                                                                                                                                                                                                                                                                                       |
-| `summary(uri)`                                                                                                        | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files)                                                                                                                                                                                                   |
-| `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search by glob, regex, extension, size, date or storage class, e.g. `find(uri, pattern="*.csv", min_size="10MB", modified_after="7d")`                                                                                                                                                                                                                                                                                                                                                           |
-| `file_details(uri, pattern=, extensions=, limit=200, max_read="1GB")`                                                 | What's inside each file, a table per kind (see [what it reports](#file-details)): a PDF's pages, title, author and whether it has text, a Word file's words, a deck's slides, each Excel sheet's size, a table's rows and column names, a picture's size, a video's length, an archive's files. Findings: scanned PDFs that need OCR, password-protected files, files that aren't what their name says, table files in one folder with different columns. Reads only the parts each format needs |
-| `largest(uri)` / `newest(uri)` / `oldest(uri)`                                                                        | The top-N objects under a prefix: the biggest, the newest or the oldest                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `compare(uri_a, uri_b)`                                                                                               | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync)                                                                                                                                                                                                                                                                                                                                                                                                      |
-
-#### Cut cost
-
-| Command                                                       | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `duplicates(uri, method="hash", min_size=1, max_read="10GB")` | Identical files, the space and monthly cost of their copies, which copy to keep, and folders that hold nothing but copies (e.g. a backfill of files that exist elsewhere), plus the call that gets the list as a DataFrame. Files are matched by size and ETag, and where same-size files have different ETags (copies uploaded in parts of another size, or encrypted with SSE-KMS), by the SHA-256 of their content: the first 64 KB first, the whole file only where those match, reading at most `max_read`. `method="etag"` reads nothing; `method="strict"` hashes every file that shares its size |
-| `what_if(uri, move_after=, to=, delete_after=)`               | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves                                                                                                                                                                                                                                                                                                                                                                 |
-| `uploads(uri)`                                                | Incomplete multipart uploads (billed but invisible in normal listings) and what they cost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-
-#### Versions and deleted files
-
-| Command                            | Shows                                                                                                                                                                                             |
-| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `versions(uri)`                    | Current vs noncurrent versions, delete markers, what the old versions cost per month, keys holding the most old-version data                                                                      |
-| `history(uri)`                     | Version history of one object                                                                                                                                                                     |
-| `deleted(uri, deleted_after=None)` | Deleted files you can still bring back in a versioned bucket (most recent first), their size, the old versions kept, and the call that restores one. Read-only: it never restores anything itself |
-
-#### Open a file
-
-| Command                                                                           | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| :-------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `head(uri)`                                                                       | All object metadata, user metadata and tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `preview(uri, n=20)`                                                              | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, JSON as a tree you fold with a click (coloured like code), text, images, an audio / video player, a PDF's first pages as they look (scans too; click a page to see it full size), a Word file with its pictures in place, or a hex dump. Only downloads what it needs. |
-| `document(uri, pages=None, pictures=None)`                                        | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF's text laid out to read (headings by font size, paragraphs joined back up from the PDF's lines, lists, a line where each page starts, no running headers, footers or page numbers), a deck slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page (its text folded under it), `pictures=False` none, and a click on a drawn page shows it as big as the notebook. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages |
-| `link(uri)`                                                                       | Clickable presigned download link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-
-#### Download
-
-| Command                                                                           | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| :-------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `download(uri, path=None)`                                                        | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went: the downloads folder (`s3-downloads`, next to the notebook) unless you pass a `path`. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it                                                                                                                                                              |
-| `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder (or a list of them from one bucket, laid out under the folder they share) as one `.zip` in the downloads folder, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
-| `downloads()`                                                                     | What you've downloaded: each file, folder and zip in the downloads folder with its size and when it was downloaded, how much disk they take, and findings: unfinished zips a stopped `download_zip` left, a disk running out of room, downloads over a month old, each with the `clean_downloads(...)` call that deletes them                                                                                                                                                                                                                                                                        |
-| `clean_downloads(names=None, older_than=None, dry_run=False)`                     | Deletes downloads to free the disk: all of them, the ones named (`clean_downloads('churn.zip')`), or those downloaded before `older_than` (`'7d'`, `'2024-05-01'`). `dry_run=True` only shows what would go. It only empties a folder made for downloads, never the notebook's own folder or one that held other files first, and nothing in S3 changes                                                                                                                                                                                                                                              |
-
-Downloads go in `s3-downloads`, a folder next to the notebook, so they don't mix with your notebooks and code. It's
-made with the first download, with a `.gitignore` that keeps it out of git and marks it as a folder `clean_downloads()`
-may empty. To use another folder, pass `downloads=`; a `path` on one download saves that one elsewhere:
-
-```python
-ui = S3View(downloads="~/scratch/s3")      # or ui.core.downloads = "~/scratch/s3"
-ui.download("s3://my-bucket/data/")        # ~/scratch/s3/data/
-ui.downloads()                             # what's there, how much disk it takes
-ui.clean_downloads(older_than="7d")        # delete what was downloaded before this week
-```
-
-### Your reports as data: pandas and Excel
-
-Most reports end with a folded **🐼 This report as data**: the tables behind them, every column explained, with
-pandas lines worth running. `ui.data()` gives them as DataFrames without reading S3 again, and `ui.to_excel()` saves
-them as a workbook in `aws-analyzer-exports/` (a summary, Excel charts, a formatted sheet per table and how to read
-them). Lambda's reports work the same way.
-
-```python
-ui.summary("s3://my-bucket/data/")
-data = ui.data()
-data["folders"]                       # space by folder: files, size_gb, share_of_size
-data["largest"].uri                   # their s3:// paths, ready for ui.core.read_df(...)
-data = ui.data("find", "s3://my-bucket/", pattern="*.parquet")   # another report's tables, not shown
-ui.to_excel()
-```
-
-| Report | Tables |
-| :-- | :-- |
-| `buckets()`, `overview()` | `buckets` (in `overview()`: size, estimated cost, each check's result and why) |
-| `ls()`, `find()`, `largest()`, `newest()`, `oldest()` | `entries` / `files`: a row per file with its size, age, storage class, estimated monthly cost and s3:// path |
-| `summary()` | `folders`, `file_types`, `storage_classes`, `size_bands`, `ages`, `largest` |
-| `duplicates()` | `groups` (what each group's copies take and cost), `copies` (a row per file, keep or copy) |
-| `versions()`, `history()`, `deleted()` | `keys`, `versions`, `deleted` |
-| `compare()` | `differences`: a row per key that differs, only in A or only in B |
-| `preview()` of a table | `rows` (the rows read; `ui.core.read_df(uri)` reads them all) and its `schema` |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>S3Analyzer</code>): the same answers as Python data, for pandas and your own code</summary>
-
-`ui.core` is the `S3Analyzer`. Every UI command has a data method on it, and there are a few more:
-
-```python
-s3 = ui.core                                        # or S3Analyzer(region="us-east-1", profile="dev")
-
-summary = s3.summarize("s3://my-bucket/data/")      # PrefixSummary dataclass
-summary.by_extension["parquet"].size                # bytes
-
-files = s3.find("s3://my-bucket/data/", extensions=["csv"], modified_after="7d")
-df = objects_to_df(files)                           # key, size, last_modified, storage_class, ...
-
-df = s3.read_df("s3://my-bucket/data/big.parquet", nrows=1000, columns=["id", "ts"])
-df = s3.read_df("s3://my-bucket/reports/q1.xlsx", sheet_name="Summary")
-df = s3.read_df("s3://my-bucket/spark/part-00000", fmt="parquet")   # no extension: say what it is
-s3.parquet_info("s3://my-bucket/data/big.parquet")  # rows, row groups, schema (reads only the footer)
-s3.list_archive("s3://my-bucket/job/output/model.tar.gz").entries   # files inside, without extracting
-details = s3.file_details("s3://my-bucket/docs/", extensions="pdf")   # FileDetailsReport: .files, bytes_read
-details.to_df()                                     # one row per file: format, size, summary, pages, title, rows, ...
-s3.describe_objects(s3.find("s3://my-bucket/", min_size="1GB"))     # the same, for files you picked
-s3.read_avro("s3://my-bucket/events.avro", n=100), s3.read_npy(uri, nrows=10), s3.safetensors_info(uri)
-doc = s3.read_document("s3://my-bucket/docs/policy.pdf")   # also .docx / .pptx: doc.text, doc.parts, doc.title
-s3.read_pdf(uri, pages=[1, 2]), s3.read_docx(uri).headings, s3.read_pptx(uri).notes
-pdf_flow(s3.read_pdf(uri, layout=True))             # [('h1', 'Refunds'), ('p', '...'), ('li', '...'), ...]: the text to read
-pages = s3.render_pdf(uri, pages=[1, 2])            # [Picture]: each one shows itself in a notebook; .data is PNG / JPEG
-s3.read_docx(uri, pictures=True).pictures           # the pictures in a Word file, in reading order
-s3.read_lines("s3://my-bucket/logs/app.log.gz", 50)
-s3.read_json(...), s3.read_jsonl(..., n=100), s3.read_text(...), s3.read_bytes(uri, 0, 1023)
-with s3.open("s3://my-bucket/data/x.csv.gz") as f: ...   # streaming, decompressed
-
-for obj in s3.iter_objects("s3://my-bucket/"):      # stream a listing without holding it in memory
-    ...
-
-reports = s3.bucket_reports(match="sagemaker-*")    # BucketConfig + CloudWatch size per bucket
-explain_policy(s3.bucket_policy("my-bucket"), s3.account_id())   # [PolicyStatement], plain English
-s3.notifications("my-bucket")                       # [EventNotification]: which events go to which function, queue or topic
-impact = s3.simulate_lifecycle("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")
-impact.monthly_savings, impact.rule()               # USD per month, the rule as a dict
-s3.deleted_files("s3://my-bucket/data/", deleted_after="7d").files   # [DeletedObject]
-dupes = s3.find_duplicates("s3://my-bucket/data/")  # DuplicateReport: groups, copies, reclaimable, monthly_cost
-dupes.to_df()                                       # one row per file: group, role ('keep' / 'copy'), key, sha256, ...
-s3.download_folder("s3://my-bucket/data/", "data")  # FolderDownload; s3.download(uri, path) for one file
-plan = s3.plan_zip("s3://my-bucket/data/")          # ZipPlan: files, size, disk / memory free, can_download
-s3.download_zip("s3://my-bucket/data/", max_size="1GB").plan.path   # ZipDownload; nothing written if a check fails
-s3.list_downloads().entries                         # [LocalDownload]: what's in the downloads folder (s3.downloads_folder())
-s3.clean_downloads(older_than="30d").freed          # DownloadsCleanup; dry_run=True deletes nothing
-```
-
-The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
-for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
-`make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
-`bucket_findings`, `bucket_checks`, `overview_fixes`, `overview_verdict`, `explain_policy`, `policy_findings`, `parse_notifications`, `object_monthly_cost`, `cloudwatch_cost`,
-the duplicate finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
-have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
-file parsers `parse_docx` (`pictures=True` for its pictures), `parse_pptx`, `parse_pdf` (`layout=True` keeps where
-each line sits, its size and weight), `parse_avro`, and `render_pdf_pages`, which draws a PDF's pages from a local file
-or bytes. `pdf_flow` turns a PDF read with `layout=True` into headings, paragraphs and list items (the reading view
-`document` and the explorer's **📄 Text** show), and `pdf_furniture` lists the running headers and footers it leaves
-out. `describe_file("local.pdf")` (or a binary file
-object and its name) says what's inside a file the way `file_details` does, and `file_details_findings` works on a
-`FileDetailsReport`.
-
-</details>
-
-<details>
-<summary><a name="file-types"></a><b>File types</b>: what <code>preview</code> and <code>read_df</code> can open</summary>
-
-`preview` and `read_df` pick the reader from the file name, and from the first bytes when the name has
-no extension or the wrong one (Spark's `part-00000`, a Firehose object, a `.gz` that isn't gzipped).
-
-| Kind                 | Extensions                                                                   | `preview` shows                                                                                                                                                   | `read_df`          |
-| :------------------- | :--------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------- |
-| Delimited text       | `.csv` `.tsv` `.psv`                                                         | first rows                                                                                                                                                        | ✓                  |
-| JSON                 | `.json` `.jsonl` `.ndjson`                                                   | table of records, or a tree you fold with a click, coloured like code; a string holding JSON is shown unpacked, and a file too big to read whole shows its start  | ✓                  |
-| Columnar             | `.parquet` `.orc` `.feather` `.arrow`                                        | first rows, schema, row count (reads only what it needs)                                                                                                          | ✓                  |
-| Avro                 | `.avro`                                                                      | first rows, schema, codec (built-in reader; snappy needs `python-snappy`)                                                                                         | ✓                  |
-| Excel                | `.xlsx` `.xlsm` `.xls`                                                       | sheet names, first rows (needs `openpyxl`; `.xls` needs `xlrd`)                                                                                                   | ✓ `sheet_name=`    |
-| NumPy                | `.npy` `.npz`                                                                | shape, dtype, first rows / the arrays inside                                                                                                                      | ✓ `.npy` up to 2-D |
-| Archives             | `.zip` `.tar` `.tar.gz` `.tgz`                                               | the files inside, e.g. a SageMaker `model.tar.gz`                                                                                                                 |                    |
-| Models               | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib`                         | tensors, shapes, parameter count / files inside; pickles are never loaded                                                                                         |                    |
-| Notebooks            | `.ipynb`                                                                     | kernel and cells                                                                                                                                                  |                    |
-| Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player                                                                                                                                              |                    |
-| PDF                  | `.pdf`                                                                       | the first 3 pages as they look, scanned pages too (needs `pypdfium2` + `pillow`), page count, title and first page's text (needs `pypdf`); without either, a link |                    |
-| Word                 | `.docx` `.docm` `.dotx`                                                      | the first paragraphs laid out with their headings, lists, tables and pictures in place; word count (no package needed)                                            |                    |
-| PowerPoint           | `.pptx` `.pptm` `.ppsx`                                                      | every slide's title and text, speaker notes (no package needed)                                                                                                   |                    |
-| Old Office           | `.doc` `.ppt` `.msg`                                                         | recognised, with how to convert them (the old binary format can't be read)                                                                                        |                    |
-| Text                 | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more                     | first lines                                                                                                                                                       |                    |
-
-Any of them can also be compressed: `.gz`, `.bz2`, `.xz`, or `.zst` (Python 3.14+, or `pip install zstandard`).
-Packages in the table are optional; without them `preview` says what to install.
-
-</details>
-
-<details>
-<summary><a name="file-details"></a><b>File details</b>: what <code>file_details</code> and <code>ls(details=True)</code> report for each kind of file</summary>
-
-Each file's format comes from its name and is checked against its first bytes, so a file with no extension is still
-described and one with the wrong extension is flagged ("report.pdf is text, not a PDF"). Counts marked `≈` are
-estimates from the start of the file, and `+` marks a lower bound.
-
-| Kind            | Extensions                                       | Reports                                                                                                                                                                                       | Reads                                           |
-| :-------------- | :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
-| PDF             | `.pdf`                                           | pages, whether the first 3 pages have text (none = probably scanned), page size (A4, Letter, …), title, author, the app that made it, creation date, PDF version, whether it needs a password | the page tree and first 3 pages (needs `pypdf`) |
-| Word            | `.docx` `.docm` `.dotx`                          | words, pages (as Word last saved them), headings, tables, pictures, title, author, last saved                                                                                                 | the document's text                             |
-| PowerPoint      | `.pptx` `.pptm` `.ppsx`                          | slides, words, slides with speaker notes, tables, pictures, title, author                                                                                                                     | the slides' text                                |
-| Excel           | `.xlsx` `.xlsm`                                  | each sheet's name and rows × columns, title, author                                                                                                                                           | the size saved at the top of each sheet         |
-| Parquet         | `.parquet`                                       | rows, column names, row groups, compression, the program that wrote it                                                                                                                        | the footer (needs `pyarrow`)                    |
-| ORC, Feather    | `.orc` `.feather` `.arrow`                       | rows, column names, compression, stripes / record batches                                                                                                                                     | the metadata (needs `pyarrow`)                  |
-| Avro            | `.avro`                                          | rows, column names, codec                                                                                                                                                                     | block headers, in files up to 64 MB             |
-| CSV, JSON lines | `.csv` `.tsv` `.psv` `.jsonl` `.ndjson`          | column names, rows: exact up to 256 KB, then `≈` estimated, or `+` when compressed                                                                                                            | the first 256 KB                                |
-| JSON            | `.json`                                          | records and their keys, or an object's keys                                                                                                                                                   | up to 16 MB                                     |
-| Pictures        | `.png` `.jpg` `.gif` `.bmp` `.webp`, TIFF        | format, width × height                                                                                                                                                                        | the first 64 KB                                 |
-| Audio, video    | `.wav` `.flac` `.mp4` `.mov` `.m4a`              | length; sample rate and channels; width × height                                                                                                                                              | the header / the MP4 `moov` box                 |
-| Archives        | `.zip` `.tar` `.tar.gz` `.tgz`                   | files inside, unpacked size                                                                                                                                                                   | the zip index / tar headers                     |
-| Models, arrays  | `.safetensors` `.npy` `.npz` `.pt` `.pth` `.pkl` | tensors, parameters, dtypes / shape / arrays / files inside; pickles are never loaded                                                                                                         | headers only                                    |
-| Notebooks       | `.ipynb`                                         | cells, code cells, outputs, kernel                                                                                                                                                            | up to 50 MB                                     |
-| Text            | `.txt` `.log` `.md` and more                     | lines                                                                                                                                                                                         | the first 256 KB                                |
-
-</details>
-
-<details>
-<summary><b>Cost estimates</b>: storage only, at us-east-1 list prices, or yours</summary>
-
-Costs are storage only (no requests, retrievals or data transfer), at us-east-1 list prices for the first
-50 TB (`S3_PRICES`). They follow S3's billing rules: STANDARD_IA, ONEZONE_IA and GLACIER_IR bill at least
-128 KB per object, and GLACIER / DEEP_ARCHIVE add 40 KB of index data per object. Listings don't say which
-Intelligent-Tiering tier an object is in, so it's priced at the frequent-access rate; CloudWatch does, so
-`bucket_info` and `overview` price each tier. For another region, pass your prices:
-
-```python
-ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
-```
-
-</details>
-
-<details>
-<summary><b>Large buckets</b>: how long each command takes on millions of objects, and what to run first</summary>
-
-- `summary`, `tree`, `find`, `duplicates` and `compare` list every key under the prefix (1,000 per request),
-  so expect about 1 to 3 minutes per million objects. A progress bar shows while they run. Pass `limit=` to sample.
-- `duplicates` also downloads files that share a size but not an ETag: 64 KB of each, then whole files only where
-  those match, 16 at a time, biggest possible saving first, and it stops at `max_read` (10 GB by default). It
-  says how much it read. That download is free inside the bucket's region; from outside AWS it's billed as data
-  transfer. `method="etag"` reads nothing.
-- `download_zip` counts at most `max_files` keys (10,000 by default) before it decides, so it answers quickly even
-  on a huge folder, and it only downloads once every check passes.
-- `what_if` lists every key too; `deleted` and `versions` list every version.
-- `bucket_info` reads the bucket's size from CloudWatch without listing anything. Use it first on huge buckets.
-- `overview` makes about 15 read calls per bucket, 8 buckets at a time, and lists no keys.
-- `file_details` looks inside the first 200 files (`limit=`), 8 at a time, in 256 KB ranged requests, reading only
-  what each format needs (a PDF's page tree, a parquet footer, a picture's header), at most 128 MB of one file, and
-  stops at `max_read` (1 GB by default). It says how much it read.
-- `ls` only lists one level, so it's fast anywhere. `ls(details=True)` also reads a little of each file listed.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only but for `invoke`, and what each one is for</summary>
-
-Read-only, but for `lambda:InvokeFunction`, which only `invoke()` uses. Grant what you need:
-
-| Permission                                                                                                                                                        | For                                                                                                                 |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| `s3:ListAllMyBuckets`, `s3:GetBucketLocation`                                                                                                                     | The list of buckets (also the explorer's first page), and each bucket's region                                      |
-| `s3:ListBucket`, `s3:ListBucketVersions`                                                                                                                          | Listing files (also in the explorer), their old versions and delete markers                                         |
-| `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts`                                                                                                    | Incomplete multipart uploads                                                                                        |
-| `s3:GetObject`                                                                                                                                                    | Reading files: `preview`, `document`, `file_details`, `ls(details=True)`, `duplicates`, `download` / `download_zip` |
-| `s3:GetObjectTagging`                                                                                                                                             | Object tags                                                                                                         |
-| The `s3:GetBucket*` / `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` / `s3:GetInventoryConfiguration` family | The settings in `bucket_info`, including `s3:GetBucketPolicy` for `policy` and `s3:GetBucketNotification` for `notifications()` |
-| `s3:GetAccountPublicAccessBlock`                                                                                                                                  | The account-level public access setting                                                                             |
-| `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData`                                                                                                              | Bucket sizes                                                                                                        |
-
-Anything you can't read shows up as a note instead of an error. The
-[S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html#permissions) has a ready-made IAM policy that covers
-every command.
-
-</details>
-
-## Amazon DynamoDB
-
-<img src="docs/images/aws/dynamodb.svg" width="22" height="22" alt="" align="absmiddle"> **Tables and the items in them.** Every table's keys, size, billing and cost, the items as plain tables, and what
-they hold.
-
-📄 [`src/aws_analyzer/dynamodb/`](src/aws_analyzer/dynamodb/) · 📖 [DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)
+<b>DynamoDB scan</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dynamodb-scan-filter-dark.webp">
   <img src="docs/images/dynamodb-scan-filter-light.webp" alt="scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300">
 </picture>
 
-<p align="center"><sub><code>ui.scan()</code> with a <code>where=</code> filter: ten failed orders over 300, found by reading 1,619 items, the read units that took, and why a query would be cheaper.</sub></p>
+<sub><code>ui.scan(where=...)</code>: the items, what the read cost, and why a query is cheaper.</sub>
 
-### Quick start
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker both are already
-installed.
-
-```python
-%pip install boto3    # every command (required)
-%pip install pandas   # optional: DataFrames (page.to_df(), profile.to_df(), items_to_df)
-```
-
-Every `DynamoDBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
-
-```python
-from aws_analyzer import DynamoDBView
-
-ui = DynamoDBView()          # uses the notebook's execution role and region
-ui.help()                    # every command, grouped by task
-ui.help("scan")              # one command in full
-
-ui.tables()                  # every table in the region: key, items, size, est. cost, warnings
-ui.table_info("orders")      # indexes and how to query each, capacity, usage, backups, risks
-ui.scan("orders")            # the first 20 items as a table...
-ui.more()                    # ...and the next 20
-ui.schema("orders")          # what the items look like
-ui.get("orders", "USER#42", "ORDER#0017")
-ui.query("orders", "USER#42", sort=("begins_with", "ORDER#"))
-ui.explore("orders")         # all of it in a window, by clicking (below)
-data = ui.data()             # the last report's tables as pandas DataFrames, each column explained
-ui.to_excel()                # the last report as an Excel workbook: summary, charts, tables
-```
-
-Every report ends with a folded **🐼 This report as data**, as Lambda's, S3's and Step Functions' do. A page of
-items (`scan()`, `query()`, `sample()`, `sql()`, `largest()`) becomes `data["items"]`: keys first, nested maps as
-`address.city` columns, numbers as int or float (not Decimal), with each item's `_size_bytes` and `_read_units`.
-`schema()` gives `attributes` (types, fill rate, distinct values), `key_patterns` and `size_bands`;
-`value_counts()` a row per value; `tables()` a row per table with its cost by part (storage, capacity, requests,
-backups); `table_info()` the table and its indexes with the `query()` call for each.
-
-> [!NOTE]
-> Tables are regional: `DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))` looks at another region.
-> Items are shown and returned as plain Python, not DynamoDB JSON: numbers are `int` / `float`, sets are sets,
-> binary is `bytes`. Nothing in the file writes to a table.
-
-### Explore tables and items by clicking
-
-`ui.explore()` opens a window (Jupyter and ipywidgets) with an **Overview** of every table, the **tables** (chips for
-the ones to fix, on-demand or provisioned, without backups and idle, and a search box), the open table's **items**
-and its **schema**. A click on a table shows its keys, indexes and how to query each, usage and cost; the Items tab
-reads a sample from across the table, its first items, or one partition key's (on the table or an index, the sort key
-narrowed to a prefix), and a click on an item shows all of it. The Schema tab lists every attribute with its types and
-fill rate, and a click counts its values. It reads in the background, it only reads, and each read says what it cost.
-
-```python
-ui.explore("orders", tab="items")   # or explore(), explore("orders", tab="schema")
-```
-
-### Commands (`DynamoDBView`)
-
-Grouped the way `ui.help()` lists them.
-
-#### As data
-
-| Command | Shows |
-| :-- | :-- |
-| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("query", "orders", "USER#42")` reads one without showing it |
-| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
-
-#### Tables
-
-| Command              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tables(match=None)` | Every table in the region in one table: key, item count, size, billing mode, indexes, estimated monthly cost (including on-demand requests at the last 24 hours' rate) and a list of warnings. `match="prod-*"` checks only matching names                                                                                                                                                                                                                                                                                                                             |
-| `table_info(table)`  | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks, each with what to do about it: no point-in-time recovery (with its cost and the command that turns it on), throttling, capacity near its limit, or capacity far above what's used (with what less capacity or on-demand would cost) |
-
-#### Look at items
-
-| Command                                                           | Shows                                                                                                                                                                                                                                     |
-| :---------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample(table, n=20)`                                             | About n items spread across the whole key space. `scan` shows the start of the table, which can all be one partition key; this reads a few items from many slices of it                                                                   |
-| `scan(table, n=20, where=, index=, attributes=)`                  | Items from the start of the table (or an index) as a table: key attributes first, then the others by how many items have them, nested maps as `address.city` columns. Shows how many items were read to find them and the read units used |
-| `query(table, partition, sort=None, index=, where=, descending=)` | Items sharing one partition key, in sort-key order, on the table or an index                                                                                                                                                              |
-| `get(table, *key)`                                                | One item with every nested map and list expanded, the type of each attribute, its size and read / write cost. `as_json=True` adds a JSON copy                                                                                             |
-| `sql(statement, *params)`                                         | A PartiQL statement, e.g. `sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42")`                                                                                                                                                         |
-| `more()`                                                          | The next page of the last `scan`, `query` or `sql`                                                                                                                                                                                        |
-
-#### Understand the data
-
-| Command                          | Shows                                                                                                                                                                                                                                                                                                                                                                      |
-| :------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema(table, n=1000)`          | Every attribute and map field: type (or mix of types), share of items that have it, distinct values, examples, range. Key patterns such as `USER#<number>` and `ORDER#<date>`, which show the entity types of a single-table design. Item sizes, the largest items, and findings: mixed types, empty strings, items near the 400 KB limit, attribute names built from data |
-| `value_counts(table, attribute)` | How often each value occurs, with the size of those items. On the partition key this is each item collection's size, so hot partitions stand out                                                                                                                                                                                                                           |
-| `largest(table, n=10)`           | The biggest items by DynamoDB's sizing rules, and what reading each costs                                                                                                                                                                                                                                                                                                  |
-| `count(table, where=None)`       | Exact count (a full scan), next to DynamoDB's own estimate                                                                                                                                                                                                                                                                                                                 |
-| `explore(what=None, tab=None)`   | The [explorer window](#explore-tables-and-items-by-clicking): every table, one in full, its items and its schema, by clicking. `view.explorer` is the window                                                                                                                                                                                                              |
-
-### Filters
-
-`where=` works on `scan`, `query`, `sample`, `schema`, `value_counts`, `largest` and `count`. It takes a dict, and
-every condition must match:
-
-| `where=`                                  | Means                                                            |
-| :---------------------------------------- | :--------------------------------------------------------------- |
-| `{"status": "failed"}`                    | `status = 'failed'`                                              |
-| `{"total": (">", 100)}`                   | also `"="`, `"!="`, `"<"`, `"<="`, `">="`                        |
-| `{"total": ("between", 10, 100)}`         | both ends included                                               |
-| `{"sk": ("begins_with", "ORDER#")}`       |                                                                  |
-| `{"tags": ("contains", "promo")}`         | a substring, or a member of a set or list                        |
-| `{"status": ("in", ["paid", "shipped"])}` |                                                                  |
-| `{"deleted_at": ("not_exists",)}`         | also `("exists",)`, and `("type", "N")` to check the stored type |
-| `{"address.city": "Pune"}`                | dots reach into maps                                             |
-
-For OR and NOT, pass a boto3 condition instead: `where=Attr("a").eq(1) | Attr("b").exists()`. The `sort=` argument
-of `query` takes a value or one of the same tuples (`=`, `<`, `<=`, `>`, `>=`, `between`, `begins_with`). Key values
-are converted to the key's type, so `"42"` works for a number key.
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>DynamoDBAnalyzer</code>): items as plain dicts and DataFrames, for pandas and your own code</summary>
-
-`ui.core` is the `DynamoDBAnalyzer`. Every UI command has a data method on it:
-
-```python
-ddb = ui.core                                       # or DynamoDBAnalyzer(region="eu-west-1", profile="dev")
-
-page = ddb.scan("orders", n=5000, where={"status": "failed"})   # ItemPage
-page.items                                          # list of plain dicts
-df = page.to_df()                                   # DataFrame: keys first, nested maps as 'address.city'
-page.stats                                          # items read, items returned, read units, seconds
-more = ddb.scan("orders", n=5000, where={"status": "failed"}, start_key=page.last_key)
-
-ddb.query("orders", "USER#42", sort=("between", "ORDER#2024-01", "ORDER#2024-12"), descending=True)
-ddb.query("orders", "failed", index="by-status").to_df()
-ddb.sample("orders", 500).items                     # spread over the key space
-ddb.get("orders", "USER#42", "ORDER#0017")          # dict, or None
-ddb.sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42").items
-
-profile = ddb.profile("orders", 2000)               # TableProfile (what schema() shows)
-profile.attributes["total"].types                   # Counter({'N': 1990, 'S': 10})
-profile.to_df()                                     # one row per attribute
-
-ddb.value_counts("orders", "status").counts         # {'paid': Stat(count=..., size=...), ...}
-ddb.count("orders", where={"status": "failed"}).matched
-ddb.describe("orders")                              # TableInfo: keys, indexes, capacity, TTL, backups, tags
-ddb.table_metrics("orders", hours=24)               # consumed units, busiest period, throttle events
-ddb.table_reports(match="prod-*")                   # [TableReport]: describe() + usage for every table
-
-for item in ddb.iter_items("orders", limit=None):   # stream a full scan without holding it in memory
-    ...
-```
-
-The analysis functions are pure (no AWS calls), so they also work on items you already have, for example a
-DynamoDB export to S3: `from_dynamo_item`, `to_dynamo`, `items_to_df`, `flatten_item`, `profile_items`,
-`count_values`, `item_size`, `key_pattern`, `build_filter`, `table_findings`, `profile_findings`,
-`table_monthly_cost`, `capacity_cost`, `request_cost`.
-
-```python
-rows = S3Analyzer().read_jsonl("s3://my-bucket/AWSDynamoDB/01234-abcd/data/part.json.gz")   # from s3.py
-profile_items([from_dynamo_item(row["Item"]) for row in rows], keys=["pk", "sk"])
-```
-
-</details>
-
-<details>
-<summary><b>Large tables and cost</b>: what scans read and bill, where they stop, and the prices used</summary>
-
-- DynamoDB bills every item a scan reads, and a scan competes with your application for the table's
-  capacity. So the commands that scan stop early by default: `value_counts` and `largest` read the first
-  10,000 items (`limit=None` reads everything), `schema` profiles about 1,000, and `ui.scan` with a filter
-  reads at most 100,000 items per page (`scan_limit=`).
-- `count` always reads the whole table: `Select=COUNT` returns no items but still reads, and bills, every one.
-  For an instant estimate, `tables()` and `table_info()` show DynamoDB's own item count and size, which it
-  refreshes about every 6 hours.
-- Every report shows the read units it used and, where it matters, what they cost on-demand.
-- Costs are estimates at us-east-1 list prices for the standard table class, before the free tier
-  (`DYNAMODB_PRICES`): storage, provisioned capacity and point-in-time recovery per month, and on-demand
-  reads and writes per million. For another region, pass your prices:
-  `DynamoDBAnalyzer(prices={"storage": 0.285, "read_request": 0.1425})`.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                                                                                   | For                                  |
-| :--------------------------------------------------------------------------------------------------------------------------- | :----------------------------------- |
-| `dynamodb:ListTables`                                                                                                        | The list of tables                   |
-| `dynamodb:DescribeTable`, `dynamodb:DescribeTimeToLive`, `dynamodb:DescribeContinuousBackups`, `dynamodb:ListTagsOfResource` | A table's keys, indexes and settings |
-| `dynamodb:Scan`, `dynamodb:Query`, `dynamodb:GetItem`                                                                        | Reading items                        |
-| `dynamodb:PartiQLSelect`                                                                                                     | `sql`                                |
-| `cloudwatch:GetMetricData`                                                                                                   | Usage                                |
-
-Reading an index needs the permission on its ARN too (`arn:aws:dynamodb:<region>:<account>:table/orders/index/*`),
-and a table encrypted with a customer managed KMS key needs `kms:Decrypt`. Anything you can't read shows up as a
-note instead of an error. The [DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html#permissions)
-has a ready-made IAM policy that covers every command.
-
-</details>
-
-## Amazon Bedrock Knowledge Bases
-
-<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **Knowledge bases, what they retrieve, and the answers built on them.** Settings and sync health, every file
-and how it was indexed, search with highlighted passages, answers with citations, and retrieval measured on your own
-questions. The [explorer window](#explore-by-clicking) shows it all by clicking.
-
-📄 [`src/aws_analyzer/bedrock_kb/`](src/aws_analyzer/bedrock_kb/) · 📖 [Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)
+<b>Knowledge base answer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/bedrock-ask-dark.webp">
   <img src="docs/images/bedrock-ask-light.webp" alt="ask(): an answer about refund times with a [1] and a [2] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf">
 </picture>
 
-<p align="center"><sub><code>ui.ask("How long do refunds take?")</code>: the answer with its <code>[1]</code> <code>[2]</code> citations, 77% grounded because its last sentence cites nothing, and the passages behind it.</sub></p>
+<sub><code>ui.ask("How long do refunds take?")</code>: cited answer, 77% grounded.</sub>
 
-### Quick start
+</td>
+<td width="50%" valign="top">
 
-Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker both are already
-installed.
-
-```python
-%pip install boto3    # every command (required)
-%pip install pandas   # optional: DataFrames (r.to_df(), a.to_df(), report.to_df())
-```
-
-Every `BedrockKBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
-Answers are generated through Bedrock itself (RetrieveAndGenerate or Converse), so no model SDK is needed and any
-Bedrock model you have access to works.
-
-```python
-from aws_analyzer import BedrockKBView
-
-ui = BedrockKBView()               # uses the notebook's execution role and region
-ui.help()                          # every command, grouped by task
-ui.help("ask")                     # one command in full
-
-ui.kbs()                           # every knowledge base: status, store, last sync, warnings
-ui.use("support-docs")             # later commands use this one (a name, ID or ARN)
-ui.kb_info()                       # settings in plain English, syncs, findings, idle cost
-ui.search("how do refunds work?")  # ranked passages, with the question's words highlighted
-ui.chunk(2)                        # the full text and metadata of result #2
-ui.link(2)                         # a link that opens result #2's file in a new browser tab
-ui.ask("How long do refunds take?")      # an answer with [1][2] citations and its sources
-ui.follow_up("And for digital goods?")   # same conversation
-ui.ask("How long do refunds take?", data_source="faq")   # answered from one data source only
-
-ui.files()                         # every file next to Bedrock's record of it: failed, changed, not synced...
-ui.save_file_list()                # every file's s3:// path in a .txt file, one per line, with a link to download it
-ui.file("refund-policy.pdf")       # how one file was indexed: its parser, chunks in order, metadata, what to fix
-ui.search_file("refund-policy.pdf", "How long do refunds take?")   # does the question find it, and where it ranks
-ui.explore()                       # all of it in a window, by clicking (below)
-```
-
-> [!NOTE]
-> Knowledge bases are regional: `BedrockKBView(BedrockKBAnalyzer(region="us-west-2"))` looks at another region.
-> Commands take `kb=` (a name in any case, the 10-character ID, or the ARN); without it they use the one set by
-> `use()` or `BedrockKBView(kb=...)`, else the only knowledge base in the region, else they list the ones there and
-> say how to pick. Nothing in the file changes a knowledge base: where a sync is needed, it shows the
-> `aws bedrock-agent start-ingestion-job ...` command and the boto3 call instead of running them. The one file it
-> writes is the list `save_file_list()` (or the explorer's **⬇ List**) saves beside the notebook.
-
-### Explore by clicking
-
-`explore()` opens a window on a knowledge base that you use by clicking, with nothing to type but a question. Every
-file of its S3 data sources is listed next to Bedrock's record of it, so you see at once which ones failed and why,
-which changed in S3 since they were indexed, which were added after the last sync, which the sync skipped, and which
-are gone from S3 but still turn up in answers. Click a file to see how it was indexed, step by step: the parser that
-read it, each chunk in document order with the text it shares with the one before, its metadata file next to what its
-chunks carry, and what to fix.
+<b>Knowledge base explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/kb-explorer-tour-dark.webp">
   <img src="docs/images/kb-explorer-tour-light.webp" alt="The knowledge base explorer in a notebook, animated: it starts on support-docs&#x27; Overview, its verdict on the files and a card for each thing to do; the pointer opens the Files tab, types warranty in the search box and clicks warranty.pdf, which shows how it was indexed, step by step; it asks How long is the warranty? about that file and sees its passages and where they rank in the whole knowledge base; then it opens the Search tab and asks What does error E1234 mean?, the passages found shown with their scores, and last the Syncs tab, every sync on a timeline">
 </picture>
 
-<p align="center"><sub><code>explore(&quot;support-docs&quot;)</code>: find a file and see how it was indexed, ask whether it answers a question, search the whole knowledge base, then read its syncs.</sub></p>
+<sub><code>explore("support-docs")</code>: how a file was indexed, and whether a question finds it.</sub>
 
-```python
-from aws_analyzer.bedrock_kb import explore
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-explore()                                  # the only knowledge base here, or the first active one
-explore("support-docs")                    # a name, ID or ARN
-explore("support-docs", file="faq/returns.md")   # straight to one file's page
-explore(region="us-west-2")                # another region (or profile="dev")
-explore("support-docs", height=800)        # 800px pages (else the browser's height)
-ui.explore()                               # from a BedrockKBView, on its knowledge base
-```
-
-The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
-browser tab). Without it, or outside Jupyter, it shows the same as reports: `files()`, `file()` and `search_file()`.
-
-| To                                 | Do this                                                                                                                                                                                                                                                                                                                                                                |
-| :--------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pick a knowledge base              | Click the field at the top left: the region's knowledge bases, with a search box that finds one by name, part of its ID or its description. Enter picks the first, and a whole ID or ARN works too. The cards beside it say how it's doing: its files, how many are searchable, failed or waiting for a sync, the last sync and the idle cost of its vector store |
-| See what's wrong                   | **Overview**: one sentence on the files (how many are indexed and up to date, how many need you, and how many a sync fixes), their states in one bar, a card for each thing to do (a sync per data source with its command to copy, since the window never syncs; the files to fix; the files to convert), the findings left, how each data source becomes vectors (its location, parser, chunking, embedding model and vector store) with each problem pinned under the step where it happens, and the recent syncs |
-| Find a file                        | **Files**: type part of a name, a folder or Bedrock's reason in the search box, click a state's chip (**Failed**, **Changed**, **Not synced**, **Skipped**, **Deleted**, **Ignored**, **Indexed**) to see only those, pick a data source, or sort by name, folder, size, last change or last indexed. Problems come first, 40 to a page with **«** **‹** **›** **»** under the list |
-| Get the list of files              | **⬇ List**, beside the sort, saves the `s3://` path of every file the list shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt` beside the notebook. **⬇ Download** under the list then saves it on your computer |
-| See how a file was indexed         | Click it. Its page has its state and what to do about it, then each step from S3 into the vector store, the one that failed in red. Its chunks follow as a bar of their sizes (for a .txt or .md file, also where each sits in the file and what no chunk holds), then a line each with its page, size and first words that opens to the chunk's text, the part it repeats from the chunk before marked, and its metadata. Last, its `.metadata.json` next to what its chunks carry, and Bedrock's record of it |
-| Check that a question finds a file | On its page, type a question in **Ask a question…** and press Enter: the file's own best passages for it, and where it ranks among the whole knowledge base's. When an answer, which sees the top 5, wouldn't see it, a finding says what to change |
-| Search the knowledge base          | **Search**: a question's passages with their scores and the question's words highlighted. Pick the number of passages, the search type (**Semantic** or **Hybrid**), a data source and a reranker, and type a metadata filter under them (`team = billing; year >= 2024`) to search only the files whose `.metadata.json` matches. **How refund-policy.pdf was indexed ›** under a passage opens its file's page |
-| Pick a search setting              | **Compare**, beside **Search**: the question searched as Semantic and as Hybrid, with the passages picked and twice as many, and each passage's rank under each, with how much the settings agree and what one finds that the others miss (`compare()`) |
-| Read the sync history              | **Syncs**: every sync, newest first, as a timeline: when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed |
-| Read the settings                  | **Settings**: every setting in plain English (the embedding model and its dimensions, the vector store and where it keeps each part of a chunk, each data source's location, chunking, parser and deletion policy, the tags), then GetKnowledgeBase and GetDataSource as AWS returns them, folded |
-
-Everything is read in the background, so a click shows what's known at once and the rest as it arrives, and the
-window keeps answering. Like the rest of the file it only reads: where a sync would help, it shows the command.
-`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.focus` is
-what you're looking at (the knowledge base, the tab and the file or search open), and `x.ui` is a `BedrockKBView` for
-reports in other cells. `x.search("refund window", where="team = billing")` and `x.compare(...)` do from code what the
-Search tab's box and buttons do.
-
-### Commands (`BedrockKBView`)
-
-Grouped the way `ui.help()` lists them.
-
-#### Explore by clicking
-
-| Command                                         | Shows                                                                                                                                                                                                       |
-| :---------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(kb=None, file=None, height=None)`      | The [explorer window](#explore-by-clicking): every file and how it was indexed, the syncs, a search box and every setting, by clicking. `file=` opens one file's page; `view.explorer` is the window      |
-
-#### Knowledge bases
-
-| Command            | Shows                                                                                                                                                                                                                                                                   |
-| :----------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kbs()`            | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings                                                                                             |
-| `use(kb)`          | Sets the knowledge base that later commands use when you don't pass `kb=`: a name in any case, the 10-character ID, or the ARN                                                                                                                                          |
-| `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy, and the `data_source=` to ask each one when there are several), recent syncs, tags, and what to try next |
-
-#### What's indexed
-
-| Command                                                   | Shows                                                                                                                                                                           |
-| :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `syncs(kb=None, data_source=None, n=10)`                  | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again                                   |
-| `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the ones that aren't indexed with Bedrock's reason, and the sync command. `status="INDEXED"` or `"FAILED"` lists only those |
-| `unsynced(kb=None, data_source=None)`                     | S3 files added or changed since each data source's last successful sync, and the command to sync them                                                                           |
-| `files(kb=None, data_source=None, status=None, match=None, n=50)` | Every file next to Bedrock's record of it: indexed, failed (and why), changed in S3 since it was indexed, added after the last sync, skipped by the sync (and the likely reason: a type Bedrock doesn't read, over 50 MB, archived), gone from S3 but still searchable. Problems first, with the commands that sync them. `status="failed"` or `match="refund"` narrows the list |
-| `save_file_list(kb=None, path=None, data_source=None, status=None, match=None, link="s3", expires=3600)` | Saves the files as a text file, one per line, sorted by path: each file's `s3://` path, ready for a script, `aws s3 cp` or a spreadsheet, with a **⬇ Download** link that saves it on your computer and its first lines. `status=`, `match=` and `data_source=` keep the files `files()` lists with them; `link="https"` writes a link that opens each file in a browser (presigned, for `expires` seconds; anyone holding the list can open them until then) and `link="key"` each one's path in the bucket. `path`: default `<knowledge base>-files.txt` beside the notebook; a file of that name is replaced |
-| `file(path, kb=None)`                                     | How one file was indexed, step by step (stored in S3, read by the parser, cut into chunks, embedded, stored as vectors, where it stands now), its chunks in document order with their size, page and the text each shares with the one before, its metadata file checked against what its chunks carry, and what to fix. `path`: its name, its path in the bucket or its `s3://` path |
-| `search_file(path, question, kb=None, n=10)`              | Whether a question finds a file: its own best passages for it, and where it ranks among the whole knowledge base's (an answer sees the top 5), with what to change when it ranks too low |
-
-#### Search and answer
-
-| Command                                                                                    | Shows                                                                                                                                                                                                                                                                                                                                                                        |
-| :----------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `search(question, n=5, kb=, data_source=, where=, search_type=, rerank=)`                  | Ranked passages: a score bar relative to the top result, file and page (the file's name opens it in a new browser tab), the data source when they come from several, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
-| `chunk(rank)`                                                                              | The full text, metadata and IDs of result #rank from the last `search` or `ask`, a link that opens its file in a new browser tab, and the `S3View().preview("s3://...")` call that previews it in the notebook                                                                                                                                                              |
-| `link(source=1, expires=3600)`                                                             | A link that opens a file in a new browser tab: source #n of the last `search` or `ask` (a PDF opens at the passage's page), a file name from it, or any `s3://` path. S3 files get a presigned link, signed in the notebook with no AWS call, that works for `expires` seconds; PDFs, pictures, text and HTML show in the tab, Word and Excel files download. Web, Confluence, SharePoint and Salesforce sources link to their page. Every file name in `search`, `ask`, `follow_up`, `compare`, `documents` and `unsynced` is already such a link |
-| `ask(question, kb=, data_source=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table (each file a link that opens it, with each source's data source when there are several) and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens)                                                                       |
-| `follow_up(question, data_source=None)`                                                    | The next question in the same RetrieveAndGenerate session (or Converse conversation), searching the same data source. `data_source=` moves this and later follow-ups to another one (`"all"` back to every one). If the session has expired, starts a new one and says so                                                                                                   |
-| `models(match=None)`                                                                       | The text models you can use for `ask()` here: the ID to pass as `model=`, provider, on demand or through an inference profile, and $ per 1M tokens in and out                                                                                                                                                                                                                |
-
-#### Measure retrieval
-
-| Command                                                                          | Shows                                                                                                                                                   |
-| :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `compare(question, kb=, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=, data_source=)` | One row per passage and one column per setting with its rank there, how much each pair of settings overlaps, and what each found that the others missed |
-| `evaluate(cases, kb=, n=5, search_type=, where=, data_source=)`                                | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes   |
-
-### Two ways to generate answers
-
-|                     | `engine="kb"` (default)                                                                               | `engine="converse"`                                                                                               |
-| :------------------ | :---------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
-| **How**             | Bedrock's managed RetrieveAndGenerate: Bedrock retrieves, prompts the model and returns the citations | Retrieves, then calls the model through Bedrock Converse with the passages numbered as sources. Any Bedrock model |
-| **Tokens and cost** | Estimated from characters, and labelled as estimates: RetrieveAndGenerate doesn't report token counts | Exact counts and cost                                                                                             |
-| **Your own prompt** | A custom `prompt=` must contain `$search_results$`                                                    | A `prompt=` template with `{sources}` and `{question}` (see `bedrock_kb.DEFAULT_PROMPT`)                          |
-| **Follow-ups**      | `follow_up()` keeps Bedrock's session                                                                 | `follow_up()` continues the conversation                                                                          |
-
-With `engine="converse"`, the sources are sent as data, never as instructions, and the model is told to cite them as
-`[n]` and to say when they don't hold the answer.
-
-`model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`,
-`"claude-opus-5"`, `"nova-pro"`. The default is Claude Haiku 4.5 (`bedrock_kb.DEFAULT_MODEL`), through the region's
-inference profile when it needs one; `BedrockKBAnalyzer(default_model="sonnet")` changes it. Your account's
-application inference profiles are in `models()` too, as "your inference profile", and `model=` takes one by its
-name, ID or ARN.
-
-### One data source (`data_source=`)
-
-A knowledge base can have several data sources (an S3 bucket of policies, a crawled help site, a Confluence space).
-`data_source=` points a question at one of them: `search`, `ask`, `compare` and `evaluate` take its name (in any case)
-or its ID, or a list of them, and `follow_up()` keeps it for the rest of the conversation.
-
-```python
-ui.search("refund window", data_source="faq")                 # passages from the faq data source only
-ui.ask("How long do refunds take?", data_source="policies")   # an answer from the policies only
-ui.follow_up("And on the help site?", data_source="help-site")   # the next question searches another one
-ui.follow_up("Anything else?", data_source="all")             # back to every data source
-```
-
-Bedrock tags every chunk with its data source's ID (`x-amz-bedrock-kb-data-source-id`), so this needs no metadata
-files, and it combines with `where=` (both must match). `kb_info()` lists the data sources, with the `data_source=` for each.
-When passages come from several data sources, the reports say which each came from and suggest asking the one most of
-them came from. If a vector store returns passages from another data source anyway, a finding says so: tag the files
-with your own metadata then, and filter with `where=`.
-
-### Filters (`where=`)
-
-`where=` filters on the documents' own metadata, which comes from a `<file>.metadata.json` next to each file (for
-example `refund-policy.pdf.metadata.json` holding `{"metadataAttributes": {"team": "billing", "year": 2024}}`). It
-works on `search`, `ask`, `compare` and `evaluate`, uses the same vocabulary as the DynamoDB analyzer, and every
-condition must match:
-
-| `where=`                              | Means                                                         |
-| :------------------------------------ | :------------------------------------------------------------ |
-| `{"team": "billing"}`                 | `team = 'billing'`                                            |
-| `{"team": ["billing", "support"]}`    | one of these values                                           |
-| `{"year": (">=", 2024)}`              | also `"="`, `"!="`, `">"`, `"<"`, `"<="`                      |
-| `{"year": ("between", 2020, 2024)}`   | both ends included                                            |
-| `{"region": ("in", ["eu", "uk"])}`    | also `("not_in", [...])`                                      |
-| `{"doc_id": ("begins_with", "POL-")}` | text starting with this                                       |
-| `{"title": ("contains", "refund")}`   | text containing this, or a list with an element containing it |
-| `{"tags": ("list_contains", "gdpr")}` | a list attribute holding exactly this element                 |
-
-`where=` also takes the same as text, the way the explorer's Search tab does: `where="team = billing; year >= 2024"`,
-`"region in eu, uk"`, `"year between 2020 and 2024"`, `"doc_id begins with POL-"`, `"title contains refund"`,
-`"tags has gdpr"`, with `;`, `,` or `and` between conditions and quotes around a value that holds them
-(`parse_where` turns it into the dict). Values are typed: `2024` and `"2024"` differ. For OR, pass a Bedrock
-`RetrievalFilter` instead, e.g.
-`where={"orAll": [{"equals": {"key": "team", "value": "a"}}, {"equals": {"key": "team", "value": "b"}}]}`; it is
-sent unchanged.
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>BedrockKBAnalyzer</code>): passages, answers and evaluations as Python objects</summary>
-
-`ui.core` is the `BedrockKBAnalyzer`. Every UI command has a data method on it, and its methods take the knowledge
-base first:
-
-```python
-kb = ui.core                                        # or BedrockKBAnalyzer(region="us-west-2", profile="dev")
-
-info = kb.describe("support-docs")                  # KnowledgeBaseInfo: settings, data sources, last syncs, tags
-info.data_sources[0].chunking                       # the chunkingConfiguration AWS returned
-kb.list_knowledge_bases()                           # [KnowledgeBaseInfo], described in parallel
-kb.ingestion_jobs("support-docs", n=20)             # [IngestionJob], newest first, with failure reasons
-docs, summary = kb.documents("support-docs", status="FAILED")   # [KBDocument], DocumentSummary
-kb.unsynced("support-docs")                         # [SyncFreshness]: changed S3 files per data source
-
-inv = kb.file_inventory("support-docs")             # FileInventory: every file, KBFile.state and why (KBFile.note)
-inv.counts(), inv.to_df()                           # files per state; one row per file
-kb.save_file_list(inv, "files.txt")                 # SavedFileList: a line per file (link="https" or "key" too)
-f = "s3://support-docs-bucket/policies/refund-policy.pdf"
-chunks = kb.document_chunks("support-docs", f)      # DocumentChunks: its chunks in document order, .stats
-kb.metadata_file(f)                                 # MetadataFile: its .metadata.json's attributes and problems
-kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank in the whole knowledge base
-kb.document_status("support-docs", f, "docs-s3")    # KBDocument: Bedrock's record of one file
-
-r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
-r.passages[0].text, r.passages[0].source, r.passages[0].metadata
-r = kb.retrieve("support-docs", "refund window", data_source="faq")   # one data source: r.data_sources
-kb.data_sources("support-docs")                     # [DataSourceInfo]: ID, name, status
-df = r.to_df()                                      # one row per passage
-
-a = kb.ask("support-docs", "How long do refunds take?")          # Answer (RetrieveAndGenerate)
-a.text, a.citations, a.sources, a.grounded_share
-a = kb.generate("refund window?", r.passages, model="opus", prompt=MY_TEMPLATE)   # Converse on your passages
-a = kb.generate("refund window?", ["my own chunk", "another chunk"])             # ...or on plain strings
-a.input_tokens, a.output_tokens                     # exact, from Converse
-
-kb.compare("support-docs", "refund window for EU orders").overlap   # SearchComparison
-report = kb.evaluate("support-docs", [("refund window?", "refund-policy.pdf")])
-report.hit_rate, report.mrr, report.to_df()         # EvalReport
-kb.models("claude")                                 # [ModelInfo]: what to pass as model=, and its price
-```
-
-The analysis functions are pure (no AWS calls), so they also work on responses and passages you already have:
-`parse_knowledge_base`, `parse_data_source`, `parse_ingestion_job`, `parse_retrieve`, `parse_rag`, `parse_converse`,
-`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`, `parse_where`,
-`data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`
-(and `DEFAULT_PROMPT`), `parse_citation_markers`, `question_terms`, `best_snippet`, `retrieval_metrics`,
-`match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
-`vector_store_monthly_cost`, `query_cost`, the file functions: `inventory_files`, `file_state`, `skip_reason`,
-`sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`,
-`find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`, what to do about the files:
-`file_actions` (grouped by what fixes them), `files_verdict` (the files in one sentence), `stage_problems` (where
-in the pipeline each problem happens), and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
-`answer_findings`, `eval_findings`, `inventory_findings` (`state_findings` and `listing_findings`, its two parts),
-`other_findings`, `file_findings`, `probe_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost and limits</b>: the prices used, idle vector store cost, and where commands stop</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25
-  and checked against the AWS Price List API on 2026-09-27, and every report says whether it used list prices or
-  yours. `BEDROCK_PRICES` holds the OpenSearch Serverless OCU-hour, its idle minimum, reranking per 1,000 queries
-  (Cohere Rerank 3.5, and Amazon Rerank at half that) and question embedding; `MODEL_PRICES` holds $ per 1M
-  input and output tokens by model family, and `GLOBAL_MODEL_PRICES` the lower prices of `global.` profiles
-  (a price you set in `model_prices` applies to every profile of that model). Pass your own:
-  `BedrockKBAnalyzer(prices={"opensearch_min_ocus": 1}, model_prices={"my-model": (1.0, 5.0)})`.
-- The idle cost is only estimated for OpenSearch Serverless: a classic vector collection bills 2 OCUs
-  (about $350/month) even with no traffic. Collections that share a KMS key share those OCUs, dev-test collections
-  bill half, and NextGen collections scale to zero, so check your collection type. Other vector stores are billed by
-  their own service and show "not estimated".
-- `ask()` with the default engine estimates tokens from characters, since RetrieveAndGenerate doesn't return
-  them; `engine="converse"` shows exact counts. A model that isn't in `MODEL_PRICES` shows its cost as unknown.
-- `evaluate()` and `compare()` only retrieve, so they cost a question embedding per search (well under a cent),
-  plus reranking when you ask for it.
-- `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects by default; both say
-  when they stopped early (`.core.documents(..., limit=None)` reads everything).
-- `files()`, `save_file_list()`, `file()` and the explorer read at most 10,000 of Bedrock's documents and 10,000 S3 files per data
-  source, and say when they stopped (`.core.file_inventory(..., limit=None)` reads everything). A file the document
-  list didn't reach is looked up on its own when you open it.
-- A file's chunks come from one Retrieve limited to the file (a filter on `x-amz-bedrock-kb-source-uri`), which
-  returns at most 100 passages: a file with more says so. Opening a file costs one search and asking it a question
-  two (a question embedding each, well under a cent). A vector store that ignores the filter is caught: passages of
-  other files are counted and left out.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and which command needs which</summary>
-
-Read-only, per command:
-
-| Permission                                                                                 | Used by                                                            |
-| :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
-| `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`                                   | `kbs`, `kb_info`, and finding a knowledge base by name             |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `save_file_list`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `save_file_list`, `file`, `explore` |
-| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
-| `bedrock:GetKnowledgeBaseDocuments`                                                        | `file` and `explore`, for a file the document list stopped before  |
-| `bedrock:ListTagsForResource`                                                              | `kb_info`                                                          |
-| `bedrock:Retrieve`                                                                         | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")`, and a file's chunks and questions in `file`, `search_file` and `explore` |
-| `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up`                                                 |
-| `bedrock:InvokeModel`                                                                      | `ask(engine="converse")`, `core.generate`                          |
-| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`                            | `models`, and turning `model="sonnet"` into an ID                  |
-| `s3:ListBucket` on the data source's bucket                                                | `unsynced`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
-| `s3:GetObject` on the data source's files                                                  | `file` and `explore` read a file's `<file>.metadata.json`, and a .txt or .md file's text to place its chunks in it. Opening a file from its link (`link`, `save_file_list(link="https")`, and the file names in reports) uses it too, in your browser |
-
-A model also has to be enabled for the account under **Model access** in the Bedrock console. Anything you can't
-read shows up as a note instead of an error. The
-[Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#permissions) has a ready-made IAM
-policy that covers every command.
-
-</details>
-
-## Bedrock knowledge base chat
-
-<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
-questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field
-of RetrieveAndGenerate) while you watch the request as JSON. Then ask a whole list of test questions with that setup,
-see how each one did, try every combination of the settings you're unsure of at once and see which setup does best,
-keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
-
-📄 [`src/aws_analyzer/bedrock_chat/`](src/aws_analyzer/bedrock_chat/) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
+<b>Knowledge base chat</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-tour-dark.webp">
   <img src="docs/images/chat-tour-light.webp" alt="The chat window in a notebook, animated: the pointer types Can digital goods be refunded? and presses Enter, and the answer comes back with its cited spans shaded and its sources; it asks for a summary of how long refunds take as a list, and opens a source's details; then it opens the Test tab, pastes six test questions with the file each should cite and runs them, each question on its own line as its answer comes back; last it opens the Code tab, the setup as a Python script to copy">
 </picture>
 
-<p align="center"><sub><code>chat(&quot;support-docs&quot;, model=&quot;sonnet&quot;)</code>: ask and read the cited sources, run a list of test questions, then copy the setup as a Python script.</sub></p>
+<sub><code>chat("support-docs")</code>: ask, read the sources, run test questions.</sub>
 
-### Quick start
+</td>
+<td width="50%" valign="top">
 
-```python
-from aws_analyzer import chat
-
-chat()                                     # pick the knowledge base and the model in the window
-chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
-chat("support-docs", data_source="faq")    # ask only one of its data sources (a name or ID)
-chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
-chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
-chat("support-docs", height=800)           # an 800px conversation (else the window fills the browser's height)
-chat("support-docs", assistant=AgentView())   # ✦ Ask: the agent beside the chat, asking why an answer cited what it did
-ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
-ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
-ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])   # every combination on that list, the setups ranked
-ui.use_run()                               # switch to the best setup
-ui.save_runs()                             # keep every run (and every later one) in kb-test-runs.jsonl
-ui.code()                                  # this setup as a Python script, JSON and an AWS CLI command
-```
-
-The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
-browser tab). Without it, or outside Jupyter, every command below still works as a report.
-
-- **The pickers.** The fields at the top: the knowledge base, the model (Claude Haiku 4.5 unless you pick another or
-  pass `model=`) and, when the knowledge base has more than one, the **data source** questions search ("All data sources" by default), and the **files**. Click one to open its
-  list, with a search box that finds a line by name, part of an ID (`K7QJ` finds `K7QJ2M4XNA`), description or
-  provider; Enter picks the first, and a whole knowledge base ID or ARN works even when it isn't listed. Tick files
-  and the next questions search only them (shown as chips; click one to drop it, or **All files**). **⬇ List**
-  beside the files' search box saves the `s3://` path of every file the list shows, one per line, in
-  `<knowledge base>-indexed-files.txt` beside the notebook, with a **⬇ Download** link under the list. Another data
-  source, file or model keeps the conversation; another knowledge base starts a new one.
-- **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
-  one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
-  and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
-  Findings under an answer say which setting to try (Bedrock's "unable to assist" reply, no citations, a guardrail,
-  cut off at `max_tokens`). Follow-ups keep Bedrock's session; **New chat** starts over.
-- **Answer / Retrieve only.** The switch beside the question box. **Retrieve only** sends the same search without
-  the model (Retrieve instead of RetrieveAndGenerate): every passage the question finds, best first, with its score
-  and the start of its text, and no answer. Ask a question both ways to check the search and the answer apart: the
-  search marks the passages the answer to the same question cited (`cited [1]`), and a finding says when the answer
-  came back "unable to assist" although the search found passages (the answer step, not the search, is what to fix).
-  Switching puts your last question back in the box; the settings for the answer (temperature, prompt...) are
-  dimmed while they aren't sent.
-- **Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
-  name for what it does and its path in the request). Change it in place, remove it with ✕, or open **+ Add a
-  setting** to add the common ones with one click, search **every** field by
-  name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
-  the list comes from the installed boto3's description of the API, so nothing is missing. A value that
-  can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
-  newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
-- **Request.** The exact request the next question sends, as a folding tree with your settings highlighted, as
-  JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
-  back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
-  while you were editing without saying so. **Response** shows what came back.
-- **Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
-  model, data source, files and settings, on its own (never as a follow-up), a few at a time, while the window stays
-  usable (**Stop** sends no more). Each question gets a line saying how it did (answered, "unable to assist", no
-  citations, partly grounded, failed) with its grounded share, sources and time, and opens to the full answer. Add
-  `| refund-policy.pdf` after a question to check that the answer cites that file. Cards and findings sum up the run
-  and say which setting to try; change it and **Run** again, and each line says whether that question did better or
-  worse. Before you run, the estimated cost shows beside the button. On **Retrieve only**, the list is searched instead.
-- **Try variations**, in the Test tab, asks the list with every combination of the values you type, one setting
-  per line (`n = 5, 10`, `search_type = SEMANTIC, HYBRID`, `model = haiku, sonnet`, `reranker = none, cohere`, or
-  `data_source = all, faq`), or add with one click. **Run** asks each question with every setup before the next one,
-  so **Stop** leaves them all with the same questions, then ranks the setups: by the expected files cited, then the
-  answers that say something, then the grounded share, the cheaper first when two are as good. Findings say which
-  setup beats yours and by how much, what each setting changed ("search_type=HYBRID did best in each of the 2 groups
-  of setups that differ only in search_type"; "temperature made no difference"), when the lead is small enough to be
-  chance, and which questions no setup could answer. A table shows how each question did with each setup, and
-  **Use this setup** switches to the one you pick. A sweep estimated over $2 asks for a second click.
-- **Runs.** Every test run, newest first, ranked against the other runs of the same questions: open one in the
-  Test tab, switch to its setup, or compare it with the others side by side. **Save** writes them to a file (one JSON
-  line per run, with each answer and its sources) and adds every later run as it finishes; **Load** reads a file
-  back after a kernel restart, or a teammate's.
-- **Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
-  questions, printing each answer and the files it cites; the config as JSON (the request without the question,
-  which `client.retrieve_and_generate(input={"text": question}, **config)` or the AWS CLI's `--cli-input-json` sends);
-  or the AWS CLI command for one question. It follows every change to the knowledge base, model, files and settings.
-
-### Commands (`BedrockChatView`)
-
-`chat()` returns the view behind the window. Its commands share the window's settings and conversation, and an open
-window follows them.
-
-#### Chat
-
-| Command | What it shows |
-|:---|:---|
-| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Runs, Code, Request and Response tabs |
-| `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
-| `retrieve(question)` | Only the search behind an answer (Retrieve, the same settings without the model): every passage found, best first, with its score, and no answer. After `ask()` with the same question, which passages the answer cited, and whether a poor answer comes from the search or the model |
-| `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
-| `transcript()` | The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't) |
-| `last()` | The last answer (or search) in full: every passage, the exact request and response as JSON, and the same call in Python |
-
-#### Test a list of questions
-
-| Command | What it shows |
-|:---|:---|
-| `ask_all(questions=None, *, retrieve_only=None, workers=4, limit=50, label=None)` | Asks a list of test questions with these settings, each on its own (not as a follow-up), and shows how each did: answered or "unable to assist", grounded share, sources, the file it should cite (`"question \| file"`), time and estimated cost, with findings across them all. `ask_all()` asks the last list again and says which questions did better or worse since the last run. `questions` is a list, text with one per line, or a DataFrame with `question` and `expected` columns; `label=` names the run |
-| `sweep(questions=None, *, setups=None, retrieve_only=None, workers=4, limit=50, max_setups=16, max_cost=2.0, label=None, **values)` | Asks the test questions with every combination of the values listed: `sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])`, and `model=`, `data_source=` and `files=` lists too (`None` leaves a setting out), or whole `setups=[{...}, {...}]`. Ranks the setups best first, says which one beats yours, what each setting changed and which questions no setup handled, and shows how each question did with each setup. Each setup becomes a test run. Nothing is sent when it's more than `max_setups` setups or estimated over `max_cost` USD. `retrieve_only=True` sweeps the search alone, for the embedding's cost |
-| `results(run=-1)` | A test run again, as a report that stays in the saved notebook: the last one, or `results(1)` for the first, as `runs()` numbers them. Nothing is asked again |
-
-#### Keep and compare test runs
-
-| Command | What it shows |
-|:---|:---|
-| `runs()` | Every test run so far, newest first: when, its setup, how it did and its estimated cost, ranked against the other runs of the same questions, with the best setup to switch to |
-| `compare_runs(*runs)` | Runs of the same questions side by side, best first, and how each question did in each: `compare_runs(2, 5)`, or `compare_runs()` for every run of the last run's questions |
-| `use_run(run=None)` | Switches to a run's settings, model, data source and files: `use_run()` the best run of the last list, `use_run(7)` run 7 |
-| `save_runs(path=None)` | Adds every test run to a file (JSON Lines, `kb-test-runs.jsonl` by default) and every later run as it finishes, so they outlast a kernel restart. Nothing in the file is changed |
-| `load_runs(path=None)` | Reads saved runs back, after a restart or from a teammate, and lists them as `runs()` does |
-
-#### Settings
-
-| Command | What it shows |
-|:---|:---|
-| `settings()` | Every setting sent with every question, what its value means, where it goes in the request, warnings, and the `chat(...)` call that opens this setup again |
-| `set(name=None, value=None, **values)` | Changes settings: `set(temperature=0.2, n=8)`, or `set("generationConfiguration.performanceConfig.latency", "optimized")` for any field. `None` removes one |
-| `unset(*names)` | Stops sending settings: `unset("temperature", "top_p")` |
-| `fields(match=None)` | Every field RetrieveAndGenerate takes in this boto3: the name `set()` takes, its type and range, what it does and its path. `fields("rerank")` keeps those that mention it |
-| `request(question=None, retrieve_only=None)` | The exact JSON the next question sends, highlighted, with what Bedrock would refuse in it, and the same call in Python. Nothing is sent. `retrieve_only=True` shows the Retrieve request `retrieve()` sends (default: the window's Answer / Retrieve only) |
-| `code(questions=None, retrieve_only=None)` | This setup as code to copy and run anywhere: a Python script (boto3 only) that asks your test questions and prints each answer with the files it cites, the config as JSON (the request without the question), and the AWS CLI command for one question. Nothing is sent |
-
-#### Knowledge base and model
-
-| Command | What it shows |
-|:---|:---|
-| `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base (a new conversation), the model, or what questions search (the same one): `use(data_source="faq")`, `use(files=["refund-policy.pdf", "faq/returns.md"])` (names, paths in the bucket or `s3://` paths), or `"all"` |
-| `files(match=None)` | The knowledge base's files to pick from: name, folder, data source, whether it's indexed, when it changed, and which ones questions search. `files("refund")` keeps those whose path contains it |
-| `save_file_list(match=None, path=None, link="s3", expires=3600)` | Saves the knowledge base's files as a text file, one per line, sorted by path, with a **⬇ Download** link that saves it on your computer: each file's `s3://` path, `link="https"` a link that opens it in a browser (presigned, for `expires` seconds) or `link="key"` its path in the bucket. `match=` keeps those whose path contains it; `path` defaults to `<knowledge base>-files.txt` beside the notebook |
-| `kbs(match=None)` | The knowledge bases in the region: name, ID, status, description and when each changed; `match=` finds them by name, ID or description |
-| `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
-| `inference_profiles(match=None)` | Every inference profile in the region, yours and AWS's cross-region ones (US, Europe, Global, ...): what to pass as `model=`, the model each serves, the regions it sends requests to and $ per 1M tokens. Says when a global profile serves the model in use for less; `inference_profiles("global")` keeps those whose ID, name, kind or model holds it |
-
-### Settings with short names
-
-`chat()` and `set()` take these as keywords. The API's own names (`maxTokens`, `overrideSearchType`) and paths work
-too, and values are forgiving (`"0.2"`, `"hybrid"`, JSON text or a Python dict).
-
-| Name | What it does |
-|:---|:---|
-| `n` | Passages to retrieve, 1 to 100 (Bedrock's default is 5) |
-| `search_type` | `"HYBRID"` (meaning and exact words) or `"SEMANTIC"` |
-| `filter` (or `where`) | Only documents whose metadata matches: `{"team": "billing"}`, `{"year": (">=", 2024)}` (in JSON, `[">=", 2024]`), or a Bedrock `RetrievalFilter`. The same vocabulary as `bedrock_kb.py`'s [`where=`](#filters-where) |
-| `reranker`, `rerank_n` | Re-order the passages with `"cohere"` (Cohere Rerank 3.5) or `"amazon"` (Amazon Rerank 1.0), or a model ID, and keep the best `rerank_n` |
-| `temperature`, `top_p` | Randomness, 0 to 1. Newer Claude models take one of the two |
-| `max_tokens`, `stop` | The longest answer in tokens; up to 4 stop sequences |
-| `prompt` | Your own prompt template. It needs `$search_results$`; keep `$output_format_instructions$` or answers lose their citations. Adding it in the window starts from `bedrock_chat.DEFAULT_PROMPT` |
-| `model_fields` | The model's own settings, passed as they are: `{"top_k": 50}` for Claude |
-| `guardrail_id`, `guardrail_version` | A Bedrock guardrail that screens the question and the answer |
-| `latency` | `"optimized"` for latency-optimized inference, where the model offers it |
-| `query_decomposition` | `True`: Bedrock splits a complicated question into simpler searches |
-| `orchestration_prompt` | The prompt of the step that rewrites the question before searching |
-| `kms_key` | A KMS key that encrypts the conversation Bedrock keeps |
-
-Every other field goes by its path from `knowledgeBaseConfiguration`, e.g.
-`set("orchestrationConfiguration.inferenceConfig.textInferenceConfig.temperature", 0)`.
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>BedrockChatAnalyzer</code>): requests and answers as Python objects</summary>
-
-```python
-a = ui.answers[-1]                    # Answer: the conversation's answers (and searches), oldest first
-a.text, a.citations, a.sources, a.grounded_share
-a.retrieve_only                       # a search: no text, and a.sources is every passage found, with p.score
-a.request, a.response                 # exactly what was sent and what came back
-a.to_df()                             # one row per cited source
-ui.values                             # the settings: {'n': 8, 'temperature': 0.2, ...}
-
-core = ui.core                        # or BedrockChatAnalyzer(region="us-west-2", profile="dev")
-params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
-a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
-a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)  # a follow-up
-a = core.ask("support-docs", "refund window?", data_source="faq")       # one data source: a.data_sources
-a = core.ask("support-docs", "refund window?", files=["refund-policy.pdf"])   # only these files: a.files
-r = core.retrieve("support-docs", "refund window?", {"n": 8})    # only the search: r.sources, ranked, with scores
-core.request("support-docs", "refund window?", retrieve_only=True)      # the Retrieve request, not sent
-core.data_sources("support-docs")     # [DataSource]: ID, name, status
-core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
-core.save_file_list(core.files("support-docs"), "files.txt")   # SavedFileList: a line per file
-core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
-core.schema().fields["temperature"]   # Field: path, type, range, what it does
-
-batch = core.ask_all("support-docs", ["refund window? | refund-policy.pdf", "gift returns?"], {"n": 8},
-                     model="sonnet", workers=4)   # Batch: each question asked on its own
-batch.items[0].answer, batch.items[0].found, batch.items[0].cost   # its Answer, where the file came up ([n]), USD
-batch.failed, batch.cost, batch.to_df()                           # what Bedrock refused, the total, one row each
-ui.batches                            # every test run of the view, oldest first; ui.questions: the Test tab's list
-
-from aws_analyzer.bedrock_chat import sweep_setups
-setups = sweep_setups({"n": [5, 10], "model": ["haiku", "sonnet"]})   # [{'n': 5, 'model': 'haiku'}, ...]
-sweep = core.sweep("support-docs", ["refund window? | refund-policy.pdf"], setups, {"n": 5})   # Sweep: a Batch each
-sweep.ranked                          # [(Batch, RunScore)], best first: answered, grounded, hits, MRR, failed, cost
-sweep.best, sweep.to_df()             # the best setup's run; one row per setup
-ui.sweeps                             # every sweep of the view; ui.log: the file every run is added to
-```
-
-The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
-`build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`,
-`parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`,
-`describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
-`files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `file_list_lines`, `describe_setting`,
-`answer_cost`, `cited_ranks`, and the findings: `settings_findings`, `answer_findings` and `compare_findings` (a
-search and an answer to the same question). For test runs: `parse_questions`, `format_questions`, `question_list`,
-`match_expected`, `expected_at`, `item_verdict`, `batch_estimate`, `batch_findings` and `batch_changes` (two runs of
-the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations`, `format_variations`, `apply_setup`,
-`sweep_estimate`, `run_setup`, `varied_setups`, `setup_label`, `shared_questions`, `run_score`, `rank_runs`,
-`ranking_findings`, and `run_record`, `run_from_record` and `read_runs` (the file `save_runs()` writes). For the code:
-`config_of`, `config_json`, `python_script` and `cli_command`.
-
-</details>
-
-<details>
-<summary><b>Cost and limits</b>: how answers are priced</summary>
-
-- RetrieveAndGenerate doesn't report tokens, so they're estimated from characters (the question, the prompt and
-  the passages retrieved; only the cited ones come back, so their average size stands in for the rest) and labelled
-  as estimates. The estimate adds the question's embedding and, with a reranker, the reranking.
-- A retrieve-only search costs the question's embedding and, with a reranker, the reranking: no model is called.
-- Prices are the same us-east-1 list prices as `bedrock_kb.py` (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES`,
-  `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
-  in the table shows its cost as unknown.
-- Bedrock takes questions of up to 1,000 characters; the chat says so before sending a longer one.
-- A test run (`ask_all()`, the Test tab) costs what its questions would cost asked one by one, and the window shows
-  an estimate before you run it (about 300 tokens per passage and per answer). It asks up to 50 questions
-  (`ask_all(limit=None)` for all of them), four at a time; the client slows down and retries when Bedrock throttles,
-  and a question that still fails is listed with the reason while the rest are asked.
-- A sweep costs its setups' runs added up: 4 setups × 20 questions is 80 answers. It's estimated before anything is
-  sent and refused over $2 (`max_cost=`; the window asks for a second click), and up to 16 setups are asked at a time
-  (`max_setups=`). Sweeping search settings with `retrieve_only=True` costs only the questions' embeddings (and
-  reranking), so it's the cheap way to pick them before trying models.
-- `save_runs()` writes a local file next to the notebook; it only ever adds lines to it, and nothing goes to AWS.
-- `save_file_list()` and the Files list's **⬇ List** write one `.txt` file next to the notebook (or where you say),
-  replacing a file of that name; nothing goes to AWS.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what needs which</summary>
-
-| Permission | Used by |
-|:---|:---|
-| `bedrock:ListKnowledgeBases` | The knowledge base list, `kbs`, and finding a knowledge base by name (an ID works without it) |
-| `bedrock:ListDataSources` | The data source list, and `data_source=` by name (an ID works without it) |
-| `bedrock:ListKnowledgeBaseDocuments` | The **Files** list, `files`, `save_file_list`, and `files=` by name (an `s3://` path works without it) |
-| `s3:GetObject` on the knowledge base's files | Only to open the links `save_file_list(link="https")` writes, in your browser |
-| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
-| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model list, `models`, `inference_profiles`, and turning `model="sonnet"` into an ID |
-
-A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read stays empty,
-with a note naming the missing permission, and its search box takes an ID instead. The
-[chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html#permissions) has a ready-made IAM policy.
-
-</details>
-
-## Amazon SageMaker
-
-<img src="docs/images/aws/sagemaker.svg" width="22" height="22" alt="" align="absmiddle"> **The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
-costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, its Python
-environments (and a new one with another Python version, in one call), and which notebooks, apps and endpoints in
-the region look forgotten. And what you launch from it: why a training job failed and what to change, which
-endpoints nobody calls and what they cost a month, and where a pipeline run broke.
-
-📄 [`src/aws_analyzer/sagemaker_env/`](src/aws_analyzer/sagemaker_env/) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
+<b>SageMaker notebook</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sagemaker-instance-dark.webp">
   <img src="docs/images/sagemaker-instance-light.webp" alt="instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels">
 </picture>
 
-<p align="center"><sub><code>ui.instance()</code> in a Studio JupyterLab space: about $80 spent so far on a GPU that has sat idle, and nothing will stop the app tonight.</sub></p>
+<sub><code>ui.instance()</code>: about $80 spent so far on a GPU that sits idle.</sub>
 
-The file isn't called `sagemaker.py`, so it doesn't hide the SageMaker Python SDK, which is also imported as
-`sagemaker`.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-### Quick start
-
-Every command works with boto3 alone, so on SageMaker there's nothing to install.
-
-```python
-from aws_analyzer import SageMakerView
-
-ui = SageMakerView()             # uses the notebook's execution role and region
-ui.help()                        # every command, grouped by task
-
-ui.instance()                    # this notebook: type, cost so far, idle shutdown, CPU / memory / disk / GPU now
-ui.disk()                        # what fills the disk, and the caches and trash that are safe to clear
-ui.running()                     # everything billing by the hour in the region, and what looks forgotten
-ui.access()                      # who opened, started or stopped notebooks in the last 30 days, and from where
-ui.instance("old-experiment")    # another notebook instance, or a Studio space by name
-
-ui.envs()                        # the Python environments and Jupyter kernels here
-ui.new_env("3.11")               # a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops
-ui.new_env("3.12", packages="pandas boto3")   # with packages in it ('-r requirements.txt' works too)
-
-ui.training_jobs()               # the training jobs of the last 7 days, and why each failed one failed
-ui.training_job("churn-xgb-0517")   # one job: why it failed and what to change, the error in its log, its timeline
-ui.endpoints()                   # every endpoint: requests in 30 days, $/month, and the idle ones with the delete command
-ui.pipelines()                   # the pipelines and how their latest runs went
-ui.pipeline_run("churn-pipeline")   # its latest run: the step that broke, as a graph and a waterfall
-```
-
-> [!NOTE]
-> `instance()`, `disk()` and `envs()` read the machine they run on, so run them in the notebook you want to know
-> about: a notebook instance, or a Studio JupyterLab, Code Editor or Studio Classic app. Anywhere else,
-> `instance("name")` and `running()` still work. Nothing in the file stops, deletes or changes anything in AWS, or
-> removes a file; where that would help, the report shows the command. The one thing it makes is the Python
-> environment `new_env()` is asked for, and its Jupyter kernel.
-
-### A new Python environment in one call
-
-To try your code on Python 3.11 (or any other version), `new_env("3.11")` makes the environment, puts it where it
-survives the notebook stopping, and adds it to Jupyter's kernel menu as **Python 3.11 (py311)**. Pick it with
-**Kernel > Change Kernel**, or start a notebook with it from the Launcher. It takes a minute or two.
-
-- **Where it goes**: on a notebook instance only `~/SageMaker` is kept when it stops, so environments go in
-  `~/SageMaker/envs`; in Studio the home folder is kept, so they go in `~/.conda/envs`. One made the usual way
-  (`conda create -n ...`) lands on the disk that's reset, and `envs()` warns about it.
-- **What makes it**: the first of mamba, conda, micromamba and uv it finds (SageMaker has conda; `tool="uv"` picks
-  uv). conda ones use conda-forge, which needs no license or terms to accept. `packages=` pip installs what you list.
-- **After a notebook instance restarts**, the environment is there but its kernel isn't (kernels live in `~/.local`,
-  which is reset). `new_env("3.11")` again only adds the kernel back, in seconds; the report also has a lifecycle
-  configuration that does it at every start.
-- `new_env("3.11", dry_run=True)` shows the commands without running them, to run in a terminal yourself. If a step
-  fails, the report says why (no internet, a full disk, a version or package that doesn't exist) and shows the end of
-  its output.
-
-### Commands (`SageMakerView`)
-
-Grouped the way `ui.help()` lists them.
-
-#### This notebook
-
-| Command                                 | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| :-------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `instance(name=None)`                   | The notebook you're in: instance type with its vCPUs, memory and GPUs, price per hour, how long it has run and what that cost, what a month of it costs if it's never stopped, and **whether anything stops it when idle** (a notebook instance's auto-stop lifecycle configuration, or the Studio domain's idle shutdown), with the commands that turn it on. Then the machine right now: CPU load, memory, each disk and whether it survives a stop, GPU memory and use, the Jupyter kernels and the memory they hold, the biggest processes, and the Python and package versions. Settings: role, network, lifecycle configuration, image or platform, storage volume, space and domain. Findings: no idle shutdown, a disk or memory nearly full (and the other kernels holding memory), an idle GPU (and the CPU type with the same vCPUs and memory, with the saving), an instance far bigger than what's in use, Amazon Linux 1. `name=` shows another notebook instance or Studio space (`"d-abc123/analysis"` when two domains have one), without its machine |
-| `disk(path=None, top=20, limit="200k")` | How full the disk is and what fills it: the biggest folders as a tree three levels deep, the biggest files and when they last changed, and **the caches and trash that are safe to clear** (Jupyter's trash, pip and conda caches, Hugging Face and PyTorch downloads, notebook checkpoints), each with the command that empties it. Findings: a nearly full disk (with the command that makes the volume bigger and what that costs a month), what can be cleared, big files untouched for 90 days (and what they'd cost in S3). The default folder is where your notebooks live: `~/SageMaker` on a notebook instance, `/home/sagemaker-user` in Studio                                                                                                                                                                                                                                                                                                                                                                                                              |
-
-#### Python environments
-
-| Command                                                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `envs()`                                                                    | The Python environments on this machine (conda environments and virtual environments) with their Python version, where each is and **whether it's kept when the notebook stops**, the Jupyter kernel that starts each, and every kernel with the environment it starts. Findings: environments made since the machine started on the disk that's reset (they go when it stops, with the call that makes them again where they're kept), kernels that start a Python that isn't there any more (with the command that takes them off the menu), environments in the kept folder with no kernel (after a notebook instance restarts), and nothing to make an environment with |
-| `new_env(python="3.11", name=None, packages=None, path=None, tool="auto", dry_run=False)` | **Makes a Python environment with the version you ask for** (`"3.11"`, `"3.12.4"`, `"py311"`) in a folder that's kept when the notebook stops (`~/SageMaker/envs` on a notebook instance, `~/.conda/envs` in Studio), pip installs `packages=` in it (`"pandas boto3"`, a list, `"-r requirements.txt"`), and adds it to Jupyter's kernel menu. Then each step, how long it took, and the commands it ran. Run again on an environment that's there, it only installs `packages=` and adds the kernel back. `dry_run=True` shows the commands instead. On a notebook instance, also the lifecycle configuration that adds the kernels back at every start. A failed step shows why and the end of its output |
-
-#### Your account
-
-| Command                         | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `running(metrics=True, days=7)` | Everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor, Studio Classic), endpoints, and training and processing jobs, with the instance, price per hour, how long each has run and whether it stops when idle, and each endpoint's requests over the last `days` days from CloudWatch. Stopped notebook instances are listed too, because their volumes are still billed. Findings, each with the command that stops it: notebooks and apps running for over 12 hours with nothing to stop them, endpoints with no requests, and the storage that stopped notebook instances keep |
-| `access(name=None, days=30)`   | Who got into your notebooks, from CloudTrail's event history (90 days at most): every sign-in link to a notebook instance or Studio, every start and stop, and every try AWS refused, with who, when and the IP address it came from, a row per person and a row per event. `name` keeps one notebook instance or space. Findings: refused tries (with the CloudTrail call that shows what else that identity did), sign-ins by the account's root user, and internet addresses only one sign-in came from. It shows who got in, not what they did inside Jupyter |
-
-#### Training jobs
-
-| Command                                         | Shows |
-| :---------------------------------------------- | :---- |
-| `training_jobs(since="7d", status=None, limit=100)` | The region's training jobs made since `since` (`"24h"`, `"30d"`, a date, or `None` for all), newest first: status, when it was made, how long it ran, its instances, what it cost (billable time at the instances' price) and, for a failed one, why in a few words. `status=` keeps one status. Findings: each failed job with its reason and the call that explains it, a kind of failure that keeps happening, jobs close to their time limit |
-| `training_job(name, lines=1000)`                | **Why one job failed, in plain words, and what to change**: a missing package (add it to `requirements.txt`), the instance or the GPU running out of memory (with a type that has twice the memory), a full disk, no capacity for the instance type, the account's quota, the time limit, a spot interruption, the role unable to read S3, input data that isn't there. Then the error its log ends in (the Python traceback), what it went through (starting, downloading, training, uploading) and how long each took, the billable time and cost, the final metrics, a table of each instance's log and the log itself (its last `lines` lines per instance, from CloudWatch Logs), and its data, settings and hyperparameters. Also: a long wait for instances (a warm pool), a long download (`input_mode='FastFile'`), and what managed spot training would have saved |
-
-#### Endpoints
-
-| Command                | Shows |
-| :--------------------- | :---- |
-| `endpoints(days=30)`   | **Which endpoints are idle and still costing you money**: every endpoint in service with its instances, what it costs a month if left on, its requests and 5xx errors over the last `days` days (CloudWatch, per UTC day) and when it was last called, the idle ones first. Findings, each with the command to run: endpoints with no requests (and what each costs a month; deleting keeps the configuration, so the command that brings it back too), endpoints nobody has called for a week, barely used ones that serverless inference would be cheaper for, and endpoints failing more than 1% of requests (with the command that tails their container's log) |
-
-#### Pipelines
-
-| Command                           | Shows |
-| :-------------------------------- | :---- |
-| `pipelines(runs=5)`               | The region's pipelines, the most recently run first, with how their latest `runs` runs went (✓ ✗ ▶) and why the latest one failed. Findings: pipelines whose latest run failed, and how many runs in a row |
-| `pipeline_run(pipeline, run=None)` | **Where a pipeline run broke**: the step that failed and why, with the call that shows its job's log (`training_job(...)` for a training step, the `aws logs tail` command for a processing step), the steps it never reached and the command that retries the run from the failed step; the steps as a graph coloured by how each went (with a condition's if and else branches), a waterfall of when each ran, and a table of the steps with their jobs. `run=1` is the run before the latest; an ARN or display name works too |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>SageMakerAnalyzer</code>): the notebook, the machine and what's running, as Python objects</summary>
-
-`ui.core` is the `SageMakerAnalyzer`. Every UI command has a data method on it:
-
-```python
-sm = ui.core                                          # or SageMakerAnalyzer(region="eu-west-1", profile="dev")
-
-report = sm.instance()                                # InstanceReport: .env, .notebook, .machine, .identity
-report.notebook.instance_type, report.notebook.idle   # 'ml.g5.2xlarge', 'off'
-report.machine.memory_share, report.machine.gpus      # 0.37, [GPUInfo(name='NVIDIA A10G', busy=0.0, ...)]
-sm.notebook("old-experiment")                         # NotebookInfo for any notebook instance or Studio space
-sm.environment()                                      # Environment: where this code runs, from SageMaker's metadata
-sm.machine()                                          # Machine: this machine right now (local reads only)
-
-d = sm.disk("~/SageMaker", limit=None)                # DiskReport: folders, largest files, caches you can clear
-d.to_df()                                             # one row per folder
-
-e = sm.environments()                                 # EnvReport: .envs, .kernels, .tools, .folder
-e.to_df()                                             # one row per Python environment
-plan = sm.env_plan("3.11", packages="pandas")         # EnvPlan: where it goes, what makes it, .steps (the commands)
-result = sm.create_env(plan)                          # EnvResult: runs them; .ok, .python, .failed
-
-r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
-r.to_df()                                             # one row per notebook, app, endpoint and job
-
-a = sm.access("old-experiment", days=90)              # AccessReport: .events (AccessEvent), .sign_ins, .refused
-a.to_df()                                             # one row per sign-in, start and stop: who, when, IP
-
-jobs = sm.training_jobs(since="30d")                  # TrainingList: .jobs (TrainingJob), .cut_short, .errors
-jobs.to_df()                                          # one row per job: status, seconds, billable seconds, usd
-t = sm.training_job("churn-xgb-0517")                 # TrainingDetail: .job, .hosts (HostLog per instance)
-t.hosts[0].error, t.hosts[0].lines                    # the traceback its log ends in, and every line read
-e = sm.endpoints(days=30)                             # EndpointReport: .endpoints (EndpointUse: requests per day)
-e.to_df()                                             # one row per endpoint: $/month, requests, last called
-run = sm.pipeline_run("churn-pipeline")               # PipelineRun: .steps (PipelineStep: status, job, waits for)
-```
-
-The analysis functions are pure (no AWS calls), so they also work on responses you already have:
-`parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`,
-`parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`,
-`parse_process`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `folder_tree`,
-`idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`,
-`env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, `parse_access_event` (a CloudTrail
-LookupEvents item), `for_notebook`, `access_by_person`, `is_public_ip`, and the findings: `instance_findings`,
-`disk_findings`, `running_findings`, `env_findings`, `plan_findings`, `access_findings`. For jobs:
-`parse_training_detail` (a DescribeTrainingJob response), `host_log`, `find_error` (the traceback a log ends in),
-`short_reason`, `failure_kind`, `why_it_failed`, `endpoint_monthly`, `is_idle`, `parse_definition` (a pipeline
-definition's steps and what each waits for), `parse_pipeline_step`, `merge_steps`, `pipeline_layout`,
-`step_waterfall`, `step_next`, and `training_findings`, `training_list_findings`, `endpoint_findings`,
-`pipeline_findings`, `pipelines_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost and limits</b>: the prices used, and what's measured and what's estimated</summary>
-
-- Costs are estimates at us-east-1 on-demand list prices, read from the AWS Price List API on 2026-09-27.
-  `INSTANCE_TYPES` holds the price per hour of 134 instance types, with their vCPUs, memory and GPUs; a type costs
-  the same per hour as a notebook instance, a Studio app, an endpoint or a job. `SAGEMAKER_PRICES` adds storage per
-  GB-month: $0.14 for a notebook instance's volume, $0.112 for a Studio space's, and S3 Standard's $0.023 to
-  compare with. For another region or a discount, pass your own:
-  `SageMakerAnalyzer(prices={"ml.g5.xlarge": 1.21, "notebook_storage": 0.15})`. A type that isn't in the table shows
-  its cost as unknown, and every report says whether it used list prices or yours.
-- "Cost since start" is the price per hour times how long it has run: since boot for the notebook instance you're
-  in, since the app started for a Studio app, and since its last change (about when it last started) for any other
-  notebook instance. Spot training jobs cost less than the on-demand price shown.
-- A training job's cost is its billable time (what SageMaker bills, which already counts spot's saving) times its
-  instances' price; a job still running is priced on demand for its time so far. The saving managed spot training
-  would have made is an estimate at 70%. An endpoint's cost a month is its instances' price for 730 hours.
-- `endpoints()` sums CloudWatch's daily numbers, so "last request" is the UTC day of the last one. `training_job()`
-  reads the last 1,000 lines of at most 8 instances' logs (`lines=` for more); CloudWatch Logs bills reads by the
-  GB scanned, which for a training log is a fraction of a cent.
-- `instance()` reads CPU load (the 15-minute average) and memory as they are now, so the suggestion of a smaller
-  instance says "if that's typical". Whether a notebook instance stops when idle is read from its lifecycle
-  configuration script: AWS's auto-stop-idle sample and scripts like it.
-- `disk()` stops after 200,000 files by default and says so (`limit=None` measures everything). It stays on one disk
-  and doesn't follow links.
-- `new_env()` downloads Python and the packages (from conda-forge, or with uv from PyPI and GitHub), so the notebook
-  needs internet access or a package mirror. An environment takes from about 300 MB to several GB of the disk it's
-  on. Each command may run for 30 minutes.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and which command needs which</summary>
-
-Read-only, per command:
-
-| Permission                                                                                                                                                                                                                                                                             | Used by                                           |
-| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
-| `sagemaker:DescribeNotebookInstance`, `sagemaker:DescribeNotebookInstanceLifecycleConfig`                                                                                                                                                                                              | `instance` on a notebook instance, `running`      |
-| `sagemaker:DescribeApp`, `sagemaker:DescribeSpace`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile`                                                                                                                                                                        | `instance` in Studio; `running` reads the domains |
-| `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps`                                                                                                                                                                                                                  | `instance("space name")`                          |
-| `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running`                                         |
-| `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`, `endpoints`: endpoint requests         |
-| `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`                                                                                                                                                                                                                          | `training_jobs`, `training_job`                   |
-| `logs:DescribeLogStreams`, `logs:GetLogEvents`                                                                                                                                                                                                                                         | `training_job`: its log                           |
-| `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`                                                                                                                                                                                            | `endpoints`                                       |
-| `sagemaker:ListPipelines`, `sagemaker:ListPipelineExecutions`                                                                                                                                                                                                                          | `pipelines`, `pipeline_run`                       |
-| `sagemaker:DescribePipelineExecution`, `sagemaker:DescribePipelineDefinitionForExecution`, `sagemaker:ListPipelineExecutionSteps`                                                                                                                                                       | `pipeline_run`                                    |
-| `cloudtrail:LookupEvents`                                                                                                                                                                                                                                                              | `access`                                          |
-
-`sts:GetCallerIdentity` (who you're signed in as) needs no permission, `disk()` and `envs()` only read local
-files, and `new_env()` only runs conda (or uv) and pip on the notebook. Anything
-you can't read shows up as a note instead of an error. The `AmazonSageMakerFullAccess` managed policy, which many
-execution roles have, includes the `sagemaker:` permissions. The
-[SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html#permissions) has a ready-made IAM
-policy that covers every command.
-
-</details>
-
-## Amazon OpenSearch
-
-<img src="docs/images/aws/opensearch.svg" width="22" height="22" alt="" align="absmiddle"> **Vector (k-NN) indexes in OpenSearch Service domains and Serverless collections.** Each vector field in plain
-English, whether its graphs fit in the memory the nodes have, documents without a vector, vectors that repeat or are
-all zeros, and the documents nearest a question.
-
-📄 [`src/aws_analyzer/opensearch/`](src/aws_analyzer/opensearch/) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
+<b>OpenSearch index</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/opensearch-index-info-dark.webp">
   <img src="docs/images/opensearch-index-info-light.webp" alt="index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; a bar of its graphs against the k-NN memory, past the limit in red; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on">
 </picture>
 
-<p align="center"><sub><code>ui.index_info("vectors-prod/support-docs")</code>: 27,000 documents vector search can't find, and graphs that need 15.7 GB of memory where the nodes have 12 GB.</sub></p>
+<sub><code>ui.index_info(...)</code>: 27,000 documents without a vector, graphs that don't fit.</sub>
 
-### Quick start
+</td>
+<td width="50%" valign="top">
 
-Every command works with boto3 alone, so on SageMaker there's nothing to install. No OpenSearch client library is
-needed either: requests to a domain or collection are signed with the notebook's role by botocore.
-
-```python
-from aws_analyzer import OpenSearchView
-
-ui = OpenSearchView()                        # uses the notebook's execution role and region
-ui.help()                                    # every command, grouped by task
-
-ui.overview()                                # every domain and Serverless collection: size, cost, warnings
-ui.indexes("vectors-prod")                   # its indexes: vector fields, documents without vectors, memory
-ui.index_info("vectors-prod/support-docs")   # one vector index in plain English, and the query to copy
-ui.use("vectors-prod/support-docs")          # later commands use this index...
-ui.sample()                                  # ...a few documents, and how healthy their vectors are
-ui.search("how do I get my money back?")     # the documents nearest a question (embedded with Bedrock)
-ui.search(like="art-00156")                  # the documents nearest an existing one: no model needed
-ui.search(vector=model.encode("refunds"), where={"lang": "en"})   # your own vector, filtered
-ui.explore()                                 # all of it in a window, by clicking (Jupyter, ipywidgets)
-```
-
-> [!NOTE]
-> An index is named like a path, `"domain/index"` or `"collection/index"`; a collection ID, an ARN or the endpoint
-> URL your code already uses work too, and so does any OpenSearch you run yourself (`indexes("https://host:9200")`,
-> with `OpenSearchAnalyzer(auth=("user", "password"))` for a user name and password). The notebook must be able to
-> reach the endpoint: a domain inside a VPC answers only there. Nothing in the file writes: it sends GET requests,
-> and POSTs only to `_search` and `_count`, refusing anything else before it's sent.
-
-### Commands (`OpenSearchView`)
-
-Grouped the way `ui.help()` lists them.
-
-#### Domains and collections
-
-| Command                              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| :----------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `overview(match=None, metrics=True)` | Every domain and Serverless collection in the region, from the AWS APIs alone: each domain's engine and version, data nodes, storage, whether it's in a VPC, **the memory its nodes have for vector graphs** and estimated monthly cost; each collection's type, standby replicas, network access and key; and **what Serverless bills even when idle** (its OCU minimum) next to what it used in the last 24 hours and the most it can scale to. Warnings: a domain open to the internet, among others |
-| `use(where)`                         | Sets the domain or collection (`"vectors-prod"`), or an index in it (`"vectors-prod/support-docs"`), that later commands use when you don't pass one                                                                                                                                                                                                                                                                                                                                              |
-
-#### Indexes
-
-| Command                              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `indexes(target=None, hidden=False)` | Every index with its documents, size and shards, and each vector field's dimensions, engine and similarity, how many documents have a vector, and **the memory its graphs need, against what the nodes have**; cluster health and what the k-NN plugin has in memory now. Findings: the domain's own (version, instances, storage, encryption), graphs that don't fit, a tripped k-NN circuit breaker or graphs dropped from memory, documents without a vector, a deprecated engine                                                                                                       |
-| `index_info(index=None)`             | One index in plain English: each vector field's engine, algorithm and settings (`m`, `ef_construction`, `ef_search`, compression), its similarity and **what a score means**, how many documents have a vector, the memory the graphs need and what on-disk mode or fp16 would need instead, the fields you can filter on (each with its `where=`), and the k-NN query as opensearch-py code. Findings: `index.knn` off, nmslib, documents without a vector, graphs that don't fit, no replicas, too many small shards or segments, many deleted documents, an index a Bedrock knowledge base writes |
-
-#### Vectors
-
-| Command                                                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                              |
-| :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample(index=None, n=10, check=200, where=None)`                           | A few random documents with their text, source and fields (each vector as its dimensions and length), and a check of 200 documents' vectors: one size, unit length or not, **all-zero vectors and exact repeats**. `where={"embedding": ("missing",)}` shows documents with no vector                                                                                                               |
-| `search(query=None, index=None, vector=, like=, k=10, where=, field=, model=, embed=)` | The k nearest documents with their score and **the similarity it stands for** (cosine, inner product or distance), text, source and fields. The question is embedded with a Bedrock model (Titan Text Embeddings V2 for 256, 512 or 1,024 dimensions, or `model=`) or `embed=your_function`; `vector=` searches with your own vector and `like="doc-id"` with a document's own. Notes repeated texts and a query vector that doesn't look like the stored ones |
-
-#### Explore by clicking
-
-| Command                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                  |
-| :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(where=None, tab=None, height=None)` | A window you use by clicking: every domain and Serverless collection (status, k-NN memory, cost, warnings; search, chips and sortable columns), and for the one you open its indexes (each as `index_info()` shows it), a random sample of an index's documents with **the ones without a vector first** (click one for its text and fields, and **≈ Nearest documents**), and a search box for the documents nearest a question or a document. `where="vectors-prod/support-docs"` opens one index; `x.search("a question", model=...)`, `x.document(id)`, `x.index(name)` and `x.open(...)` drive it from code. Needs Jupyter and ipywidgets; outside Jupyter it shows the reports. `OpenSearchExplorer(...)` is the same window |
-
-### Filters (`where=`)
-
-`where=` works on `search` (during the search, with faiss and lucene) and `sample`. It takes a dict, and every
-condition must match:
-
-| `where=`                                              | Means                                                                                    |
-| :---------------------------------------------------- | :--------------------------------------------------------------------------------------- |
-| `{"lang": "en"}`                                      | `lang` is `en` (a text field is matched through its `.keyword` sub-field when it has one) |
-| `{"product": ["store", "app"]}`                       | one of these, also `("in", [...])`                                                       |
-| `{"year": (">=", 2024)}`                              | also `"="`, `"!="`, `">"`, `"<"`, `"<="`                                                 |
-| `{"updated": ("between", "2026-01-01", "2026-06-30")}` | both ends included                                                                       |
-| `{"metadata.source": ("prefix", "s3://acme/refunds")}` | starts with                                                                              |
-| `{"text": ("contains", "gift card")}`                 | the words, in a text field                                                               |
-| `{"embedding": ("missing",)}`                         | the field isn't set, also `("exists",)`                                                  |
-
-Query DSL passes through unchanged (`where={"bool": {...}}`). A field the index doesn't have is reported with the
-closest names, and `index_info()` lists the fields you can filter on.
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>OpenSearchAnalyzer</code>): mappings, vectors and search results as Python objects</summary>
-
-`ui.core` is the `OpenSearchAnalyzer`. Every UI command has a data method on it:
-
-```python
-aos = ui.core                                          # or OpenSearchAnalyzer(region="eu-west-1", profile="dev")
-
-ov = aos.overview()                                    # Overview: .domains, .collections, .ocus
-report = aos.indexes("vectors-prod")                   # StoreReport: .indexes, .vector_indexes, .health, .knn
-info = aos.index("vectors-prod", "support-docs")       # IndexInfo: .vectors, .fields, .with_vector, .settings
-info.vector().dimension, info.vector().space           # 1024, 'cosinesimil'
-
-s = aos.sample("vectors-prod", "support-docs", 500)    # Sample: .docs, .checks["embedding"], .to_df()
-r = aos.search("vectors-prod", "support-docs", vector=v, k=20, where={"lang": "en"})
-r.to_df()                                              # rank, id, score, similarity and the fields
-aos.embed("refund policy", model="cohere")             # Embedding: .vector, .tokens, .cost
-aos.request("vectors-prod", "support-docs/_search", {"query": {"match": {"text": "refund"}}})   # any read
-```
-
-The analysis functions are pure (no AWS calls), so they also work on mappings and vectors you already have:
-`parse_mapping`, `read_settings`, `vector_memory`, `index_vector_memory`, `knn_memory_limit`, `check_vectors`,
-`score_to_similarity`, `build_filter`, `knn_query`, `query_python`, `parse_location`, `domain_monthly_cost`,
-`serverless_minimum`, and the findings: `domain_findings`, `collection_findings`, `index_findings`, `store_findings`,
-`knn_findings`, `vector_findings`, `search_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost, memory and limits</b>: the prices used, and what's measured and what's estimated</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-05. `INSTANCE_TYPES`
-  holds the hourly price, vCPUs and memory of 189 OpenSearch Service instance types; a domain costs its data, master
-  and UltraWarm nodes plus each data node's EBS storage (`OPENSEARCH_PRICES`: gp3 $0.122 per GB-month, gp2 $0.135).
-  IOPS and throughput above gp3's baseline, UltraWarm storage and data transfer aren't included. For another region
-  or a discount, pass your own: `OpenSearchAnalyzer(prices={"r6g.large.search": 0.195, "gp3": 0.146})`.
-- Serverless bills $0.24 per OCU-hour, indexing and search alike, and at least 2 OCUs (1 without standby replicas)
-  for each group of collections that share an encryption key, a type and the standby setting. `overview()` uses the
-  OCUs CloudWatch saw in the last 24 hours when it can read them, and never less than that minimum. Storage is
-  $0.024 per GB-month on top.
-- Vector memory is OpenSearch's own sizing rule: HNSW needs 1.1 × (bytes per vector + 8 × `m`) per vector, for every
-  copy. The memory a domain has for graphs is half of what the Java heap leaves on each data node (the heap gets half
-  the RAM, up to 32 GiB): about 4 GB on an `r6g.large.search`. On a domain, the k-NN plugin's own numbers (graph
-  memory in use, a tripped circuit breaker, graphs dropped) come from `_plugins/_knn/stats`.
-- `search()` with a text embeds it with Bedrock: Titan Text Embeddings V2 is $0.02 per million tokens, so a question
-  costs far less than a cent; the report shows the tokens and cost. The reports read only what they show:
-  `indexes()` one count per vector field, `sample()` 200 documents, `search()` one search.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                                                                               | For                                                                                       |
-| :----------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
-| `es:ListDomainNames`, `es:DescribeDomains`, `es:DescribeDomain`                                                          | The domains and their settings                                                            |
-| `es:ESHttpGet`, `es:ESHttpPost` on `arn:aws:es:<region>:<account>:domain/<name>/*`                                       | A domain's indexes. POST is only used for searches and counts                             |
-| `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`, `aoss:GetSecurityPolicy`, `aoss:GetAccountSettings` | The Serverless collections, their network access and the account's capacity limits |
-| `aoss:APIAccessAll`, and a data access policy with `aoss:DescribeIndex` and `aoss:ReadDocument` on `index/<collection>/*` | A collection's indexes                                                                    |
-| `cloudwatch:GetMetricData`                                                                                               | The OCUs Serverless used (`overview`)                                                     |
-| `bedrock:InvokeModel`                                                                                                    | `search` with a text, to embed it                                                         |
-
-A domain's access policy must allow the role too, and with fine-grained access control the role must be mapped to an
-OpenSearch role that can read, such as the built-in `readall_and_monitor`. `sts:GetCallerIdentity` (the account ID
-for CloudWatch) needs no permission. Anything you can't read shows up as a note instead of an error. The
-[OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html#permissions) has a ready-made IAM policy
-and data access policy.
-
-</details>
-
-## AWS Lambda
-
-<img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Lambda functions, in one region or all of them.** What each function runs and when its runtime loses support,
-what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it
-fails, read from its own logs, with its memory, cold starts and code. The
-[explorer window](#explore-functions-and-logs-by-clicking) shows it all by clicking, its logs run by run.
-
-📄 [`src/aws_analyzer/lambda_functions/`](src/aws_analyzer/lambda_functions/) · 📖 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html)
+<b>Lambda functions</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-functions-dark.webp">
   <img src="docs/images/lambda-functions-light.webp" alt="functions(regions=&quot;all&quot;): &quot;4 of 6 functions need you&quot;, the monthly bill as one bar, the three problems to fix first with their commands, then the functions grouped as Failing, Paying for nothing, Needs a fix and Healthy, each with its calls a day, failed share, longest run against its timeout and cost">
 </picture>
 
-<p align="center"><sub><code>ui.functions(regions="all")</code>: orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses.</sub></p>
+<sub><code>ui.functions(regions="all")</code>: what's failing, what's open, what's wasted.</sub>
 
-### Quick start
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Every command works with boto3 alone, so on SageMaker there's nothing to install. The file isn't called `lambda.py`
-because `lambda` is a Python keyword.
-
-```python
-from aws_analyzer import LambdaView
-
-ui = LambdaView()                            # uses the notebook's execution role and region
-ui.help()                                    # every command, grouped by task
-
-ui.functions()                               # which functions need you and why, what to fix first, where the bill goes
-ui.functions(regions="all")                  # ...in every region your account has turned on
-ui.function_info("orders-etl")               # one function in plain English, and its last 30 days
-ui.errors("orders-etl")                      # its errors in the last 24 hours, grouped by cause
-ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
-ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
-ui.invoke("orders-etl", {"order_id": 42})    # run it once: what it returned, run time, cost and its log lines
-ui.test("orders-etl")                        # a window to paste an event in, run it, read it all and watch its logs
-ui.code("orders-etl")                        # the files in its package, and the handler's source
-ui.diff("orders-etl")                        # what changed since its last published version: files, lines, settings
-ui.how_it_works("orders-etl")                # how its Python code works, step by step from the handler
-ui.how_it_works_page("orders-etl")           # the same as a page of its own, to read in a tab with room for it
-ui.download("orders-etl")                    # its package (.zip) saved in lambda-downloads/, next to the notebook
-ui.explore()                                 # all of it in a window, by clicking (below)
-data = ui.data()                             # the last report's tables as pandas DataFrames: data["runs"], data.guide()
-ui.to_excel()                                # the last report as an Excel workbook: summary, charts, tables, how to read
-```
-
-> [!NOTE]
-> A function is named by its name, `"name:alias"`, its ARN or a link to it in the Lambda console; pass
-> `region="eu-west-1"` for one in another region. Nothing in the package changes or deletes a function: where a
-> change would help, the report shows the AWS CLI command to run. The one command that does more than read is
-> `invoke()`, which runs a function once, only when you call it, with the event you give it (it needs
-> `lambda:InvokeFunction`); `next()` never runs it for you. Environment variable values never appear in a
-> report, only their names. The files it writes are the package `download()` (or the explorer's **Download .zip**)
-> saves and the workbook `to_excel()` saves, on the notebook's disk.
-
-### Explore functions and logs by clicking
-
-`explore()` opens a window on your functions that you use by clicking, with nothing to type but a search. Every
-function in the region is listed with how it's doing, the ones that need attention first. Click one for what's wrong
-with it, what calls it and where its results go, and, a click away, **its logs run by run**: each call on one line,
-with its status, run time against the timeout, memory and cold start, the failed ones in red; click a run for every line
-it logged. Its errors grouped by cause, its run times, the code in its package and every setting are tabs beside them.
+<b>Lambda explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-explorer-tour-dark.webp">
   <img src="docs/images/lambda-explorer-tour-light.webp" alt="The Lambda explorer in a notebook, animated: it starts on the Functions tab, five functions with the ones that need attention first; the pointer clicks orders-etl, whose Overview shows its findings; it opens the Logs tab, picks Last 24 hours and opens a failed run, whose lines end in KeyError: &#x27;customer_id&#x27;; it types AccessDenied in the search box and presses Enter, and the two runs that logged it come back with the word marked; then it opens the Errors tab, the failed calls grouped by cause, and the Code tab, the function&#x27;s files">
 </picture>
 
-<p align="center"><sub><code>explore()</code>: open orders-etl, read its failed run, search its logs for AccessDenied, then see its errors by cause and its code.</sub></p>
+<sub><code>explore()</code>: a failed run's lines, a log search, errors by cause.</sub>
 
-```python
-from aws_analyzer.lambda_functions import explore
+</td>
+<td width="50%" valign="top">
 
-explore()                                  # every function in the notebook's region
-explore("orders-etl", tab="logs")          # straight to one function's logs (a name, an ARN or a console link)
-explore(tab="live")                        # what's running now, looked at every few seconds
-explore(region="all")                      # every region your account has turned on
-ui.explore("orders-etl")                   # from a LambdaView
-```
-
-The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
-browser tab). Without it, or outside Jupyter, it shows the same as reports: `functions()`, or `function_info()` and the
-other reports for one function.
-
-| To                         | Do this                                                                                                                                                                                                                                                                                                                                                  |
-| :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Find a function            | **Functions**: every function with its runtime, triggers, calls, error rate, run time, monthly cost, when it was last called and its warnings, problems first. Search by name, description, runtime, region or trigger, click a chip (**Recent**, the ones you've opened, **Changed**, the ones whose code, settings or errors changed since you last opened them, which their Overview spells out, **Needs attention**, **With errors**, **Old runtime**, **Public**, **Not called**), or a column's header to sort. Or click the function field at the top, which searches as you type and takes an ARN too. The region field switches to another region, or every region |
-| See what's wrong           | **Overview**: the findings, each with what to do; how it's wired (what calls it, and where its results, failed events and logs go); its calls and run time a day for 30 days; and what it costs                                                                                                                                                          |
-| Read its logs              | **Logs**: a line per run, newest first, with its status, run time, memory, cold start and what failed; click one for every line it logged, its REPORT line summed up. Pick the time range (15 minutes to 30 days, **Today**, or a custom From and To on a calendar), type to find runs with some text, **Enter** to search CloudWatch for the whole range (each run found comes back whole), or click a chip for the failed runs, timeouts or cold starts. Or ask for runs by their fields in the same box: `duration > 15s and cold`, `memory_share > 80%`, `error ~ KeyError`, a field your JSON logs carry or the event's (`size > 30MB`), as `runs(where=...)` reads them. The sort menu beside the chips puts the longest or the most memory first. JSON logs show each line's message, its other fields a click away, and a run that logged its event shows it at the top, as JSON to fold |
-| Watch it while you test it | **Live**, on the Logs tab: new lines every 5 seconds, new runs at the top (it stops when you leave the tab, and after 15 minutes)                                                                                                                                                                                                                       |
-| See what's running now     | **Live**: every function that ran in the last 10 minutes, the ones with runs in progress first, with how long each has run against its timeout and its calls a minute; click one to follow its runs as their lines come (it watches while the tab is open, for 15 minutes) |
-| See why it fails           | **Errors**: its errors grouped by cause with what to do, and the newest failed runs; click one to read it in the Logs tab. **Performance**: run times, memory and cold starts, and the slowest runs, each a click from its lines                                                                                                                          |
-| Read its code and settings | **Code**: the files in its package as a tree of folders, the handler's open; click a folder to open it, a file for its source in colour, and **Copy** to copy all of it (a secrets file's text is held back); **Hide files** gives the source the whole width. **How it works** explains a Python function's code in place of the source (as `how_it_works()` does), and **↗ Open in a tab** beside it saves that as a page to read in a tab of its own. **Download .zip** saves the package in `lambda-downloads/` next to the notebook. **Settings**: every setting in plain English, then as Lambda returns it (JSON in colour, each object a click to fold), environment values hidden |
-
-Everything is read in the background, so a click shows what's known at once and the rest as it arrives. Like the rest
-of the file it only reads. `explore()` returns the window: `x.logs(search="KeyError", since="24h")`, `x.run(request_id)`
-and `x.open("report-api")` do what the clicks do, and `x.ui` is a `LambdaView` for reports in other cells.
-
-### Your reports as data: pandas and Excel
-
-Every report but the code ones ends with a folded **🐼 This report as data**: the tables it was drawn from, each
-column explained (what it holds, its unit, how to read it) with pandas lines worth running. Nothing is read from AWS
-again.
-
-```python
-ui.performance("orders-etl")
-data = ui.data()                     # ReportData: the tables behind that report
-df = data["runs"]                    # one of them: a pandas DataFrame, a row per run
-data.guide("runs")                   # what each column means and how to read it
-df[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99])
-ui.to_excel()                        # aws-analyzer-exports/lambda-performance-orders-etl.xlsx
-data = ui.data("errors", "orders-etl", since="7d")   # another report's tables, without showing it
-```
-
-`to_excel()` saves a workbook laid out like the report: a **Summary** sheet (the verdict, the numbers as cards, the
-findings, warnings first, and a link to every sheet), **Charts** (Excel's own charts, so you can edit them: run times
-over time, errors by cause, the bill by function...), **a sheet per table** (an Excel table with a filter on every
-column, numbers formatted as milliseconds, money or percentages, data bars, timeouts and failures in red) and
-**How to read** (every column in plain words). It's saved under a new name in `aws-analyzer-exports/` beside the
-notebook, never over a file, or at `path=`. It needs `openpyxl` (in the `data` extra).
-
-| Report | Tables |
-| :-- | :-- |
-| `functions()` | `functions`: a row per function, the costliest first: settings, calls, errors, error rate, run time, estimated monthly cost |
-| `function_info()` | `days`: its calls, errors, run time and concurrency a day |
-| `errors()` | `causes` (a row per cause: count, share, still failing or stopped, the run to read), `error_lines`, `calls` (CloudWatch's failed calls per hour) |
-| `performance()` | `runs` (a row per run: run time, share of the timeout, memory used, cold start, timed out), `hours` (median and p95 run time, timeouts, cold starts per hour) |
-| `runs()` | `runs` (every field, the ones its JSON logs carry too), `hours` |
-| `logs()` | `lines` (every line read), `hours` |
-
-### Commands (`LambdaView`)
-
-Grouped the way `ui.help()` lists them.
-
-#### Explore by clicking
-
-| Command                                                   | Shows                                                                                                                                                                                                 |
-| :-------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(name=None, tab=None, region=None, height=None, history=True)` | The [explorer window](#explore-functions-and-logs-by-clicking): every function, and for the one you click its health, logs run by run, errors, run times, code and settings. `view.explorer` is the window |
-
-#### Functions
-
-| Command                                                                  | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region, or in several (`regions="all"` for every region your account has turned on), **the ones that need you first**: a verdict, **where the monthly bill goes**, the **problems to fix first** (each kind once, with every function that has it and its command), then each function under Failing, Paying for nothing, Needs a fix, Not called or Healthy, with its runtime and **when that loses support**, **what triggers it**, its calls a day and failed share (CloudWatch, 30 days), its longest run against its timeout and the **estimated monthly cost**. Click a function for its findings |
-| `function_info(name, region=None, days=30)`                              | One function: charts of its calls, **failed calls** and run time a day (the day it changed marked), a diagram of what calls it and where its failed events and logs go, and its cost as one bar; then, in plain English, what it runs (handler, memory and the CPU it buys, timeout, layers), what triggers it and who may call it, **what happens to failed asynchronous events**, what it can reach (role, network, environment variable names), versions, aliases and provisioned concurrency, its last 30 days day by day, and the cost by part. Findings end in the command to fix each: the runtime to move to, the timeout to set, the log retention to add |
-
-#### When something goes wrong
-
-| Command                                                                  | Shows                                                                                                                                                                                                                                                                                                     |
-| :----------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `errors(name, since="24h", region=None, limit=10000)`                    | The errors in its logs **grouped by cause**: timeouts, running out of memory, code that can't load, permissions its role lacks (with the action and resource), throttled or unreachable services, exceptions; it opens with a verdict and a chart of failed calls per hour with a row per cause, then a card per cause: new, still failing or stopped, what it means, where it fails, what to do (the command to copy) and the run to look at; and **what happened to the failed events**: dropped with nothing to keep them, kept in a dead-letter queue, still in the queue, or unknown, by what calls it |
-| `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | Its newest runs, like a log viewer: a line each (status, run time, memory, cold start, what failed) that opens to its lines, with chips for failed runs, errors and cold starts, and a search box (ipywidgets) that filters as you type; `search=` keeps the runs with some text (`KeyError OR Timeout` joins words, or pass a CloudWatch Logs filter pattern), and `request_id=` shows one run from start to end                                                                                                          |
-| `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | **Its runs as rows you can ask about**: status, start, run time, memory, cold start and what it logged, one row each. `where="duration > 15s and cold"` keeps the runs that match (also `memory_share > 80%`, `status in (failed, timeout)`, `error ~ KeyError`, `started > 14:00`, any field its JSON logs carry, and the event when it logs it: `event.Records.s3.object.size > 30MB`, or `size > 30MB` for short), `sort="-duration"` the longest first, `columns=[...]` what each row shows, `group_by="hour"` sums them up per hour (or `error_type`, `version`, any field), `fields={"written": r"wrote (\d+) orders"}` reads more fields out of text lines, and `since="today"` another range. It opens with how many failed and why, a dot per run by start and run time, and a card per cause of the failed runs (still failing or stopped, what it means, what to do). Findings: runs that reached the timeout or used 90% of the memory, and a field no run has, with the one it likely meant. The fields there are to ask about are listed, folded, at the end |
-| `performance(name, since="24h", region=None, limit=5000, compare=True)`  | **A verdict** (the typical run, and whether timeouts were runs that hung or ran slow), every run over time with the timeouts in a lane of their own, **how it compares with the 24 hours before** and between versions (or before and since its last change), how long runs take, cold starts against warm runs, **memory used against what it has, the size that would do, and memory that climbs in a container**, and the slowest runs, from the REPORT line Lambda logs after each run; `compare=False` skips reading the window before |
-
-#### Run it
-
-| Command                                                                  | Shows |
-| :----------------------------------------------------------------------- | :---- |
-| `invoke(name, event=None, region=None, wait_logs=10, dry_run=False)`     | **Runs the function once and shows what happened in one report**, like the console's Test button and its logs together: whether it worked, **what it returned** (the error and its traceback when it failed), its run time against the timeout, memory used, cold start and **what the call cost**, then **every line it logged during that run**, opened. `event=` is a dict, a list, JSON text (a Python dict written as text works too) or nothing (`{}`); `"name:alias"` runs that alias. The last 4 KB of its log come back with the answer at once; when the log is longer, the whole run is read from CloudWatch Logs, waiting up to `wait_logs=` seconds for its lines to arrive. Findings: a failure or timeout and what to change, memory or time close to the limit, a cold start. `dry_run=True` only checks you may invoke it. **This really runs the function**, with whatever its code writes or sends; it's called once and never retried |
-| `test(name, event=None, region=None, height=None)` | **A window to test one function**, like the console's Test page: paste an event (or start from an S3, SQS, SNS, API Gateway or EventBridge one) and see it as tidy JSON in colour, the line where it breaks marked when it isn't valid; ▶ Run runs it once and draws `invoke()`'s report under the box, with everything else Lambda returned (request ID, version, X-Ray trace, headers). **Live logs** watches its log group every 5 seconds while you test, its runs newest first as they come, yours opened. Earlier runs stay in a menu. Nothing runs until you click ▶ Run |
-
-#### As data
-
-| Command | Shows |
-| :-- | :-- |
-| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames** (`ReportData`): `data["runs"]`, `data.frames()`, and `data.guide()`, what every column means. `data("performance", "etl", since="7d")` runs a report without showing it and gives its tables |
-| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a formatted sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
-
-#### Code
-
-| Command                                                 | Shows                                                                                                                                                                                                                                         |
-| :------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code(name, file=None, region=None, max_size="50MB")`   | What's in its deployment package: files and folders by size, and the source of the handler's file (or `file=`; a secrets file's text is held back). Findings: a handler no file matches, secrets files packed in it, size near Lambda's limit, boto3 bundled although the runtime has it |
-| `diff(name, old=None, new=None, region=None, max_size="50MB")` | **What changed between two versions**: its own files line by line, with the Python functions each change is in, the libraries packed with it that were added, removed or upgraded, and its settings and environment variable names (never their values). `diff("orders-etl")` compares `$LATEST` with the newest published version whose code is different, `diff("orders-etl", 3, 5)` two versions, and `diff("orders-etl:prod")` what an alias runs. Findings: AWS calls the new code makes and the IAM permission each needs, a Python file that no longer reads, an environment variable taken out that the code still reads, a shorter timeout, less memory, a new runtime. Lambda keeps the code of published versions only, so code deployed over `$LATEST` without publishing is gone, and the report says so |
-| `how_it_works(name, region=None, max_size="50MB")`      | **How a Python function's code works**, read with Python's `ast` module and never run: first **a graph of how it fits together** (the event and environment variables coming in, its own functions and who calls whom, the AWS services and web it reaches, coloured by what each call does; also as Mermaid to paste in docs), and in a second tab **each step of a call to click through like a debugger**: the code on one side, each line tagged with what it does (AWS calls, environment variables, event fields, HTTP requests, logs), and the step picked on the other, with the functions it's in and what it does, and **Next** (into the functions a line calls), **Over** and **Out**. Under them, a few sentences and the findings: a variable it needs that isn't set, an import Lambda can't find, a handler that isn't there or can't take (event, context), HTTP requests without a timeout, list calls that read only their first page, errors it drops, files written outside `/tmp`, secrets written in the code, AWS calls in a loop that a batch call would do in fewer requests, and clients made on every call |
-| `how_it_works_page(name, path=None, region=None, max_size="50MB")` | `how_it_works()` as **a page of its own**, to read in a tab with room for it, with the whole graph (the notebook's stops at 24 functions, 5 calls deep): saved as `<name>-how-it-works.html` in `lambda-downloads/` next to the notebook (or at `path=`), with a link that opens it. In JupyterLab a click opens it in a JupyterLab tab; middle-click it, or right-click and pick **Open link in new tab**, for a browser tab. Plain HTML and CSS, no JavaScript, light or dark like your browser |
-| `download(name, path=None, region=None)`                | Saves its deployment package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook (or at `path=`, a file or a folder), and says where, its size and files, and whether its SHA-256 matches the one Lambda reports. A new downloads folder gets a `.gitignore`, since a package can hold secrets. In JupyterLab, right-click it in the file browser and pick **Download** to get it on your computer |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>LambdaAnalyzer</code>): functions, metrics, errors and runs as Python objects</summary>
-
-`ui.core` is the `LambdaAnalyzer`. Every UI command has a data method on it:
-
-```python
-from aws_analyzer.lambda_functions import code_graph
-
-lam = ui.core                                          # or LambdaAnalyzer(region="eu-west-1", profile="dev")
-
-ov = lam.overview(regions="all")                       # Overview: .functions, .metrics, .triggers, .accounts
-ov.to_df()                                             # one row per function: settings, calls, errors, cost
-detail = lam.describe("orders-etl")                    # FunctionDetail: .function, .triggers, .aliases, .metrics
-lam.errors("orders-etl", since="7d").groups            # ErrorGroup: kind, message, count, first, last, request_ids
-lam.performance("orders-etl").to_df()                  # one row per run: duration, billed, memory used, cold start
-lam.log_events("orders-etl", pattern='"KeyError"').to_df()
-lam.log_runs("orders-etl", since="24h").runs           # LogRun per call: .status, .duration, .cold, .events
-lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
-lam.log_runs("orders-etl", search="KeyError AND ORD-1042").runs  # AND, OR and NOT hold over a run's lines
-runs = lam.runs("orders-etl", since="today")          # RunTable: each run as fields (RunRow: .run, .values)
-runs.where("duration > 15s and cold").to_df()          # the runs a query keeps, every field a column
-runs.sorted_by("-memory").group("hour")                # RunGroup per hour: runs, failed, cold, median, slowest
-[f.name for f in runs.fields()]                        # what there is to ask about: Lambda's fields, then your logs'
-lam.code("orders-etl").files                           # CodeFile: path, size, compressed
-lam.search_code("orders-etl", "customer_id").matches   # CodeMatch per line, like grep -rn: file, line, text, context
-lam.find_symbol("orders-etl", "load_orders")           # SymbolReport: .definitions (file, line, signature), .uses
-lam.code_map("orders-etl").aws                         # CodeMap: .steps, .aws, .env, .event, .imports, .functions
-code_graph(lam.code_map("orders-etl")).mermaid()      # its graph as Mermaid: boxes and arrows
-lam.download("orders-etl").path                        # where its .zip was saved (PackageDownload)
-lam.versions("orders-etl")                             # Version per published version: number, code SHA-256, when
-lam.diff("orders-etl", 3).files                        # FileChange per changed file: status, lines, definitions
-```
-
-The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
-already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
-`function_monthly_cost`, `cost_workings`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `change_effect`, `cause_search`, `code_frames`, `failing_frame`, `parse_report`, `split_runs`, `run_timeline`, `slow_cutoff`, `run_console_url`, `run_insights_query`
-(log lines grouped into runs), `run_table`, `run_fields`, `logged_event`, `parse_query`, `looks_like_query` (runs as
-rows of fields, and the query language `runs(where=)` reads), `runs_findings`, `line_level`, `percentile`, `suggest_memory`, `run_stats`, `run_cost`,
-`performance_verdict`, `run_groups` and `slowdown` (runs by version or around the last change), `time_slices`, `run_time_bins`,
-`cold_vs_warm`, `memory_by_container` (memory run after run per container), `handler_file`, `read_package`,
-`package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
-`read_sources` (sources(): the text of a .zip's own source files), `search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
-"app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (diff on two .zip files you already
-have), `diff_settings`, `version_before`, `stream_version` (the version a log stream's name says ran), and the
-findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`,
-`code_map_findings`, `diff_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost and runtimes</b>: the prices used, and where the support dates come from</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-05 (`LAMBDA_PRICES`):
-  $0.20 per million requests, $0.0000166667 per GB-second of compute on x86_64 ($0.0000133334 on arm64), provisioned
-  concurrency $0.0000041667 per GB-second kept ready ($0.0000033334 on arm64), `/tmp` above 512 MB, and CloudWatch Logs
-  at $0.50 per GB logged and $0.03 per GB-month kept. Usage is what CloudWatch counted over the window (30 days by
-  default) scaled to a month, before the free tier, at the first pricing tier, and with compute on provisioned
-  concurrency at the on-demand rate (it's a little cheaper). API Gateway, SQS and data transfer aren't included. For
-  another region or a discount: `LambdaAnalyzer(prices={"gb_second": 0.0000183})`.
-- Runtime support dates are AWS's published schedule (end of support, then blocked creates, then blocked updates),
-  as of 2026-09-29, in `RUNTIMES`. A runtime gets a warning 90 days before its end of support.
-- The reports read only what they show. `functions()` reads 7 CloudWatch metrics per function and one per region
-  ($0.01 per 1,000) and says how many; reading logs and downloading code cost nothing.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                                                                                                                                          | For                                                                          |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- |
-| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code`, `how_it_works`, `diff` and `download` download from |
-| `lambda:GetPolicy`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionUrlConfig`                                                                                                 | What triggers each function, and who may call it                              |
-| `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates; `diff`: the versions to compare |
-| `lambda:GetAccountSettings`                                                                                                                                                         | Each region's concurrency and code storage limits                             |
-| `cloudwatch:GetMetricData`                                                                                                                                                          | Calls, errors, throttles, run time and log volume                             |
-| `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs`, `performance` and the explorer's Logs tab |
-| `ec2:DescribeRegions`                                                                                                                                                               | `functions(regions="all")`: the regions your account has turned on            |
-| `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`                                                                                                                                         | `errors`: how many failed messages wait in an SQS trigger's queue and its dead-letter queue (never receives one) |
-| `lambda:InvokeFunction` (not read-only)                                                                                                                                             | `invoke`, `test` and the explorer's ▶ Invoke only: runs the function once when you ask. Leave it out to keep every command read-only |
-
-`lambda:GetFunction` also returns the environment variables' values, which the reports never show. Anything you can't
-read shows up as a note instead of an error. The
-[Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#permissions) has a ready-made IAM
-policy.
-
-</details>
-
-## AWS Step Functions
-
-<img src="docs/images/aws/stepfunctions.svg" width="22" height="22" alt="" align="absmiddle"> **State machines and their executions.** How often each workflow ran and failed, what it costs, where and why
-its executions fail, grouped by the state they stopped at, and one execution step by step. When a failed step called
-Lambda, the report shows **the log lines of that very run**, found by the request ID the execution's history records
-and read through the [Lambda module](#aws-lambda).
-
-📄 [`src/aws_analyzer/stepfunctions/`](src/aws_analyzer/stepfunctions/) · 📖 [Step Functions guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html)
+<b>Step Functions explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sfn-explorer-tour-dark.webp">
   <img src="docs/images/sfn-explorer-tour-light.webp" alt="The Step Functions explorer in a notebook, animated: it starts on the State machines tab, four state machines with their failures, run times and cost; the pointer opens the Executions tab and clicks the failed execution ord-7f3a, whose waterfall shows each step&#x27;s time and the one that failed; then it opens the Graph tab and clicks the LoadOrders state, the workflow drawn as boxes and arrows with that state&#x27;s definition and tries beside it">
 </picture>
 
-<p align="center"><sub><code>explore()</code>: open the failed execution ord-7f3a to see which step broke, then find that step on the workflow's graph.</sub></p>
+<sub><code>explore()</code>: the step that broke, and where it sits in the graph.</sub>
 
-### Quick start
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Every command works with boto3 alone, so on SageMaker there's nothing to install.
-
-```python
-from aws_analyzer import StepFunctionsView
-
-sfn = StepFunctionsView()                    # uses the notebook's execution role and region
-sfn.help()                                   # every command, grouped by task
-
-sfn.overview()                               # every state machine: executions, failures, cost, logging
-sfn.failures("order-pipeline")               # where and why its executions fail, with the Lambda run to read
-sfn.execution("order-pipeline/ord-7f3a")     # one execution step by step, and the Lambda lines that broke it
-sfn.compare("order-pipeline/ord-7f3a")       # beside the last one that succeeded: the states and inputs that differ
-sfn.state_machine("order-pipeline")          # its numbers, what its definition risks, every state
-data = sfn.data()                            # the last report's tables as pandas DataFrames, each column explained
-sfn.to_excel()                               # the last report as an Excel workbook: summary, charts, tables
-```
-
-Every report ends with a folded **🐼 This report as data**, as Lambda's and S3's do. `execution()`'s tables join
-each Lambda step to the run behind it: `data["lambda_runs"]` holds the step's time in Step Functions beside the
-function's own run time (`lambda_ms`), the time around it (`outside_ms`: a cold start, throttling, Step Functions),
-billed time, memory and what the run cost, and `data["steps"]` each state's time, share of the execution, retries
-and state transitions with their cost. `executions()` gives a row per execution with its estimated cost,
-`failures()` a row per cause, `overview()` a row per state machine and per day, and `graph(timings=True)` each
-state's share of the time.
-
-Executions are named by their ARN, a console link, or `"state-machine/execution-name"`. **Express workflows** keep no
-history in Step Functions, so their executions, failures and steps are read from the log group their logging writes to:
-every event at level `ALL`, only failures at `ERROR` (the reports say what that leaves out), nothing with logging off.
-Their ARNs carry an ID beside the name, so `executions()` lists each one's, ready to pass to `execution()`.
-
-### Explore state machines by clicking
-
-`sfn.explore()` opens a window (Jupyter and ipywidgets) with every state machine, the failing ones first, to search,
-filter by chip (Failing, Express, Logging off, ...) or sort by a click on a column. Click one for its **Overview**, **Executions** (filter by outcome, search, pick a time range, and click one for its waterfall
-and one log with every Lambda run's lines), **Graph** (the flow drawn, coloured by the open execution's path or by
-where executions stop; pick a state for its tries, its Lambda run's lines or the failures that stopped there),
-**Failures** (each group's newest execution a click away) and **Definition**. It reads in the background, so the window answers while AWS is read, and it only reads.
-
-```python
-sfn.explore("order-pipeline", execution="ord-7f3a")   # or explore(tab="failures", since="30d")
-sfn.explore("order-pipeline", assistant=AgentView())   # ✦ Ask: the agent beside the tabs, asking about what's open
-```
-
-### Commands (`StepFunctionsView`)
-
-Grouped the way `sfn.help()` lists them.
-
-#### State machines
-
-| Command                                  | Shows                                                                                                                                                                                                                                                |
-| :--------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `overview(days=7)`                       | Every state machine in the region: its type, executions and how many **didn't succeed** (CloudWatch, 7 days), its average run, its **estimated monthly cost** and its logging, the ones with failures first. Warnings: executions failing, starts throttled, Express workflows whose executions leave no record |
-| `state_machine(name, days=7)`            | One state machine: the same numbers, every state with what it calls, where it goes next, its retries and where an error sends it, the Lambda functions it calls, how the cost was worked out, and the definition. Findings: **Lambda tasks with no retry for Lambda's own errors** (with the Retry rule AWS recommends, to paste), waits for a callback with no timeout, logging that hides Express executions |
-| `graph(name, execution=None, failures=None, timings=None)` | How it flows, **drawn as a graph**: a box per state (a Map's or Parallel's inner states listed in it), an arrow per transition, dashed where an error goes, round the side for a loop. `execution="ord-7f3a"` colours **the path that execution took** (ran, failed, never reached, each with its time and tries); `failures="7d"` shades **where executions stop**; `timings=True` shades **where the time goes** over the newest 20 succeeded executions, with each state's median, longest, share of the time and tries a run, and which states retry often (each retry is a billed state transition). Then each state with where it goes next, and the flow as a **Mermaid flowchart** to paste into a Markdown cell |
-
-#### Explore by clicking
-
-| Command                                                                 | Shows                                                                                                                                                                       |
-| :---------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(name=None, execution=None, tab=None, since="7d", height=None)` | The [explorer window](#explore-state-machines-by-clicking): every state machine, its executions with their waterfall and log, its failures and its definition. `view.explorer` is the window |
-
-#### As data
-
-| Command | Shows |
-| :-- | :-- |
-| `data(command=None, *args, **kwargs)` | **The last report's tables as pandas DataFrames**, each column explained (`data.guide()`); `data("execution", "order-pipeline/ord-7f3a")` reads one without showing it |
-| `to_excel(command=None, *args, path=None, **kwargs)` | **The last report as an Excel workbook**: Summary, Charts, a sheet per table and How to read, in `aws-analyzer-exports/` (or `path=`) |
-
-#### Executions
-
-| Command                                                   | Shows                                                                                                                                                                                                                                       |
-| :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `executions(name, status=None, since="7d", n=25)`         | A state machine's latest executions (an Express workflow's from its log group), newest first: when each started, how it ended and how long it took. `status="failed"` (or `"running"`, `"timed_out"`, `"aborted"`) keeps one outcome |
-| `execution(ref, machine=None, logs=True, max_events=5000)` | **One execution step by step**: a **waterfall** of each state on one time axis (a task's tries and the back-off between them, a Map's iterations in place), each state with what it called, how long it took and how many tries, and where it failed and why. Then **one log of what happened**: Step Functions' events and **the log lines of every Lambda run it called** (each found by its request ID, or by time when the history has none), merged by time. Findings: a Catch that moved on, retries and the back-off they added, and the command to **redrive** it (shown, never run). What it returned, its input and the failed step's input and error, folded, JSON as a tree |
-| `compare(execution, other=None, since="30d")`              | **A failed execution beside the last one that succeeded before it** (or `other=`): each state's runs in both, the input fields missing, extra or empty, and **the likely cause** when its error names a field its input lacks |
-| `failures(name, since="7d", limit=50)`                    | Why a state machine fails (an Express workflow's read from its log group): the executions that failed, timed out or were aborted, **grouped by the state they stopped at and the error**, the most common first, each with the Lambda run or the execution to read next, and how many can still be redriven. Reads one request per failure (the end of its history) |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>StepFunctionsAnalyzer</code>): state machines, executions and their steps as Python objects</summary>
-
-`sfn.core` is the `StepFunctionsAnalyzer`. Every UI command has a data method on it:
-
-```python
-core = sfn.core                                        # or StepFunctionsAnalyzer(region="eu-west-1", profile="dev")
-
-ov = core.overview(days=7)                             # Overview: .machines, .numbers (by ARN), .errors
-machine = core.state_machine("order-pipeline")         # StateMachine: .type, .states, .functions, .log_level
-core.executions("order-pipeline", status="failed").to_df()
-detail = core.execution("order-pipeline/ord-7f3a")     # ExecutionDetail: .steps, .failed_step, .lambda_run
-step = detail.failed_step                              # StepRun: .name, .function, .attempts, .request_id, .error
-detail.lambda_run.events                               # the Lambda run's lines (a LogRun from lambda_functions)
-story = core.execution_story(detail)                   # ExecutionStory: .lines (LogLine, merged), .runs, .sources
-waterfall(detail).rows                                 # WaterfallRow: name, depth, segments (each try, back-off)
-core.failures("order-pipeline").groups                 # FailureGroup: state, error, count, newest, request_id
-core.timings("order-pipeline").states                  # StateTiming: runs, median, longest, share, tries_per_run
-```
-
-The analysis functions are pure (no AWS calls), so they also work on definitions and histories you already have:
-`parse_definition`, `parse_state_machine`, `parse_execution`, `fill_detail` (GetExecutionHistory's events into the
-steps an execution took), `waterfall`, `step_lines` and `merge_log` (an execution as a waterfall and as one log), `group_failures`, `can_redrive`, `monthly_cost`, `transitions_per_execution`, `mermaid`,
-`flow_layout`, `path_marks`, `failure_marks` and `timing_marks` (the graph and what colours it), `state_timings` and
-`timing_report` (where the time goes over several executions' steps), `daily_counts` and `failure_jump` (its
-executions a day, and the day its failures jumped), `compare_executions`, `compare_steps` and `compare_inputs` (two
-executions side by side), `error_kind`, `matching_retry` and `retry_advice` (whether a Retry would have saved a kind
-of failure), `change_verdict` and `change_text` (whether a deploy or a
-definition update came just before a kind of failure began), `resource_label`, `retry_label`,
-`catch_label`, `unretried_lambda_states`, `unbounded_waits`,
-`request_id_of_output`, `request_id_of_cause`, and the findings: `machine_findings`, `numbers_findings`,
-`idle_findings`, `logging_findings`, `definition_findings`, `overview_findings`, `execution_findings`,
-`failure_findings`, `timing_findings`, `trend_findings`, `change_findings`, `group_change_findings`,
-`comparison_findings`, `retry_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost</b>: the prices used</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-31
-  (`STEPFUNCTIONS_PRICES`): Standard workflows $0.025 per 1,000 state transitions, Express workflows $1.00 per million
-  executions and $0.00001667 per GB-second at 64 MB (the least Express bills). Executions are what CloudWatch counted
-  over the window (7 days by default) scaled to a month. A Standard execution is counted as one transition per
-  top-level state; Map iterations add more, and the 4,000 free transitions a month aren't taken off. For another
-  region or a discount: `StepFunctionsAnalyzer(prices={"transition": 0.0000275})`.
-- `overview()` reads 7 CloudWatch metrics per state machine ($0.01 per 1,000) and says how many. Reading executions,
-  histories and Lambda logs costs nothing.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                        | For                                                                          |
-| :---------------------------------------------------------------- | :--------------------------------------------------------------------------- |
-| `states:ListStateMachines`, `states:DescribeStateMachine`         | The state machines, their definitions and logging                             |
-| `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory` | `executions`, `execution`, `failures` and `graph(timings=True)`  |
-| `cloudwatch:GetMetricData`                                        | Executions, failures, throttles and run times (`AWS/States`)                  |
-| `lambda:GetFunction`, `logs:FilterLogEvents`                      | A failed Lambda step's log lines in `execution` (the Lambda module reads them) |
-| `states:DescribeStateMachineForExecution`, `lambda:GetFunction`, `lambda:ListVersionsByFunction` | What changed before each kind of failure in `failures`: the definition's updates and the functions' deploys |
-| `logs:FilterLogEvents` on the state machine's log group           | An Express workflow's executions, steps and failures                          |
-
-Nothing here starts, stops or redrives an execution: findings show the `aws stepfunctions redrive-execution` command
-instead. Anything you can't read shows up as a note instead of an error. The
-[Step Functions guide](https://utkarsh5026.github.io/aws-analyzer/stepfunctions.html#permissions) has a ready-made IAM
-policy.
-
-</details>
-
-## Amazon API Gateway
-
-<img src="docs/images/aws/apigateway.svg" width="22" height="22" alt="" align="absmiddle"> **REST, HTTP and WebSocket APIs, and the calls they answer.** How often each API is called and
-how often it fails, who can call each route, which routes come close to API Gateway's **29-second limit**, and which
-calls failed and why, read from the stage's access log. When a failed call reached Lambda, the report shows **the log
-lines of that very run**, found by the request ID the access log records and read through the
-[Lambda module](#aws-lambda).
-
-📄 [`src/aws_analyzer/apigateway/`](src/aws_analyzer/apigateway/) · 📖 [API Gateway guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html)
+<b>API Gateway explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/apigw-explorer-tour-dark.webp">
   <img src="docs/images/apigw-explorer-tour-light.webp" alt="The API Gateway explorer in a notebook, animated: it starts on the APIs tab, its findings about the six APIs: orders-api returning 5xx on 2.9% of calls and close to its time limit, partner-api's open routes; the pointer opens the Routes tab, the routes as a tree, POST /orders picked with where it sends a request and why it runs out of time; then it opens the Calls tab, clicks the 5xx chip and the newest 504, which shows where its 29 seconds went, almost all in the integration, and the log lines of the orders-etl run behind it">
 </picture>
 
-<p align="center"><sub><code>explore()</code>: from the APIs to their routes, then a failed call: where its 29 seconds went and the Lambda run behind it.</sub></p>
+<sub><code>explore()</code>: a failed call, where its 29 seconds went, the Lambda run behind it.</sub>
 
-### Quick start
+</td>
+<td width="50%" valign="top">
 
-Every command works with boto3 alone, so on SageMaker there's nothing to install.
-
-```python
-from aws_analyzer import APIGatewayView
-
-apigw = APIGatewayView()                     # uses the notebook's execution role and region
-apigw.help()                                 # every command, grouped by task
-
-apigw.apis()                                 # every API: requests, 4xx and 5xx, latency, who can call it, cost
-apigw.api_info("orders-api")                 # its stages and routes, and what needs attention
-apigw.errors("orders-api")                   # which calls fail and why, with the Lambda run to read
-apigw.routes("partner-api")                  # who can call each route, where it goes, and curl to try it
-```
-
-APIs are named by their name, their ID, `"name/stage"`, their invoke URL or a console link. **A call's own record is
-in its stage's access log**: CloudWatch only counts calls. `calls()`, `errors()` and `performance()` read that log by
-the stage's own format (JSON or text), so they work with the format you chose; a stage without one gets the
-`aws apigateway update-stage` command that turns it on, in a format that logs everything they read.
-
-### Explore APIs by clicking
-
-`apigw.explore()` opens a window (Jupyter and ipywidgets) with every API, the failing ones first, to search, filter by
-chip (Failing, REST, HTTP, WebSocket, Open routes, Unused) or sort by a click on a column. Click one for its
-**Overview**, **Routes** (a tree of paths; click a route to see where a request goes, from the caller through the
-authorizer to the integration, the step that fails marked, and the curl command that calls it), **Calls** (a timeline,
-chips by status, a search box, and a click on a call shows where its time went and the Lambda run behind it),
-**Performance** and **Stages**. The stage menu at the top switches stage. It reads in the background, so the window
-answers while AWS is read, and it only reads: nothing in it sends a request to your API.
-
-```python
-apigw.explore("orders-api", tab="calls")    # or explore("orders-api/dev"), explore(tab="routes", since="7d")
-```
-
-### Commands (`APIGatewayView`)
-
-Grouped the way `apigw.help()` lists them.
-
-#### APIs
-
-| Command                                  | Shows                                                                                                                                                                                                                                                |
-| :--------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apis(days=7)`                           | Every API in the region, REST, HTTP and WebSocket: its stages, requests, **4xx and 5xx share**, how long the slowest 5% of calls take (p95), who can call it and its **estimated monthly cost** (CloudWatch, 7 days), the ones failing most first. Warnings: server errors, calls close to the time limit, **routes anyone can call**, APIs nobody calls (with the delete command, shown, never run), APIs that keep no access log |
-| `api_info(name, stage=None, days=7)`     | One API: its numbers on one stage (prod, `$default` or the one deployed last, unless `stage=` names one), its stages (URL, throttling, access and execution logs, tracing, cache, WAF) and its routes with where each goes, who can call it and, with detailed metrics, its calls, 5xx and p95. Findings: **routes that run out of time** (the integration still working when API Gateway gives up with a 504), routes failing, a stage with no throttle of its own, no access log, or full requests written to its log |
-| `routes(name, stage=None)`               | Every route: **who can call it** (its authorizer, IAM, an API key, or anyone), where it goes (a Lambda function, a URL, an AWS service call, a mock), how long API Gateway waits, the payload version, and **the curl command that calls it** (wscat for WebSocket), credentials left as `$PLACEHOLDERS`; then the authorizers |
-| `stages(name)`                           | Every stage's settings, each one's access log format, and what each risks, with the AWS CLI command that fixes it |
-
-#### Calls
-
-| Command                                                          | Shows                                                                                                                                                                                                                                       |
-| :--------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `calls(name, stage=None, since="24h", status=None, search=None, n=50)` | The stage's access log, call by call, newest first: when, the route, the status and error, how long it took and how much of that the backend took. `status="5xx"` (or `"4xx"`, `"failed"`, `504`) keeps some; `search="c1f08a2e"` asks CloudWatch Logs for a request ID or any text |
-| `errors(name, stage=None, since="24h")`                          | **What's failing**: CloudWatch's 4xx and 5xx counts, and the failed calls in the access log **grouped by status, error and route**, the most common first, each with **what it means** (a 504 is a timeout, a 502 a Lambda answer API Gateway can't use, a 429 throttling, a 403 "Missing Authentication Token" a path that doesn't exist) and the next thing to read: for a call that reached Lambda, `LambdaView().logs(function, request_id=...)` |
-| `performance(name, stage=None, since="24h")`                     | **How long calls take**: each route's average, p95 and longest (from the access log, else per-route metrics), how close they come to the time limit, how much of the time is the backend's, and the slowest calls, with **where the slowest one's time went** (the authorizer, the integration, API Gateway) |
-
-#### Explore by clicking
-
-| Command                                                              | Shows                                                                                                                                                                       |
-| :------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(name=None, tab=None, stage=None, since="24h", height=None)` | The [explorer window](#explore-apis-by-clicking): every API, its routes as a tree, its calls with where their time went and the Lambda run behind each, its performance and stages. `view.explorer` is the window |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>APIGatewayAnalyzer</code>): APIs, routes, stages and calls as Python objects</summary>
-
-`apigw.core` is the `APIGatewayAnalyzer`. Every UI command has a data method on it:
-
-```python
-core = apigw.core                                      # or APIGatewayAnalyzer(region="eu-west-1", profile="dev")
-
-ov = core.overview(days=7)                             # Overview: .apis, .numbers (by API ID), .errors
-api = core.api("orders-api")                           # Api: .kind, .stages, .routes, .authorizers, .open_routes
-route = api.route("POST /orders")                      # Route: .auth, .is_open, .integration (.function, .timeout_ms)
-report = core.report("orders-api/prod")                # ApiReport: .numbers (ApiNumbers), .route_numbers
-page = core.calls("orders-api", since="1h")            # CallPage: .calls (Call), .failed, .fields, .truncated
-page.to_df()                                           # every call as a DataFrame
-core.errors("orders-api").groups                       # ErrorGroup: status, error, route, count, newest
-run = core.lambda_run(api, page.failed[0])             # LambdaRun: .function, .lines, .duration_ms, .note
-```
-
-The analysis functions are pure (no AWS calls), so they also work on what you already have: `read_format` and
-`parse_access_line` (an access log line read by its stage's format), `group_errors`, `route_numbers_from_calls`,
-`latency_split`, `missing_fields` and `suggested_format`, `curl_command`, `monthly_cost`, the parsers
-(`parse_rest_api`, `parse_rest_routes`, `parse_rest_stage`, `parse_v2_api`, `parse_v2_routes`, `parse_v2_stage`, ...),
-and the findings: `numbers_findings`, `open_route_findings`, `idle_findings`, `stage_findings`, `format_findings`,
-`route_findings`, `overview_findings`, `api_findings`, `error_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost</b>: the prices used</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-11-01
-  (`APIGATEWAY_PRICES`): REST APIs $3.50 per million requests, HTTP APIs $1.00 per million, WebSocket APIs $1.00 per
-  million messages (each the first tier), plus a REST cache by the hour ($0.02 an hour for 0.5 GB, $3.80 for
-  237 GB). Requests are what CloudWatch counted over the window (7 days by default) scaled to a month. For another
-  region or a discount: `APIGatewayAnalyzer(prices={"rest_request": 0.0000037})`.
-- `apis()` reads 6 CloudWatch metrics per API ($0.01 per 1,000) and says how many; `api_info()` reads 6 more per route
-  when the stage has detailed metrics. Reading APIs, routes, stages and access logs costs nothing.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                        | For                                                                          |
-| :---------------------------------------------------------------- | :--------------------------------------------------------------------------- |
-| `apigateway:GET` on `arn:aws:apigateway:<region>::/*`             | Every API, its routes, integrations, authorizers and stages (REST, HTTP and WebSocket: API Gateway authorizes every read as `GET`) |
-| `cloudwatch:GetMetricData`                                        | Requests, 4xx, 5xx and latency (`AWS/ApiGateway`)                             |
-| `logs:FilterLogEvents` on the stages' access log groups           | `calls`, `errors`, `performance` and the explorer's Calls tab                 |
-| `lambda:GetFunction`, `logs:FilterLogEvents`                      | The Lambda run behind a call (the Lambda module reads it)                     |
-
-Nothing here sends a request to your API or changes one: findings show the `aws apigateway` / `aws apigatewayv2`
-command instead. Anything you can't read shows up as a note instead of an error. The
-[API Gateway guide](https://utkarsh5026.github.io/aws-analyzer/apigateway.html#permissions) has a ready-made IAM
-policy.
-
-</details>
-
-## Amazon Athena
-
-<img src="docs/images/aws/athena.svg" width="22" height="22" alt="" align="absmiddle"> **SQL over S3: what it costs,
-why it fails, and the tables behind it.** Every past query with **what it scanned and cost** ($5 per TB), the same
-query's runs added up so a dashboard that runs 20 times a day shows what it costs in all, **why queries failed** in
-plain words with the fix, and the [Glue Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html):
-**tables that point at an empty or missing S3 folder**, tables with no partitions that every query reads in full,
-partitions never loaded, and **crawlers that failed or stopped running**.
-
-📄 [`src/aws_analyzer/athena/`](src/aws_analyzer/athena/) · 📖 [Athena guide](https://utkarsh5026.github.io/aws-analyzer/athena.html)
-
-> [!NOTE]
-> **Read-only, so it never runs a query.** Athena writes every query's results to S3, so starting one would break
-> the read-only rule. Past queries and the results they saved are read back; for a new query, `query_code()` shows
-> the Python to run it yourself, and the most it could cost.
-
-### Quick start
-
-Every command works with boto3 alone, so on SageMaker there's nothing to install.
-
-```python
-from aws_analyzer import AthenaView
-
-athena = AthenaView()                        # uses the notebook's execution role and region
-athena.help()                                # every command, grouped by task
-
-athena.overview()                            # what the week's queries cost, which fail, and what to fix first
-athena.expensive()                           # the costliest queries, the same query's runs added up
-athena.failures()                            # why queries failed, and how to fix each kind
-athena.table_info("sales.events")            # one table: partitions, size, its queries, SQL to copy
-```
-
-Tables are named `"database.table"` (`"sales/events"`, `'"sales"."events"'` and `"AwsDataCatalog.sales.events"` work
-too), and times as `"7d"`, `"24h"` or `"2026-11-01"`. Athena keeps 45 days of query history.
-
-### Explore queries and tables by clicking
-
-`athena.explore()` opens a window (Jupyter and ipywidgets) with an **Overview**, every **query** (chips for the
-failed, costly, cancelled and running ones, and a search box), the **costliest** queries with each one's runs added
-up, the **failures** by kind with the fix, every Glue **table** with chips for what's wrong with it, and the
-**crawlers**. A click on a query shows its SQL, numbers and saved rows; on a table, its partitions, size, the
-queries that read it and the SQL to copy. Menus at the top pick the time range and a workgroup. It reads in the
-background, so the window answers while AWS is read, and it only reads.
-
-```python
-athena.explore(tab="costs", since="30d")    # or explore("sales.events"), explore("a1b2c3d4-...")
-```
-
-### Commands (`AthenaView`)
-
-Grouped the way `athena.help()` lists them.
-
-#### Athena
-
-| Command            | Shows                                                                                                                                                                                                                                       |
-| :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `overview(days=7)` | The region at a glance: what the week's queries scanned and **cost** (and about how much a month at that rate), how many failed, each workgroup's queries, cost and **per-query scan limit**, the costliest kinds of query, and every finding below, warnings first |
-
-#### Past queries
-
-| Command                                                                     | Shows                                                                                                                                                                                                                                   |
-| :-------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `queries(since="7d", workgroup=None, status=None, database=None, limit=2000)` | Every query, newest first: when, how it ended, what it scanned and cost, how long it took, its SQL and ID. `status="failed"` (or `"succeeded"`, `"cancelled"`, `"running"`) and `database=` keep some |
-| `expensive(since="7d", top=10, workgroup=None)`                              | **The costliest queries**: the same SQL with other values grouped, so a query run 40 times shows once with its total and its share of the bill, then the single costliest runs. Findings: **a query that runs again and again** (turn on result reuse, or keep its answer with CREATE TABLE AS), costly `SELECT *` |
-| `failures(since="7d", workgroup=None)`                                       | **Why queries failed**, grouped by kind (`TABLE_NOT_FOUND`, `HIVE_BAD_DATA`, `HIVE_PARTITION_SCHEMA_MISMATCH`, an S3 permission, exhausted resources, the scan limit, ...), each with **what it means and how to fix it**, and the newest one's message and ID |
-| `query(query_id, rows=20)`                                                   | One past query: its SQL, how it ended and why, what it scanned and cost, how long it queued and ran, rows in and out, and **the first rows of the results it saved**, read back from S3 without running it again |
-
-#### Data Catalog
-
-| Command                            | Shows                                                                                                                                                                                                                                 |
-| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `catalog(database=None)`           | Every database and table: format, partition keys, location and **whether its S3 folder holds files** (one small S3 request a table, at most 200), and the crawlers. Findings: tables that point at **a bucket that's gone or an empty folder**, partitioned tables **with no partitions loaded** (MSCK REPAIR TABLE), tables whose queries read them in full |
-| `table_info(table, since="7d")`    | One table: format, partitions (with the newest), **size and files in S3**, its columns, **the queries that read it** and what they cost. Findings: no partitions (with what its queries cost), queries that don't filter on its partitions, a row format like CSV or JSON, many small files. Then **SQL to copy**: a first query, `CREATE TABLE AS` to Parquet partitioned by date, `MSCK REPAIR TABLE` |
-| `crawlers()`                       | Every Glue crawler: what it crawls into which database, how often it runs, its last crawl and how it went, and the tables it added, changed or removed. Findings: **a failed last crawl** (with its error), **a paused schedule**, **a scheduled crawler that stopped running**, one that never ran |
-
-#### Run a query yourself
-
-| Command                                          | Shows                                                                                                                                                                                                 |
-| :----------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `query_code(sql, database=None, workgroup=None)` | **The Python to run a query** (boto3, or a DataFrame with awswrangler), and what it could cost: the tables it names, **the most it could read** (their folders' size), and whether it filters on their partitions |
-
-#### Explore by clicking
-
-| Command                                                                  | Shows                                                                                                                                                         |
-| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `explore(what=None, tab=None, since="7d", workgroup=None, height=None)` | The [explorer window](#explore-queries-and-tables-by-clicking): the Overview, every query, the costliest, the failures, every table and the crawlers. `view.explorer` is the window |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>AthenaAnalyzer</code>): queries, tables and crawlers as Python objects</summary>
-
-`athena.core` is the `AthenaAnalyzer`. Every UI command has a data method on it:
-
-```python
-core = athena.core                                     # or AthenaAnalyzer(region="eu-west-1", profile="dev")
-
-history = core.history(since="7d")                     # QueryHistory: .queries (Query), .truncated, .errors
-history.to_df()                                        # every query as a DataFrame
-detail = core.query("a1b2c3d4-...")                    # QueryDetail: .query, .rows_in, .rows_out, .results
-core.results("a1b2c3d4-...", limit=10_000).to_df()     # a past query's saved results as a DataFrame
-groups = core.workgroups()                             # Workgroup: .output_location, .bytes_cutoff, .engine_version
-catalog = core.catalog("sales")                        # Catalog: .databases, .tables, .crawlers; catalog.to_df()
-table = core.table("sales.events")                     # Table: .format, .partition_keys, .partitions, .location
-report = core.table_report("sales.events")             # TableReport: .table, .queries that read it
-```
-
-The analysis functions are pure (no AWS calls), so they also work on what you already have: `query_cost` and
-`billed_bytes` (rounded up to the MB, 10 MB at least, nothing for a failed query, DDL or a reused result),
-`query_shapes` (runs of the same SQL with other values), `group_failures`, `failure_kind` and `explain_failure`,
-`tables_in_sql`, `filters_on`, `selects_every_column`, `normalize_sql`, the SQL and code they write (`sample_sql`,
-`ctas_sql`, `repair_sql`, `run_code`, `pandas_code`), the parsers (`parse_query`, `parse_table`, `parse_crawler`,
-`parse_workgroup`, `parse_results`) and the findings: `query_findings`, `workgroup_findings`, `table_findings`,
-`catalog_findings`, `crawler_findings`, `overview_findings`, `detail_findings`, `code_findings`.
-
-</details>
-
-<details>
-<summary><b>Cost</b>: the prices used</summary>
-
-- Costs are at us-east-1 list prices, read from the AWS Price List API on 2026-11-07 (`ATHENA_PRICES`): **$5.00 per
-  TB scanned**, rounded up to the MB with **a 10 MB minimum per query**, for successful and cancelled queries. Failed
-  queries, DDL (`CREATE`, `ALTER`, `MSCK REPAIR TABLE`) and results reused from an earlier run are free. A workgroup
-  on provisioned capacity pays $0.30 per DPU-hour instead, which the reports don't show. For another region or a
-  discount: `AthenaAnalyzer(prices={"scanned_tb": 6.75})`.
-- Reading queries, workgroups and the catalog costs nothing. `catalog()` makes one small S3 LIST request per table
-  ($0.005 per 1,000) and says how many; `table_info()` lists the table's folder, 1,000 keys a request, up to 10,000
-  keys.
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                                                  | For                                                                    |
-| :------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------- |
-| `athena:ListWorkGroups`, `athena:GetWorkGroup`                                              | The workgroups and their settings                                      |
-| `athena:ListQueryExecutions`, `athena:BatchGetQueryExecution`, `athena:GetQueryExecution`   | Past queries (`overview`, `queries`, `expensive`, `failures`, `query`) |
-| `athena:GetQueryRuntimeStatistics`                                                          | Rows in and out of one query (`query`)                                 |
-| `athena:GetQueryResults`, and `s3:GetObject` on the result location                         | A past query's saved results (`query`, `core.results`)                 |
-| `glue:GetDatabases`, `glue:GetDatabase`, `glue:GetTables`, `glue:GetTable`, `glue:GetPartitions` | The Data Catalog's databases, tables and partitions               |
-| `glue:GetCrawlers`, `glue:GetCrawlerMetrics`                                                | The crawlers and their last crawl                                      |
-| `s3:ListBucket` on the tables' buckets                                                      | Whether a table's folder holds files, and its size                     |
-
-Nothing here runs a query, starts a crawler or changes a table: findings show the SQL or the `aws athena` /
-`aws glue` command instead. Anything you can't read shows up as a note instead of an error. The
-[Athena guide](https://utkarsh5026.github.io/aws-analyzer/athena.html#permissions) has a ready-made IAM policy.
-
-</details>
-
-## SQS, SNS and EventBridge
-
-<img src="docs/images/aws/messaging.svg" width="22" height="22" alt="" align="absmiddle"> **Where did my message go?** Every
-queue, SNS topic and EventBridge rule in a region, read as one map: how many messages wait in each queue and how old
-the oldest is, which **dead-letter queues** hold failed messages, which deliveries fail, and the queue policy, function
-permission or encryption key that **keeps a sender out**. `follow()` takes a message from a topic, queue or rule hop by
-hop to the Lambda function that reads it.
-
-📄 [`src/aws_analyzer/messaging/`](src/aws_analyzer/messaging/) · 📖 [SQS, SNS and EventBridge guide](https://utkarsh5026.github.io/aws-analyzer/messaging.html)
+<b>Messaging explorer</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/msg-explorer-tour-dark.webp">
   <img src="docs/images/msg-explorer-tour-light.webp" alt="The messaging explorer in a notebook, animated: it opens on the Everything tab, orders-dlq holding 42 failed messages first; the pointer opens orders-events and its Map tab, the subscriptions as a tree with partner-webhooks and audit-events marked because their policy keeps the topic out, clicks partner-webhooks, which the map then follows; it opens the Dead letters tab, then email-jobs and the Live tab, where the backlog drains a few messages at each look">
 </picture>
 
-<p align="center"><sub><code>msg.explore()</code>: from what failed, to where a topic's messages go, to a queue draining as you watch.</sub></p>
+<sub><code>msg.explore()</code>: what failed, where messages go, a queue draining live.</sub>
 
-### Quick start
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Every command works with boto3 alone, so on SageMaker there's nothing to install.
-
-```python
-from aws_analyzer import MessagingView
-
-msg = MessagingView()                        # uses the notebook's execution role and region
-msg.help()                                   # every command, grouped by task
-
-msg.overview()                               # every queue, topic and rule: what waits, what failed, what it costs
-msg.follow("orders-events")                  # where a message goes from a topic, queue, rule or bus
-msg.dead_letters()                           # failed messages, what they came from, how to move them back
-msg.queue_info("orders")                     # one queue: backlog, readers, senders, settings in plain English
-```
-
-**It never shows what's in a queue.** The only way to read a message is `ReceiveMessage`, which hides it from its
-readers for the visibility timeout and counts as a try towards its dead-letter queue, so even a look changes what
-happens to it. The reports use counts, ages and settings (`GetQueueAttributes` and CloudWatch); why a message failed
-is in its reader's logs, which the [Lambda module](#aws-lambda) reads.
-
-### Explore queues, topics and rules by clicking
-
-`msg.explore()` opens a window (Jupyter and ipywidgets) with every queue, topic and rule, a dead-letter queue holding
-messages first, to search, filter by chip (Problems, Queues, Dead-letter queues, Topics, Rules) or sort by a click on a
-column. Click one for its **Overview** (its report), its **Map** (where its messages go; click a queue, topic or rule on
-the way to open it), the **Dead letters** tab, and **Live**: the queue's backlog looked at every 5 seconds while the
-tab is open, with which way it's going and when it would be empty. Each look is one `GetQueueAttributes` request per
-queue, and Live stops after 10 minutes. The window only reads.
-
-```python
-msg.explore("orders-events", tab="map")      # or explore("email-jobs", tab="live")
-```
-
-### Commands (`MessagingView`)
-
-Grouped the way `msg.help()` lists them.
-
-#### Where messages go
-
-| Command                 | Shows                                                                                                                                                                                                                                       |
-| :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `overview(days=7)`      | Every queue (messages waiting and in flight, the oldest's age, sent and handled over 7 days, who reads it, its dead-letter queue, cost), every topic (subscriptions, published, delivered, **failed**, filtered out) and every rule (on or off, **what it matches in plain English**, targets, failed). Findings: dead-letter queues holding messages, failed deliveries with nothing to catch them, **senders a policy or key keeps out** (with the command under "Let them in"), messages close to being deleted unread, queues nothing reads, unconfirmed subscriptions, topics publishing to no one |
-| `follow(name, days=7)`  | The way a message takes from a topic, queue, rule or bus: what sends to it, then a tree of every subscription (and its filter), rule target, queue, reader and dead-letter queue, each with its numbers and **where messages get lost** |
-| `dead_letters(days=7)`  | Every dead-letter queue, the fullest first: its failed messages, the oldest's age, how long it keeps them, what it catches failures from (queues, subscriptions, rule targets) and `aws sqs start-message-move-task`, the command that moves them back (shown, never run) |
-
-#### One queue, topic or rule
-
-| Command                             | Shows                                                                                                                                                                                                   |
-| :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `queue_info(name, days=7)`          | One queue: backlog, a line per day, **each setting and what it means**, the topics and rules that send to it and whether its policy lets them, the Lambda functions that read it. Findings: a visibility timeout shorter than six times the reader's timeout, a queue falling behind, too few receives before the dead-letter queue, a dead-letter queue that keeps messages no longer than its source, empty receives that long polling would save |
-| `topic_info(name, days=7)`          | One topic: published, delivered, failed and filtered out each day, every subscription with its filter in plain English, whether it's confirmed, its dead-letter queue and whether its queue or function lets the topic in |
-| `rule_info(name, bus=None, days=7)` | One EventBridge rule (`"bus/rule"` for a custom bus): what it matches, its targets with their retries and dead-letter queues, matched and failed each day, and the `aws events test-event-pattern` command when it matched nothing |
-
-#### Explore by clicking
-
-| Command                                              | Shows                                                                                                                                     |
-| :--------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| `explore(where=None, tab=None, days=7, height=None)` | The [explorer window](#explore-queues-topics-and-rules-by-clicking): everything, one in full, its map, the dead-letter queues and Live. `view.explorer` is the window |
-
-### Reference
-
-<details>
-<summary><b>Getting the data</b> (<code>MessagingAnalyzer</code>): queues, topics and rules as Python objects</summary>
-
-`msg.core` is the `MessagingAnalyzer`. Every UI command has a data method on it:
-
-```python
-core = msg.core                                # or MessagingAnalyzer(region="eu-west-1", profile="dev")
-
-ov = core.overview(days=7)                     # Overview: .queues, .topics, .buses, .rules, .queue_numbers, .errors
-ov.queues_df()                                 # every queue and its numbers as a DataFrame
-core.queue_report("orders")                    # QueueReport: .queue, .numbers (.daily), .dlq, .feeders
-core.topic_report("orders-events")             # TopicReport: .topic (.subscriptions), .numbers, .queues, .functions
-core.rule_report("shop/order-placed")          # RuleReport: .rule (.targets, .pattern), .numbers
-core.dead_letters()                            # DeadLetter: .queue, .numbers, .catches
-core.follow("orders-events").hops              # Hop: .kind, .name, .via, .numbers, .problem
-```
-
-The analysis functions are pure (no AWS calls): `describe_pattern` and `describe_filter` (an event pattern or filter
-policy as a sentence), `allows` (whether a queue's or function's policy lets a topic or rule in), `access_fixes`,
-`feeders_of`, `follow_map`, `dead_letters_from`, `queue_monthly`, `topic_monthly`, the parsers (`parse_queue`,
-`parse_subscription`, `parse_topic`, `parse_rule`, `parse_target`, `parse_consumer`), the commands findings show
-(`redrive_command`, `move_back_command`, `queue_attribute_command`, `subscription_dlq_command`, `target_dlq_command`,
-`queue_policy_command`, `lambda_permission_command`), and the findings: `queue_findings`, `topic_findings`,
-`rule_findings`, `overview_findings`. `backlog_trend` says which way a queue's backlog goes from looks you took (`QueueSample`).
-
-</details>
-
-<details>
-<summary><b>Cost</b>: the prices used</summary>
-
-- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-11-07 (`MESSAGING_PRICES`,
-  the first tier after the free tier): SQS $0.40 per million requests ($0.50 FIFO), SNS $0.50 per million messages
-  published, $0.60 per million HTTPS and $20 per million email deliveries (SQS and Lambda deliveries are free). A
-  queue's requests are every message sent, received and deleted plus every empty receive: batches make it fewer, so
-  it's the most it can be. For another region or a discount: `MessagingAnalyzer(prices={"sqs_request": 0.00000045})`.
-- `overview()` reads 6 CloudWatch metrics per queue, topic and rule ($0.01 per 1,000) and says how many. Reading
-  queues, topics and rules costs nothing, but for SQS: each `GetQueueAttributes` is a request ($0.40 per million),
-  and the explorer's Live tab makes one per queue it watches every 5 seconds (it says what an hour costs).
-
-</details>
-
-<details>
-<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
-
-Read-only. Grant what you need:
-
-| Permission                                                                                                         | For                                                                         |
-| :----------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------- |
-| `sqs:ListQueues`, `sqs:GetQueueAttributes`, `sqs:GetQueueUrl`, `sqs:ListDeadLetterSourceQueues`                    | Every queue, its messages, settings, policy and dead-letter queue            |
-| `sns:ListTopics`, `sns:GetTopicAttributes`, `sns:ListSubscriptions`, `sns:ListSubscriptionsByTopic`, `sns:GetSubscriptionAttributes` | Every topic and its subscriptions, filters and dead-letter queues |
-| `events:ListEventBuses`, `events:ListRules`, `events:DescribeRule`, `events:ListTargetsByRule`, `events:ListRuleNamesByTarget`, `events:ListArchives` | Every bus and rule, and their targets                    |
-| `cloudwatch:GetMetricData`                                                                                         | Sent, received, delivered, failed and matched counts, the oldest message's age |
-| `lambda:ListEventSourceMappings`, `lambda:GetFunctionConfiguration`, `lambda:GetPolicy`                            | Which functions read a queue, their timeout, and who may invoke them         |
-
-There's no `sqs:ReceiveMessage`: nothing here reads, sends, moves or deletes a message, and findings show the `aws sqs`
-/ `aws sns` / `aws events` / `aws lambda` command instead of running it. Anything you can't read shows up as a note
-instead of an error. The [guide](https://utkarsh5026.github.io/aws-analyzer/messaging.html#permissions) has a
-ready-made IAM policy.
-
-</details>
-
-## Ask in plain English
-
-<img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
-the package's read-only tools until it can answer: which functions failed and how often, why, and the run that shows
-it. Ask "Were last night's uploads to acme-raw processed?" and it joins the bucket's event notifications, the files that
-arrived and the function's runs, and finds the files that never ran it (a suffix filter that misses `.CSV`, a
-multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
-zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
-`S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases (whether one is up to date, why
-a sync failed, what a question finds in it), and Step Functions, API Gateway, SageMaker, DynamoDB and OpenSearch. It
-knows what normal looks like: ask "Is churn-endpoint slow?" and it holds the number against the same hour yesterday
-and last week, says since when it's been off and whether an alarm watches it. A
-problem can cross services: ask "Why did order-pipeline fail?" and it finds the state that failed, then reads the
-log lines of the Lambda run behind it by the request ID the execution's history records, and the line of code that
-raised; ask "Why does orders-api return 504s?" and it groups the failed calls in the stage's access log and reads the
-run behind the newest one. With `memory=True` it remembers what it learned about your account
-("orders-etl runs in eu-west-1") from one conversation to the next. The model is yours to pick: one on Amazon Bedrock (so
-nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
-[deepagents](https://pypi.org/project/deepagents/).
-
-📄 [`src/aws_analyzer/agent/`](src/aws_analyzer/agent/) · 📖 [Agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html)
-
-### Quick start
-
-The agent comes with aws-analyzer: its packages (deepagents, langchain-openai, langchain-aws,
-langgraph-checkpoint-sqlite and mcp) are installed with it.
-
-```python
-%pip install aws-analyzer
-
-from aws_analyzer import AgentView, set_timezone
-
-set_timezone("Asia/Kolkata")                            # so "last night" means your night (every report follows it too)
-agent = AgentView(provider="bedrock")                   # pick a model: see "Which model" below
-agent.chat()                                            # a chat window: ask, and watch each tool call as it runs
-agent.ask("Which Lambda failed last night?")            # or ask in a cell: the answer as a report
-agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
-agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
-agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
-x = LambdaView().explore("orders-etl", tab="errors")
-agent.ask("Why does this fail?", focus=x)               # about what the explorer shows: the function, tab and window
-x.attach(agent)                                         # ✦ Ask in the explorer: the chat beside its tabs, asking about it
-S3Explorer("s3://acme-raw/incoming/", assistant=agent)  # the same in the S3 explorer, in the list's place
-agent.tools()                                           # what it can call, its model and its budget
-agent.transcript()                                      # every question and answer so far, with their cost
-agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
-agent.memory()                                          # what it remembers; forget("orders-etl") clears a note
-agent = AgentView(provider="bedrock", chats=True)       # every chat saved on this machine, titled from its first question
-agent.chats()                                           # your saved chats; open_chat(1) carries on the newest
-agent = AgentView(runbooks="~/team-runbooks")           # your team's step-by-step guides, beside the built-in ones
-agent.runbooks()                                        # the runbooks it follows when a question matches one
-agent = AgentView(provider="bedrock", subagents=True)   # long searches go to an investigator per service: only its
-                                                        # conclusion fills the conversation, every call still shows
-```
+<b>Agent chat</b>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/agent-chat-tour-dark.webp">
   <img src="docs/images/agent-chat-tour-light.webp" alt="The agent&#x27;s chat window in a notebook, animated: it starts on the greeting and the questions to start from; the pointer types Which Lambda failed in the last 24 hours, and why? and presses Enter; the agent writes a three-step plan under the question and ticks it off as it calls function_health and function_errors, each call shown with the services it reads; then it answers: orders-etl failed 66 of its 2,226 calls, from a KeyError on customer_id, timeouts and an AccessDeniedException; last the pointer opens the folded steps and the first tool call: the AWS operations it read, the window it covered and the calls to look closer">
 </picture>
 
-<p align="center"><sub><code>agent.chat()</code>: a question asked, the plan ticked off as each read-only tool runs, with a badge for each AWS service it reads, then the answer and the steps behind it. The <a href="docs/agent.md#chat">agent guide</a> shows more.</sub></p>
+<sub><code>agent.chat()</code>: the plan ticked off as each read-only tool runs, then the answer.</sub>
 
-### Which model
+</td>
+<td width="50%"></td>
+</tr>
+</table>
 
-| Model | How | Needs |
-| :---- | :-- | :---- |
-| **Amazon Bedrock** | `AgentView(provider="bedrock")`: Claude Haiku 4.5; `model="sonnet"`, `"nova-pro"`, a model ID or an inference profile for another | The notebook's AWS role, with `bedrock:InvokeModel` on the model. Nothing leaves AWS, and the cost uses Bedrock's list prices |
-| **OpenAI** | `AgentView(model="openai:gpt-4.1")`; `endpoint=` for any server that speaks OpenAI's API (LiteLLM, vLLM, OpenRouter) | `OPENAI_API_KEY`, or `api_key=` |
-| **Azure OpenAI** | `AgentView()` with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_DEPLOYMENT` set, or `AgentView(endpoint=..., deployment=..., api_key=...)`; `azure_ad_token_provider=` for Entra ID | A deployment of a model that supports tool calling |
-| **Any LangChain provider** | `AgentView(model="anthropic:claude-sonnet-4-5")`, `"google_genai:gemini-2.5-pro"`, `"ollama:llama3.1"`, ... (anything `init_chat_model` knows), or `chat_model=` with a LangChain chat model | That provider's LangChain package (Anthropic's and Google's come with the extra) and its key |
+## Permissions
 
-Without `provider=`, the agent works it out from the model's name (`"sonnet"` is Bedrock's, `"gpt-4.1"` OpenAI's) and
-the environment: `AWS_ANALYZER_AGENT_MODEL` (`"bedrock:sonnet"`, set once for every notebook), then the Azure
-settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
-
-> [!NOTE]
-> What leaves AWS: your question and what the tools return (function and bucket names, settings, counts, file names,
-> error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that
-> looks like a key or password hidden) go to the model's provider. With a model on Amazon Bedrock it stays in your
-> AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and
-> secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either
-> unless you turn on `read_files=True` or give it a Python sandbox (`python=`), whose code reads the files it saves
-> and sends the model what it prints (below).
-
-### What it can call
-
-Eighteen tools in two toolkits (nineteen with `read_files=True`, six more with `python=`, and six for Bedrock
-knowledge bases with the `bedrock_kb` toolkit), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
-summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
-then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
-lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
-way a coding tool reads code with sed, an editor's go to definition and grep; "what changed when it started failing?" is
-`function_errors` (each cause says which versions it ran on), then `diff_versions`; "were last night's files processed?" is `s3_triggers`, then
-`function_errors` for the runs that failed.
-
-| Tool                                                  | What it returns                                                                                                                                       |
-| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `find_functions(match, regions)`                      | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed                                                     |
-| `function_health(since, until, match, regions)`       | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called. Fast: the agent starts here     |
-| `function_errors(function, since, until, region)`     | One function's errors from its logs, grouped by cause, with counts, an example line, request IDs and the file and line its traceback names, next to CloudWatch's count of failed calls |
-| `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error                   |
-| `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs                                                 |
-| `function_details(function, region)`                  | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding with its next step               |
-| `function_code(function, region)`                     | What a Python function's code calls (AWS operations, environment variables by name, event fields, libraries), read with `ast` and never run            |
-| `function_source(function, file, lines, region)`      | The function's code, numbered line by line, like `sed -n` (any runtime with a .zip package): `lines="42"` for the lines around the one an error's traceback names, `"150-300"` for any range, up to 300 lines a call; with no file, the handler's file and the package's own files. Nothing is run, and anything that looks like a secret is hidden |
-| `search_code(function, text, regex, files, region)`   | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: the function's own files, or `files=` globs and folders, the libraries packed with it too |
-| `find_symbol(function, name, region)`                 | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition and find references. Read with `ast` and never run |
-| `diff_versions(function, old, new, region)`           | What changed between two versions, like `git diff`: settings and environment variable names, libraries added, removed or upgraded, each changed file with the Python functions its changes are in, and the changed lines (secrets hidden). By default `$LATEST` against the newest published version with different code |
-| `find_buckets(match, sizes)`                          | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first                                     |
-| `bucket_details(bucket)`                              | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, **its event notifications**, size and monthly cost, and its findings |
-| `list_folder(location)`                               | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first                                                                   |
-| `find_files(location, match, since, until, min_size, max_size, limit)` | The files under a location that match a name glob, a time window or a size: how many, how big, the newest                    |
-| `folder_summary(location)`                            | What a location holds by file type, storage class and folder, the largest files, the monthly cost and findings                                       |
-| `file_info(location)`                                 | One file's headers, never its content: size, type, storage class (Glacier needs a restore), encryption (KMS needs `kms:Decrypt`), metadata, tags        |
-| `preview_file(location, rows)`                        | **Only with `read_files=True`.** What's inside one file, the same reading as `S3View().preview()`: a table's columns and first rows (csv, json lines, parquet, orc, avro, excel), a JSON file's start, a text file's first lines, a PDF's or Word file's text, an archive's files. Anything that looks like a secret is hidden; images, audio, video and binary files only give their type and size |
-| `s3_triggers(bucket, function, since, until, region)` | **S3 and Lambda joined**: which bucket events invoke which functions, on which keys; whether the function exists and lets the bucket invoke it; the files that arrived in the window and how many ran it (and which were missed: by the case of their ending, or a multipart upload a PUT-only notification ignores); and the function's runs and failures in that window |
-
-`s3_triggers` is there when the agent has both toolkits, as it does by default; `AgentView(toolkits=["s3"])` gives S3
-alone. By default no S3 tool reads what's inside a file. `AgentView(read_files=True)` adds `preview_file`, so the agent
-can answer "which columns does orders.parquet have?" or "why does this CSV fail to load?". What it reads is sent to the
-model's provider, so turn it on with a model on Amazon Bedrock, or with a provider your organisation allows for that
-data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
-`budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
-
-**Bedrock knowledge bases** have a toolkit of their own, which every agent gets (`toolkits=["lambda", "s3"]` leaves
-it out). Its seven tools read through `BedrockKBAnalyzer` in the agent's
-region; "is support-docs up to date?" is `kb_health`, then `kb_files` for the files that aren't, and "why doesn't it
-answer X?" is `search_kb` with the question, then `file_chunks` on the file that should have answered it. "What does
-it answer to X?" is `answer_kb`: the answer a model writes from those passages, next to what it cites.
-
-| Tool                                                  | What it returns                                                                                                                                       |
-| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `find_knowledge_bases(match)`                         | The knowledge bases in the region: status, vector store, embedding model, each data source's last sync, and how many warnings each has                |
-| `kb_health(knowledge_base)`                           | Its status, settings in plain words, estimated idle cost, each data source's chunking, parsing and last syncs, its documents by status with why they failed, and its findings |
-| `kb_syncs(knowledge_base, data_source, n)`            | Its syncs newest first, with what each indexed and why a failed one failed, the patterns in them, and the command that syncs each data source again   |
-| `kb_files(knowledge_base, state, match, data_source, limit)` | Each file of its S3 data sources next to Bedrock's record of it: failed (and why), changed since it was indexed, new since the last sync, skipped, deleted from S3, or indexed. Names, sizes and dates only |
-| `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them (Bedrock's `Retrieve`), with findings about the result     |
-| `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks (how many, how big, the first ones' text) and, with `question=`, where its best passage ranks against the whole knowledge base's |
-| `answer_kb(question, knowledge_base, model, n, data_source, search_type)` | The answer the knowledge base gives once a model has read the passages (Bedrock's `RetrieveAndGenerate`, Claude Haiku 4.5 unless `model=` names another): which parts cite which sources, how much of it a citation backs, its estimated cost, and findings |
-
-With one knowledge base in the region, `knowledge_base` can be left out. Nothing here syncs or changes a knowledge
-base: the findings give the `aws bedrock-agent start-ingestion-job` command to run. `search_kb`, `file_chunks` and
-`answer_kb` send the passages and answers they get to the model's provider (cut short, secrets hidden), so a model on
-Amazon Bedrock keeps them in AWS; they get 10 calls a question between them (`budget={"kb_searches": 20}` raises it).
-Each `answer_kb` call runs a Bedrock model in your account, and its estimated cost is in the answer's AWS cost.
-
-**Step Functions and API Gateway** have a toolkit each, which every agent gets. Both lead to Lambda: a failed step's
-history and a call's access log line name the request ID of the Lambda run behind them, and these tools read that
-run's lines through the Lambda toolkit's `LambdaAnalyzer`, so `function_logs`, `function_errors` and
-`function_source` go on from there. "Why did order-pipeline fail?" is `state_machine_failures`, then
-`execution_details` on the newest execution of the biggest group; "why does orders-api return 504s?" is `api_errors`.
-
-| Tool                                                  | What it returns                                                                                                                                       |
-| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `find_state_machines(match, days)`                    | Every state machine's executions over the last days from CloudWatch (started, failed, timed out, throttled), the Lambda functions each calls and its estimated cost, the failing ones first |
-| `state_machine_details(state_machine, days)`          | Its type, logging and tracing, each state in order (what it calls, where it goes next, how it retries and catches errors), its cost and the findings about its definition |
-| `state_machine_failures(state_machine, since)`        | The failed, timed-out and aborted executions grouped by the state they stopped at and the error, each with its share, its newest execution, how many can still be redriven, and the Lambda run's function and request ID |
-| `list_executions(state_machine, status, since, limit)` | Its executions in a window, newest first, with how many ended each way (an Express workflow's from its log group)                                  |
-| `execution_details(execution, state_machine)`         | One execution step by step: every state with how it went, its retries, the step that ended it, and the failed Lambda step's run: its last lines and the file and line its traceback names |
-| `compare_with_success(execution, other, state_machine)` | The execution beside the newest that succeeded before it: the states that differ, the input fields missing, extra or empty, and the likely cause when the error names one |
-| `find_apis(match, days)`                              | Every REST, HTTP and WebSocket API's requests, 4xx and 5xx errors and latency from CloudWatch, its routes (and how many anyone can call), the functions it calls, whether it keeps an access log, its estimated cost |
-| `api_details(api, stage, days)`                       | Its URL and stages (throttling, logging, access log, cache), each route with who may call it, what it calls and how long API Gateway waits, and the findings |
-| `api_errors(api, stage, since)`                       | CloudWatch's counts over the window, the failed calls in the stage's access log grouped by status, error and route, and the Lambda run behind the newest one |
-| `api_calls(api, stage, since, until, search, status, limit)` | The calls the access log recorded, newest first, found by a request ID, a path or any text; with one match, the Lambda run behind it               |
-
-**SageMaker, DynamoDB and OpenSearch** have a toolkit each too. SageMaker's reads what's billing and why a job failed:
-`sagemaker_running` (everything billing by the hour, the most expensive first, with what looks forgotten),
-`training_jobs` and `training_job` (the error its log ends in and what to change: a bigger instance, a missing
-package), `sagemaker_endpoints` (cost and traffic), `sagemaker_pipelines` and `pipeline_run` (the step that broke,
-and the training job it started). This notebook's own disk and environments aren't read. DynamoDB's are
-`find_tables`, `table_details` (keys, indexes and the query that reads each, capacity, stream, TTL, backups, its
-last day) and `table_shape`, which scans a sample of items spread over the table and sends the model only their
-shape: each attribute's types and fill rate, number ranges, lengths and key shapes (`USER#<number>`), never a value.
-It scans up to 1,000 items a call (`budget={"dynamodb_items": 5_000}` raises it), and the read capacity it used is
-in the answer's AWS cost. OpenSearch's are `find_vector_stores` (domains and Serverless collections, their cost and
-risks), `store_indexes` (which indexes hold vectors, how many documents have one, whether the graphs fit in the
-nodes' memory), `index_details` (each vector field's engine, similarity and what a score means) and
-`check_vectors` (a sample of the stored vectors measured: dimensions, zero and repeated ones; no document's fields
-or vectors reach the model). No question is embedded, so no Bedrock model is called. Nothing in these toolkits
-stops, deletes, writes or starts anything: the findings name the command that would.
-
-**What normal looks like.** A number alone doesn't say whether it's a problem: 1,840 ms may be slow for one endpoint and
-usual for another. The CloudWatch toolkit compares each number with the same hour yesterday and the same hour last
-week, says since when it has looked off and reads the alarms set on it. The tool works the comparison out, ratios and
-times included, and hands the model a sentence to copy, so the model never does the maths:
-
-> p95 latency of churn-endpoint is 1,840 ms against 410 ms last week (4.5×), since 02:10. No alarm is set on it.
-
-| Tool                                                   | What it returns                                                                                                                              |
-| :----------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------- |
-| `compare_metric(resource, metric, at, minutes, region)` | Each of a resource's main numbers (or the one `metric=` names, like `'p99 latency'`) over the last hour against the same hour yesterday and last week: the ratios, whether that's usual, since when it has looked off (from 5-minute points), the alarms set on it, the hours before it, and the `aws cloudwatch put-metric-alarm` command that would catch it when nothing watches it. `resource` is `lambda:orders-etl`, `sagemaker:churn-endpoint`, `sqs:email-jobs`, `states:order-pipeline`, `dynamodb:orders`, `apigateway:orders-api`, `http:<api id>`, an ARN, or any metric as `'AWS/EC2:InstanceId=i-0abc'` |
-| `find_alarms(state, prefix, region)`                   | The region's alarms, the firing ones first: each one's rule in words (`p95 > 1,000 ms for 3 of 3 periods of 5 minutes`), since when it's in its state, what it watches and whether it tells anyone |
-
-A number is off when it's over 1.5× both the same time yesterday and last week (or under two thirds of both, for
-traffic), by a margin that matters for it: 3 more errors in the hour, 100 ms more run time. Nothing here sets or
-changes an alarm.
-
-### Running Python (`python=`)
-
-Some questions need work no tool does: what a folder of PDFs says, every place a function's code calls DynamoDB,
-errors by hour across a day of logs, a count across a hundred CSVs, a chart of sales by month. `AgentView(python="local")`
-gives the agent a Python sandbox on the notebook's machine, with pandas and Altair, and six tools of its own (plus
-deepagents' file tools, below):
-
-| Tool                                         | What it returns                                                                                                                         |
-| :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| `save_function_code(function, files, region)` | Saves the function's own source files (or `files=` globs, the libraries packed with it too) into the workspace, under `lambda/<function>/`. Secrets files (`.env`, keys) are never saved |
-| `save_s3_files(location, match, since, until, max_files)` | Copies one file, or the files under a location that match, into the workspace under `s3/<bucket>/<key>` (50 by default; when more match it asks whether to copy them all, up to `save_files`). A PDF's, Word file's or PowerPoint file's text is saved beside it as `<key>.txt`; files in Glacier are skipped until they're restored |
-| `save_logs(function, since, until, search, region)` | Saves a window of a function's logs as `lines.jsonl` (each line) and `runs.jsonl` (each run: status, run time, memory, cold start, error), with anything that looks like a secret hidden |
-| `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
-| `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
-| `show_chart(file, title)`                    | Puts a chart the code saved in the answer, under its text, with its title: an Altair (Vega-Lite) chart, which the sandbox draws as SVG, or a PNG or SVG picture |
-
-```python
-%pip install "aws-analyzer[sandbox]"      # brings Deno
-
-agent = AgentView(provider="bedrock", python="local")
-agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
-agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
-agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
-agent.ask("Chart the orders in s3://acme-raw/sales/*.csv by month and region")   # the answer, with its charts
-agent.save_charts()                             # those charts as SVG files in agent-charts/, for a slide
-```
-
-**Charts.** When a picture answers better than a table (a trend, a few groups compared, a distribution), the agent
-reads the files it saved with pandas, makes the chart with [Altair](https://altair-viz.github.io) and puts it in the
-answer with `show_chart`. The sandbox draws it as a crisp SVG with [Vega-Lite](https://vega.github.io/vega-lite/),
-in the same Deno that runs the code, so drawing it fetches nothing. The report shows each chart under the answer's text
-with its title, and so do the chat window and `transcript()`; the picture is inside the notebook's output, so it stays
-when the notebook is saved. Every chart gets the same look (`CHART_THEME`: one size, quiet axes and grid, and eight
-colours that stay apart for colour-blind readers, in a fixed order), and the agent is told how to make one read: a
-title that says what it shows, axes labelled with units, no pies or second y-axis. `save_charts()` writes the last
-answer's charts to SVG files with each chart's Vega-Lite spec beside it (`answer=` picks an earlier one; it never
-replaces a file), and `answer.charts` holds them as data (`.title`, `.data`, `.spec`): with Altair installed,
-`alt.Chart.from_dict(answer.charts[0].spec)` shows one again with tooltips. A question gets at most 8 charts
-(`budget={"charts": 12}` raises it). Prefer matplotlib? `LocalSandbox(packages=["pandas", "matplotlib"])`.
-
-The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on
-[Deno](https://deno.com), which grants it read access to Pyodide's own files and nothing else: no network (so not
-the instance metadata service that hands out the notebook role's credentials), no environment variables, none of the
-machine's files and no subprocesses. Each run starts a fresh interpreter; the workspace's files are kept in memory
-and stay between runs. The code can import the standard library, pandas (with numpy) and Altair;
-`LocalSandbox(packages=["pandas", "altair", "scikit-learn"])` (from `aws_analyzer.agent`) offers others from
-[Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run
-more than the 2 GB it gets by default.
-
-> [!NOTE]
-> The first run downloads Pyodide 314.0.7's files once from the jsDelivr CDN, about 24 MB with pandas, Altair and
-> Vega-Lite, into
-> `~/.cache/aws-analyzer/pyodide/` (`LocalSandbox(cache=...)` for another folder), and checks each file's SHA-256.
-> `LocalSandbox().prepare()` does it ahead of time and says what it has. A notebook without internet access can copy
-> the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")` for Pyodide's,
-> `vega_url="https://..."` for Vega's (an npm mirror).
-
-deepagents' file tools work on the same files: the agent writes a longer script with `write_file`, runs it with
-`run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending it all again, and reads or searches
-saved files with `read_file` and `grep` without spending a run (anything that looks like a secret is hidden in what
-they show). Each of those calls counts as a tool call, and shows in the chat window and the report.
-
-Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
-never needs AWS. What it prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each
-(starting Pyodide takes about 2 seconds of that, loading pandas about 3, and Altair about 2 more), and the tools
-save at most 50 MB in all:
-`budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
-
-To run the code somewhere else (a container, a managed sandbox), pass your own `Workspace` (from
-`aws_analyzer.agent`): it puts, reads, deletes and lists files and runs code in a fresh interpreter, and it must give the code
-**no AWS credentials and no network**. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get
-the notebook role's credentials from the instance's metadata service.
-
-```python
-from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
-
-class MySandbox(Workspace):
-    title, place = "my sandbox", "(a container with no network)"   # how reports and the model name it
-    packages = ("pandas",)                                           # what the code can import
-
-    def put(self, path, data): ...                                   # write bytes at a path in the workspace
-    def read(self, path): ...                                        # -> bytes (FileNotFoundError when it's not there)
-    def delete(self, path): ...                                      # remove a file (FileNotFoundError likewise)
-    def files(self): ...                                             # -> [WorkspaceFile(path, size), ...]
-    def run(self, code, *, timeout): ...                             # -> PythonRun(ok, stdout, stderr, seconds, ...)
-
-agent = AgentView(provider="bedrock", python=MySandbox())
-```
-
-### Memory between conversations
-
-With `memory=True` the agent keeps notes about your account, so the next conversation doesn't look the same thing up
-again: "orders-etl runs in eu-west-1", "acme-raw/incoming feeds orders-etl". It writes one fact per line, dated, when
-it finds something lasting (where things run, what they're for, which bucket feeds which function, what you tell it),
-and never counts, costs, settings' values or log lines. Its notes go into the prompt when a conversation starts, as
-facts it found, not instructions: when a tool says otherwise, the tool wins and it fixes the note.
-
-```python
-agent = AgentView(provider="bedrock", memory=True)       # notes in ~/.cache/aws-analyzer/agent/memory.sqlite
-agent = AgentView(memory="~/SageMaker/agent-memory.sqlite")   # a notebook instance keeps only ~/SageMaker when it stops
-agent = AgentView(notes="AGENTS.md")                     # your own facts, from a file, read for each new conversation
-agent.memory()                                           # what it remembers: each note, when it learned it, how full
-agent.forget("orders-etl")                               # clear the notes holding these words
-agent.forget_all()                                       # clear every note about this account
-```
-
-In the chat window, **🧠 memory** shows the same notes, with their age and a ✕ on each to forget it; **forget all**
-asks for a second click.
-
-The notes are kept per AWS account (STS `GetCallerIdentity`), so one account's never reach a question about another.
-Anything in a note that looks like a key or password is hidden before it's stored, the notes stay under 8 KB
-(`budget={"memory_bytes": ...}`), since they're sent with every conversation, and the agent can't delete them: only
-`forget()` and `forget_all()` do. Memory is off unless you turn it on, and conversations themselves last only as long
-as the kernel unless you save them ([Saved chats](#saved-chats)). The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#memory) shows the report and
-the window, and what the agent notes and never notes.
-
-### Saved chats
-
-With `chats=True` every conversation is saved on this machine with a title, its first question until you rename it, so
-you can list your chats, open one again and carry it on where it left off, even after the kernel restarts.
-
-```python
-agent = AgentView(provider="bedrock", chats=True)        # chats in ~/.cache/aws-analyzer/agent/chats.sqlite
-agent = AgentView(chats="~/SageMaker/agent-chats.sqlite")    # a notebook instance keeps only ~/SageMaker when it stops
-agent.chats()                                            # every saved chat: title, questions, last asked, cost
-agent.open_chat(1)                                       # the newest, shown again; the next ask() carries it on
-agent.open_chat("nightly etl")                           # or by words of its title
-agent.rename_chat("Nightly ETL failures")                # a title of your own for the chat going on
-agent.delete_chat("nightly etl")                         # remove one from this machine
-```
-
-In the chat window, **🗂 chats** lists them, newest first: a click opens one in the window, a ✕ deletes it on a second
-click, and a box renames the chat that's open. The window's header shows the open chat's title.
-
-Each chat keeps every answer as you saw it (the text, findings, plan, charts and tool calls) and the conversation the
-model carries on (LangGraph's checkpoints), in one SQLite file. What's kept is what the agent showed: tool results had
-anything that looks like a key or password hidden before the model saw them. Saving chats is off unless you turn it on,
-and `clean_up()` leaves the file alone.
-
-### MCP servers (`mcp=`)
-
-Give the agent the tools of any [MCP](https://modelcontextprotocol.io) server: your ticket tracker, a docs search,
-GitHub, AWS's own MCP servers. Their tools sit beside its AWS tools, so one question can use both ("Is there a
-ticket about the orders-etl failure?").
-
-```python
-agent = AgentView(provider="bedrock")                      # mcp=True: servers kept in ~/.cache/aws-analyzer/agent/mcp.json
-agent.add_mcp("npx -y @modelcontextprotocol/server-memory")   # a command it runs on this machine
-agent.add_mcp("https://example.com/mcp", headers={"Authorization": "Bearer ${env:EXAMPLE_TOKEN}"})
-agent.add_mcp('{"mcpServers": {"docs": {"command": "uvx", "args": ["awslabs.aws-documentation-mcp-server@latest"]}}}')
-agent.mcp()                                                # each server: connected or why not, its tools, its calls
-agent.import_mcp()                                         # the mcp.json files your editor keeps (VS Code, Cursor, ...)
-agent.import_mcp(".vscode/mcp.json")                       # add their servers
-agent.disable_mcp("memory"); agent.enable_mcp("memory")    # switch one off and on
-agent.remove_mcp("memory")
-agent = AgentView(mcp=".vscode/mcp.json")                  # or use an editor's file as it is
-```
-
-In the chat window, **🔌 mcp** shows how many servers are connected (`🔌 mcp 2/3`) and opens a panel: a line per
-server with a dot (connected, connecting, failed, off), what it runs, its tools and calls, and why it failed. **tools ▸**
-lists its tools, a box each to turn one off, with when it asks first; **↻** connects it again, **off** / **on**
-switches it, **✕** removes it. **+ add a server** takes a command, a URL or a pasted mcp.json, guesses a name, takes
-environment variables or headers, and connects before it saves. The editor's mcp.json files are offered to import.
-
-> [!NOTE]
-> MCP tools aren't AWS reads: they're your servers', outside the agent's read-only guard. So before a tool runs that
-> doesn't say it only reads (its `readOnlyHint`), the agent stops and asks: **run** or **skip** (after `ask()`, `go()`
-> or `skip()`). `asks="every"` asks before every call, `asks="never"` never. A stdio server gets PATH and HOME and
-> the variables you give it, not the notebook's AWS credentials. What a tool returns goes to the model with anything
-> that looks like a secret hidden; pictures are named, not sent. The servers' file is readable only by you: write a key
-> as `${env:NAME}` to keep it out of the file. Signing in with OAuth isn't supported: give a remote server its key as a
-> header.
-
-### Safe and bounded
-
-- **It only reads.** (MCP servers' tools are theirs: see above.) The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
-  operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a
-  knowledge base) before its request is built, whatever asks for it. There's
-  no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
-  memory (with `memory=True`, its notes about the account in a local SQLite file, and with `chats=True` the chats). Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
-- **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
-  model's prices, $1.00 of tokens;
-  a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
-  When a question uses up a limit, the agent stops and asks whether to raise it for that question (twice as much, or
-  what a save needs): **go** and it carries on, **smaller** or **skip** and it answers with what it has, and the report
-  says what was cut short (`ask_more=False`: it never asks).
-  `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them for every question. With `read_files=True`, a
-  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
-  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`), 500
-  files per `save_s3_files` call (`save_files`) and 8 charts in an answer (`charts`). With the `bedrock_kb` toolkit, 10 knowledge base searches (`kb_searches`).
-- **Big reads ask first.** Before an S3 listing goes past 20,000 keys (`ask_keys`), a log read runs longer than
-  `log_days`, a save into the workspace passes 10 MB (`ask_bytes`), or a save finds more files than the model asked
-  for (`max_files`, 50 by default), the agent stops and asks: **go** (all of it, with the requests it takes and what
-  they cost), **smaller** (the keys listed so far, the last days of logs, the files that fit or that it asked for) or
-  **skip**. The chat window shows three buttons; after `ask()`, run `go()`, `smaller()` or `skip()`.
-  It's about time and cost: the agent only reads either way. `interrupt_on=` picks the tools that ask (`False`: none,
-  and long reads stop at the budget as before).
-- **Investigators are held to the same rules.** With `subagents=True`, the model can hand a part of a question to an
-  investigator (`investigate(service, task)`): the same model with only that service's read-only tools, whose
-  conclusion goes back in place of everything it read. Its calls are the question's own: they count against the same
-  budget, go through the same read-only guard, show in the report under the task (`↳`), and are what the answer is
-  checked against. An investigator never asks before a big read (it stops at the budget's limits) and never saves
-  files. Each one costs model calls of its own, so it's off by default.
-- **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
-  agent is told to say so. A missing permission becomes part of the answer, not an error.
-- **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
-  to follow it, and the tools hide anything that looks like a secret first.
-
-### Commands (`AgentView`)
-
-| Command                     | Shows                                                                                                                                                                                                 |
-| :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🗂 chats** lists the saved chats to open one again, rename it or delete it (with `chats=True`); **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **🔌 mcp** adds, switches and watches your MCP servers and their tools; **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
-| `ask(question, new=False, focus=None)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. `focus=` takes an explorer window (or its `x.focus`): the model is told what it shows, so "this" means the function, run, folder or file you have open. The kernel's stop button stops it, and the report shows what it found until then |
-| `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
-| `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
-| `memory()`                  | With `memory=True`: what the agent remembers about the account, each note and when it learned it, the notes old enough to check and how full its memory is, then your `notes=` file |
-| `forget(match)` / `forget_all()` | Clears the agent's notes holding these words (any case), or every note about this account; the next conversation starts without them |
-| `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
-| `chats()`                   | With `chats=True`: your saved chats, newest first: each one's title, questions, when it was last asked in, the model and what it cost |
-| `open_chat(chat)`           | Opens a saved chat again (its number in `chats()`, its ID or words of its title) and shows it question by question; the next `ask()` carries it on, even after a restart |
-| `rename_chat(title, *, chat=None)` | Gives the chat going on (or the one `chat=` names) a title of your own |
-| `delete_chat(chat)`         | Removes a saved chat from this machine: its answers and the conversation the model would carry on |
-| `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
-| `runbooks()`                | The runbooks the agent follows when a question matches one: each one's name, what it's for, where it's from and the toolkits it needs, and any that didn't load and why (a missing name or description, a name that isn't its folder's) |
-| `mcp()`                     | Your MCP servers: whether each is connected (or why not), what it runs or where it is, its tools and which ask before they run, the calls it has answered, and what to fix |
-| `add_mcp(server, *, name="", env=None, headers=None, asks=None, replace=False)` | Adds an MCP server (a command, a URL or its mcp.json JSON), connects it and saves it in the agent's mcp.json |
-| `remove_mcp(name)` / `enable_mcp(name)` / `disable_mcp(name)` | Removes a server, or switches it on (connecting it) or off |
-| `reconnect_mcp(name=None)`  | Connects a server again (every one that's on, without a name), after fixing what made it fail |
-| `import_mcp(path=None)`     | The mcp.json files your editor and apps keep (VS Code's `.vscode/mcp.json`, Claude Code's `.mcp.json`, Cursor's, Claude Desktop's) and their servers; with a path, adds that file's servers |
-| `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
-| `setup(provider=None)` | How to set up the model, as cells to copy: every provider with whether it's ready in this notebook, then for one (`setup('azure')`) the install line, a settings cell that asks for the key with `getpass` (never saved in the notebook), the call that starts the agent, and the lines for every notebook. It checks the Python, the packages and which variables are set, never their values |
-| `use_model(provider=None, model=None, *, endpoint=None, api_key=None, api_version=None, chat_model=None)` | Switches the model the agent answers with (`use_model('bedrock', 'sonnet')`, `use_model('openai', 'gpt-4.1', api_key=...)`), then says where what it sends goes. A new conversation starts; a missing key or package is said, and the agent keeps the model it had |
-
-### Reference
+Everything is read-only, but for `lambda:InvokeFunction`, which only Lambda's `invoke()` uses. Grant what you need;
+anything you can't read shows up as a note instead of an error. Each guide has a ready-made IAM policy (for example
+[Lambda's](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#permissions)).
 
 <details>
-<summary><b>Settings and data</b> (<code>AgentAnalyzer</code>): the model, the account, the budget, and answers as Python objects</summary>
+<summary><b>IAM permissions</b> by service</summary>
 
-```python
-from aws_analyzer import AgentAnalyzer, AgentView
+<br>
 
-core = AgentAnalyzer(
-    provider="bedrock",                   # or "openai", "azure", any LangChain provider; worked out when left out
-    model="sonnet",                       # a model ID, profile or short name; "openai:gpt-4.1" names both
-    # Azure OpenAI's own: deployment=, endpoint=, api_key=, api_version="2024-10-21", azure_ad_token_provider=
-    model_prices={"claude-sonnet-5": (2.00, 10.00)},   # USD per 1M input and output tokens (then cached ones), over the list prices
-    timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
-    regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
-    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account (or a .md file)
-    memory=True,                          # keeps its own notes between conversations (a path: where the SQLite file goes)
-    chats=True,                           # saves every conversation with a title, to open again (a path: the file)
-    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for; by default also "stepfunctions",
-                                          # "apigateway", "sagemaker", "dynamodb" and "opensearch" (s3_triggers
-                                          # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
-    cores={"stepfunctions": StepFunctionsAnalyzer(region="eu-west-1")},   # any toolkit's analyzer, by its name
-    read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
-    python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
-    findings=False,                       # answer in plain text, without findings (on by default)
-)
-agent = AgentView(core)
+| Service | Permissions |
+| :------ | :---------- |
+| **Amazon S3** | `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:ListBucketVersions`, `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts`, `s3:GetObject`, `s3:GetObjectTagging`, the bucket settings (`s3:GetBucket*`: `s3:GetBucketVersioning`, `s3:GetBucketPolicy`, `s3:GetBucketPolicyStatus`, `s3:GetBucketPublicAccessBlock`, `s3:GetBucketOwnershipControls`, `s3:GetBucketObjectLockConfiguration`, `s3:GetBucketLogging`, `s3:GetBucketTagging`, `s3:GetBucketNotification`, with `s3:GetLifecycleConfiguration`, `s3:GetReplicationConfiguration`, `s3:GetEncryptionConfiguration`, `s3:GetInventoryConfiguration`), `s3:GetAccountPublicAccessBlock`, `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData` |
+| **Amazon DynamoDB** | `dynamodb:ListTables`, `dynamodb:DescribeTable`, `dynamodb:DescribeTimeToLive`, `dynamodb:DescribeContinuousBackups`, `dynamodb:ListTagsOfResource`, `dynamodb:Scan`, `dynamodb:Query`, `dynamodb:GetItem`, `dynamodb:PartiQLSelect`, `cloudwatch:GetMetricData`; `kms:Decrypt` for a table encrypted with your own key |
+| **Bedrock Knowledge Bases and chat** | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:GetKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, `bedrock:RetrieveAndGenerate`, `bedrock:InvokeModel` (the answering model), `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`, `s3:ListBucket` and `s3:GetObject` on the data sources' buckets |
+| **Amazon SageMaker** | `sagemaker:DescribeNotebookInstance`, `sagemaker:DescribeNotebookInstanceLifecycleConfig`, `sagemaker:ListNotebookInstances`, `sagemaker:ListDomains`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile`, `sagemaker:ListSpaces`, `sagemaker:DescribeSpace`, `sagemaker:ListApps`, `sagemaker:DescribeApp`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob`, `sagemaker:ListPipelines`, `sagemaker:ListPipelineExecutions`, `sagemaker:DescribePipelineExecution`, `sagemaker:DescribePipelineDefinitionForExecution`, `sagemaker:ListPipelineExecutionSteps`, `cloudwatch:GetMetricData`, `logs:DescribeLogStreams`, `logs:GetLogEvents`, `cloudtrail:LookupEvents` |
+| **Amazon OpenSearch** | `es:ListDomainNames`, `es:DescribeDomains`, `es:DescribeDomain`, `es:ESHttpGet`, `es:ESHttpPost` (to `_search` and `_count` only), `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`, `aoss:GetSecurityPolicy`, `aoss:GetAccountSettings`, `aoss:APIAccessAll` with a data access policy allowing `aoss:DescribeIndex` and `aoss:ReadDocument`, `cloudwatch:GetMetricData`, `bedrock:InvokeModel` (to embed a question) |
+| **AWS Lambda** | `lambda:ListFunctions`, `lambda:GetFunction`, `lambda:GetPolicy`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionUrlConfig`, `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`, `lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`, `ec2:DescribeRegions` (for `regions="all"`), `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`; and `lambda:InvokeFunction`, only for `invoke()` |
+| **AWS Step Functions** | `states:ListStateMachines`, `states:DescribeStateMachine`, `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory`, `states:DescribeStateMachineForExecution`, `cloudwatch:GetMetricData`, `logs:FilterLogEvents`, `lambda:GetFunction`, `lambda:ListVersionsByFunction` |
+| **Amazon API Gateway** | `apigateway:GET` (IAM's one permission for every API Gateway read), `cloudwatch:GetMetricData`, `logs:FilterLogEvents`, `lambda:GetFunction` |
+| **Amazon Athena** | `athena:ListWorkGroups`, `athena:GetWorkGroup`, `athena:ListQueryExecutions`, `athena:BatchGetQueryExecution`, `athena:GetQueryExecution`, `athena:GetQueryRuntimeStatistics`, `athena:GetQueryResults`, `glue:GetDatabases`, `glue:GetDatabase`, `glue:GetTables`, `glue:GetTable`, `glue:GetPartitions`, `glue:GetCrawlers`, `glue:GetCrawlerMetrics`, `s3:ListBucket`, `s3:GetObject` (saved results) |
+| **SQS, SNS and EventBridge** | `sqs:ListQueues`, `sqs:GetQueueAttributes`, `sqs:GetQueueUrl`, `sqs:ListDeadLetterSourceQueues`, `sns:ListTopics`, `sns:GetTopicAttributes`, `sns:ListSubscriptions`, `sns:ListSubscriptionsByTopic`, `sns:GetSubscriptionAttributes`, `events:ListEventBuses`, `events:ListRules`, `events:DescribeRule`, `events:ListTargetsByRule`, `events:ListRuleNamesByTarget`, `events:ListArchives`, `cloudwatch:GetMetricData`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionConfiguration`, `lambda:GetPolicy`; never `sqs:ReceiveMessage` |
+| **Ask in plain English** | The permissions above for the services it reads, plus `cloudwatch:ListMetrics`, `cloudwatch:DescribeAlarmsForMetric` and `cloudwatch:DescribeAlarms`; with a model on Bedrock, `bedrock:InvokeModel`, `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` and `bedrock:GetInferenceProfile` |
 
-answer = core.ask("Which Lambda failed last night?")    # AgentAnswer
-answer.text                    # the answer, in markdown
-answer.findings                # AgentFinding: level, message, call (a View call to run next, checked), shows
-answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
-answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
-answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
-answer.provider, answer.model # who served it, and the model or profile that answered
-answer.input_tokens, answer.output_tokens, answer.cost   # cost is None without its prices (answer.rates says whose)
-answer.stopped, answer.error   # why it stopped early, or what failed
-core.tools()                   # the tools themselves: plain functions, for another agent framework
-core.memories()                # MemoryState: notes (Note: text, learned), text, account, path, limit
-core.forget("orders-etl")      # the Notes it cleared; core.forget_all() returns how many
-core.chats()                   # ChatSummary: thread, title, started, updated, questions, cost, model
-core.open_chat(1)              # the ChatSummary it opened; its answers join core.history
-core.chat_title                # the title of the chat going on
-```
-
-`chat_model=` takes any LangChain chat model instead (a `ChatOllama` with your own settings, say). The pure functions work without AWS or a model: `hide_secrets`,
-`asked_at`, `system_prompt`, `function_row`, `summarize_functions`, `summarize_health`, `summarize_errors`,
-`summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `file_row`,
-`summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
-`summarize_preview` (what the model reads of a `Preview`),
-`count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, the Bedrock knowledge base toolkit's `summarize_knowledge_bases`, `summarize_kb_health`,
-`summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Step
-Functions toolkit's `summarize_state_machines`, `summarize_state_machine`, `summarize_failures`, `summarize_executions`
-and `summarize_execution`, API Gateway's `summarize_apis`, `summarize_api`, `summarize_api_errors`, `summarize_calls`
-and `summarize_lambda_run`, SageMaker's `summarize_running`, `summarize_training_jobs`, `summarize_training_job`,
-`summarize_endpoints`, `summarize_pipelines` and `summarize_pipeline_run`, DynamoDB's `summarize_tables`,
-`summarize_table` and `summarize_shape`, OpenSearch's `summarize_stores`, `summarize_indexes`, `summarize_index` and
-`summarize_vectors`, the Python
-toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
-`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `check_grounding`, `grounding_findings`, `check_citations`, `cited_refs`, `unbacked_causes`, `hedge_root_causes`, `recheck_request`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
-`explain_model_error`.
-
-Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
-it covers, and `tools()` returning plain functions whose type hints and docstrings tell the model how to call them.
-Pass it next to the built-in ones, `AgentView(toolkits=["lambda", "s3", "bedrock_kb", Runbooks()])`, and its tools get the same
-budget, error handling and report as the built-in ones; the read-only guard covers every AWS client the analyzer it
-reads through (`make_analyzer()`) makes from its session. The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#toolkits) has an
-example.
-
-</details>
-
-<details>
-<summary><b>Permissions and cost</b>: the IAM permissions its tools use, and what a question costs</summary>
-
-The Lambda tools read through `LambdaAnalyzer`, so they need the [Lambda permissions](#aws-lambda) above, all
-read-only: `lambda:ListFunctions`, `lambda:GetFunction`, `lambda:ListEventSourceMappings`, `lambda:GetPolicy`,
-`lambda:GetFunctionUrlConfig`, `lambda:GetFunctionEventInvokeConfig`, `lambda:ListAliases`,
-`lambda:ListVersionsByFunction`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`,
-`lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`,
-`logs:FilterLogEvents` and, for `regions="all"`, `ec2:DescribeRegions`. The S3 tools read through `S3Analyzer`:
-`s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:GetObject` (for `file_info`'s HeadObject: the
-headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too, and with
-`python=`, `save_s3_files` the whole file),
-`s3:GetObjectTagging`, the bucket settings [S3's permissions](#amazon-s3) list for
-`bucket_info` (`s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration`, `s3:GetBucketPublicAccessBlock`,
-`s3:GetBucketPolicyStatus`, `s3:GetBucketPolicy`, `s3:GetBucketOwnershipControls`,
-`s3:GetBucketObjectLockConfiguration`, `s3:GetLifecycleConfiguration`, `s3:GetReplicationConfiguration`,
-`s3:GetBucketLogging`, `s3:GetBucketTagging`, `s3:GetInventoryConfiguration`), `s3:GetBucketNotification`,
-`s3:GetAccountPublicAccessBlock` and `cloudwatch:ListMetrics`. `s3_triggers` needs both sets. The Bedrock knowledge
-base tools read through `BedrockKBAnalyzer`: `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`,
-`bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`,
-`bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve` (for `search_kb` and
-`file_chunks`: a search, which changes nothing), `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the
-answering model or inference profile and `bedrock:ListFoundationModels` / `bedrock:ListInferenceProfiles` (for
-`answer_kb`: the same search, then a model writes the answer, which changes nothing) and `s3:ListBucket` on each data source's bucket (`kb_files` and
-`file_chunks` list its files' names, sizes and dates). The Step Functions tools need `states:ListStateMachines`,
-`states:DescribeStateMachine`, `states:ListExecutions`, `states:DescribeExecution`, `states:GetExecutionHistory`,
-`cloudwatch:GetMetricData` and `logs:FilterLogEvents` (an Express workflow's log group, and the Lambda run behind a
-step, with `lambda:GetFunction` and `logs:DescribeLogGroups`; and for what changed before a failure,
-`states:DescribeStateMachineForExecution` and `lambda:ListVersionsByFunction`). The API Gateway tools need `apigateway:GET` (IAM's one
-permission for every API Gateway read), `cloudwatch:GetMetricData` and `logs:FilterLogEvents` (the stages' access
-logs, and the Lambda run behind a call). The SageMaker tools need the [SageMaker permissions](#amazon-sagemaker)
-`running`, `training_jobs`, `training_job`, `endpoints`, `pipelines` and `pipeline_run` list, with
-`logs:DescribeLogStreams` and `logs:GetLogEvents` for a training job's log. The DynamoDB tools need
-`dynamodb:ListTables`, `dynamodb:DescribeTable`, `dynamodb:DescribeTimeToLive`, `dynamodb:DescribeContinuousBackups`,
-`dynamodb:ListTagsOfResource`, `cloudwatch:GetMetricData` and, for `table_shape`, `dynamodb:Scan` (the one read
-here that reads items; the guard lets it through by name). The OpenSearch tools need `es:ListDomainNames`,
-`es:DescribeDomains`, `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`,
-`aoss:GetSecurityPolicy`, `aoss:GetAccountSettings`, `cloudwatch:GetMetricData` and, to read indexes,
-`es:ESHttpGet` and `es:ESHttpPost` on a domain (POST to `_search` and `_count` only) or `aoss:APIAccessAll` with a
-data access policy on a collection. The CloudWatch tools need `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics` (a
-SageMaker endpoint's variants, a state machine's ARN, an HTTP API's stage, and close names when one isn't found),
-`cloudwatch:DescribeAlarmsForMetric` (the alarms on a number) and `cloudwatch:DescribeAlarms` (for `find_alarms`).
-Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
-and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
-`bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
-`"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the
-resource, or an Entra ID identity with the Cognitive Services OpenAI User role on it. With `memory=True`, the agent
-reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
-
-Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices
-(the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
-on the plan, the region and the deployment type, so there are no built-in ones). Without a price the cost shows as
-unknown, never a guess, and each question's budget is checked against it when there is one. The rules and the tools' descriptions (about 20,000 tokens with the built-in tools, the same for every question;
-`toolkits=["lambda", "s3"]` brings it to about 9,000) go to the model with each question. On Amazon Bedrock, Claude and Amazon Nova keep them in Bedrock's prompt cache for five minutes, so a follow-up reads them at a tenth of the input price (Nova: a quarter); the first question writes them, at a quarter more for Claude. The note under each answer says how many input tokens the cache served and what that saved, at the cache's list prices. OpenAI and Azure OpenAI cache by themselves: give their cached price after the others, `model_prices={"gpt-4.1": (2.00, 8.00, 0.50)}`, or cached tokens are priced as ordinary input and the note says the cost is an upper bound.
-The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
-$0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. A knowledge
-base search embeds its question (about $0.0000004 at Titan Embeddings' price); the vector store bills by its own
-terms (OpenSearch Serverless by the hour, whether it's searched or not). Reading logs
-and Lambda's settings costs nothing.
+`sts:GetCallerIdentity` needs no permission.
 
 </details>
 
 ## Development
 
 Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules the code
-follows, and [SECURITY.md](SECURITY.md) how to report a vulnerability privately. What changed in each release is in
-[CHANGELOG.md](CHANGELOG.md).
+follows, and [SECURITY.md](SECURITY.md) how to report a vulnerability privately.
 
 ```bash
 pip install -r requirements-dev.txt    # pinned versions
-python -m pytest                       # every test, no AWS account needed
+python -m pytest                       # every test, against moto: no AWS account needed
 ruff check .                           # lint
-python -m build                        # the PyPI package, in dist/
-
-pip install -r requirements-docs.txt   # the guide site
-mkdocs serve                           # preview it at http://127.0.0.1:8000
+mkdocs serve                           # the guide site, from docs/ (pip install -r requirements-docs.txt)
 ```
-
-- **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
-  Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
-  tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
-  The OpenSearch tests use moto for domains, fake Serverless, CloudWatch and Bedrock clients checked the same way, and
-  [`tests/fake_opensearch.py`](tests/fake_opensearch.py), a small in-memory OpenSearch that answers the REST calls
-  (k-NN searches included) and fails the test if anything but a read is sent.
-  The SQS, SNS and EventBridge tests run on moto alone, CloudWatch's numbers included
-  ([`tests/fake_messaging.py`](tests/fake_messaging.py) seeds them).
-  The Lambda tests use moto for functions, triggers, CloudWatch and logs, with the few Lambda reads moto lacks
-  (account limits, provisioned concurrency) answered by functions checked against the service model.
-  The Step Functions tests use [`tests/fake_stepfunctions.py`](tests/fake_stepfunctions.py): fake Step Functions and
-  CloudWatch clients checked against the service model, with execution histories built event by event as Step
-  Functions writes them (moto's are canned), and moto for the Lambda function whose logs a failed step shows.
-  The API Gateway tests use moto for the APIs (REST in `apigateway`, HTTP and WebSocket in `apigatewayv2`), their
-  access logs and the Lambda run behind a call, and [`tests/fake_apigateway.py`](tests/fake_apigateway.py)'s
-  CloudWatch, since moto keeps no API Gateway metrics and no percentiles.
-  The Athena tests use [`tests/fake_athena.py`](tests/fake_athena.py): fake Athena and Glue clients checked against
-  the service model, with a week of query history (moto's Athena keeps none), and moto for the tables' S3 folders.
-  The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
-  window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
-  stream event against the service model.
-- **Guides** in `docs/` are Markdown, built with [MkDocs](https://www.mkdocs.org/) and the
-  [Material](https://squidfunk.github.io/mkdocs-material/) theme ([`mkdocs.yml`](mkdocs.yml)) and published to GitHub
-  Pages by [the Docs workflow](.github/workflows/pages.yml) whenever they change on `main`; pull requests build them
-  with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
-  service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
-  [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
-  [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
-  [`docs/lambda_functions.md`](docs/lambda_functions.md), [`docs/stepfunctions.md`](docs/stepfunctions.md),
-  [`docs/apigateway.md`](docs/apigateway.md), [`docs/athena.md`](docs/athena.md),
-  [`docs/messaging.md`](docs/messaging.md)), and so does the S3
-  explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
-- **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
-  `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
-  `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
-  Bedrock, since moto has none, and OpenSearch's by simulated clusters. The chat window's and the knowledge base
-  explorer's are taken in a real JupyterLab by `.claude/skills/demo/chat_shots.py` and
-  `.claude/skills/demo/kb_explorer_shots.py` (they need jupyterlab and playwright too).
-- **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships [`src/aws_analyzer/`](src/aws_analyzer/), where
-  each analyzer is one module and [`_kit/`](src/aws_analyzer/_kit/) holds the code they share (formatting, parsing,
-  optional imports, AWS errors, how reports are drawn, and the base View and analyzer each service builds on);
-  [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
-  classes and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
-  `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
-  [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
-  both, see [CONTRIBUTING.md](CONTRIBUTING.md#releases)), and publishes a GitHub release tagged `v<version>`:
-  [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to PyPI with trusted
-  publishing (its comments have the one-time setup).
-- **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.11 to 3.14 for every pull request and push to
-  `main`, and also imports each analyzer with only boto3 installed (the agent with its own packages), and builds the
-  package and imports it as pip installs it. The versions in
-  `requirements-dev.txt` and `requirements-docs.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly
-  pull requests to update them and the GitHub Actions the workflows use.
 
 ## License
 
