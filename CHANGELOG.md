@@ -25,12 +25,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - Each clash is a finding with the command that lines them up; advice to raise the timeout says what else must change.
   - 🚪 API Gateway's `api_info()` notes a Lambda function whose timeout outlasts how long API Gateway waits for it.
 
-- 🔀 **Step Functions: tasks that give up before their Lambda does** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🔀 **Step Functions: tasks that give up before their Lambda does** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - `state_machine()` holds each Lambda task's `TimeoutSeconds`, an Express workflow's 5 minutes and a Map's parallel items against the function's timeout and concurrency.
   - A Map that can flood the region's Lambda pool, or runs more than reserved concurrency allows, is a finding with the `MaxConcurrency` to set.
-- ⚡ **Lambda: a load balancer's real idle timeout** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- ⚡ **Lambda: a load balancer's real idle timeout** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - `function_info()` reads the idle timeout of the load balancer in front of a target group instead of assuming 60 s, and gives the command to raise it.
-- 🤖 **Agent: "will my callers time out?"** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🤖 **Agent: "will my callers time out?"** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - A `caller_limits` tool: each caller's own limits against the function's settings, with the fix; `function_details` includes them too.
 
 ### Fixed
