@@ -135,6 +135,12 @@ class Trigger:
     """
     Something that invokes a function: an event source mapping (a queue or stream Lambda reads), a resource
     policy statement (a service or account allowed to call it), or its function URL.
+
+    An event source mapping's settings are kept as data too: batch_size (the most records in one call),
+    batch_window (seconds Lambda waits to fill a batch), max_concurrency (SQS: the most calls it runs at once),
+    max_retries and max_record_age (streams: how many tries, and for how many seconds, a failed batch gets; -1 means
+    until the record expires), split_batches (a failed batch is split in two to find the bad record) and
+    failure_destination (where failed batches go).
     """
 
     kind: str  # 'SQS queue', 'S3 bucket', 'EventBridge rule', 'API Gateway', 'Function URL', 'AWS account', ...
@@ -149,6 +155,13 @@ class Trigger:
     principal: str | None = None
     unscoped: bool = False  # a service allowed without saying which of its resources (any account's)
     uuid: str | None = None  # the event source mapping's ID
+    batch_size: int | None = None
+    batch_window: int = 0
+    max_concurrency: int | None = None
+    max_retries: int | None = None
+    max_record_age: int | None = None
+    split_batches: bool = False
+    failure_destination: str | None = None
 
     @property
     def short(self) -> str:
@@ -371,7 +384,8 @@ class QueueState:
     An SQS queue as GetQueueAttributes describes it now: `visible` messages wait to be read
     (ApproximateNumberOfMessages) and `in_flight` ones are being read or hidden after a failed read
     (ApproximateNumberOfMessagesNotVisible); it keeps them `retention` seconds (MessageRetentionPeriod) and moves one
-    that failed `max_receives` reads to `dead_letter_arn` (its RedrivePolicy). `oldest_age` is its oldest message's age
+    that failed `max_receives` reads to `dead_letter_arn` (its RedrivePolicy); a message being read stays hidden from
+    other readers for `visibility` seconds (VisibilityTimeout). `oldest_age` is its oldest message's age
     in seconds from CloudWatch, None without a recent value, and `error` the error code when it couldn't be read.
     """
 
@@ -383,6 +397,7 @@ class QueueState:
     oldest_age: float | None = None
     dead_letter_arn: str | None = None
     max_receives: int | None = None
+    visibility: int = 30
     dead_letter: QueueState | None = None
     error: str | None = None
 
@@ -415,7 +430,8 @@ class EventFate:
 @dataclass
 class FunctionDetail:
     """
-    Everything function_info() shows about one function. Sections that couldn't be read are in errors.
+    Everything function_info() shows about one function. Sections that couldn't be read are in errors. queues are
+    its SQS triggers' queues as they are now (by ARN), for how their settings meet the function's.
     """
 
     function: Function
@@ -431,6 +447,7 @@ class FunctionDetail:
     runtime_version: str | None = None  # the runtime version 'Manual' pins
     metrics: FunctionMetrics | None = None
     errors: dict[str, str] = field(default_factory=dict)  # section -> error code
+    queues: dict[str, QueueState] = field(default_factory=dict)
 
 
 @dataclass

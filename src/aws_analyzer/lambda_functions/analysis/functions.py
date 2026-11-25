@@ -278,4 +278,8 @@ def parse_event_source_mapping(mapping: dict[str, Any]) -> Trigger:
         parts.append(f"failed batches go to {_source_name(failure)[0]}")
     return Trigger(kind, name, arn=arn, via="event source mapping", state=mapping.get("State"),
                    detail=", ".join(parts), last_result=mapping.get("LastProcessingResult"),
-                   uuid=mapping.get("UUID"))
+                   uuid=mapping.get("UUID"), batch_size=mapping.get("BatchSize"),
+                   batch_window=mapping.get("MaximumBatchingWindowInSeconds") or 0, max_concurrency=most,
+                   max_retries=mapping.get("MaximumRetryAttempts"),
+                   max_record_age=mapping.get("MaximumRecordAgeInSeconds"),
+                   split_batches=bool(mapping.get("BisectBatchOnFunctionError")), failure_destination=failure)

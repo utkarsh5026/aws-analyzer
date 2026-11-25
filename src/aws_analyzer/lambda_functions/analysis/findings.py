@@ -18,6 +18,7 @@ from .text import _cli, _reason, _region_flag, _window
 from .functions import runtime_status
 from .cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .fates import keep_failed_command
+from .limits import raising_timeout_note
 
 
 _SECRET_NAME_RE = re.compile(r"PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL", re.I)
@@ -151,6 +152,16 @@ def _longer(fn: Function) -> str:
     return f"aws lambda update-function-configuration {_cli(fn)} --timeout {_next_timeout(fn.timeout)}"
 
 
+def _connected_note(fn: Function, detail: FunctionDetail) -> str:
+    """
+    What a longer timeout also needs from what's connected to the function (raising_timeout_note), when there's a
+    longer timeout to give.
+    """
+    if fn.timeout >= MAX_TIMEOUT:
+        return ""
+    return raising_timeout_note(detail, _next_timeout(fn.timeout))
+
+
 CHANGE_BEFORE_DAYS = 7
 
 _CHANGE_JUMP = 3
@@ -261,7 +272,7 @@ def _usage_findings(
             found.append(("warn", (
                 f"Its longest run took {human_ms(metrics.duration_max)} of its {fn.timeout} s timeout: runs that "
                 f"need longer are cut off and fail. performance('{name}') shows how close they come; if they need "
-                f"more time: {_longer(fn)}."
+                f"more time: {_longer(fn)}.{_connected_note(fn, detail)}"
             )))
         elif fn.timeout >= 300 and calls >= 20 and share <= 0.1:
             suggested = _nice_timeout(metrics.duration_max)

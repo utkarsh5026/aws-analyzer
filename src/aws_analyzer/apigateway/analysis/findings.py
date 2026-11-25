@@ -214,6 +214,40 @@ def _bill_findings(overview: Overview, prices: dict[str, float]) -> list[tuple[s
                      f"{_call('api_info', name)} shows what it's made of.")]
 
 
+def _waits_ms(api: Api, route: Route) -> int:
+    """
+    How long API Gateway waits for this route's integration: its own timeout when one is set, at most the API's.
+    """
+    own = route.integration.timeout_ms if route.integration is not None else None
+    return min(own or api.max_timeout_ms, api.max_timeout_ms)
+
+
+def backend_timeout_findings(api: Api, timeouts: dict[str, int]) -> list[tuple[str, str]]:
+    """
+    Lambda functions whose timeout outlasts how long API Gateway waits for them: past that, the caller gets a 504
+    while the function keeps running, billed, and its answer is thrown away. A finding per function, naming its
+    routes. timeouts: function name -> its timeout in seconds (ApiReport.function_timeouts).
+    """
+    routes_by_function: dict[str, list[Route]] = {}
+    for route in api.routes:
+        name = route.integration.function if route.integration is not None else ""
+        if name in timeouts and timeouts[name] * 1000 > _waits_ms(api, route):
+            routes_by_function.setdefault(name, []).append(route)
+    findings = []
+    for name, routes in routes_by_function.items():
+        waits = min(_waits_ms(api, route) for route in routes)
+        seconds = timeouts[name]
+        region = next((r.integration.function_region for r in routes if r.integration.function_region), "")
+        lower = (f"aws lambda update-function-configuration --function-name {name} --timeout {waits // 1000}"
+                 + (f" --region {region}" if region else ""))
+        findings.append(("info", f"{name} can run longer than {api.name} waits for it: its timeout is {seconds:,} s, "
+                                 f"but API Gateway answers {_names([r.key for r in routes])} with a 504 after "
+                                 f"{_seconds(waits)}, while the function goes on, billed, and its answer is thrown "
+                                 f"away. Lower its timeout to match ({lower}), or answer at once and hand the work "
+                                 "to a queue."))
+    return findings
+
+
 def api_findings(report: ApiReport, prices: dict[str, float]) -> list[tuple[str, str]]:
     """
     One API's findings: its numbers, its routes, who can call it, its stage's settings and log format.
@@ -222,6 +256,7 @@ def api_findings(report: ApiReport, prices: dict[str, float]) -> list[tuple[str,
     findings = numbers_findings(api, report.numbers) + route_findings(api, report.route_numbers)
     findings += open_route_findings(api) + idle_findings(api, report.numbers)
     findings += stage_findings(api, stage) + format_findings(api, stage)
+    findings += backend_timeout_findings(api, report.function_timeouts)
     if stage is not None and report.numbers and report.numbers.requests and not stage.detailed_metrics:
         findings.append(("info", f"Stage {stage.name} has no per-route metrics: CloudWatch counts the whole API, so "
                                  f"the routes table has no numbers. {_call('performance', api.name)} works them out "

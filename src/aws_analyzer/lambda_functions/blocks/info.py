@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from ..._kit.blocks import _Table
+from ..._kit.blocks import _Table, _Tone
 from ..._kit.charts import _Part, _Split
 from ..._kit.fmt import _count, _plural, _total, human_money, human_size
 
@@ -16,6 +16,7 @@ from ..models import FunctionDetail
 from ..prices import DAYS_PER_MONTH
 from ..analysis.cost import CostWorking
 from ..analysis.functions import _source_name
+from ..analysis.limits import ConnectionLimit
 from .logs import _short_day
 from .wiring import _Columns, _Wiring
 
@@ -110,6 +111,24 @@ def wiring_block(detail: FunctionDetail) -> _Wiring:
     return _Wiring(_input_nodes(detail), center, _output_nodes(detail),
                    title="How it's wired: what calls it, and where its results and logs go",
                    empty="Nothing calls it on its own: it's called directly (an SDK, Step Functions...)")
+
+
+_TOGETHER = {"warn": _Tone("clash", "warn"), "ok": _Tone("fits", "ok"), "": "worth knowing"}
+
+
+def limits_table(limits: list[ConnectionLimit]) -> _Table | None:
+    """
+    How what's connected to the function limits it, a line per pair: the caller's rule, the function's setting it
+    meets, whether they clash, and what happens, with the command that lines them up. Nothing when no caller has a
+    rule that meets one of its settings.
+    """
+    if not limits:
+        return None
+    rows = [[limit.caller, limit.limit, limit.setting, _TOGETHER.get(limit.tone, ""),
+             f"{limit.effect} {limit.fix}".strip()] for limit in limits]
+    return _Table(["Connected", "Its rule", "Meets this function's", "Together", "What happens"], rows, max_rows=0,
+                  sortable=False, prose_cols=(4,),
+                  title="How what's connected limits it: each caller's own rules against the function's settings")
 
 
 def _day_columns(detail: FunctionDetail, days: list[datetime]) -> tuple[list, list]:

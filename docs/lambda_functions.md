@@ -93,6 +93,7 @@ Cost and code
 { .qgroup }
 
 -   [Did it get slower, or is it paying for memory it never uses?](#performance) `ui.performance("orders-etl")`{ .long }
+-   [Do its callers give up before it's done?](#limits) `ui.function_info("orders-etl")`{ .long }
 -   [What does its code actually do?](#how-it-works) `ui.how_it_works("orders-etl")`{ .long }
 -   [It worked last week. What changed?](#diff) `ui.diff("orders-etl")`
 
@@ -149,8 +150,8 @@ Start with `functions()`: it says which functions need you and why, what to fix 
 ui.functions(regions="all")
 ```
 
-![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-light.webp#only-light){ width="984" height="1976" loading=lazy }
-![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-dark.webp#only-dark){ width="984" height="1976" loading=lazy }
+![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-light.webp#only-light){ width="984" height="2032" loading=lazy }
+![functions(regions="all"): "4 of 6 functions need you", the $93.93 monthly bill as one bar (three-quarters of it provisioned concurrency), the three problems to fix first, each with its command, then the functions under Failing, Paying for nothing and Needs a fix, each with its calls a day, failed share, longest run against its timeout and cost, the healthy ones folded, and a table by region](images/lambda-functions-dark.webp#only-dark){ width="984" height="2032" loading=lazy }
 /// caption
 `ui.functions(regions="all")`: orders-etl started failing after a change three days ago, report-api is open to anyone, and $70 of the $94 a month is provisioned concurrency churn-scoring never uses.
 ///
@@ -188,10 +189,10 @@ The `update-function-configuration` call that moves it to a supported runtime or
 ui.function_info("orders-etl")
 ```
 
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-light.webp#only-light){ width="984" height="2150" loading=lazy }
-![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; and a bar of where its monthly cost goes](images/lambda-function-info-dark.webp#only-dark){ width="984" height="2150" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, messages its queue hands out again while they're still being worked on, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; a table of how its callers' own limits meet its settings, where orders-queue hides a message for 30 s against its 60 s timeout, a clash; and a bar of where its monthly cost goes](images/lambda-function-info-light.webp#only-light){ width="984" height="2560" loading=lazy }
+![function_info("orders-etl"): cards for its runtime, memory, timeout, architecture, calls, error rate, average and longest run, throttles, estimated cost and triggers; findings about its runtime, rising errors, calls that began to fail after its last change, a run close to the timeout, messages its queue hands out again while they're still being worked on, logs costing more than its compute, failed S3 events being dropped, a log group kept forever and a password in an environment variable; charts of its calls a day, its failed calls a day jumping after the change, and its run time a day against the timeout; a diagram of what calls it and where its failed events and logs go; a table of how its callers' own limits meet its settings, where orders-queue hides a message for 30 s against its 60 s timeout, a clash; and a bar of where its monthly cost goes](images/lambda-function-info-dark.webp#only-dark){ width="984" height="2560" loading=lazy }
 /// caption
-`ui.function_info("orders-etl")`: its logs cost six times its compute, and failed S3 events are dropped because nothing catches them.
+`ui.function_info("orders-etl")`: its logs cost six times its compute, failed S3 events are dropped because nothing catches them, and its queue hands a message out again before a run is done with it.
 ///
 
 ??? more "What the report's tables hold"
@@ -236,6 +237,29 @@ The report marks a runtime **ended** after its end of support, and warns 90 days
     | Anyone calls its HTTPS address | Its function URL | With auth type `NONE`, anyone who has the URL |
 
     **Anyone** in the triggers means its resource policy lets any AWS account invoke it, and **URL (public)** means its function URL needs no sign-in: both are warnings, since anyone can run it and you pay for every call. A service allowed without a source (an S3 permission with no `SourceArn`) is a note: that service could call it for other accounts' resources too. Functions called directly (an SDK, Step Functions, a service using its own role) leave no trace here, since their permission is on the caller's role.
+
+### What its callers' own limits do to it { #limits }
+
+Every service that calls a function has rules of its own, and the function's settings have to fit them: `function_info()` lines them up, a row per caller.
+{ .gist }
+
+A function doesn't run alone. Each caller decides how long it waits, how often it tries again and how many copies it starts, whatever the function's settings say. When the two disagree, nothing fails loudly. The table **How what's connected limits it**, under the wiring diagram, puts each caller's rule beside the setting it meets, says whether they **clash** or **fit**, and what happens. A clash is also a finding, with the command that lines them up.
+
+| Caller | Its rule | Meets | When they clash |
+|---|---|---|---|
+| API Gateway | Waits 29 s for an answer (30 s for an HTTP API) | The timeout | The caller gets a `504` at 29 s, while the run goes on, billed, to its own timeout, and its answer is thrown away. A caller that retries runs the work twice |
+| Application Load Balancer | Waits its idle timeout, 60 s unless raised | The timeout | The same `504`, past 60 s |
+| Cognito user pool | Waits 5 s, then tries again, 4 tries in all | The timeout | The sign-in fails, and a slow run may run 4 times side by side |
+| SQS queue | Hides a message for its visibility timeout while it's read | The timeout | A message comes back while still being worked on: another run takes it too, and each comeback counts towards the dead-letter queue. AWS asks for 6 times the timeout, plus the batch window |
+| SQS queue | Lambda reads it with as many calls at once as it can | Reserved concurrency | The extra calls are throttled, and their messages can reach the dead-letter queue without ever failing |
+| Kinesis or DynamoDB stream | Reads each shard in order | Retries of a failed batch | With the defaults, one bad record stops its shard until the record expires |
+| S3, SNS, EventBridge | Hand the event to Lambda's own queue | Retries and the oldest age kept | Worth knowing: a slow or throttled function delays these events, and drops one still waiting after 6 hours |
+
+The advice elsewhere in the report knows about them too. When runs come close to the timeout, the finding that says to raise it also says what else must change: the queue's visibility timeout with it, or that API Gateway will still stop waiting at 29 s, so a longer timeout won't help those callers.
+
+??? more "What it reads, and what it can't see"
+
+    The queue's visibility timeout and redrive policy come from `sqs:GetQueueAttributes`, read as the report runs. API Gateway's, the load balancer's and Cognito's limits are their defaults: an API whose integration timeout was raised (a regional REST API can ask for more than 29 s), or a load balancer whose idle timeout was, isn't read from here. `APIGatewayView().api_info()` reads each route's own integration timeout and holds it against its function's. Callers that use their own role (Step Functions, an SDK) leave no trace in the function, so they aren't in the table.
 
 ## When something goes wrong { #errors }
 
@@ -758,7 +782,7 @@ Everything is read-only but `invoke()`, which needs `lambda:InvokeFunction` as w
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. `sqs:GetQueueUrl` and `sqs:GetQueueAttributes` are only for `errors()`' failed messages in an SQS trigger's queue. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. `sqs:GetQueueUrl` and `sqs:GetQueueAttributes` read an SQS trigger's queue: its visibility timeout for `function_info()`, and its failed messages for `errors()`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -816,7 +840,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 |---|---|
 | `explore(name=None, tab=None, region=None, height=None, history=True)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`), the ones that need you first: a verdict, where the bill goes, what to fix first with the commands, then each function by group with its calls a day, failed share, longest run against its timeout and cost |
-| `function_info(name, region=None, days=30)` | One function: charts of its calls, failures and run time a day, how it's wired, where its cost goes, then what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
+| `function_info(name, region=None, days=30)` | One function: charts of its calls, failures and run time a day, how it's wired and how its callers' limits meet its settings, where its cost goes, then what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `runs(name, since="24h", where=None, sort=None, columns=None, group_by=None, fields=None, n=50, region=None, limit=10000)` | [Its runs as rows](#runs): the ones a query keeps (`duration > 15s and cold`), sorted, in the columns you pick, or summed up by hour, error or any field |

@@ -19,7 +19,8 @@ from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.apigateway import (
     APIGATEWAY_PRICES, APIGatewayAnalyzer, APIGatewayExplorer, APIGatewayView, Api, ApiNumbers, Call,
-    ErrorGroup, ErrorReport, Integration, Route, RouteNumbers, Stage, curl_command, error_findings, group_errors,
+    ErrorGroup, ErrorReport, Integration, Route, RouteNumbers, Stage, backend_timeout_findings, curl_command,
+    error_findings, group_errors,
     curl_lines, invoke_url, lambda_of_uri, latency_split, missing_fields, monthly_cost, numbers_findings, open_route_findings,
     parse_access_line, parse_api_ref, parse_rest_routes, parse_v2_routes, read_format, route_findings,
     route_numbers_from_calls, service_action, stage_findings,
@@ -609,3 +610,23 @@ def test_explorer_draws_its_reports_in_the_theme_set(core):
     assert pages and all('<div class="apg theme-soft">' in page for page in pages)
     assert x.root.children[0].value.count(theme_rules) == 1
     assert not any(theme_rules in page for page in pages)
+
+
+def test_a_backend_function_that_outlasts_api_gateway_is_a_finding():
+    api = Api("a1", "shop", "REST", routes=[
+        Route("POST", "/orders", integration=Integration("AWS_PROXY", function="orders-etl", function_region="eu-west-1")),
+        Route("GET", "/orders", integration=Integration("AWS_PROXY", function="orders-etl", timeout_ms=10_000)),
+        Route("GET", "/health", integration=Integration("AWS_PROXY", function="health")),
+    ])
+    [(level, text)] = backend_timeout_findings(api, {"orders-etl": 300, "health": 3})
+    assert level == "info" and "orders-etl can run longer than shop waits for it: its timeout is 300 s" in text
+    assert "POST /orders, GET /orders with a 504 after 10s" in text
+    assert "--function-name orders-etl --timeout 10 --region eu-west-1" in text
+    assert backend_timeout_findings(api, {"orders-etl": 5}) == []
+
+
+def test_a_report_reads_its_functions_timeouts(core, capsys):
+    report = core.report("orders-api")
+    assert report.function_timeouts["orders-etl"] == 60 and "functions" not in report.errors
+    out = run(capsys, APIGatewayView(core, mode="text", progress="off").api_info, "orders-api")
+    assert "orders-etl can run longer than orders-api waits for it: its timeout is 60 s" in out

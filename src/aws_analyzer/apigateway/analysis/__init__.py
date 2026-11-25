@@ -17,7 +17,8 @@ from .access_log import (
 from .cost import cache_monthly, monthly_cost, monthly_requests, request_price
 from .try_it import curl_command, curl_lines, route_path
 from .findings import (
-    access_log_command, api_findings, delete_command, error_findings, format_findings, idle_findings,
+    access_log_command, api_findings, backend_timeout_findings, delete_command, error_findings, format_findings,
+    idle_findings,
     numbers_findings, open_route_findings, overview_findings, route_findings, stage_findings,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "LogFormat",
     "access_log_command",
     "api_findings",
+    "backend_timeout_findings",
     "cache_monthly",
     "curl_command",
     "curl_lines",

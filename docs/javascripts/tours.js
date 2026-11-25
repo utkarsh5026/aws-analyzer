@@ -1375,7 +1375,7 @@ window.AA_TOURS = {
      {
       "img": "lambda-function-info",
       "w": 1476,
-      "h": 3225
+      "h": 3840
      }
     ],
     "captions": [
@@ -1662,7 +1662,7 @@ window.AA_TOURS = {
    },
    {
     "kind": "cell",
-    "dur": 13.8,
+    "dur": 15.0,
     "chapter": "One API",
     "step": 2,
     "steps": 2,
@@ -1672,7 +1672,7 @@ window.AA_TOURS = {
      {
       "img": "apigw-api-info",
       "w": 1476,
-      "h": 1866
+      "h": 2102
      }
     ],
     "captions": [
@@ -1685,7 +1685,7 @@ window.AA_TOURS = {
       "Where each route sends a request, and who's allowed to call it."
      ],
      [
-      10.2,
+      11.4,
       "<code>POST /orders</code> <b>runs out of time</b> while orders-etl may still be working."
      ]
     ]

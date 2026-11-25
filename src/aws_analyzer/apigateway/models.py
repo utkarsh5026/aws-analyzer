@@ -332,13 +332,15 @@ class Overview:
     numbers: dict[str, ApiNumbers] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     metrics_read: int = 0
+    function_timeouts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
 class ApiReport:
     """
-    One API in detail: its stage's numbers over `days` days, each route's when the stage has detailed metrics, and
-    what couldn't be read ('metrics', 'routes').
+    One API in detail: its stage's numbers over `days` days, each route's when the stage has detailed metrics, the
+    timeout of each Lambda function its routes call (function_timeouts, name -> seconds), and what couldn't be read
+    ('metrics', 'routes', 'functions').
     """
 
     api: Api

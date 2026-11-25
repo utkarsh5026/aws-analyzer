@@ -1245,7 +1245,7 @@ window.AA_CLIPS = {
  },
  "lambda-function-info": {
   "notebook": "lambda.ipynb",
-  "summary": "ui.function_info(\"orders-etl\"): ui.function_info(\"orders-etl\"): its logs cost six times its compute, and failed S3 events are dropped because nothing catches them.",
+  "summary": "ui.function_info(\"orders-etl\"): ui.function_info(\"orders-etl\"): its logs cost six times its compute, failed S3 events are dropped because nothing catches them, and its queue hands a message out again before a run is done with it.",
   "video": "",
   "scenes": [
    {
@@ -1258,13 +1258,13 @@ window.AA_CLIPS = {
      {
       "img": "lambda-function-info",
       "w": 1476,
-      "h": 3225
+      "h": 3840
      }
     ],
     "captions": [
      [
       3.14,
-      "Its logs cost six times its compute, and failed S3 events are dropped because nothing catches them."
+      "Its logs cost six times its compute, failed S3 events are dropped because nothing catches them, and its queue hands a message out again before a run is done with it."
      ]
     ]
    }
@@ -1493,7 +1493,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 13.8,
+    "dur": 15.0,
     "chapter": "Amazon API Gateway",
     "label": "Amazon API Gateway",
     "code": "apigw.api_info(\"orders-api\")",
@@ -1501,7 +1501,7 @@ window.AA_CLIPS = {
      {
       "img": "apigw-api-info",
       "w": 1476,
-      "h": 1866
+      "h": 2102
      }
     ],
     "captions": [

@@ -45,7 +45,8 @@ from .models import (
     Route, RouteNumbers, RunLine, Stage,
 )
 from .analysis import (
-    LogFormat, access_log_command, api_findings, cache_monthly, curl_command, curl_lines, delete_command, error_findings,
+    LogFormat, access_log_command, api_findings, backend_timeout_findings, cache_monthly, curl_command, curl_lines,
+    delete_command, error_findings,
     format_findings, group_errors, idle_findings, latency_split, missing_fields, monthly_cost, monthly_requests,
     numbers_findings, open_route_findings, overview_findings, parse_access_line, parse_rest_api,
     parse_rest_authorizer, parse_rest_integration, parse_rest_routes, parse_rest_stage, parse_v2_api,
@@ -79,6 +80,7 @@ __all__ = [
     "Stage",
     "access_log_command",
     "api_findings",
+    "backend_timeout_findings",
     "cache_monthly",
     "curl_command",
     "curl_lines",

@@ -37,7 +37,7 @@ from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime
 from .models import (
     AccountLimits, Alias, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, ProvisionedConcurrency,
-    SavedPage, SymbolReport, Trigger, Version, VersionDiff,
+    QueueState, SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
@@ -701,7 +701,7 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
         detail = FunctionDetail(fn)
         client = self._service("lambda", where)
         qualified = {"Qualifier": qualifier} if qualifier else {}
-        steps = 9 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
+        steps = 10 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
         done = [1]
 
         def read(section: str, call: Callable[[], Any], missing: Any = None) -> Any:
@@ -764,12 +764,21 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
                 detail.runtime_updates = runtime.get("UpdateRuntimeOn")
                 detail.runtime_version = runtime.get("RuntimeVersionArn")
         detail.log_group = read("log_group", lambda: self.log_group(fn.log_group, where))
+        detail.queues = read("queues", lambda: self._trigger_queues(detail.triggers)) or {}
         if metrics:
             until = _utcnow()
             since = _midnight(until) - timedelta(days=days - 1)
             numbers = read("metrics", lambda: self.metrics([fn], since=since, until=until, concurrency=True))
             detail.metrics = numbers[0].get(fn.arn) if numbers else None
         return detail
+
+    def _trigger_queues(self, triggers: list[Trigger]) -> dict[str, QueueState]:
+        """
+        Each SQS trigger's queue as it is now (GetQueueUrl, GetQueueAttributes), by ARN, side by side; a queue that
+        can't be read comes back with its error code in .error.
+        """
+        arns = list(dict.fromkeys(t.arn for t in triggers if t.kind == "SQS queue" and t.arn))
+        return dict(zip(arns, self._map(self._one_queue, arns)))
 
     # ------------------------------------------------------------------ logs
 
