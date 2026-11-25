@@ -390,6 +390,43 @@ def test_calls_errors_and_performance(ui, capsys):
         ui._calls_blocks(ui.core.calls("orders-api"), status="bad")
 
 
+def test_reports_give_their_tables_for_pandas(ui, capsys, tmp_path, monkeypatch):
+    out = run(capsys, ui.apis)
+    assert "-- This report as data (pandas, Excel) --" in out
+    apis = ui.data()["apis"]
+    assert apis.api.iloc[0] == "orders-api" and apis.est_monthly_usd.fillna(0).is_monotonic_decreasing
+    assert apis.set_index("api").open_routes["partner-api"] == 2
+    assert ui.data().again == "data('apis')" and len(ui.data()["days"]) == 6 * 7
+    errors = ui.data("errors", "orders-api")
+    assert capsys.readouterr().out == ""
+    causes = errors["causes"]
+    assert causes.iloc[0].status == 504 and causes.iloc[0]["count"] == 36 and causes.iloc[0].function == "orders-etl"
+    assert causes.iloc[0].lambda_request == TIMEOUT_RUN and causes["share"].sum() == pytest.approx(1.0)
+    assert set(errors["failed"].status_class) == {"4xx", "5xx"}
+    calls = ui.data("calls", "orders-api", status="5xx")
+    assert len(calls["calls"]) == 37 and calls["hours"].calls.sum() == 37 and calls.names == ["calls", "routes", "hours"]
+    performance = ui.data("performance", "orders-api")
+    slowest = performance["routes"].iloc[0]
+    assert slowest.route == "POST /orders" and slowest.p95_share_of_limit == pytest.approx(1.0)
+    first = performance["calls"].iloc[0]
+    assert first.integration_ms + first.authorizer_ms + first.gateway_ms == pytest.approx(first.latency_ms)
+    info = ui.data("api_info", "orders-api", stage="prod")
+    assert info.names == ["stages", "routes", "days"] and info.again == "data('api_info', 'orders-api', stage='prod')"
+    assert ui.data("routes", "partner-api")["routes"].is_open.sum() == 2
+    assert ui.data("stages", "orders-api")["stages"].set_index("stage").access_log["dev"] == ""
+    monkeypatch.chdir(tmp_path)
+    ui.to_excel("errors", "orders-api")
+    assert "Saved What's failing in orders-api as a workbook" in capsys.readouterr().out
+    assert (tmp_path / "aws-analyzer-exports" / "apigateway-errors-orders-api.xlsx").exists()
+
+
+def test_calls_without_an_access_log_give_no_tables(ui, capsys):
+    out = run(capsys, ui.calls, "partner-api")
+    assert "This report as data" not in out
+    said = run(capsys, ui.data, "calls", "partner-api")
+    assert "calls() gave no tables. Stage" in said and "keeps no access log" in said
+
+
 def test_a_stage_without_an_access_log_says_how_to_turn_it_on(ui, capsys):
     out = run(capsys, ui.calls, "partner-api")
     assert "keeps no access log" in out and "aws apigatewayv2 update-stage" in out

@@ -4,12 +4,14 @@ APIGatewayView: the notebook UI, which renders what APIGatewayAnalyzer returns a
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
+from .._kit.dataview import _DataCommands
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from .._kit.deps import _require
 from .._kit.errors import _Hint
-from .._kit.fmt import _count, _fmt_dt, _plural, _tz_label, human_age, human_money
+from .._kit.fmt import _count, _fmt_dt, _plural, _tz_label, _utcnow, human_age, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
 from .._kit.view import _BaseView, _friendly_errors
@@ -19,6 +21,9 @@ from .models import Api, ApiReport, Call, CallPage, ErrorReport, LambdaRun, Over
 from .analysis import (
     access_log_command, api_findings, curl_command, curl_lines, error_findings, format_findings, latency_split,
     monthly_cost, open_route_findings, overview_findings, route_numbers_from_calls, stage_findings,
+)
+from .analysis.datasets import (
+    api_data, apis_data, calls_data, errors_data, performance_data, routes_data, stages_data,
 )
 from .analysis.findings import SLOW_SHARE
 from .analyzer import APIGatewayAnalyzer
@@ -64,6 +69,16 @@ def _status_range(status: Any) -> tuple[int, int] | None:
     raise ValueError(f"status= is '5xx', '4xx', 'failed', '2xx' or a code like 504, not {status!r}")
 
 
+def _with_status(calls: list[Call], status: Any) -> list[Call]:
+    """
+    The calls calls(status=) keeps: all of them without a status, else those whose code is in its range.
+    """
+    wanted = _status_range(status)
+    if wanted is None:
+        return calls
+    return [c for c in calls if c.status is not None and wanted[0] <= c.status < wanted[1]]
+
+
 def _auth_cell(api: Api) -> Any:
     """
     Who may call an API, in a few words: its routes' authorizers, 'none ×2' (warned) when some answer anyone.
@@ -106,7 +121,14 @@ def _call_status(call: Call) -> Any:
     return _Tone(text, tone) if tone in ("bad", "warn") else text
 
 
-class APIGatewayView(_BaseView):
+def _unless(**options: tuple[Any, Any]) -> dict[str, Any]:
+    """
+    A command's options as its call writes them: each (value, default) pair kept only when it isn't the default.
+    """
+    return {name: value for name, (value, default) in options.items() if value != default}
+
+
+class APIGatewayView(_DataCommands, _BaseView):
     """
     Notebook UI for API Gateway. Every public method renders a report and returns None; the data is on self.core
     (an APIGatewayAnalyzer).
@@ -117,14 +139,19 @@ class APIGatewayView(_BaseView):
         "🚪 APIs": ("apis", "api_info", "routes", "stages"),
         "📞 Calls": ("calls", "errors", "performance"),
         "🖱️ Explore by clicking": ("explore",),
+        "🐼 As data": ("data", "to_excel"),
         "❓ Help": ("help", "next"),
     }
+    _CHANGES = frozenset({"to_excel"})
     _START = (
         ("apis()", "every API: requests, errors, latency, who can call it and its cost"),
         ("api_info('api-name')", "one API's stages, routes and what's failing"),
         ("errors('api-name')", "which calls fail and why, with the Lambda run behind each"),
     )
     _PROGRESS = ("Reading", "log lines")
+
+    def _data_example(self) -> str:
+        return "data('errors', 'my-api')"
 
     def __init__(
         self,
@@ -166,7 +193,9 @@ class APIGatewayView(_BaseView):
                         _Note(f"No APIs in {overview.region}. They're regional: pass "
                               "APIGatewayAnalyzer(region='...') to look in another region.")])
             return
-        self._show(self._overview_blocks(overview))
+        data = replace(apis_data(overview, self.core.prices, today=_utcnow().date()),
+                       source=_call("apis", **_unless(days=(days, 7))))
+        self._show(self._with_data(self._overview_blocks(overview), data))
 
     def _overview_blocks(self, overview: Overview) -> list[Any]:
         prices, days, numbers = self.core.prices, overview.days, overview.numbers
@@ -261,7 +290,9 @@ class APIGatewayView(_BaseView):
         """
         with self._progress(f"Reading {name}", unit="parts"):
             report = self.core.report(name, stage=stage, days=days)
-        self._show(self._api_blocks(report))
+        data = replace(api_data(report, self.core.prices, today=_utcnow().date()),
+                       source=_call("api_info", name, **_unless(stage=(stage, None), days=(days, 7))))
+        self._show(self._with_data(self._api_blocks(report), data))
 
     def _api_cards(self, report: ApiReport, findings: list[tuple[str, str]]) -> list[tuple[str, ...]]:
         numbers, api = report.numbers, report.api
@@ -347,7 +378,8 @@ class APIGatewayView(_BaseView):
         calls it.
         """
         api = self.core.api(name)
-        self._show(self._routes_blocks(api, stage))
+        data = replace(routes_data(api, stage), source=_call("routes", name, **_unless(stage=(stage, None))))
+        self._show(self._with_data(self._routes_blocks(api, stage), data))
 
     def _routes_blocks(self, api: Api, stage: str | None = None) -> list[Any]:
         open_routes = api.open_routes
@@ -428,7 +460,8 @@ class APIGatewayView(_BaseView):
         cache and WAF, with what each risks and the command that fixes it.
         """
         api = self.core.api(name)
-        self._show(self._stages_blocks(api))
+        data = replace(stages_data(api, self.core.prices), source=_call("stages", name))
+        self._show(self._with_data(self._stages_blocks(api), data))
 
     def _stages_blocks(self, api: Api) -> list[Any]:
         findings: list[tuple[str, str]] = []
@@ -461,15 +494,20 @@ class APIGatewayView(_BaseView):
         with self._progress(f"Reading {name}'s access log", unit="lines") as tick:
             page = self.core.calls(name, stage=stage, since=since, pattern=f'"{search}"' if search else None,
                                    progress=tick)
-        self._show(self._calls_blocks(page, status=status, n=n))
+        blocks = self._calls_blocks(page, status=status, n=n)
+        if page.note:
+            self._show(blocks)
+            return
+        options = _unless(stage=(stage, None), since=(since, "24h"), status=(status, None), search=(search, None))
+        data = replace(calls_data(page, _with_status(page.calls, status)), source=_call("calls", name, **options))
+        self._show(self._with_data(blocks, data))
 
     def _calls_blocks(self, page: CallPage, *, status: Any = None, n: Any = 50) -> list[Any]:
         api, stage = page.api, page.stage
         title = _Title(f"Calls to {api.name}", f"stage {_stage_name(stage)} · from {_fmt_dt(page.since, zone=True)}")
         if page.note:
             return [title, *self._no_log_blocks(api, stage)]
-        wanted = _status_range(status)
-        calls = [c for c in page.calls if wanted is None or (c.status is not None and wanted[0] <= c.status < wanted[1])]
+        calls = _with_status(page.calls, status)
         failed = page.failed
         times = sorted(c.latency_ms for c in page.calls if c.latency_ms is not None)
         cards = [("Calls", _count(len(page.calls))), ("Failed", _count(len(failed)), "warn" if failed else ""),
@@ -513,7 +551,9 @@ class APIGatewayView(_BaseView):
         """
         with self._progress(f"Reading {name}'s failures", unit="lines") as tick:
             report = self.core.errors(name, stage=stage, since=since, progress=tick)
-        self._show(self._error_blocks(report))
+        options = _unless(stage=(stage, None), since=(since, "24h"))
+        data = replace(errors_data(report), source=_call("errors", name, **options))
+        self._show(self._with_data(self._error_blocks(report), data))
 
     def _error_blocks(self, report: ErrorReport) -> list[Any]:
         api, stage, page, numbers = report.api, report.stage, report.page, report.numbers
@@ -584,7 +624,9 @@ class APIGatewayView(_BaseView):
         with self._progress(f"Reading {name}'s access log", unit="lines") as tick:
             page = self.core.calls(name, stage=stage, since=since, progress=tick)
             report = self.core.report(name, stage=page.stage.name if page.stage else None, days=7)
-        self._show(self._performance_blocks(page, report))
+        options = _unless(stage=(stage, None), since=(since, "24h"))
+        data = replace(performance_data(page, report), source=_call("performance", name, **options))
+        self._show(self._with_data(self._performance_blocks(page, report), data))
 
     def _performance_blocks(self, page: CallPage, report: ApiReport) -> list[Any]:
         api, stage, numbers = page.api, page.stage, report.numbers

@@ -66,7 +66,7 @@ Two calls in a notebook, from every API to the route that runs out of time: each
 
 ## Start here { #tour }
 
-Four questions people bring to an API, and the one line that answers each. None of them call your API or change it.
+Five questions people bring to an API, and the one line that answers each. None of them call your API or change it.
 { .gist }
 
 <div class="quick" markdown>
@@ -82,6 +82,7 @@ How an API works
 
 -   [Who can call each route?](#routes) `apigw.routes("partner-api")`{ .long }
 -   [Where does the time go?](#explorer) `apigw.explore("orders-api", tab="calls")`{ .long }
+-   [Can I analyse the calls in pandas or Excel?](#as-data) `apigw.data()` `apigw.to_excel()`
 
 </div>
 
@@ -187,6 +188,35 @@ apigw.explore("orders-api", tab="calls")      # straight to its calls
 
 The [API Gateway explorer guide](apigateway_explorer.md) covers every tab, with its own video tour.
 
+## Take a report into pandas or Excel { #as-data }
+
+Every report ends with **🐼 This report as data**: its tables for pandas, each column explained, and a workbook to share. A call's row names the Lambda function behind its route and the request ID of the run that answered it.
+{ .gist }
+
+```python
+apigw.errors("orders-api")
+data = apigw.data()
+data["causes"]           # each way of failing: status, error, route, count, share, the Lambda run to read
+data["failed"]           # every failed call: time, route, status, latency_ms, integration_ms, function, lambda_request
+apigw.to_excel()         # aws-analyzer-exports/apigateway-errors-orders-api.xlsx
+```
+
+`data("performance", "orders-api")` gives the same without drawing the report: each route's `p95_ms` and `p95_share_of_limit` (over 0.8 comes close to the 504), and every call with its time split into `integration_ms`, `authorizer_ms` and `gateway_ms`. A call's `lambda_request` opens its run: `LambdaView().logs(function, request_id=...)`.
+
+??? more "Which tables each report gives"
+
+    | Report | Tables |
+    |---|---|
+    | `apis()` | `apis` (requests, 4xx and 5xx shares, p95, open routes, estimated monthly cost), `days` (a row per API per UTC day) |
+    | `api_info()` | `stages`, `routes` (with their numbers when the stage has detailed metrics), `days` |
+    | `routes()` | `routes` (who can call it, where it goes, its timeout, the curl command), `authorizers` |
+    | `stages()` | `stages` (URL, throttling, access log, tracing, cache and what it costs, WAF) |
+    | `calls()` | `calls` (the ones `status=` keeps), `routes` (their numbers from those calls), `hours` |
+    | `errors()` | `causes`, `failed` |
+    | `performance()` | `routes` (the slowest first), `calls` (the slowest first, each with where its time went) |
+
+    A report with nothing to read, such as `calls()` on a stage without an access log, gives no tables and says why.
+
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
@@ -286,6 +316,8 @@ Every `APIGatewayView` command. `apigw.help()` prints the same list grouped by t
 | `calls(name, stage=None, since="24h", status=None, search=None, n=50)` | The access log, call by call, newest first |
 | `errors(name, stage=None, since="24h")` | Failed calls grouped by status, error and route, with what each means and the Lambda run to read |
 | `performance(name, stage=None, since="24h")` | How long calls take, route by route, and where the slowest call's time went |
+| `data(command=None, *args, **kwargs)` | [The last report's tables](#as-data) as pandas DataFrames, each column explained |
+| `to_excel(command=None, *args, path=None, **kwargs)` | [The last report as an Excel workbook](#as-data): summary, charts, a sheet per table and how to read them |
 | `explore(name=None, tab=None, stage=None, since="24h", height=None)` | The explorer window: every API, its routes as a tree, its calls with their Lambda runs, performance and stages |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
