@@ -42,6 +42,7 @@ from .analysis.findings import lambda_logs_call, redrive_command
 from .analysis.express import logging_gaps
 from .analysis.layout import FlowMarks, failure_marks, flow_layout, path_marks, timing_marks
 from .analysis.timing import timing_findings, took_text
+from .analysis.lambda_limits import StateLimit, state_limits
 from .analysis.story import ExecutionStory, waterfall
 from .analysis.trend import daily_counts, failure_jump
 from .analysis.compare import ExecutionComparison, StateRuns, _runs_text, comparison_findings
@@ -328,6 +329,32 @@ def _unless(**options: tuple[Any, Any]) -> dict[str, Any]:
     return {name: value for name, (value, default) in options.items() if value != default}
 
 
+_TOGETHER = {"warn": _Tone("clash", "warn"), "ok": _Tone("fits", "ok"), "": "worth knowing"}
+
+
+def _limits_table(limits: list[StateLimit]) -> _Table:
+    rows = [[limit.state, limit.function, limit.rule, limit.setting, _TOGETHER.get(limit.tone, ""),
+             f"{limit.effect} {limit.fix}".strip()] for limit in limits]
+    return _Table(["State", "Calls", "The state", "The function", "Together", "What happens"], rows, max_rows=0,
+                  sortable=False, prose_cols=(5,),
+                  title="How its states and the Lambda functions they call limit each other")
+
+
+def _limits_blocks(machine: StateMachine) -> list[Any]:
+    """
+    The table of how its Lambda tasks and their functions' settings meet, or a note saying why there's none: its
+    functions' settings couldn't be read, or it calls none.
+    """
+    limits = state_limits(machine)
+    if limits:
+        return [_limits_table(limits)]
+    unread = machine.errors.get("lambda")
+    if unread and machine.functions:
+        return [_Note(f"Couldn't read its Lambda functions' settings ({unread}), so their timeouts and concurrency "
+                      "aren't held against its states. It needs lambda:GetFunction.")]
+    return []
+
+
 class StepFunctionsView(_DataCommands, _BaseView):
     """
     Notebook UI for Step Functions. Every public method renders a report and returns None; the data is on
@@ -482,11 +509,12 @@ class StepFunctionsView(_DataCommands, _BaseView):
     def state_machine(self, name: str, *, days: int = 7) -> None:
         """
         One state machine: its type, executions, failures, average run and estimated cost over the last 7 days,
-        what its definition risks (Lambda tasks with no retry, waits with no timeout), every state with what it
-        calls and how it handles errors, and the definition itself.
+        what its definition risks (Lambda tasks with no retry, waits with no timeout), how its states and the Lambda
+        functions they call limit each other (a TimeoutSeconds shorter than the function's, a Map running more of
+        it at once than it may), every state with what it calls and how it handles errors, and the definition itself.
         """
         with self._progress("Reading the state machine", unit="calls"):
-            machine = self.core.state_machine(name)
+            machine = self.core.read_lambda_settings(self.core.state_machine(name))
             numbers = self.core.numbers([machine], days=days)[0].get(machine.arn)
         data = replace(machine_data(machine, numbers), source=_call("state_machine", name, **_unless(days=(days, 7))))
         self._show(self._with_data(self._machine_blocks(machine, numbers), data))
@@ -519,6 +547,7 @@ class StepFunctionsView(_DataCommands, _BaseView):
             blocks.append(_Note(machine.description))
         blocks += _days_blocks(numbers)
         blocks.append(self._states_table(machine, title="Its states, in the order the definition lists them"))
+        blocks += _limits_blocks(machine)
         if machine.functions:
             blocks.append(_Note(f"It calls {_plural(len(machine.functions), 'Lambda function')}: "
                                 f"{', '.join(machine.functions)}. LambdaView().functions() shows how they're doing."))

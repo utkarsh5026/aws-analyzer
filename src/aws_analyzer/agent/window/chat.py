@@ -113,6 +113,8 @@ _SERVICES = {
     "sagemaker": _Service("Amazon SageMaker", "sagemaker", _MACHINE_LEARNING, "hex"),
     "states": _Service("AWS Step Functions", "step functions", _INTEGRATION, "flow"),
     "apigateway": _Service("Amazon API Gateway", "api gateway", _NETWORKING, "gate"),
+    "sqs": _Service("Amazon SQS", "sqs", _INTEGRATION, "flow"),
+    "elasticloadbalancing": _Service("Elastic Load Balancing", "elb", _NETWORKING, "gate"),
     "es": _Service("Amazon OpenSearch Service", "opensearch", _ANALYTICS, "search"),
     "aoss": _Service("Amazon OpenSearch Serverless", "opensearch", _ANALYTICS, "search"),
     "mcp": _Service("An MCP server's tool (not an AWS read)", "mcp", "#5B6B8A", "plug"),

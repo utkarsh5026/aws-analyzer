@@ -27,6 +27,7 @@ from .compare import (
 from .retries import RetryAdvice, advice_finding, error_kind, matching_retry, retry_advice, retry_findings
 from .suspects import ChangeVerdict, change_findings, change_text, change_verdict, group_change_findings
 from .story import ExecutionStory, LogLine, Waterfall, WaterfallRow, merge_log, step_lines, waterfall
+from .lambda_limits import StateLimit, state_limit_findings, state_limits
 
 __all__ = [
     "RetryAdvice",
@@ -73,6 +74,9 @@ __all__ = [
     "logging_findings",
     "merge_log",
     "machine_findings",
+    "StateLimit",
+    "state_limits",
+    "state_limit_findings",
     "mermaid",
     "monthly_cost",
     "numbers_findings",

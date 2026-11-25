@@ -2043,7 +2043,7 @@ window.AA_TOURS = {
      {
       "img": "sfn-state-machine",
       "w": 1476,
-      "h": 2213
+      "h": 2798
      }
     ],
     "captions": [

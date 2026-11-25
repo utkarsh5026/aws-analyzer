@@ -29,6 +29,8 @@ _TOOL_WORDS = {
     "function_logs": _ToolWords("reading {t}'s logs", "read {t}'s logs", "the function"),
     "function_performance": _ToolWords("timing {t}'s runs", "timed {t}'s runs", "the function"),
     "function_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the function"),
+    "caller_limits": _ToolWords("checking what {t}'s callers allow it", "checked what {t}'s callers allow it",
+                                "the function"),
     "function_code": _ToolWords("reading {t}'s code", "read {t}'s code", "the function"),
     "function_source": _ToolWords("reading {t}'s source", "read {t}'s source", "the function"),
     "search_code": _ToolWords("searching {t}'s code", "searched {t}'s code", "the function"),

@@ -248,7 +248,7 @@ A function doesn't run alone. Each caller decides how long it waits, how often i
 | Caller | Its rule | Meets | When they clash |
 |---|---|---|---|
 | API Gateway | Waits 29 s for an answer (30 s for an HTTP API) | The timeout | The caller gets a `504` at 29 s, while the run goes on, billed, to its own timeout, and its answer is thrown away. A caller that retries runs the work twice |
-| Application Load Balancer | Waits its idle timeout, 60 s unless raised | The timeout | The same `504`, past 60 s |
+| Application Load Balancer | Waits its idle timeout, read from the load balancer in front of the target group | The timeout | The same `504`, once the idle timeout runs out |
 | Cognito user pool | Waits 5 s, then tries again, 4 tries in all | The timeout | The sign-in fails, and a slow run may run 4 times side by side |
 | SQS queue | Hides a message for its visibility timeout while it's read | The timeout | A message comes back while still being worked on: another run takes it too, and each comeback counts towards the dead-letter queue. AWS asks for 6 times the timeout, plus the batch window |
 | SQS queue | Lambda reads it with as many calls at once as it can | Reserved concurrency | The extra calls are throttled, and their messages can reach the dead-letter queue without ever failing |
@@ -259,7 +259,7 @@ The advice elsewhere in the report knows about them too. When runs come close to
 
 ??? more "What it reads, and what it can't see"
 
-    The queue's visibility timeout and redrive policy come from `sqs:GetQueueAttributes`, read as the report runs. API Gateway's, the load balancer's and Cognito's limits are their defaults: an API whose integration timeout was raised (a regional REST API can ask for more than 29 s), or a load balancer whose idle timeout was, isn't read from here. `APIGatewayView().api_info()` reads each route's own integration timeout and holds it against its function's. Callers that use their own role (Step Functions, an SDK) leave no trace in the function, so they aren't in the table.
+    The queue's visibility timeout and redrive policy come from `sqs:GetQueueAttributes`, and a load balancer's idle timeout from `elasticloadbalancing:DescribeTargetGroups` and `DescribeLoadBalancerAttributes`, read as the report runs (without them, the load balancer's 60 s default is used and said so). API Gateway's and Cognito's limits are their defaults: an API whose integration timeout was raised (a regional REST API can ask for more than 29 s) isn't read from here. `APIGatewayView().api_info()` reads each route's own integration timeout and holds it against its function's. Callers that use their own role (Step Functions, an SDK) leave no trace in the function, so they aren't in the table: `StepFunctionsView().state_machine()` holds each Lambda task against its function from the workflow's side.
 
 ## When something goes wrong { #errors }
 
@@ -759,9 +759,12 @@ Everything is read-only but `invoke()`, which needs `lambda:InvokeFunction` as w
       "Resource": "*"
     },
     {
-      "Sid": "FailedMessages",
+      "Sid": "WhatCallsIt",
       "Effect": "Allow",
-      "Action": ["sqs:GetQueueUrl", "sqs:GetQueueAttributes"],
+      "Action": [
+        "sqs:GetQueueUrl", "sqs:GetQueueAttributes",
+        "elasticloadbalancing:DescribeTargetGroups", "elasticloadbalancing:DescribeLoadBalancerAttributes"
+      ],
       "Resource": "*"
     },
     {
@@ -782,7 +785,7 @@ Everything is read-only but `invoke()`, which needs `lambda:InvokeFunction` as w
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. `sqs:GetQueueUrl` and `sqs:GetQueueAttributes` read an SQS trigger's queue: its visibility timeout for `function_info()`, and its failed messages for `errors()`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. `sqs:GetQueueUrl` and `sqs:GetQueueAttributes` read an SQS trigger's queue: its visibility timeout for `function_info()`, and its failed messages for `errors()`. The two `elasticloadbalancing` reads find the idle timeout of a load balancer that calls the function. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 

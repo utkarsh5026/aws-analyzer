@@ -100,21 +100,44 @@ def _api_gateway(detail: FunctionDetail, trigger: Trigger) -> ConnectionLimit:
                            level="warn" if is_happening else "info")
 
 
+def _load_balancer_wait(detail: FunctionDetail, trigger: Trigger) -> tuple[int, str, str]:
+    """
+    How long the load balancer in front of a target group waits (its idle timeout), and words for both cases: the
+    one read from it, or the 60 s default when it couldn't be (no target group ARN, or the read was refused).
+    """
+    wait = detail.load_balancers.get(trigger.arn or "")
+    if wait is None:
+        return (LOAD_BALANCER_IDLE_S, f"waits {LOAD_BALANCER_IDLE_S} s by default (its idle timeout)",
+                f"unless its idle timeout was raised, after {LOAD_BALANCER_IDLE_S} s")
+    return (wait.idle_timeout, f"{wait.name} waits {wait.idle_timeout:,} s (its idle timeout)",
+            f"{wait.name} waits {wait.idle_timeout:,} s, so after that")
+
+
+def _idle_timeout_command(detail: FunctionDetail, trigger: Trigger) -> str:
+    wait = detail.load_balancers.get(trigger.arn or "")
+    arn = wait.arn if wait is not None else "<load balancer ARN>"
+    return (f"aws elbv2 modify-load-balancer-attributes --load-balancer-arn {arn} --attributes "
+            f"Key=idle_timeout.timeout_seconds,Value={detail.function.timeout}")
+
+
 def _load_balancer(detail: FunctionDetail, trigger: Trigger) -> ConnectionLimit:
     """
-    An Application Load Balancer waits for the function up to its idle timeout, 60 s unless someone raised it.
+    An Application Load Balancer waits for the function up to its idle timeout, 60 s unless someone raised it: the
+    one read from the load balancer in front of the target group when it could be, else that default.
     """
     timeout = detail.function.timeout
-    limit = f"waits {LOAD_BALANCER_IDLE_S} s by default (its idle timeout)"
+    wait, limit, after = _load_balancer_wait(detail, trigger)
     setting = f"{timeout:,} s timeout"
-    if timeout <= LOAD_BALANCER_IDLE_S:
+    if timeout <= wait:
         return ConnectionLimit(_caller(trigger), limit, setting,
-                               "Its timeout ends a run before the load balancer's default idle timeout.", tone="ok")
-    effect = (f"The load balancer may stop waiting first: unless its idle timeout was raised, after "
-              f"{LOAD_BALANCER_IDLE_S} s the caller gets a 504 while the run goes on for up to {timeout:,} s.")
-    fix = (f"Raise the load balancer's idle_timeout.timeout_seconds to {timeout} (aws elbv2 "
-           "modify-load-balancer-attributes), or lower the function's timeout.")
-    return ConnectionLimit(_caller(trigger), limit, setting, effect, tone="warn", fix=fix, level="info")
+                               "Its timeout ends a run before the load balancer stops waiting.", tone="ok")
+    is_read = trigger.arn in detail.load_balancers
+    effect = (f"The load balancer stops waiting before the function does: {after} the caller gets a 504 while the "
+              f"run goes on for up to {timeout:,} s, billed, and its answer is thrown away.")
+    fix = (f"Raise the load balancer's idle timeout to match ({_idle_timeout_command(detail, trigger)}), or lower "
+           f"the function's timeout to {wait} s ({_timeout_command(detail, wait)}).")
+    return ConnectionLimit(_caller(trigger), limit, setting, effect, tone="warn", fix=fix,
+                           level="warn" if is_read else "info")
 
 
 def _cognito(detail: FunctionDetail, trigger: Trigger) -> ConnectionLimit:
@@ -331,6 +354,8 @@ def raising_timeout_note(detail: FunctionDetail, new_timeout: int) -> str:
     notes = []
     for trigger in detail.triggers:
         wait = _WAITING_CALLERS.get(trigger.kind)
+        if trigger.kind == "Load balancer":
+            wait = _load_balancer_wait(detail, trigger)[0]
         if wait is not None and new_timeout > wait:
             notes.append(f"{_caller(trigger)} stops waiting after {wait} s whatever the timeout, so a longer one won't "
                          "help its callers: make it answer sooner, or answer at once and hand the work to a queue")

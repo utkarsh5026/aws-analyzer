@@ -428,10 +428,23 @@ class EventFate:
 
 
 @dataclass
+class LoadBalancerWait:
+    """
+    A load balancer in front of a function and how long it waits for an answer: its idle timeout in seconds
+    (idle_timeout.timeout_seconds, 60 unless raised).
+    """
+
+    name: str
+    arn: str
+    idle_timeout: int = 60
+
+
+@dataclass
 class FunctionDetail:
     """
     Everything function_info() shows about one function. Sections that couldn't be read are in errors. queues are
-    its SQS triggers' queues as they are now (by ARN), for how their settings meet the function's.
+    its SQS triggers' queues as they are now (by ARN), and load_balancers the load balancer in front of each target
+    group that calls it (by target group ARN), for how their settings meet the function's.
     """
 
     function: Function
@@ -448,6 +461,7 @@ class FunctionDetail:
     metrics: FunctionMetrics | None = None
     errors: dict[str, str] = field(default_factory=dict)  # section -> error code
     queues: dict[str, QueueState] = field(default_factory=dict)
+    load_balancers: dict[str, LoadBalancerWait] = field(default_factory=dict)
 
 
 @dataclass

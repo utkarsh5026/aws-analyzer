@@ -9,7 +9,7 @@ pyarrow==25.0.1
 ipython==9.18.1
 
 # Tests
-moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs,sns,events]==5.2.5
+moto[apigateway,apigatewayv2,s3,dynamodb,cloudwatch,sagemaker,awslambda,logs,iam,sqs,sns,events,elbv2]==5.2.5
 pytest==9.2.0
 # Runs the tests on every CPU (CI's `pytest -n auto`); the Pyodide tests share one worker (tests/conftest.py).
 pytest-xdist==3.8.0

@@ -400,22 +400,29 @@ def _lambda_time(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
+LAMBDA_SETTINGS = {"orders-etl": {"Timeout": 60}, "resize-image": {"Timeout": 30, "Reserved": 2}}
+
+
 class FakeLambda(_Checked):
     """
-    GetFunction and ListVersionsByFunction over `deploys`: function name -> when each published version was made,
-    oldest first (the last one is also $LATEST's LastModified). A name it doesn't hold is ResourceNotFound.
+    GetFunction, ListVersionsByFunction and GetAccountSettings over `deploys`: function name -> when each published
+    version was made, oldest first (the last one is also $LATEST's LastModified). A name it doesn't hold is
+    ResourceNotFound. `settings` give a function its timeout and reserved concurrency ('Timeout', 'Reserved'):
+    LAMBDA_SETTINGS by default, where resize-image may run 2 at once, fewer than order-pipeline's Map starts.
     """
 
     service = "lambda"
 
-    def __init__(self, deploys: dict[str, list[datetime]], region: str = REGION):
+    def __init__(self, deploys: dict[str, list[datetime]], region: str = REGION,
+                 settings: dict[str, dict[str, int]] | None = None):
         super().__init__(region)
         self.deploys = deploys
+        self.settings = LAMBDA_SETTINGS if settings is None else settings
 
     def _config(self, name: str, version: str, when: datetime) -> dict[str, Any]:
         return {"FunctionName": name, "FunctionArn": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:{name}",
-                "Runtime": "python3.12", "Handler": "app.handler", "MemorySize": 512, "Timeout": 30,
-                "LastModified": _lambda_time(when), "Version": version, "CodeSize": 4_096}
+                "Runtime": "python3.12", "Handler": "app.handler", "MemorySize": 512,
+                "Timeout": self.settings.get(name, {}).get("Timeout", 30), "LastModified": _lambda_time(when), "Version": version, "CodeSize": 4_096}
 
     def _deploys_of(self, name: str, operation: str) -> list[datetime]:
         if name not in self.deploys:
@@ -425,7 +432,14 @@ class FakeLambda(_Checked):
 
     def _get_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
         deploys = self._deploys_of(FunctionName, "GetFunction")
-        return {"Configuration": self._config(FunctionName, "$LATEST", deploys[-1])}
+        answer: dict[str, Any] = {"Configuration": self._config(FunctionName, "$LATEST", deploys[-1])}
+        reserved = self.settings.get(FunctionName, {}).get("Reserved")
+        if reserved is not None:
+            answer["Concurrency"] = {"ReservedConcurrentExecutions": reserved}
+        return answer
+
+    def _get_account_settings(self, **params: Any) -> dict[str, Any]:
+        return {"AccountLimit": {"ConcurrentExecutions": 1000, "UnreservedConcurrentExecutions": 998}}
 
     def _list_versions_by_function(self, FunctionName: str, **params: Any) -> dict[str, Any]:
         deploys = self._deploys_of(FunctionName, "ListVersionsByFunction")

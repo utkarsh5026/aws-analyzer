@@ -34,6 +34,7 @@ from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.blocks.info import cost_split
 from aws_analyzer.lambda_functions.analysis.performance import short_stream
 from aws_analyzer.lambda_functions.analysis.limits import raising_timeout_note
+from aws_analyzer.lambda_functions.models import LoadBalancerWait
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
 from aws_analyzer.lambda_functions.explorer import plain as plain_search
@@ -5007,3 +5008,47 @@ def test_function_info_shows_how_what_is_connected_limits_it(ui, capsys):
     assert "SQS queue orders" in out and "hides a message 30 s while it's read" in out
     assert "Messages from orders come back while they're still being worked on" in out
     assert "VisibilityTimeout=5400" in out and "Timeout: 900 s" in out
+
+
+def _load_balancer_in_front(function_name, idle_seconds):
+    """
+    A moto Application Load Balancer with its idle timeout set, forwarding to a Lambda target group that the
+    function's resource policy lets call it; the target group's ARN.
+    """
+    ec2 = boto3.client("ec2", region_name=REGION)
+    vpc = ec2.create_vpc(CidrBlock="10.0.0.0/16")["Vpc"]["VpcId"]
+    subnets = [ec2.create_subnet(VpcId=vpc, CidrBlock=f"10.0.{i}.0/24", AvailabilityZone=f"{REGION}{zone}")
+               ["Subnet"]["SubnetId"] for i, zone in ((1, "a"), (2, "b"))]
+    elbv2 = boto3.client("elbv2", region_name=REGION)
+    balancer = elbv2.create_load_balancer(Name="web", Subnets=subnets)["LoadBalancers"][0]["LoadBalancerArn"]
+    group = elbv2.create_target_group(Name="orders", TargetType="lambda")["TargetGroups"][0]["TargetGroupArn"]
+    elbv2.create_listener(LoadBalancerArn=balancer, Protocol="HTTP", Port=80,
+                          DefaultActions=[{"Type": "forward", "TargetGroupArn": group}])
+    elbv2.modify_load_balancer_attributes(LoadBalancerArn=balancer, Attributes=[
+        {"Key": "idle_timeout.timeout_seconds", "Value": str(idle_seconds)}])
+    boto3.client("lambda", region_name=REGION).add_permission(
+        FunctionName=function_name, StatementId="alb", Action="lambda:InvokeFunction",
+        Principal="elasticloadbalancing.amazonaws.com", SourceArn=group)
+    return group
+
+
+def test_describe_reads_the_idle_timeout_of_the_load_balancer_in_front(core, seeded):
+    group = _load_balancer_in_front("etl-nightly", 120)
+    detail = core.describe("etl-nightly", metrics=False)
+    wait = detail.load_balancers[group]
+    assert (wait.name, wait.idle_timeout) == ("web", 120) and ":loadbalancer/app/web/" in wait.arn
+    balancer = next(limit for limit in lfmod.connection_limits(detail, detail.queues)
+                    if limit.caller.startswith("Load balancer"))
+    assert balancer.limit == "web waits 120 s (its idle timeout)" and balancer.level == "warn"
+    assert "web waits 120 s, so after that the caller gets a 504" in balancer.effect
+    assert f"--load-balancer-arn {wait.arn} --attributes Key=idle_timeout.timeout_seconds,Value=900" in balancer.fix
+
+
+def test_a_load_balancer_that_waits_long_enough_fits():
+    group = f"arn:aws:elasticloadbalancing:{REGION}:{ACCOUNT}:targetgroup/orders/1a2b"
+    trigger = Trigger("Load balancer", "orders", arn=group, via="resource policy")
+    waits = {group: LoadBalancerWait("web", "arn:lb", 300)}
+    [fits] = lfmod.connection_limits(FunctionDetail(fn(timeout=120), triggers=[trigger], load_balancers=waits))
+    assert fits.tone == "ok" and fits.limit == "web waits 300 s (its idle timeout)"
+    note = raising_timeout_note(FunctionDetail(fn(timeout=290), triggers=[trigger], load_balancers=waits), 600)
+    assert "Load balancer orders stops waiting after 300 s whatever the timeout" in note

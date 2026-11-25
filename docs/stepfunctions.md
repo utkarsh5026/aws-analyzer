@@ -209,10 +209,19 @@ sfn.graph("order-pipeline", failures="7d")          # shaded by where executions
 
 The findings read the definition: a Lambda task with no Retry for Lambda's own errors (`Lambda.ServiceException`, `Lambda.TooManyRequestsException`, ...) fails the whole execution on one throttle, and the finding shows the Retry rule AWS recommends, to paste; a task that waits for a callback (`.waitForTaskToken`, an activity) with no `TimeoutSeconds` or `HeartbeatSeconds` can wait up to a year.
 
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-light.webp#only-light){ width="984" height="1475" loading=lazy }
-![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, its executions a day as bars, and a table of every state with what it calls, where it goes next, its retries and where an error sends it](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1475" loading=lazy }
+It also reads the settings of the Lambda functions the states call (`lambda:GetFunction`) and holds each task against its function, in a table under the states. A state and its function each have a clock, and the shorter one wins:
+
+| The state | The function | When they clash |
+|---|---|---|
+| `TimeoutSeconds` | Its timeout | The state fails with `States.Timeout` while the run goes on, billed. A `Retry` on the timeout starts a second run beside the first |
+| An Express workflow's 5 minutes | Its timeout | The run outlives the execution that started it |
+| A Map's items at once (`MaxConcurrency`, else 40 inline or 10,000 distributed) | Reserved concurrency | The extra runs are throttled: they fail the item unless the task retries `Lambda.TooManyRequestsException` |
+| A Map's items at once | No reserved concurrency | A Map as big as the region's pool (`lambda:GetAccountSettings`) throttles every other function in the region while it runs |
+
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, one that ProcessItems is throttled by resize-image's reserved concurrency, its executions a day as bars, a table of every state with what it calls, where it goes next, its retries and where an error sends it, and a table of how its states and Lambda functions limit each other, where ProcessItems runs 4 resize-image items at once against the function's reserved concurrency of 2, a clash](images/sfn-state-machine-light.webp#only-light){ width="984" height="1865" loading=lazy }
+![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, one that ProcessItems is throttled by resize-image's reserved concurrency, its executions a day as bars, a table of every state with what it calls, where it goes next, its retries and where an error sends it, and a table of how its states and Lambda functions limit each other, where ProcessItems runs 4 resize-image items at once against the function's reserved concurrency of 2, a clash](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1865" loading=lazy }
 /// caption
-`sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, and LoadOrders has no Retry for Lambda's own errors; the finding gives the rule to paste.
+`sfn.state_machine("order-pipeline")`: its failures jumped three days ago, the day outlined in the bars, LoadOrders has no Retry for Lambda's own errors (the finding gives the rule to paste), and ProcessItems runs more of resize-image at once than the function may run.
 ///
 
 ![graph('order-pipeline', execution='ord-7f3a'): the flow drawn as boxes and arrows, the path ord-7f3a took in green up to LoadOrders in red, its error arrow to OrderFailed, and the states it never reached dashed](images/sfn-graph-light.webp#only-light){ width="984" height="1215" loading=lazy }
@@ -383,14 +392,16 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
     {
       "Sid": "ReadLambdaRuns",
       "Effect": "Allow",
-      "Action": ["lambda:GetFunction", "lambda:ListVersionsByFunction", "logs:FilterLogEvents"],
+      "Action": [
+        "lambda:GetFunction", "lambda:ListVersionsByFunction", "lambda:GetAccountSettings", "logs:FilterLogEvents"
+      ],
       "Resource": "*"
     }
   ]
 }
 ```
 
-The last statement is only for the Lambda lines in `execution()` and the deploys `failures()` compares with when each kind of failure began; without it the report says what it couldn't read and shows the call that reads it. `states:DescribeStateMachineForExecution` dates the definition a failure ran with.
+The last statement is only for the Lambda lines in `execution()`, the deploys `failures()` compares with when each kind of failure began, and the functions' timeouts and concurrency `state_machine()` holds its tasks against (`lambda:GetAccountSettings` only when a Map runs a function without reserved concurrency); without it the report says what it couldn't read and shows the call that reads it. `states:DescribeStateMachineForExecution` dates the definition a failure ran with.
 
 ## Troubleshooting { #troubleshooting }
 

@@ -21,6 +21,8 @@ class StateDef:
     it goes next (labels: what sends it to a target, a Choice rule's condition, 'Default' or a Catch's errors), and its
     error handling. path is where it sits ('ProcessItems > ResizeImage' inside a Map), branch which of its Parallel's
     branches, and starts the StartAt of each state machine nested in it (a Map's one, a Parallel's per branch).
+    A Map's max_concurrency is its MaxConcurrency (None or 0: as many as Step Functions allows) and distributed says
+    whether it runs its items as child executions (Mode DISTRIBUTED) rather than inline.
     """
 
     name: str
@@ -39,6 +41,8 @@ class StateDef:
     labels: dict[str, str] = field(default_factory=dict)
     branch: int = 0
     starts: list[str] = field(default_factory=list)
+    max_concurrency: int | None = None
+    distributed: bool = False
 
     @property
     def waits_for_callback(self) -> bool:
@@ -49,10 +53,23 @@ class StateDef:
 
 
 @dataclass
+class LambdaSettings:
+    """
+    The settings of a Lambda function a state machine calls that meet its states' own: its timeout in seconds and
+    its reserved concurrency (None: it shares the region's pool, whose size is region_concurrency when known).
+    """
+
+    timeout: int
+    reserved_concurrency: int | None = None
+    region_concurrency: int | None = None
+
+
+@dataclass
 class StateMachine:
     """
     A state machine: STANDARD or EXPRESS, its states (parsed from the definition, in order), logging and tracing.
-    definition is the raw ASL text; errors holds the sections that couldn't be read.
+    definition is the raw ASL text; errors holds the sections that couldn't be read. lambda_settings are the
+    settings of the Lambda functions it calls, by name, once read (read_lambda_settings()).
     """
 
     name: str
@@ -70,6 +87,7 @@ class StateMachine:
     log_groups: list[str] = field(default_factory=list)
     tracing: bool = False
     errors: dict[str, str] = field(default_factory=dict)
+    lambda_settings: dict[str, LambdaSettings] = field(default_factory=dict)
 
     @property
     def is_express(self) -> bool:
