@@ -4880,6 +4880,10 @@ def test_a_report_is_read_quietly_for_its_tables_and_saved_as_a_workbook(ui, cap
     data = ui.data("performance", "etl-nightly", since="7d")
     assert capsys.readouterr().out == "" and data.again == "data('performance', 'etl-nightly', since='7d')"
     assert "How to read it" in str(data.guide("runs"))
+    runs = data.table("runs")
+    answers = {recipe.tells: eval(recipe.code, {"df": runs.to_df()}) for recipe in runs.recipes}
+    cold_against_warm = next(answer for tells, answer in answers.items() if "cold start" in tells)
+    assert list(cold_against_warm.columns) == ["duration_ms", "init_ms"]
     ui.to_excel()
     out = capsys.readouterr().out
     assert "Saved Performance of etl-nightly as a workbook" in out

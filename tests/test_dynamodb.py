@@ -1243,3 +1243,18 @@ def test_reports_give_their_tables_for_pandas(ui, capsys, tmp_path, monkeypatch)
     ui.to_excel()
     saved = capsys.readouterr().out
     assert "Saved Scan orders" in saved and "(page 2)" in saved
+
+
+def test_the_schema_guides_mixed_type_recipe_finds_only_attributes_with_two_types():
+    """
+    An attribute seen 1,000 times or more has a comma in its count (S (1,200)), so the recipe can't look for one.
+    """
+    from aws_analyzer.dynamodb.datasets import schema_data
+
+    items = [{"pk": f"USER#{n}", "zip": n if n % 10 == 0 else str(n)} for n in range(1200)]
+    attributes = schema_data(ddb_analysis.profile_items(items, "users", keys=["pk"])).table("attributes")
+    recipe = next(recipe for recipe in attributes.recipes if "more than one type" in recipe.tells)
+    df = attributes.to_df()
+    mixed = eval(recipe.code, {"df": df})
+    assert df.set_index("attribute").loc["pk", "types"] == "S (1,200)"
+    assert list(mixed.attribute) == ["zip"]

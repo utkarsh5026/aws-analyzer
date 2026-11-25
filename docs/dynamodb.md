@@ -323,6 +323,21 @@ The [DynamoDB explorer guide](dynamodb_explorer.md) covers every tab.
 Every report ends with **🐼 This report as data**: the items or numbers it shows, each column explained, for pandas, and a workbook to share.
 { .gist }
 
+A minute in a notebook: a query, its items in pandas, totals by status, the schema as data, and the workbook.
+
+<div class="aa-tour" data-tour="dynamodb_data">
+  <div class="tour-screen"></div>
+  <div class="tour-controls"></div>
+  <div class="tour-chapters"></div>
+  <p class="tour-links"><a href="tour.html?service=dynamodb_data">Full screen</a> · <a href="videos/dynamodb_data-tour-light.mp4" data-tour-mp4 download>Download as MP4</a>, for Slack or a slide (light or dark, as this page is)</p>
+</div>
+
+![The end of a query on CUSTOMER#1042: the fold This report as data opened, with the code to copy and the items table's columns, each attribute with how many items have it](images/dynamodb-data-fold-light.webp#only-light){ width="984" height="857" loading=lazy }
+![The end of a query on CUSTOMER#1042: the fold This report as data opened, with the code to copy and the items table's columns, each attribute with how many items have it](images/dynamodb-data-fold-dark.webp#only-dark){ width="984" height="857" loading=lazy }
+/// caption
+The end of `ui.query(...)`, opened: the items as a table, and each attribute with how often it's set.
+///
+
 ```python
 ui.query("acme-app", "CUSTOMER#1042")
 data = ui.data()
@@ -334,6 +349,38 @@ ui.to_excel()               # aws-analyzer-exports/dynamodb-schema-acme-app.xlsx
 ```
 
 The items are the ones the report read, nothing more: `more()` reads the next page, and `data()` then holds that page. For thousands of items at once, `ui.core.scan("acme-app", n=5000).to_df()` is still the way.
+
+![ui.to_excel() saying it saved dynamodb-schema-acme-app.xlsx, then the workbook opened: the Summary sheet, the Charts sheet and the attributes sheet](images/dynamodb-data-excel-light.webp#only-light){ width="984" height="1813" loading=lazy }
+![ui.to_excel() saying it saved dynamodb-schema-acme-app.xlsx, then the workbook opened: the Summary sheet, the Charts sheet and the attributes sheet](images/dynamodb-data-excel-dark.webp#only-dark){ width="984" height="1813" loading=lazy }
+/// caption
+`ui.to_excel()` after the schema: the summary, Excel's own charts, and every attribute as a row.
+///
+
+??? more "What each line gives back, in a notebook"
+
+    The items as plain rows, maps as dotted columns:
+
+    ![A DataFrame of eight orders: sort key, status, total, currency, shipping.method and coupon, with blank cells where an order has no coupon](images/dynamodb-data-frame-light.webp#only-light){ width="984" height="276" loading=lazy }
+    ![A DataFrame of eight orders: sort key, status, total, currency, shipping.method and coupon, with blank cells where an order has no coupon](images/dynamodb-data-frame-dark.webp#only-dark){ width="984" height="276" loading=lazy }
+    /// caption
+    `ui.data()["items"]`: plain values, not `{"S": ...}`, and `shipping.method` as its own column.
+    ///
+
+    Then it's pandas:
+
+    ![Orders grouped by status with count, sum and mean of total: 10 delivered, 5 shipped, 3 failed worth $1,798.89, one cancelled and one refunded](images/dynamodb-data-pandas-light.webp#only-light){ width="984" height="228" loading=lazy }
+    ![Orders grouped by status with count, sum and mean of total: 10 delivered, 5 shipped, 3 failed worth $1,798.89, one cancelled and one refunded](images/dynamodb-data-pandas-dark.webp#only-dark){ width="984" height="228" loading=lazy }
+    /// caption
+    Three failed orders: $1,798.89 that never went through.
+    ///
+
+    And the schema's attributes that hold more than one type:
+
+    ![One row: address.zip with types S (142); N (20), in 162 items, a fill rate of 0.162](images/dynamodb-data-schema-light.webp#only-light){ width="984" height="87" loading=lazy }
+    ![One row: address.zip with types S (142); N (20), in 162 items, a fill rate of 0.162](images/dynamodb-data-schema-dark.webp#only-dark){ width="984" height="87" loading=lazy }
+    /// caption
+    `address.zip` is text in 142 items and a number in 20: a filter on one type misses the other.
+    ///
 
 ??? more "Which tables each report gives"
 

@@ -34,7 +34,10 @@ Needs Pillow (pip install pillow) and Chrome: $CHROME, or the headless shell Pla
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import hashlib
+import html
 import importlib
 import io
 import json
@@ -80,15 +83,22 @@ class Figure:
     """
     One figure in the guides. theme is the reports' theme (set_theme's names), "" for the one a user gets
     (AWS_ANALYZER_THEME, else console); guide is the page it's on, when it isn't its service's guide.
+
+    The code runs as a notebook cell: every report it draws is in the picture, and so is the value of its last line,
+    shown as Jupyter shows it (a DataFrame as its table, anything else as its repr). fold draws only the report's
+    "🐼 This report as data" fold, opened at its first table; workbook adds the workbook to_excel() saved, each
+    sheet as a spreadsheet draws it (LibreOffice, from the same openpyxl workbook).
     """
 
     name: str  # docs/images/<name>-light.webp
     service: str
-    code: str  # what the figure shows: every report it renders ends up in the picture
+    code: str
     setup: str = ""  # runs first, shows nothing (e.g. use())
     crop: int | None = None  # keep only the top this many CSS px ("The top of ui.summary(...)")
     theme: str = ""
     guide: str = ""
+    fold: bool = False
+    workbook: bool = False
 
 
 LAKE = "s3://acme-ml-data"
@@ -188,6 +198,48 @@ FIGURES = [
     Figure("athena-catalog", "athena", "ui.catalog()"),
     Figure("athena-table-info", "athena", 'ui.table_info("sales.events")', crop=1000),
     Figure("athena-query-code", "athena", 'ui.query_code("SELECT * FROM orders WHERE total > 100", database="sales")'),
+    Figure("lambda-data-fold", "lambda_functions", 'ui.performance("orders-etl")', fold=True),
+    Figure("lambda-data-frame", "lambda_functions",
+           'data = ui.data()\ndf = data["runs"]\n'
+           'df.nlargest(6, "duration_ms")[["time", "duration_ms", "timeout_share", "memory_share", "status"]]',
+           setup='ui.performance("orders-etl")'),
+    Figure("lambda-data-guide", "lambda_functions", 'data.guide("runs")',
+           setup='ui.performance("orders-etl"); data = ui.data()'),
+    Figure("lambda-data-pandas", "lambda_functions",
+           'df[~df.timed_out].duration_ms.describe(percentiles=[.5, .9, .99])',
+           setup='ui.performance("orders-etl"); df = ui.data()["runs"]'),
+    Figure("lambda-data-excel", "lambda_functions", "ui.to_excel()", setup='ui.performance("orders-etl")',
+           workbook=True),
+    Figure("s3-data-fold", "s3", f'ui.summary("{LAKE}/")', fold=True),
+    Figure("s3-data-frame", "s3", 'data = ui.data()\ndata["folders"][["folder", "files", "size_gb", "share_of_size"]].round(3)', setup=f'ui.summary("{LAKE}/")'),
+    Figure("s3-data-find", "s3",
+           f'files = ui.data("find", "{LAKE}/curated/", pattern="*.parquet")["files"]\n'
+           'files[["file_name", "size_mb", "age_days", "uri"]].round(1)'),
+    Figure("s3-data-read", "s3",
+           'train = files[files.file_name == "train.parquet"].uri.iloc[0]\nui.core.read_df(train).head()',
+           setup=f'files = ui.data("find", "{LAKE}/curated/", pattern="*.parquet")["files"]'),
+    Figure("s3-data-excel", "s3", f'ui.to_excel("summary", "{LAKE}/")', workbook=True),
+    Figure("dynamodb-data-fold", "dynamodb", 'ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"))',
+           fold=True),
+    Figure("dynamodb-data-frame", "dynamodb",
+           'df = ui.data()["items"]\ndf[["sk", "status", "total", "currency", "shipping.method", "coupon"]].head(8)',
+           setup='ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"))'),
+    Figure("dynamodb-data-pandas", "dynamodb", 'df.groupby("status").total.agg(["count", "sum", "mean"]).round(2)',
+           setup='ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#")); df = ui.data()["items"]'),
+    Figure("dynamodb-data-schema", "dynamodb",
+           'attributes = ui.data("schema", "acme-app")["attributes"]\n'
+           'attributes[attributes.types.str.contains(";")][["attribute", "types", "items", "fill_rate", "examples"]]'),
+    Figure("dynamodb-data-excel", "dynamodb", "ui.to_excel()", setup='ui.schema("acme-app")', workbook=True),
+    Figure("sfn-data-fold", "stepfunctions", 'ui.executions("order-pipeline", since="30d")', fold=True),
+    Figure("sfn-data-frame", "stepfunctions",
+           'df = ui.data()["executions"]\ndf[["execution", "status", "started", "seconds"]]',
+           setup='ui.executions("order-pipeline", since="30d")'),
+    Figure("sfn-data-steps", "stepfunctions",
+           'failed = df[df.status == "FAILED"].ref.iloc[0]\nsteps = ui.data("execution", failed)["steps"]\n'
+           'steps[["step", "status", "seconds", "share_of_execution", "tries", "est_cost_usd"]]',
+           setup='ui.executions("order-pipeline", since="30d"); df = ui.data()["executions"]'),
+    Figure("sfn-data-excel", "stepfunctions", "ui.to_excel()", setup='ui.execution("order-pipeline/ord-7f3a")',
+           workbook=True),
 ]
 
 
@@ -1033,9 +1085,139 @@ SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed
 # ----------------------------------------------------------------------------- rendering and screenshots
 
 
+def run_cell(code: str, scope: dict[str, Any]) -> Any:
+    """
+    Runs code as a notebook cell does: every statement in turn, and gives the value of the last one when it's an
+    expression (None otherwise), which Jupyter would show under the cell.
+    """
+    tree = ast.parse(code)
+    last = tree.body[-1] if tree.body else None
+    if not isinstance(last, ast.Expr):
+        exec(compile(tree, "<cell>", "exec"), scope)
+        return None
+    exec(compile(ast.Module(tree.body[:-1], type_ignores=[]), "<cell>", "exec"), scope)
+    return eval(compile(ast.Expression(last.value), "<cell>", "eval"), scope)
+
+
+def value_html(value: Any) -> str:
+    """
+    A cell's value as JupyterLab shows it: its _repr_html_ when it has one (a DataFrame's table), else its repr as
+    plain text (a Series, data.guide(), a ReportData).
+    """
+    rich = getattr(value, "_repr_html_", None)
+    drawn = rich() if callable(rich) else None
+    if drawn:
+        return f'<div class="jp-out">{drawn}</div>'
+    return f'<pre class="jp-out">{html.escape(repr(value))}</pre>'
+
+
+def opened_fold(drawn: str) -> str:
+    """
+    A report's "This report as data" fold drawn open, and its first table's fold open in it.
+    """
+    drawn = drawn.replace('<details class="dg">', '<details class="dg" open>', 1)
+    return drawn.replace('<details class="dg-t">', '<details class="dg-t" open>', 1)
+
+
+SHEET_WIDTH = WIDTH - 2 * MARGIN - 2
+SHEET_HEIGHT = 440
+SHEET_ZOOM = 0.85
+SHEETS_SHOWN = 3
+CONVERT_SECONDS = 180
+
+
+def sheet_pictures(data: Any, folder: Path) -> list[tuple[str, Any]]:
+    """
+    Each sheet of the workbook to_excel() writes for this data, as LibreOffice draws it: (sheet name, picture). The
+    workbook is built as to_excel() builds it, and LibreOffice puts each whole sheet on one PDF page.
+    """
+    import pypdfium2
+    from aws_analyzer._kit.workbook import build_workbook
+
+    book = build_workbook(data)
+    source = folder / "workbook.xlsx"
+    book.save(source)
+    one_page_each = 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
+    office = shutil.which("soffice") or sys.exit("The workbook figures need LibreOffice: apt install libreoffice-calc")
+    subprocess.run([office, "--headless", "--convert-to", one_page_each, "--outdir", str(folder), str(source)],
+                   check=True, capture_output=True, timeout=CONVERT_SECONDS)
+    pages = pypdfium2.PdfDocument(folder / "workbook.pdf")
+    points_to_pixels = SHEET_ZOOM * SCALE * 96 / 72
+    return [(name, pages[index].render(scale=points_to_pixels).to_pil())
+            for index, name in enumerate(book.sheetnames)]
+
+
+def sheet_window_html(file_name: str, names: list[str], shown: str, picture: Any) -> str:
+    """
+    One sheet in a spreadsheet's window: the file's name over its top left corner, and the sheet tabs under it with
+    this one picked.
+    """
+    corner = picture.crop((0, 0, min(picture.width, round(SHEET_WIDTH * SCALE)),
+                           min(picture.height, round(SHEET_HEIGHT * SCALE))))
+    buffer = io.BytesIO()
+    corner.save(buffer, "PNG")
+    source = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+    tabs = "".join(f'<span class="{"on" if name == shown else ""}">{html.escape(name)}</span>' for name in names)
+    return (f'<div class="xl"><div class="xl-top"><span class="xl-grid"></span>{html.escape(file_name)}'
+            f'<span class="xl-dim"> · {html.escape(shown)}</span></div>'
+            f'<img src="{source}" width="{round(corner.width / SCALE)}" alt=""><div class="xl-tabs">{tabs}</div></div>')
+
+
+def workbook_html(data: Any, saved: Path) -> str:
+    """
+    The workbook to_excel() saved, opened: its Summary, its Charts and its first table, each in a spreadsheet window.
+    """
+    with tempfile.TemporaryDirectory() as folder:
+        sheets = sheet_pictures(data, Path(folder))
+    names = [name for name, _ in sheets]
+    windows = [sheet_window_html(saved.name, names, name, picture) for name, picture in sheets[:SHEETS_SHOWN]]
+    return "".join(windows)
+
+
+def drawn_report(view: Any, blocks: list[Any], figure: Figure, look: str) -> str:
+    """
+    One report as the figure shows it: all of it, or only its data fold, opened.
+    """
+    if figure.fold:
+        from aws_analyzer._kit.dataview import _DataGuide
+
+        blocks = [block for block in blocks if isinstance(block, _DataGuide)]
+    drawn = view._render_html(view._runnable_steps(blocks), view.max_rows, theme=look) if blocks else ""
+    return opened_fold(drawn) if figure.fold else drawn
+
+
+def run_figure(figure: Figure, ui: Any, scope: dict[str, Any]) -> list[str]:
+    """
+    One figure's cell, run quietly after its setup: the HTML of every report it draws, then its value's, then the
+    workbook it saved. Reports are caught where every View shows them, _BaseView._show, so a report a View draws
+    through super() (to_excel()'s) is caught too, and data()'s quiet reads stay quiet.
+    """
+    from aws_analyzer._kit.view import _BaseView
+
+    shown: list[str] = []
+    ui._show = lambda blocks: None
+    exec(figure.setup, scope)
+    del ui._show
+    look = figure.theme or importlib.import_module("aws_analyzer._kit.themes")._theme_name()
+    sys.modules["__main__"].ui = ui
+    showing = _BaseView._show
+    _BaseView._show = lambda view, blocks: shown.append(drawn_report(view, blocks, figure, look))
+    try:
+        value = run_cell(figure.code, scope)
+    finally:
+        _BaseView._show = showing
+    if value is not None:
+        shown.append(value_html(value))
+    if figure.workbook:
+        saved = sorted(Path("aws-analyzer-exports").glob("*.xlsx"))[-1]
+        shown.append(workbook_html(ui._last_data, saved))
+    return shown
+
+
 def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
     """
-    Every figure's report(s) as notebook HTML fragments, from one moto session with the service's scene.
+    Every figure's report(s) as notebook HTML fragments, from one moto session with the service's scene. Each cell
+    runs in an empty folder of its own, so what it saves (to_excel()'s workbook) is never left in the checkout.
     """
     for name, value in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                         "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": REGION}.items():
@@ -1052,19 +1234,41 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
         core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         core = core_cls(region=REGION, **kwargs) if "session" not in kwargs else core_cls(**kwargs)
         out: dict[str, list[str]] = {}
+        home = Path.cwd()
         for figure in figures:
             ui = view_cls(core, mode="text", progress="off")
-            shown: list[str] = []
             scope = {"ui": ui, "core": core, "mod": mod}
-            ui._show = lambda blocks: None
-            exec(figure.setup, scope)
-            look = figure.theme or importlib.import_module("aws_analyzer._kit.themes")._theme_name()
-            sys.modules["__main__"].ui = ui
-            ui._show = lambda blocks, ui=ui, shown=shown, look=look: shown.append(
-                ui._render_html(ui._runnable_steps(blocks), ui.max_rows, theme=look))
-            exec(figure.code, scope)
-            out[figure.name] = shown
+            with tempfile.TemporaryDirectory() as folder:
+                os.chdir(folder)
+                try:
+                    out[figure.name] = run_figure(figure, ui, scope)
+                finally:
+                    os.chdir(home)
         return out
+
+
+NOTEBOOK_OUTPUT_CSS = """
+.jp-out{font:13px/1.45 system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:6px 0 14px;overflow:hidden}
+pre.jp-out{font:12.5px/1.5 "DejaVu Sans Mono",Menlo,Consolas,monospace;white-space:pre-wrap}
+.jp-out table{border-collapse:collapse;border:none;font-size:12px}
+.jp-out thead{border-bottom:1px solid light-dark(#bdbdbd,#616161);vertical-align:bottom}
+.jp-out td,.jp-out th{text-align:right;padding:.45em .6em;border:none;white-space:nowrap}
+.jp-out th{font-weight:600}
+.jp-out tbody tr:nth-child(odd){background:light-dark(#f5f5f5,#2c2c2c)}
+.xl{margin:6px 0 16px;border:1px solid light-dark(#d8d2c8,#4a4642);border-radius:8px;overflow:hidden;
+    font:12.5px/1.4 system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;background:#fff}
+.xl img{display:block}
+.xl-top{display:flex;align-items:center;gap:8px;padding:7px 12px;font-weight:600;
+        background:light-dark(#f3efe8,#2b2926);color:light-dark(#3b3631,#e8e2da)}
+.xl-dim{font-weight:400;opacity:.65}
+.xl-grid{width:14px;height:14px;border-radius:3px;background:#a85a26;
+         -webkit-mask:linear-gradient(#000 0 0) 0 0/100% 100%,
+           repeating-linear-gradient(90deg,transparent 0 4px,#000 4px 5px),repeating-linear-gradient(transparent 0 4px,#000 4px 5px)}
+.xl-tabs{display:flex;gap:2px;padding:0 8px;background:light-dark(#f3efe8,#2b2926);
+         border-top:1px solid light-dark(#d8d2c8,#4a4642)}
+.xl-tabs span{padding:5px 12px;color:light-dark(#6b645c,#b5aea6)}
+.xl-tabs span.on{background:#fff;color:#a85a26;font-weight:600;border-bottom:2px solid #a85a26}
+"""
 
 
 def page(fragments: list[str], theme: str) -> str:
@@ -1074,7 +1278,8 @@ def page(fragments: list[str], theme: str) -> str:
     """
     jupyter_light = "true" if theme == "light" else "false"
     return (f'<!doctype html><html lang="en" style="color-scheme:{theme}"><head><meta charset="utf-8"><style>'
-            f"body{{margin:0;padding:{MARGIN}px {MARGIN}px 0;background:Canvas;color:CanvasText}}</style></head>"
+            f"body{{margin:0;padding:{MARGIN}px {MARGIN}px 0;background:Canvas;color:CanvasText}}"
+            f"{NOTEBOOK_OUTPUT_CSS}</style></head>"
             f'<body data-jp-theme-light="{jupyter_light}">' + "".join(fragments) + "</body></html>")
 
 

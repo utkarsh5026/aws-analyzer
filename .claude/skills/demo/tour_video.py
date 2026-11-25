@@ -101,6 +101,8 @@ class Cell:
     when the cell should type something else, and `pan_max` stops the scroll that many pixels down the report. An
     explorer's tour shows its window's screenshots (made by the *_shots.py scripts, not shots.py), so its cells always
     say their `code`: the call that opens the window, or the window's own command that shows what the screenshot does.
+    A cell that `continues` the one before it types only its figure's call, since the cells before it ran the
+    figure's setup already (a data tour's `df = ui.data()["runs"]`).
     """
 
     chapter: str
@@ -108,6 +110,7 @@ class Cell:
     captions: list[str]
     code: str = ""
     pan_max: int | None = None
+    continues: bool = False
 
 
 @dataclass
@@ -115,7 +118,9 @@ class Tour:
     """
     One service's tour: its View and the variable its guide keeps it in, the notebook's name in the tab, the title
     card's words (the guide's headline), what a screen reader says it shows, and its cells. An explorer's tour also
-    names the variable it keeps the window in (`window`, `x`), whose commands its end card lists too.
+    names the variable it keeps the window in (`window`, `x`), whose commands its end card lists too. A tour that
+    isn't its own guide's (a service's data tour, in its guide's "as data" section) names the page and section it's
+    on as `guide`, and `install` is what its first cell pip-installs.
     """
 
     service: str
@@ -129,6 +134,15 @@ class Tour:
     summary: str
     cells: list[Cell] = field(default_factory=list)
     window: str = ""
+    guide: str = ""
+    install: str = "aws-analyzer"
+
+    @property
+    def page(self) -> str:
+        """
+        The guide page the tour is on, with its section when it's in one: 'lambda_functions.html#as-data'.
+        """
+        return self.guide or f"{self.service}.html"
 
 
 LAKE = "s3://acme-ml-data"
@@ -588,6 +602,114 @@ TOURS = [
                 "and **10 passages add gift-cards.md**."],
            code='x.compare("How long do refunds take?", where="team = billing")')],
          window="x"),
+    Tour("lambda_functions_data", "LambdaView", "ui", "lambda.ipynb", "AWS Lambda", "lambda",
+         "Take a Lambda report into pandas or Excel",
+         "Every report ends with the tables it was drawn from: no new read from AWS, and every column explained.",
+         "A notebook tour of aws-analyzer's Lambda reports as data: the fold at the end of performance(), its runs as "
+         "a pandas DataFrame, what each column means, a question answered in pandas, and the report as an Excel "
+         "workbook.",
+         [Cell("The report", "lambda-data-fold",
+               ["**Run a report as usual**: how long orders-etl's runs take.",
+                "It ends with **🐼 This report as data**: the tables it was drawn from.",
+                "Each column in plain words, with its unit and **how to read it**.",
+                "Then pandas lines worth running, ready to copy."]),
+          Cell("In pandas", "lambda-data-frame",
+               ["**`ui.data()`**: the report's tables as pandas DataFrames.",
+                "**No new read from AWS**: a row per run, with its run time and its share of the timeout.",
+                "The six slowest: **three runs hit the 60 s timeout**."], continues=True),
+          Cell("What it means", "lambda-data-guide",
+               ["**`data.guide()`**: every column in plain words, in the notebook.",
+                "Its unit, and how to read it: over 0.8 of the timeout runs **close to being stopped**.",
+                "So you never have to guess what a column holds."], continues=True),
+          Cell("Ask it", "lambda-data-pandas",
+               ["**Your own question, in pandas**: how long do the finished runs take?",
+                "Every finished run took **under 8.7 s**, against a 60 s timeout.",
+                "So the three timeouts **hung**: a longer timeout would only cost more."], continues=True),
+          Cell("Excel", "lambda-data-excel",
+               ["**`ui.to_excel()`**: the same report as a workbook to share.",
+                "A **Summary** sheet with the verdict, the numbers and the findings.",
+                "**Charts** Excel draws itself: the three hung runs stand out at 60 s.",
+                "Then a sheet per table, with filters and data bars. **It never replaces a file.**"],
+           continues=True)],
+         guide="lambda_functions.html#as-data", install="aws-analyzer[data]"),
+    Tour("s3_data", "S3View", "ui", "acme-ml-data.ipynb", "Amazon S3", "s3",
+         "Take an S3 report into pandas or Excel",
+         "Every report ends with the tables it was drawn from, each file with its s3:// path, ready for pandas.",
+         "A notebook tour of aws-analyzer's S3 reports as data: the fold at the end of summary(), space by folder as a "
+         "pandas DataFrame, a search for Parquet files as data, one of them read into pandas, and the summary as an "
+         "Excel workbook.",
+         [Cell("The report", "s3-data-fold",
+               ["**Run a report as usual**: a summary of everything in the bucket.",
+                "It ends with **🐼 This report as data**: six tables, from folders to the largest files.",
+                "Each column explained, and **nothing is read from S3 again**."]),
+          Cell("In pandas", "s3-data-frame",
+               ["**`ui.data()`**: the summary's tables as pandas DataFrames.",
+                "Space by folder: **training/ holds 80%** of the 1.3 TB.",
+                "Sizes in GB and shares from 0 to 1, ready to sort, filter or chart."], continues=True),
+          Cell("Any report", "s3-data-find",
+               ["**Any report, without drawing it**: `ui.data(\"find\", ...)` gives its tables.",
+                "199 Parquet files under curated/, **each with its s3:// path**.",
+                "Sizes in MB and ages in days, as numbers you can sort."], continues=True),
+          Cell("Read a file", "s3-data-read",
+               ["**Open one of them in pandas**, by the path in its row.",
+                "`read_df` reads Parquet, CSV, JSON and more **straight from S3**.",
+                "No download step and no boto3 code to write."], continues=True),
+          Cell("Excel", "s3-data-excel",
+               ["**`ui.to_excel(\"summary\", ...)`**: a report as a workbook, named and read in one line.",
+                "A **Summary** sheet with the numbers and the findings, each priced.",
+                "**Charts** Excel draws itself, then a sheet per table with data bars."], continues=True)],
+         guide="s3.html#as-data", install="aws-analyzer[data]"),
+    Tour("dynamodb_data", "DynamoDBView", "ui", "acme-app.ipynb", "Amazon DynamoDB", "dynamodb",
+         "Take DynamoDB items into pandas or Excel",
+         "Items as plain rows, maps as columns, and a table's schema as data: no {\"S\": ...} anywhere.",
+         "A notebook tour of aws-analyzer's DynamoDB reports as data: the fold at the end of a query, the items as a "
+         "pandas DataFrame, totals by status, the attributes that hold two types, and the schema as an Excel "
+         "workbook.",
+         [Cell("The report", "dynamodb-data-fold",
+               ["**Run a report as usual**: one customer's orders.",
+                "It ends with **🐼 This report as data**: the items as a table.",
+                "Each attribute explained: **what it holds, and in how many items**."]),
+          Cell("In pandas", "dynamodb-data-frame",
+               ["**`ui.data()`**: the items as a pandas DataFrame, keys first.",
+                "Plain values, not `{\"S\": ...}`, and maps as **dotted columns**: `shipping.method`.",
+                "An attribute an item doesn't have is an empty cell, not an error."], continues=True),
+          Cell("Ask it", "dynamodb-data-pandas",
+               ["**Then it's just pandas**: this customer's orders by status.",
+                "Ten delivered, and **three failed: $1,798.89** that never went through.",
+                "Counted, summed and averaged in one line, on the items the query already read."], continues=True),
+          Cell("The schema", "dynamodb-data-schema",
+               ["**Any report, without drawing it**: the table's schema, as data.",
+                "One attribute holds **two types**: 142 zip codes as text, 20 as numbers.",
+                "A filter on one type **silently misses** the others."], continues=True),
+          Cell("Excel", "dynamodb-data-excel",
+               ["**`ui.to_excel()`**: the schema as a workbook to share.",
+                "A **Summary** sheet with the numbers and the findings.",
+                "**Charts** Excel draws itself, then a sheet per table."], continues=True)],
+         guide="dynamodb.html#as-data", install="aws-analyzer[data]"),
+    Tour("stepfunctions_data", "StepFunctionsView", "sfn", "workflows.ipynb", "AWS Step Functions",
+         "stepfunctions",
+         "Take your workflows' executions into pandas or Excel",
+         "Every execution as a row, a failed one step by step, and a workbook to share: no new read from AWS.",
+         "A notebook tour of aws-analyzer's Step Functions reports as data: the fold at the end of executions(), the "
+         "executions as a pandas DataFrame, the failed one's steps read by its ref, and that execution as an Excel "
+         "workbook.",
+         [Cell("The report", "sfn-data-fold",
+               ["**Run a report as usual**: order-pipeline's executions.",
+                "It ends with **🐼 This report as data**: a row per execution, and a row per day.",
+                "Each column explained, and **nothing is read from AWS again**."]),
+          Cell("In pandas", "sfn-data-frame",
+               ["**`sfn.data()`**: the executions as a pandas DataFrame.",
+                "**Five failed and one timed out**, with when each started and how long it took.",
+                "Each row's `ref` opens that execution as data."], continues=True),
+          Cell("One execution", "sfn-data-steps",
+               ["**Drill into the newest failure**, by its `ref`.",
+                "Its steps: **ChargeCard took 65%** of the time, over three tries.",
+                "And **LoadOrders failed**: the step to look at."], continues=True),
+          Cell("Excel", "sfn-data-excel",
+               ["**`sfn.to_excel()`**: that execution as a workbook to share.",
+                "A **Summary** sheet with the verdict, the numbers and the findings.",
+                "**Charts** Excel draws itself, then its steps, tries and Lambda runs as sheets."], continues=True)],
+         guide="stepfunctions.html#as-data", install="aws-analyzer[data]"),
 ]
 
 
@@ -632,6 +754,8 @@ def cell_code(tour: Tour, cell: Cell, *, first: bool) -> str:
     """
     if cell.code:
         code = cell.code
+    elif cell.continues:
+        code = figure_named(cell.figure).code
     else:
         figure = figure_named(cell.figure)
         code = "\n".join(part for part in (figure.setup, figure.code) if part)
@@ -730,27 +854,38 @@ def install_lines(version: str) -> list[dict]:
             {"at": 1.05, "html": f'<span class="ok">✓</span> Successfully installed aws-analyzer-{version}'}]
 
 
-def install_scene() -> dict:
+INSTALL_SAYS = {
+    "aws-analyzer": "**Install it once**, in any SageMaker or Jupyter notebook. Read-only: it never changes anything "
+                    "in AWS.",
+    "aws-analyzer[data]": "**Install it with its data extra**: pandas for the tables, openpyxl for the workbook. "
+                          "Read-only, like the rest.",
+}
+
+
+def install_scene(package: str) -> dict:
     """
-    The tour's first cell: installing the package, pip's lines streaming in under it.
+    The tour's first cell: installing the package (with an extra, quoted as a shell needs it), pip's lines streaming
+    in under it.
     """
     source = shots.ROOT.joinpath("src", "aws_analyzer", "__init__.py").read_text(encoding="utf-8")
     version = re.search(r'__version__ = "([^"]+)"', source).group(1)
-    code = "%pip install aws-analyzer"
+    code = f'%pip install "{package}"' if "[" in package else f"%pip install {package}"
     seconds = round(output_appears(code, runs=INSTALL_RUNS) + INSTALL_HOLD, 1)
     return {"kind": "cell", "dur": seconds, "chapter": "Install", "label": "Install", "runs": INSTALL_RUNS,
             "code": code, "outputs": [{"lines": install_lines(version)}],
-            "captions": [[0, caption_html("**Install it once**, in any SageMaker or Jupyter notebook. "
-                                          "Read-only: it never changes anything in AWS.")]]}
+            "captions": [[0, caption_html(INSTALL_SAYS[package])]]}
 
 
 def short_call(code: str, *variables: str) -> str:
     """
     A cell's call for the end card: the last command it runs on the View (or on an explorer's window), with `(…)`
-    when it took arguments.
+    when it took arguments; "" for a cell of pandas alone.
     """
     names = "|".join(re.escape(variable) for variable in variables if variable)
-    name, method, opening = re.findall(rf"^(?:\w+ = )?({names})\.(\w+)\((.?)", code, re.MULTILINE)[-1]
+    calls = re.findall(rf"^(?:\w+ = )?({names})\.(\w+)\((.?)", code, re.MULTILINE)
+    if not calls:
+        return ""
+    name, method, opening = calls[-1]
     arguments = "" if opening == ")" else "…"
     return f"{name}.{method}({arguments})"
 
@@ -761,7 +896,7 @@ def end_scene(tour: Tour, calls: list[str]) -> dict:
     """
     return {"kind": "end", "dur": END_SECONDS, "chapter": "Your turn", "eyebrow": tour.eyebrow,
             "icon": f"images/aws/{tour.icon}.svg", "heading": "Your turn: one line each.",
-            "calls": [*calls, f"{tour.variable}.help()"], "url": f"{SITE}/{tour.service}.html"}
+            "calls": [*calls, f"{tour.variable}.help()"], "url": f"{SITE}/{tour.page}"}
 
 
 def tour_data(tour: Tour) -> dict:
@@ -772,10 +907,11 @@ def tour_data(tour: Tour) -> dict:
              "icon": f"images/aws/{tour.icon}.svg", "heading": html.escape(tour.heading, quote=False),
              "text": html.escape(tour.text, quote=False), "ahead": [cell.chapter for cell in tour.cells]}
     cells = [cell_scene(tour, cell, number=number) for number, cell in enumerate(tour.cells, 1)]
-    calls = list(dict.fromkeys(short_call(scene["code"], tour.variable, tour.window) for scene in cells))
+    calls = [short_call(scene["code"], tour.variable, tour.window) for scene in cells]
+    made = list(dict.fromkeys(call for call in calls if call))
     return {"eyebrow": tour.eyebrow, "notebook": tour.notebook, "summary": tour.summary,
-            "guide": f"{tour.service}.html", "video": f"videos/{tour.service}-tour-light.mp4",
-            "scenes": [title, install_scene(), *cells, end_scene(tour, calls)]}
+            "guide": tour.page, "video": f"videos/{tour.service}-tour-light.mp4",
+            "scenes": [title, install_scene(tour.install), *cells, end_scene(tour, made)]}
 
 
 def tours_text() -> str:

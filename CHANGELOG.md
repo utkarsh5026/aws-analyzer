@@ -9,6 +9,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Fixed
+
+- 📊 **DynamoDB: the schema's mixed-type recipe finds only mixed types** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - `schema()`'s 🐼 fold runs `df[df.types.str.contains(';')]`: the old `','` also matched one-type counts like `S (1,200)`.
+  - `data["attributes"].types` now separates the types with `; `: `S (142); N (20)`.
+- ⚡ **Lambda: the cold-start recipe shows start-up time** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  - `performance()`'s 🐼 fold compares `duration_ms` and `init_ms`, cold against warm: Lambda's run time leaves start-up out.
+
 ## [0.64.0] - 2026-11-24
 
 ### Added
