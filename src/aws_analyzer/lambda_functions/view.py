@@ -42,6 +42,7 @@ from .models import (
 )
 from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
+from .analysis.performance import run_stats
 from .analysis.cost import cost_workings, function_monthly_cost, provisioned_monthly_cost
 from .analysis.findings import _errors_level, _times, account_findings, function_findings
 from .analysis.errors import (
@@ -97,6 +98,9 @@ def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
 
 
 _SMALLEST_BILL = 0.01
+_DEFAULT_SINCE = "24h"
+_WEEK = "7d"
+_MORE_LINES = 4
 
 _SECTIONS = {  # what a section of a report is, and the permission that reads it
     "list": ("functions", "lambda:ListFunctions"),
@@ -805,7 +809,25 @@ class LambdaView(_DataCommands, _BaseView):
         with self._progress("Reading error lines", unit="lines") as tick, self._named(name, region):
             report = self.core.errors(name, since=since, region=region, limit=limit, progress=tick)
         data = replace(errors_data(report), source=_call("errors", name, **_since_arg(since, "24h")))
+        self._suggest_for_errors(report, since=since, limit=limit)
         self._show(self._with_data(self._errors_blocks(report, since=since, limit=limit), data))
+
+    def _suggest_for_errors(self, report: ErrorReport, *, since: Any, limit: int) -> None:
+        """
+        The ways to run errors() again that its report makes worth it, for its "⚙ Ran with" fold: a week back to see
+        how long the top cause has been failing (or whether there were any errors at all), and a higher limit when
+        the read stopped early.
+        """
+        if report.truncated:
+            self._suggest(f"the read stopped at the newest {_count(limit)} error lines: reads further back",
+                          limit=limit * _MORE_LINES)
+        if since != _DEFAULT_SINCE:
+            return
+        if report.groups:
+            top = report.groups[0]
+            self._suggest(f"has {top.kind} been failing for longer than a day?", since=_WEEK)
+        else:
+            self._suggest("no errors in the last 24 hours: looks a week back", since=_WEEK)
 
     def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
                        for_window: bool = False) -> list[Any]:
@@ -1102,7 +1124,25 @@ class LambdaView(_DataCommands, _BaseView):
             perf = self.core.performance(name, since=since, region=region, limit=limit, compare=compare,
                                          progress=tick)
         data = replace(performance_data(perf), source=_call("performance", name, **_since_arg(since, "24h")))
+        self._suggest_for_performance(perf, since=since, limit=limit)
         self._show(self._with_data(self._performance_blocks(perf, since=since, limit=limit), data))
+
+    def _suggest_for_performance(self, perf: Performance, *, since: Any, limit: int) -> None:
+        """
+        The ways to run performance() again that its report makes worth it, for its "⚙ Ran with" fold: a week back
+        when runs timed out (were they there before?) or none ran, and a higher limit when the read stopped early.
+        """
+        stats = run_stats(perf.invocations, perf.function.timeout)
+        if perf.truncated:
+            self._suggest(f"the read stopped at the newest {_count(limit)} runs: reads further back",
+                          limit=limit * _MORE_LINES)
+        if since != _DEFAULT_SINCE:
+            return
+        if stats.timeouts:
+            self._suggest(f"were the {_plural(stats.timeouts, 'timeout')} there before yesterday, or are they new?",
+                          since=_WEEK)
+        elif not stats.runs:
+            self._suggest("no runs in the last 24 hours: looks a week back", since=_WEEK)
 
     def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
                             for_window: bool = False) -> list[Any]:

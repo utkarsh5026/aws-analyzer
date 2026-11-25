@@ -26,6 +26,7 @@ from .blocks import _Next, _Note, _Table, _Text, _Title
 from .deps import _in_notebook
 from .errors import _Hint
 from .fmt import _tz_label
+from .options import _Asked, _Options, _RunAgain, command_options
 from .progress import _progress_bar, _progress_bar_class, _progress_text
 from .render import _render_text, _signature
 from .text import _esc
@@ -140,6 +141,8 @@ def _friendly_errors(method: Callable) -> Callable:
 
     @functools.wraps(method)
     def wrapper(self: _BaseView, *args: Any, **kwargs: Any) -> None:
+        running = self._commands_running()
+        running.append(_Running(_Asked(method, args, kwargs)))
         try:
             return method(self, *args, **kwargs)
         except ClientError as exc:
@@ -158,11 +161,25 @@ def _friendly_errors(method: Callable) -> Callable:
             if note is None:
                 raise
             self._show([note])
+        finally:
+            running.pop()
 
     return wrapper
 
 
+@dataclass
+class _Running:
+    """
+    A command running now: how it was called, with what its report suggested running again (_BaseView._suggest), and
+    whether its report has its options fold yet.
+    """
+
+    asked: _Asked
+    has_options: bool = False
+
+
 _LINE_EVERY = 0.5
+_NO_OPTIONS = frozenset({"help", "next", "data", "to_excel", "explore", "chat", "app"})
 
 
 class _ProgressLine:
@@ -326,9 +343,9 @@ class _BaseView:
         """
         Shows a report: as HTML in Jupyter, else as text. With mode='html' outside Jupyter (no IPython), it's shown
         as text with a note saying why, and from then on as text. Its next steps are made ready to run first
-        (_runnable_steps).
+        (_prepared).
         """
-        blocks = self._runnable_steps(blocks)
+        blocks = self._prepared(blocks)
         if self.use_html:
             try:
                 from IPython.display import HTML, display
@@ -340,6 +357,51 @@ class _BaseView:
                 display(HTML(self._render_html(blocks, self.max_rows, theme=_theme_name())))
                 return
         print(self._render_text(blocks, self.max_rows))
+
+    def _prepared(self, blocks: list[Any]) -> list[Any]:
+        """
+        A report as it's shown: its next steps ready to run (_runnable_steps) and its "⚙ Ran with" fold
+        (_with_options).
+        """
+        return self._with_options(self._runnable_steps(blocks))
+
+    def _commands_running(self) -> list[_Running]:
+        """
+        The commands running now, outermost first: next(1) running errors() is two. The innermost one's report gets
+        the options fold.
+        """
+        return self.__dict__.setdefault("_running", [])
+
+    def _suggest(self, why: str, **changes: Any) -> None:
+        """
+        Suggests running the command that's running now again with these options changed, for a reason its report
+        found (self._suggest("were the 3 timeouts there before yesterday?", since="7d")). It comes first in the
+        report's "⚙ Ran with" fold.
+        """
+        running = self._commands_running()
+        if running:
+            running[-1].asked.suggestions.append(_RunAgain(changes, why))
+
+    def _with_options(self, blocks: list[Any]) -> list[Any]:
+        """
+        The report with its "⚙ Ran with" fold (_Options): how the command that drew it ran and other ways to run it,
+        after the Next block and before the data fold. Only a report (one with a title) of a command that has
+        options gets it, once per run; notes, errors and the commands in _NO_OPTIONS don't.
+        """
+        running = self._commands_running()
+        if not running or running[-1].has_options or not any(isinstance(block, _Title) for block in blocks):
+            return blocks
+        command = running[-1]
+        name = command.asked.name
+        if name in _NO_OPTIONS or any(isinstance(block, _Options) for block in blocks):
+            return blocks
+        command.has_options = True
+        options = command_options(command.asked, help_call=self._prefixed(f"help({name!r})"), prefixed=self._prefixed)
+        if options is None:
+            return blocks
+        place = next((index for index, block in enumerate(blocks) if type(block).__name__ == "_DataGuide"),
+                     len(blocks))
+        return [*blocks[:place], options, *blocks[place:]]
 
     def _prefixed(self, call: str) -> str:
         """

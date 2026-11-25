@@ -2639,7 +2639,8 @@ def test_functions_report_across_regions(ui, capsys):
     assert "Lambda functions in 2 regions" in out and "Regions with functions: 2 of 2" in out
     assert "-- By region --" in out and "eu-fn (eu-west-1)" in out and "nodejs18.x (ended)" in out
     assert "!  eu-fn  nodejs18.x (ended) · eu-west-1" in out
-    assert "functions(regions='all')" not in out
+    report, _, ran_with = out.partition("Ran with:")
+    assert "functions(regions='all')" not in report and "functions(regions='all')" in ran_with
     assert "function_info('eu-fn', region='eu-west-1')" in run(capsys, ui.functions, match="eu-*", regions=[OTHER])
 
 

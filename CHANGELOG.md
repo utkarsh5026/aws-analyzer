@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🧰 **Every service: each report shows how its command ran, and other ways to run it**
+  - A **⚙ Ran with** line under Next: the options it used, defaults included (`since='24h' · limit=5000`).
+  - Open it for calls to copy (`ui.performance('etl', since='7d')`), the report's own suggestions first, and every option.
+  - `ui.help('performance')` still has the whole description.
+
 ### Fixed
 
 - 📊 **DynamoDB: the schema's mixed-type recipe finds only mixed types** ([#286](https://github.com/utkarsh5026/aws-analyzer/pull/286))
