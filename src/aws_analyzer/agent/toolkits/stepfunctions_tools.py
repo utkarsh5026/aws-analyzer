@@ -49,7 +49,7 @@ _LAMBDA_RUN = ("lambda:GetFunction", "logs:DescribeLogGroups", "logs:FilterLogEv
 _CHANGES = ("states:DescribeStateMachineForExecution", "lambda:GetFunction", "lambda:ListVersionsByFunction")
 STEPFUNCTIONS_TOOL_READS: dict[str, tuple[str, ...]] = {
     "find_state_machines": (*_LIST, *_METRICS),
-    "state_machine_details": (*_LIST, *_METRICS),
+    "state_machine_details": (*_LIST, *_METRICS, "lambda:GetFunction", "lambda:GetAccountSettings"),
     "state_machine_failures": (*_LIST, "states:ListExecutions", "states:GetExecutionHistory", *_METRICS,
                                *_EXPRESS_LOGS, *_CHANGES),
     "list_executions": (*_LIST, "states:ListExecutions", *_EXPRESS_LOGS),
@@ -426,7 +426,7 @@ class StepFunctionsToolkit(Toolkit):
     reads = STEPFUNCTIONS_TOOL_READS
     service = "states"
     services = {"GetMetricData": "cloudwatch", "FilterLogEvents": "logs", "DescribeLogGroups": "logs",
-                "GetFunction": "lambda", "ListVersionsByFunction": "lambda"}
+                "GetFunction": "lambda", "ListVersionsByFunction": "lambda", "GetAccountSettings": "lambda"}
     view = "StepFunctionsView"
     privacy = ("Step Functions: an execution's input and output and its Lambda run's last lines, cut short "
                "with secrets hidden.")
@@ -518,11 +518,13 @@ AWS Step Functions
         One state machine in plain words: its type (Standard or Express), logging and tracing, its executions over
         the last days (days=) from CloudWatch, its estimated monthly cost, and each state in order: what it calls
         (the Lambda function, the AWS API), where it goes next, how it retries and catches errors, and its
-        timeout; with the findings about its definition (a Lambda task with no retry, a wait with no timeout).
-        state_machine: its name or ARN. days: 1 to 90.
+        timeout; with the findings about its definition (a Lambda task with no retry, a wait with no timeout) and
+        about how its tasks meet what they call (a TimeoutSeconds shorter than its Lambda function's or the child
+        state machine's, a Map running more of a function at once than it may). state_machine: its name or ARN.
+        days: 1 to 90.
         """
         core = self.analyzer
-        machine = core.state_machine(state_machine)
+        machine = core.read_connections(core.state_machine(state_machine))
         numbers = self._numbers(machine, _days(days))
         out = summarize_state_machine(machine, numbers, core.prices)
         out["region"] = core.region

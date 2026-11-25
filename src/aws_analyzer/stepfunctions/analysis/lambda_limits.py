@@ -1,8 +1,10 @@
 """
-How a state machine's states and the Lambda functions they call limit each other. A Task state has rules of its own
-that meet the function's settings: its TimeoutSeconds against the function's timeout, an Express workflow's five
-minutes against it too, a Map state's parallel items against the function's reserved concurrency (or the region's
-whole pool). state_limits() lines each pair up, says what they do together and what to change. Pure: no AWS calls.
+How a state machine's states and what they call limit each other: the Lambda functions they run, and the state
+machines they start. A Task state has rules of its own that meet the function's settings: its TimeoutSeconds against
+the function's timeout, an Express workflow's five minutes against it too, a Map state's parallel items against the
+function's reserved concurrency (or the region's whole pool). A task that starts another state machine waits for it
+for its TimeoutSeconds, while the child runs for its own. state_limits() lines each pair up, says what they do
+together and what to change. Pure: no AWS calls.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from ..helpers import machine_name
 from ..models import LambdaSettings, StateDef, StateMachine
 from .definition import CATCH_ALL_ERRORS
 
@@ -26,7 +29,8 @@ _THROTTLE_ERRORS = ("Lambda.TooManyRequestsException", *CATCH_ALL_ERRORS)
 @dataclass
 class StateLimit:
     """
-    One way a state and the Lambda function it calls limit each other. `state` and `function` name them, `rule` is
+    One way a state and what it calls limit each other. `state` and `function` name them (`function` is the Lambda
+    function it runs, or the state machine it starts), `rule` is
     the state's side in a few words ('gives up after 30 s'), `setting` the function's ('60 s timeout'), `effect`
     what the two do together, written as a finding, and `fix` what lines them up ('' when they already do). `tone` is
     'warn' when they clash, 'ok' when they fit, '' when it's only worth knowing; `level` the finding it makes
@@ -181,18 +185,108 @@ def _limits_of(machine: StateMachine, state: StateDef, settings: LambdaSettings)
     return [limit for limit in found if limit is not None]
 
 
+def _owner(name: str) -> str:
+    """
+    A name made possessive: "refund-approvals'" and "nightly-load's".
+    """
+    return f"{name}'" if name.endswith("s") else f"{name}'s"
+
+
+def _child_runs_up_to(child: StateMachine) -> tuple[int | None, str]:
+    """
+    How long a child state machine's execution may run, in seconds (None: a year, Standard's longest) and in words.
+    """
+    if child.timeout:
+        return child.timeout, f"{child.timeout:,} s (its own TimeoutSeconds)"
+    if child.is_express:
+        return EXPRESS_LONGEST_S, f"{EXPRESS_LONGEST_S // 60} minutes (Express)"
+    return None, "up to a year (no TimeoutSeconds of its own)"
+
+
+def _started_and_left(state: StateDef) -> StateLimit:
+    """
+    A task that starts another state machine without waiting for it (startExecution, no .sync): the parent moves
+    on, and the child's failures never reach it.
+    """
+    name = machine_name(state.child)
+    return StateLimit(state.name, name, "starts it and moves on (no .sync)", "its own execution", (
+        f"{state.name} doesn't wait for {name}: the parent goes on, and succeeds, whatever the child does, so a "
+        f"failed {name} shows only in its own executions (failures('{name}')). To wait for it, use "
+        "arn:aws:states:::states:startExecution.sync:2."))
+
+
+def _waits_without_timeout(state: StateDef, rule: str, runs: str) -> StateLimit:
+    name = machine_name(state.child)
+    effect = (f"Neither {state.name} nor {name} has a timeout: a {name} execution that gets stuck holds "
+              f"{state.name} for up to a year, and the parent execution with it.")
+    fix = (f"Give {state.name} a \"TimeoutSeconds\" a little over how long {name} should take, or give "
+           f"{_owner(name)} definition one.")
+    return StateLimit(state.name, name, rule, runs, effect, tone="warn", fix=fix, level="info")
+
+
+def _gives_up_on_child(state: StateDef, child_limit: int | None, runs: str) -> StateLimit:
+    """
+    A task that waits for a child state machine with a TimeoutSeconds shorter than the child may run: the parent
+    fails with States.Timeout first, and doesn't see what the child goes on to do. A Retry on the timeout starts the
+    child again.
+    """
+    name = machine_name(state.child)
+    is_retried = _catches(state, _TIMEOUT_ERRORS)
+    again = (f" Its Retry catches the timeout and starts {name} again, so its work can be done twice."
+             if is_retried else "")
+    effect = (f"{state.name} gives up on {name} before {name} has to finish: after {state.timeout:,} s it fails with "
+              f"States.Timeout, while {name} may run {runs}, and the parent doesn't see what it goes on to do."
+              f"{again}")
+    if child_limit is None:
+        fix = (f"Give {_owner(name)} definition a \"TimeoutSeconds\" under {state.timeout:,}, so it ends first, or "
+               f"give {state.name} room for how long {name} really takes.")
+    else:
+        room = child_limit + TIMEOUT_ROOM_S
+        fix = (f"Give {state.name} room past the child's limit (\"TimeoutSeconds\": {room}), or lower {_owner(name)} "
+               f"own TimeoutSeconds under {state.timeout:,}.")
+    return StateLimit(state.name, name, f"waits {state.timeout:,} s for it (TimeoutSeconds)", f"runs {runs}", effect,
+                      tone="warn", fix=fix, level="warn" if is_retried else "info")
+
+
+def _child_limit(state: StateDef, child: StateMachine | None) -> StateLimit | None:
+    """
+    How a task that starts another state machine and the child limit each other; None when the child couldn't be
+    read and nothing can be said without it.
+    """
+    if not state.waits_for_child:
+        return _started_and_left(state)
+    if child is None:
+        return None
+    child_limit, runs = _child_runs_up_to(child)
+    name = machine_name(state.child)
+    if state.timeout is None and child_limit is None:
+        return _waits_without_timeout(state, "waits for it with no TimeoutSeconds", runs)
+    if state.timeout is not None and (child_limit is None or child_limit > state.timeout):
+        return _gives_up_on_child(state, child_limit, runs)
+    rule = (f"waits {state.timeout:,} s for it (TimeoutSeconds)" if state.timeout is not None
+            else "waits for it as long as it runs")
+    return StateLimit(state.name, name, rule, f"runs {runs}", (
+        f"{_owner(name)} own limit ends it before {state.name} stops waiting, so the parent sees how it ended."),
+        tone="ok")
+
+
 def state_limits(machine: StateMachine) -> list[StateLimit]:
     """
     How each Lambda task and its function limit each other: a TimeoutSeconds shorter than the function's timeout, an
     Express workflow's five minutes against it, and a Map that runs more of the function at once than its reserved
-    concurrency, or the region's pool, allows. Reads machine.lambda_settings: a function whose settings weren't read
-    is left out. Clashes first, then what's worth knowing, then what fits.
+    concurrency, or the region's pool, allows. And how each task that starts another state machine meets it: a
+    TimeoutSeconds shorter than the child may run, no timeout on either side, or a child started and left. Reads
+    machine.lambda_settings and machine.children: what wasn't read is left out. Clashes first, then what's worth
+    knowing, then what fits.
     """
     found: list[StateLimit] = []
     for state in machine.states:
         settings = machine.lambda_settings.get(state.function) if state.function else None
         if settings is not None:
             found += _limits_of(machine, state, settings)
+        child = _child_limit(state, machine.children.get(state.child)) if state.child else None
+        if child is not None:
+            found.append(child)
     order = {"warn": 0, "": 1, "ok": 2}
     return sorted(found, key=lambda limit: order.get(limit.tone, 1))
 

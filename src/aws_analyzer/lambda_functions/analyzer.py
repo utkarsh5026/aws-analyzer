@@ -32,12 +32,13 @@ from .prices import LAMBDA_PRICES
 from .activity import _ActivityReads
 from .invoke import _InvokeRuns
 from .fate_reads import _FateReads
+from .caller_reads import _CallerReads
 from .performance_reads import _PerformanceReads
-from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
+from .helpers import MB, _midnight, _pages, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
     AccountLimits, Alias, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, ProvisionedConcurrency,
-    LoadBalancerWait, QueueState, SavedPage, SymbolReport, Trigger, Version, VersionDiff,
+    SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
@@ -48,7 +49,6 @@ from .analysis.errors import _filter_pattern, classify_error, group_errors, requ
 from .analysis.logs import LogPage, LogRun, split_runs
 from .analysis.runs import RunTable, run_table
 from .analysis.word_search import runs_matching, search_hits, word_search
-from .analysis.limits import LOAD_BALANCER_IDLE_S
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.source import find_symbol_in, read_sources, search_package
 from .analysis.versions import diff_packages, nothing_before, version_before
@@ -70,6 +70,7 @@ _ERROR_PATTERN = (
 _PACKAGES_KEPT = 2
 
 _KEPT_PACKAGE_BYTES = 50 * MB
+
 
 _SEARCH_HITS = 500  # log_runs(search=...) reads at most this many matching lines (the newest)...
 
@@ -167,27 +168,6 @@ def _log_group(entry: dict[str, Any]) -> LogGroup:
     )
 
 
-def _pages(client: Any, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
-    """
-    Every item under `key` across the pages of a List / Describe call (Lambda's Marker, or nextToken).
-    """
-    call = getattr(client, operation)
-    items: list[dict[str, Any]] = []
-    token: dict[str, str] = {}
-    for _ in range(100_000):
-        resp = call(**params, **token)
-        items += resp.get(key) or []
-        if resp.get("NextMarker"):
-            token = {"Marker": resp["NextMarker"]}
-        elif resp.get("nextToken"):
-            token = {"nextToken": resp["nextToken"]}
-        elif resp.get("NextToken"):
-            token = {"NextToken": resp["NextToken"]}
-        else:
-            break
-    return items
-
-
 def _qualifier(arn: str | None) -> str:
     """
     'arn:aws:lambda:r:a:function:etl:live' -> 'live'.
@@ -196,7 +176,7 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns, _BaseAnalyzer):
+class LambdaAnalyzer(_ActivityReads, _CallerReads, _FateReads, _PerformanceReads, _InvokeRuns, _BaseAnalyzer):
     """
     Pure-logic Lambda analysis: every method returns data and nothing is printed. Every method only reads, but
     invoke(), which runs a function when you ask it to.
@@ -258,6 +238,12 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
                         "ec2": lambda: self.session.client("ec2", region_name=region, config=self._config),
                         "sqs": lambda: self.session.client("sqs", region_name=region, config=self._config),
                         "elbv2": lambda: self.session.client("elbv2", region_name=region, config=self._config),
+                        "apigateway": lambda: self.session.client(
+                            "apigateway", region_name=region, config=self._config
+                        ),
+                        "apigatewayv2": lambda: self.session.client(
+                            "apigatewayv2", region_name=region, config=self._config
+                        ),
                     }
                     try:
                         self._clients[(name, region)] = makers[name]()
@@ -703,7 +689,7 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
         detail = FunctionDetail(fn)
         client = self._service("lambda", where)
         qualified = {"Qualifier": qualifier} if qualifier else {}
-        steps = 11 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
+        steps = 12 + (fn.package_type == "Zip") + bool(metrics)  # GetFunction, then one read per section
         done = [1]
 
         def read(section: str, call: Callable[[], Any], missing: Any = None) -> Any:
@@ -768,46 +754,13 @@ class LambdaAnalyzer(_ActivityReads, _FateReads, _PerformanceReads, _InvokeRuns,
         detail.log_group = read("log_group", lambda: self.log_group(fn.log_group, where))
         detail.queues = read("queues", lambda: self._trigger_queues(detail.triggers)) or {}
         detail.load_balancers = read("load_balancers", lambda: self._trigger_load_balancers(detail.triggers)) or {}
+        detail.api_waits = read("apis", lambda: self._trigger_apis(fn.name, detail.triggers)) or {}
         if metrics:
             until = _utcnow()
             since = _midnight(until) - timedelta(days=days - 1)
             numbers = read("metrics", lambda: self.metrics([fn], since=since, until=until, concurrency=True))
             detail.metrics = numbers[0].get(fn.arn) if numbers else None
         return detail
-
-    def _trigger_queues(self, triggers: list[Trigger]) -> dict[str, QueueState]:
-        """
-        Each SQS trigger's queue as it is now (GetQueueUrl, GetQueueAttributes), by ARN, side by side; a queue that
-        can't be read comes back with its error code in .error.
-        """
-        arns = list(dict.fromkeys(t.arn for t in triggers if t.kind == "SQS queue" and t.arn))
-        return dict(zip(arns, self._map(self._one_queue, arns)))
-
-    def _trigger_load_balancers(self, triggers: list[Trigger]) -> dict[str, LoadBalancerWait]:
-        """
-        For each load balancer target group that calls the function (its resource policy's SourceArn), the load
-        balancer in front of it that waits the least (DescribeTargetGroups, then DescribeLoadBalancerAttributes'
-        idle_timeout.timeout_seconds), by target group ARN.
-        """
-        groups = list(dict.fromkeys(t.arn for t in triggers
-                                    if t.kind == "Load balancer" and t.arn and ":targetgroup/" in t.arn))
-        found: dict[str, LoadBalancerWait] = {}
-        for group in groups:
-            region = group.split(":")[3]
-            elbv2 = self._service("elbv2", region)
-            described = elbv2.describe_target_groups(TargetGroupArns=[group]).get("TargetGroups") or [{}]
-            waits = [self._load_balancer_wait(elbv2, arn) for arn in described[0].get("LoadBalancerArns") or []]
-            if waits:
-                found[group] = min(waits, key=lambda wait: wait.idle_timeout)
-        return found
-
-    @staticmethod
-    def _load_balancer_wait(elbv2: Any, arn: str) -> LoadBalancerWait:
-        attributes = elbv2.describe_load_balancer_attributes(LoadBalancerArn=arn).get("Attributes") or []
-        values = {a.get("Key"): a.get("Value") for a in attributes}
-        idle = values.get("idle_timeout.timeout_seconds")
-        return LoadBalancerWait(arn.split("/")[-2] if arn.count("/") >= 2 else arn, arn,
-                                int(idle) if idle and idle.isdigit() else LOAD_BALANCER_IDLE_S)
 
     # ------------------------------------------------------------------ logs
 

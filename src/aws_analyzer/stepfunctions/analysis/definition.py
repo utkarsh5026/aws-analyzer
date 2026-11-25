@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from ..helpers import lambda_name, loads
+from ..helpers import lambda_name, loads, machine_name
 from ..models import Execution, StateDef, StateMachine
 
 
@@ -135,6 +135,17 @@ def _is_distributed(body: dict[str, Any]) -> bool:
     return isinstance(config, dict) and config.get("Mode") == "DISTRIBUTED"
 
 
+def _child_of(resource: str, parameters: dict[str, Any]) -> str:
+    """
+    The state machine a states:startExecution task starts: its StateMachineArn, '' for anything else or an ARN taken
+    from the input at run time.
+    """
+    if ":states:startExecution" not in resource:
+        return ""
+    arn = parameters.get("StateMachineArn")
+    return arn if isinstance(arn, str) else ""
+
+
 def _state(name: str, body: dict[str, Any], path: str, depth: int, branch: int = 0) -> StateDef:
     resource = str(body.get("Resource") or "")
     parameters = body.get("Parameters") or body.get("Arguments") or {}
@@ -157,6 +168,7 @@ def _state(name: str, body: dict[str, Any], path: str, depth: int, branch: int =
         starts=[str(inner.get("StartAt") or "") for inner in _inner_machines(body)],
         max_concurrency=body.get("MaxConcurrency") if isinstance(body.get("MaxConcurrency"), int) else None,
         distributed=_is_distributed(body),
+        child=_child_of(resource, parameters if isinstance(parameters, dict) else {}),
     )
 
 
@@ -198,6 +210,8 @@ def parse_state_machine(described: dict[str, Any]) -> StateMachine:
     logging = described.get("loggingConfiguration") or {}
     groups = [d.get("cloudWatchLogsLogGroup", {}).get("logGroupArn", "") for d in logging.get("destinations") or []]
     start_at, states = parse_definition(described.get("definition") or "")
+    parsed = loads(described.get("definition") or "")
+    timeout = parsed.get("TimeoutSeconds") if isinstance(parsed, dict) else None
     return StateMachine(
         name=described.get("name", ""),
         arn=described.get("stateMachineArn", ""),
@@ -213,6 +227,7 @@ def parse_state_machine(described: dict[str, Any]) -> StateMachine:
         log_data=bool(logging.get("includeExecutionData")),
         log_groups=[g for g in groups if g],
         tracing=bool((described.get("tracingConfiguration") or {}).get("enabled")),
+        timeout=timeout if isinstance(timeout, int) else None,
     )
 
 
@@ -245,6 +260,8 @@ def resource_label(state: StateDef) -> str:
     if state.function:
         return f"λ {state.function}"
     resource = state.resource
+    if state.child:
+        return f"⇢ {machine_name(state.child)}"
     if resource.startswith(_SERVICE_PREFIX):
         service = resource[len(_SERVICE_PREFIX):]
         return service.removeprefix("aws-sdk:")

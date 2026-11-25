@@ -23,7 +23,7 @@ from aws_analyzer.stepfunctions import (
     can_redrive, definition_findings, fill_detail, group_failures, lambda_name, logging_findings, machine_name,
     mermaid, monthly_cost, parse_definition, parse_execution_ref, parse_state_machine, request_id_of_cause,
     request_id_of_output, short_cause, transitions_per_execution, unbounded_waits, unretried_lambda_states,
-    LambdaSettings, state_limit_findings, state_limits,
+    LambdaSettings, resource_label, state_limit_findings, state_limits,
 )
 from aws_analyzer.stepfunctions.analysis.express import (
     LoggedRun, arn_pattern, endings_pattern, execution_of, group_log_lines, log_group_name, parse_log_line,
@@ -1704,8 +1704,63 @@ def test_a_map_runs_more_of_a_function_than_it_may():
 
 def test_state_machine_reads_its_functions_settings_and_shows_the_clash(ui, capsys, fakes):
     out = run(capsys, ui.state_machine, "order-pipeline")
-    assert "-- How its states and the Lambda functions they call limit each other --" in out
+    assert "-- How its states and the functions and state machines they call limit each other --" in out
     assert "ProcessItems runs more of resize-image at once than it may run" in out
     assert "runs 4 items at once (MaxConcurrency)" in out and "reserved concurrency 2" in out
     called = [name for name, _ in fakes["lambda"].calls]
     assert "get_account_settings" not in called and called.count("get_function") == 4
+
+
+def _start(child, *, wait=True, **state):
+    resource = "arn:aws:states:::states:startExecution" + (".sync:2" if wait else "")
+    return {"Type": "Task", "Resource": resource, "Parameters": {"StateMachineArn": machine_arn(child)}, **state}
+
+
+def _child(name, *, kind="STANDARD", timeout=None):
+    definition = {"StartAt": "Go", "States": {"Go": {"Type": "Pass", "End": True}}}
+    if timeout is not None:
+        definition["TimeoutSeconds"] = timeout
+    child = parse_state_machine(described(name, definition))
+    child.type = kind
+    return child
+
+
+def _parent(state, child):
+    machine = _machine_with({"Run": state})
+    if child is not None:
+        machine.children[machine_arn(child.name)] = child
+    return machine
+
+
+def test_a_task_that_gives_up_on_the_state_machine_it_starts():
+    retried = _start("nightly-load", TimeoutSeconds=600, End=True,
+                     Retry=[{"ErrorEquals": ["States.ALL"], "MaxAttempts": 2}])
+    [clash] = state_limits(_parent(retried, _child("nightly-load", timeout=3600)))
+    assert (clash.tone, clash.level, clash.function) == ("warn", "warn", "nightly-load")
+    assert "after 600 s it fails with States.Timeout, while nightly-load may run 3,600 s" in clash.effect
+    assert "starts nightly-load again" in clash.effect and '"TimeoutSeconds": 3605' in clash.fix
+    [unbounded_child] = state_limits(_parent(_start("nightly-load", TimeoutSeconds=600, End=True),
+                                            _child("nightly-load")))
+    assert unbounded_child.level == "info" and "up to a year" in unbounded_child.effect
+    [express] = state_limits(_parent(_start("quick", TimeoutSeconds=600, End=True), _child("quick", kind="EXPRESS")))
+    assert express.tone == "ok" and express.setting == "runs 5 minutes (Express)"
+    assert _parent(_start("quick", End=True), None).states[0].resource.endswith(".sync:2")
+    assert resource_label(_parent(_start("quick", End=True), None).states[0]) == "⇢ quick"
+
+
+def test_a_child_with_no_timeout_on_either_side_or_started_and_left():
+    [stuck] = state_limits(_parent(_start("nightly-load", End=True), _child("nightly-load")))
+    assert "Neither Run nor nightly-load has a timeout" in stuck.effect and stuck.level == "info"
+    [left] = state_limits(_parent(_start("nightly-load", wait=False, End=True), None))
+    assert left.tone == "" and left.finding is None and "doesn't wait for nightly-load" in left.effect
+    assert state_limits(_parent(_start("nightly-load", End=True), None)) == []
+
+
+def test_read_children_describes_the_state_machines_a_workflow_starts(core):
+    parent = _parent(_start("refund-approvals", TimeoutSeconds=60, End=True), None)
+    parent.states.append(StateDef("Gone", "Task", resource="arn:aws:states:::states:startExecution.sync:2",
+                                  child=machine_arn("not-there")))
+    core.read_connections(parent)
+    assert list(parent.children) == [machine_arn("refund-approvals")] and "children" in parent.errors
+    [limit] = state_limits(parent)
+    assert limit.function == "refund-approvals" and limit.tone == "warn"

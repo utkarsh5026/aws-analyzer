@@ -335,9 +335,9 @@ _TOGETHER = {"warn": _Tone("clash", "warn"), "ok": _Tone("fits", "ok"), "": "wor
 def _limits_table(limits: list[StateLimit]) -> _Table:
     rows = [[limit.state, limit.function, limit.rule, limit.setting, _TOGETHER.get(limit.tone, ""),
              f"{limit.effect} {limit.fix}".strip()] for limit in limits]
-    return _Table(["State", "Calls", "The state", "The function", "Together", "What happens"], rows, max_rows=0,
+    return _Table(["State", "Calls", "The state", "What it calls", "Together", "What happens"], rows, max_rows=0,
                   sortable=False, prose_cols=(5,),
-                  title="How its states and the Lambda functions they call limit each other")
+                  title="How its states and the functions and state machines they call limit each other")
 
 
 def _limits_blocks(machine: StateMachine) -> list[Any]:
@@ -510,11 +510,12 @@ class StepFunctionsView(_DataCommands, _BaseView):
         """
         One state machine: its type, executions, failures, average run and estimated cost over the last 7 days,
         what its definition risks (Lambda tasks with no retry, waits with no timeout), how its states and the Lambda
-        functions they call limit each other (a TimeoutSeconds shorter than the function's, a Map running more of
-        it at once than it may), every state with what it calls and how it handles errors, and the definition itself.
+        functions and state machines they call limit each other (a TimeoutSeconds shorter than the function's or the
+        child's, a Map running more of a function at once than it may), every state with what it calls and how it
+        handles errors, and the definition itself.
         """
         with self._progress("Reading the state machine", unit="calls"):
-            machine = self.core.read_lambda_settings(self.core.state_machine(name))
+            machine = self.core.read_connections(self.core.state_machine(name))
             numbers = self.core.numbers([machine], days=days)[0].get(machine.arn)
         data = replace(machine_data(machine, numbers), source=_call("state_machine", name, **_unless(days=(days, 7))))
         self._show(self._with_data(self._machine_blocks(machine, numbers), data))

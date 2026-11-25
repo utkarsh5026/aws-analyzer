@@ -234,6 +234,34 @@ class StepFunctionsAnalyzer(_ChangeReads, _CompareReads, _ExpressReads, _BaseAna
                 machine.lambda_settings[name] = LambdaSettings(function.timeout, function.reserved_concurrency, pool)
         return machine
 
+    def read_children(self, machine: StateMachine) -> StateMachine:
+        """
+        The state machines its tasks start (DescribeStateMachine, side by side), kept in machine.children by ARN, so
+        how long each may run can be held against how long its task waits. One that can't be read (another
+        account's, or refused) is named in machine.errors['children'].
+        """
+        arns = [arn for arn in machine.child_machines if arn not in machine.children][:_MOST_FUNCTIONS]
+        for arn, child in zip(arns, self._map(lambda arn: self._child(arn, machine), arns)):
+            if child is not None:
+                machine.children[arn] = child
+        return machine
+
+    def read_connections(self, machine: StateMachine) -> StateMachine:
+        """
+        What the state machine's states call, read so its limits can be held against theirs: its Lambda functions'
+        settings (read_lambda_settings()) and the state machines it starts (read_children()).
+        """
+        return self.read_children(self.read_lambda_settings(machine))
+
+    def _child(self, arn: str, machine: StateMachine) -> StateMachine | None:
+        try:
+            return self.state_machine(arn)
+        except ClientError as exc:
+            machine.errors["children"] = _error_code(exc)
+        except BotoCoreError as exc:
+            machine.errors["children"] = type(exc).__name__
+        return None
+
     def _lambda_function(self, name: str, machine: StateMachine) -> Any:
         try:
             return self.lambda_core.function(name)
