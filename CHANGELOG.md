@@ -33,10 +33,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🤖 **Agent: "will my callers time out?"** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - A `caller_limits` tool: each caller's own limits against the function's settings, with the fix; `function_details` includes them too.
 
-- 🔀 **Step Functions: workflows that start other workflows** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- 🔀 **Step Functions: workflows that start other workflows** ([#291](https://github.com/utkarsh5026/aws-analyzer/pull/291))
   - `state_machine()` holds a `startExecution.sync` task's `TimeoutSeconds` against how long the child may run, from its own definition.
   - It also flags a child with no timeout on either side, and says when a child started without `.sync` can fail unseen.
-- ⚡ **Lambda: API Gateway's real integration timeout** ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+- ⚡ **Lambda: API Gateway's real integration timeout** ([#291](https://github.com/utkarsh5026/aws-analyzer/pull/291))
   - `function_info()` reads how long each API that calls the function waits, route by route, instead of assuming 29 s.
 
 ### Fixed
