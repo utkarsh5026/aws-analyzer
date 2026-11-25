@@ -73,7 +73,7 @@ SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}  # the agent show
 # An analyzer can be a package (agent/): its modules are checked like an analyzer's file, as one analyzer.
 PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")}
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
-KIT_UI = {"blocks", "charts", "dataview", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
+KIT_UI = {"blocks", "charts", "dataview", "options", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
 CORE_FROM_RENDER = {"_call", "_signature"}
 MIXIN_RE = re.compile(r"_\w+(Commands|Tab|Pane)$")
 REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")

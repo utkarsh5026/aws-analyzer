@@ -568,6 +568,15 @@ How the View layer works:
   `<service>/analysis/datasets.py`, the mixin, `"🐼 As data": ("data", "to_excel")` in its `_GROUPS` and `to_excel`
   in `_CHANGES`; every column gets a meaning, times stay aware (UTC in pandas, the reports' zone in Excel), shares are
   0 to 1, and a table's name is its key and sheet name.
+- **How a report ran** (`_kit/options.py`): `_BaseView._show` ends every report a command draws with `_Options`, the
+  "⚙ Ran with" fold (after `_Next`, before the `_DataGuide`; `_prepared` is `_runnable_steps` then `_with_options`).
+  `@_friendly_errors` records the command as it was called (`_Running`, an `_Asked`, a stack, so `next(1)`'s step gets
+  its own), and `command_options` reads the rest: each option and its default from the signature, the values worth
+  trying and what each does from the docstring's examples (`docstring_examples`: `since='7d' or '2026-10-01' looks
+  further back; compare=False skips ...`), else `_COMMON_TRIES` / `_PARAM_WORDS`. So write a command's options in its
+  docstring as `name=value what it does;`. A command adds what its report found first with `self._suggest(why,
+  since='7d')`, called before `_show` (Lambda's `performance()` and `errors()`). Notes, errors, `_NO_OPTIONS` and
+  commands with no optional parameter get none; windows draw `_<command>_blocks` and never do.
 - Every public View method is decorated with `@_friendly_errors` (`_kit/view.py`), which turns `ClientError` /
   `BotoCoreError` / data-decoding errors into a warning note instead of a traceback, and asks the View what to
   say: `_explain(code, message)` adds what an AWS error means and what to do (the windows call it too), and

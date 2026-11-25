@@ -2620,7 +2620,7 @@ def main() -> int:
         fragments: list[str] = []
 
         def show(blocks: list) -> None:
-            blocks = ui._runnable_steps(blocks)
+            blocks = ui._prepared(blocks)
             print(ui._render_text(blocks, ui.max_rows), flush=True)  # how the View draws a report as text
             if args.html:
                 fragments.append(ui._render_html(blocks, ui.max_rows, theme=look))

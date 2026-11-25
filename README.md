@@ -105,6 +105,9 @@ LambdaView().explore()                # a window: every function, its logs run b
 AgentView().ask("Which Lambda failed last night?")
 ```
 
+Every report ends with **⚙ Ran with**: the options its command used, defaults included, and other ways to run it
+to copy (`ui.performance('etl', since='7d')`), so you learn a command's options without opening `help()`.
+
 Every service has a View (`DynamoDBView`, `BedrockKBView`, `SageMakerView`, `OpenSearchView`, `StepFunctionsView`,
 `APIGatewayView`, `AthenaView`, `MessagingView`, ...), and each View's `.core` is the analyzer behind it, which returns
 plain Python data instead of a report.
