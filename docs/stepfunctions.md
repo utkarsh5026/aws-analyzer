@@ -218,6 +218,14 @@ It also reads the settings of the Lambda functions the states call (`lambda:GetF
 | A Map's items at once (`MaxConcurrency`, else 40 inline or 10,000 distributed) | Reserved concurrency | The extra runs are throttled: they fail the item unless the task retries `Lambda.TooManyRequestsException` |
 | A Map's items at once | No reserved concurrency | A Map as big as the region's pool (`lambda:GetAccountSettings`) throttles every other function in the region while it runs |
 
+A task that starts another state machine (`states:startExecution`) is held against it the same way, from the child's own definition:
+
+| The task | The child | When they clash |
+|---|---|---|
+| `.sync` with a `TimeoutSeconds` | Its own `TimeoutSeconds`, 5 minutes for Express, else up to a year | The task fails with `States.Timeout` before the child has to finish, and doesn't see how it ends. A `Retry` on the timeout starts the child again |
+| `.sync` with no `TimeoutSeconds` | No `TimeoutSeconds` either | A stuck child holds the parent for up to a year |
+| No `.sync` | Anything | Worth knowing: the parent goes on and succeeds whatever the child does, so a failed child shows only in its own executions |
+
 ![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, one that ProcessItems is throttled by resize-image's reserved concurrency, its executions a day as bars, a table of every state with what it calls, where it goes next, its retries and where an error sends it, and a table of how its states and Lambda functions limit each other, where ProcessItems runs 4 resize-image items at once against the function's reserved concurrency of 2, a clash](images/sfn-state-machine-light.webp#only-light){ width="984" height="1865" loading=lazy }
 ![state_machine('order-pipeline'): cards for its type, executions, failures, average run, cost and logging, a finding that its failures jumped three days ago, one that LoadOrders has no Retry for Lambda's errors with the rule to paste, one that ProcessItems is throttled by resize-image's reserved concurrency, its executions a day as bars, a table of every state with what it calls, where it goes next, its retries and where an error sends it, and a table of how its states and Lambda functions limit each other, where ProcessItems runs 4 resize-image items at once against the function's reserved concurrency of 2, a clash](images/sfn-state-machine-dark.webp#only-dark){ width="984" height="1865" loading=lazy }
 /// caption

@@ -34,7 +34,7 @@ from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.blocks.info import cost_split
 from aws_analyzer.lambda_functions.analysis.performance import short_stream
 from aws_analyzer.lambda_functions.analysis.limits import raising_timeout_note
-from aws_analyzer.lambda_functions.models import LoadBalancerWait
+from aws_analyzer.lambda_functions.models import ApiWait, LoadBalancerWait
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, functions as functions_tab, logs as logs_tab
 from aws_analyzer.lambda_functions.explorer import live as live_tab
 from aws_analyzer.lambda_functions.explorer import plain as plain_search
@@ -5052,3 +5052,58 @@ def test_a_load_balancer_that_waits_long_enough_fits():
     assert fits.tone == "ok" and fits.limit == "web waits 300 s (its idle timeout)"
     note = raising_timeout_note(FunctionDetail(fn(timeout=290), triggers=[trigger], load_balancers=waits), 600)
     assert "Load balancer orders stops waiting after 300 s whatever the timeout" in note
+
+
+def _allow_api(function_name, api_id, statement):
+    boto3.client("lambda", region_name=REGION).add_permission(
+        FunctionName=function_name, StatementId=statement, Action="lambda:InvokeFunction",
+        Principal="apigateway.amazonaws.com", SourceArn=f"arn:aws:execute-api:{REGION}:{ACCOUNT}:{api_id}/*/*/*")
+
+
+def _function_uri(name):
+    return (f"arn:aws:apigateway:{REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:{REGION}:{ACCOUNT}:"
+            f"function:{name}/invocations")
+
+
+def test_describe_reads_how_long_a_rest_api_waits_for_it(core, seeded):
+    rest = boto3.client("apigateway", region_name=REGION)
+    api = rest.create_rest_api(name="shop")["id"]
+    root = rest.get_resources(restApiId=api)["items"][0]["id"]
+    for path, timeout in (("orders", 12_000), ("refunds", 20_000)):
+        resource = rest.create_resource(restApiId=api, parentId=root, pathPart=path)["id"]
+        rest.put_method(restApiId=api, resourceId=resource, httpMethod="POST", authorizationType="NONE")
+        rest.put_integration(restApiId=api, resourceId=resource, httpMethod="POST", type="AWS_PROXY",
+                             integrationHttpMethod="POST", uri=_function_uri("etl-nightly"), timeoutInMillis=timeout)
+    _allow_api("etl-nightly", api, "shop")
+    detail = core.describe("etl-nightly", metrics=False)
+    wait = detail.api_waits[api]
+    assert (wait.kind, wait.route, wait.wait_ms, wait.routes) == ("REST", "POST /orders", 12_000, 2)
+    limit = next(limit for limit in lfmod.connection_limits(detail) if limit.caller.startswith("API Gateway"))
+    assert limit.limit == "POST /orders waits 12 s for an answer (the shortest of its 2 routes that call it)"
+    assert "after 12 s on POST /orders the caller gets a 504" in limit.effect and "--timeout 12" in limit.fix
+
+
+def test_describe_reads_how_long_an_http_api_waits_for_it(core, seeded):
+    v2 = boto3.client("apigatewayv2", region_name=REGION)
+    api = v2.create_api(Name="search", ProtocolType="HTTP")["ApiId"]
+    target = v2.create_integration(ApiId=api, IntegrationType="AWS_PROXY", PayloadFormatVersion="2.0",
+                                   IntegrationUri=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl-nightly",
+                                   TimeoutInMillis=25_000)["IntegrationId"]
+    v2.create_route(ApiId=api, RouteKey="GET /search", Target=f"integrations/{target}")
+    _allow_api("etl-nightly", api, "search")
+    wait = core.describe("etl-nightly", metrics=False).api_waits[api]
+    assert (wait.kind, wait.route, wait.wait_ms) == ("HTTP", "GET /search", 25_000)
+
+
+def test_api_waits_are_read_from_integrations_that_call_the_function():
+    resources = [{"path": "/orders", "resourceMethods": {
+        "POST": {"methodIntegration": {"uri": _function_uri("etl-nightly")}},
+        "GET": {"methodIntegration": {"uri": _function_uri("etl-nightly-v2"), "timeoutInMillis": 1_000}}}}]
+    wait = lfmod.analysis.limits.rest_api_wait("a1", resources, "etl-nightly")
+    assert (wait.route, wait.wait_ms) == ("POST /orders", 29_000)
+    assert lfmod.analysis.limits.rest_api_wait("a1", resources, "other") is None
+    assert lfmod.analysis.limits.calls_function("arn:aws:lambda:us-east-1:1:function:etl:live", "etl")
+    trigger = Trigger("API Gateway", "a1", via="resource policy")
+    detail = FunctionDetail(fn(timeout=20), triggers=[trigger], api_waits={"a1": ApiWait("a1", "REST", "GET /", 10_000)})
+    assert lfmod.connection_limits(detail)[0].tone == "warn"
+    assert "API Gateway a1 stops waiting after 10 s" in raising_timeout_note(detail, 40)

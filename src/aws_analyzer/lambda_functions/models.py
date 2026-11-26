@@ -440,11 +440,27 @@ class LoadBalancerWait:
 
 
 @dataclass
+class ApiWait:
+    """
+    How long an API Gateway API waits for the function: the shortest integration timeout (timeoutInMillis) among its
+    routes that call it, the route that has it, the API's kind ('REST', or 'HTTP' for an HTTP or WebSocket API) and
+    how many of its routes call the function.
+    """
+
+    api_id: str
+    kind: str
+    route: str
+    wait_ms: int
+    routes: int = 1
+
+
+@dataclass
 class FunctionDetail:
     """
     Everything function_info() shows about one function. Sections that couldn't be read are in errors. queues are
     its SQS triggers' queues as they are now (by ARN), and load_balancers the load balancer in front of each target
-    group that calls it (by target group ARN), for how their settings meet the function's.
+    group that calls it (by target group ARN) and api_waits how long each API Gateway API that calls it waits (by API
+    ID), for how their settings meet the function's.
     """
 
     function: Function
@@ -462,6 +478,7 @@ class FunctionDetail:
     errors: dict[str, str] = field(default_factory=dict)  # section -> error code
     queues: dict[str, QueueState] = field(default_factory=dict)
     load_balancers: dict[str, LoadBalancerWait] = field(default_factory=dict)
+    api_waits: dict[str, ApiWait] = field(default_factory=dict)
 
 
 @dataclass

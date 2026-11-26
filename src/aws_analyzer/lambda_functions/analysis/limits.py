@@ -8,12 +8,15 @@ together, and gives the command that lines them up. Pure: no AWS calls.
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
+from typing import Any
 
 from ..._kit.fmt import _plural
 
 from ..helpers import human_ms
-from ..models import AsyncConfig, FunctionDetail, QueueState, Trigger
+from ..models import ApiWait, AsyncConfig, FunctionDetail, QueueState, Trigger
 from .fates import _queue_url
 from .text import _cli, _region_flag, _window
 
@@ -74,6 +77,73 @@ def _longest_ms(detail: FunctionDetail) -> float | None:
     return detail.metrics.duration_max if detail.metrics is not None else None
 
 
+REST_DEFAULT_WAIT_MS = API_GATEWAY_WAIT_S * 1000
+HTTP_DEFAULT_WAIT_MS = HTTP_API_WAIT_S * 1000
+
+
+def calls_function(uri: str, function: str) -> bool:
+    """
+    Whether an integration's URI calls the function: its ARN, or API Gateway's invocation path around it
+    ('arn:aws:apigateway:...:lambda:path/2015-03-31/functions/arn:aws:lambda:...:function:etl/invocations'), with or
+    without a version or alias.
+    """
+    return re.search(rf":function:{re.escape(function)}(?:[:/]|$)", uri or "") is not None
+
+
+def _shortest(api_id: str, kind: str, waits: list[tuple[str, int]]) -> ApiWait | None:
+    if not waits:
+        return None
+    route, wait_ms = min(waits, key=lambda item: item[1])
+    return ApiWait(api_id, kind, route, wait_ms, routes=len(waits))
+
+
+def rest_api_wait(api_id: str, resources: list[dict[str, Any]], function: str) -> ApiWait | None:
+    """
+    A REST API's GetResources answer (embed=['methods']) -> how long it waits for the function: the shortest
+    integration timeout among its methods that call it (29 s when one sets none). None when none calls it.
+    """
+    waits = []
+    for resource in resources:
+        for method, body in (resource.get("resourceMethods") or {}).items():
+            integration = (body or {}).get("methodIntegration") or {}
+            if calls_function(integration.get("uri", ""), function):
+                waits.append((f"{method} {resource.get('path', '/')}",
+                              integration.get("timeoutInMillis") or REST_DEFAULT_WAIT_MS))
+    return _shortest(api_id, "REST", waits)
+
+
+def http_api_wait(api_id: str, integrations: list[dict[str, Any]], routes: list[dict[str, Any]],
+                  function: str) -> ApiWait | None:
+    """
+    An HTTP or WebSocket API's GetIntegrations and GetRoutes answers -> how long it waits for the function: the
+    shortest TimeoutInMillis among the routes whose integration calls it (30 s when one sets none). None when none
+    calls it.
+    """
+    timeouts = {item.get("IntegrationId"): item.get("TimeoutInMillis") or HTTP_DEFAULT_WAIT_MS
+                for item in integrations if calls_function(item.get("IntegrationUri", ""), function)}
+    waits = []
+    for route in routes:
+        target = (route.get("Target") or "").removeprefix("integrations/")
+        if target in timeouts:
+            waits.append((route.get("RouteKey", "?"), timeouts[target]))
+    return _shortest(api_id, "HTTP", waits)
+
+
+def _api_wait_words(detail: FunctionDetail, trigger: Trigger) -> tuple[float, str, str]:
+    """
+    How long API Gateway waits for the function, in seconds, with words for its rule and for when it gives up: the
+    integration timeout read from the API when it could be, else the defaults (29 s, 30 s for an HTTP API).
+    """
+    wait = detail.api_waits.get(trigger.source)
+    if wait is None:
+        return (API_GATEWAY_WAIT_S, f"waits {API_GATEWAY_WAIT_S} s for an answer ({HTTP_API_WAIT_S} s for an HTTP API)",
+                f"after {API_GATEWAY_WAIT_S} s")
+    seconds = wait.wait_ms / 1000
+    others = f" (the shortest of its {wait.routes} routes that call it)" if wait.routes > 1 else ""
+    return (seconds, f"{wait.route} waits {seconds:g} s for an answer{others}",
+            f"after {seconds:g} s on {wait.route}")
+
+
 def _api_gateway(detail: FunctionDetail, trigger: Trigger) -> ConnectionLimit:
     """
     API Gateway calls the function and waits for its answer, but only for 29 s (30 s for an HTTP API). Past that it
@@ -81,21 +151,23 @@ def _api_gateway(detail: FunctionDetail, trigger: Trigger) -> ConnectionLimit:
     is thrown away. A caller that retries starts the same work again beside it.
     """
     timeout = detail.function.timeout
-    limit = f"waits {API_GATEWAY_WAIT_S} s for an answer ({HTTP_API_WAIT_S} s for an HTTP API)"
+    wait, limit, after = _api_wait_words(detail, trigger)
+    is_read = trigger.source in detail.api_waits
     setting = f"{timeout:,} s timeout"
-    if timeout <= HTTP_API_WAIT_S:
+    if timeout <= (wait if is_read else HTTP_API_WAIT_S):
         return ConnectionLimit(_caller(trigger), limit, setting, (
             "Its timeout ends a run before API Gateway stops waiting, so a slow call fails with the function's own "
             "error, and no run is left working for a caller that's gone."), tone="ok")
     longest = _longest_ms(detail)
-    is_happening = longest is not None and longest > API_GATEWAY_WAIT_S * 1000
+    is_happening = longest is not None and longest > wait * 1000
     seen = (f"Its longest run took {human_ms(longest)}, so this already happens. " if is_happening else "")
     effect = (
-        f"API Gateway stops waiting long before the function does: after {API_GATEWAY_WAIT_S} s the caller gets a "
-        f"504, while the run goes on, billed, for up to {timeout:,} s and its answer is thrown away. A caller that "
-        f"retries runs the work twice. {seen}".rstrip())
-    fix = (f"Lower the timeout to what API Gateway waits ({_timeout_command(detail, API_GATEWAY_WAIT_S)}), or, "
-           "for work that needs longer, answer at once and hand the work to a queue or Step Functions.")
+        f"API Gateway stops waiting long before the function does: {after} the caller gets a 504, while the run "
+        f"goes on, billed, for up to {timeout:,} s and its answer is thrown away. A caller that retries runs the "
+        f"work twice. {seen}".rstrip())
+    lower = max(1, math.floor(wait))
+    fix = (f"Lower the timeout to what API Gateway waits ({_timeout_command(detail, lower)}), or, for work that "
+           "needs longer, answer at once and hand the work to a queue or Step Functions.")
     return ConnectionLimit(_caller(trigger), limit, setting, effect, tone="warn", fix=fix,
                            level="warn" if is_happening else "info")
 
@@ -354,11 +426,14 @@ def raising_timeout_note(detail: FunctionDetail, new_timeout: int) -> str:
     notes = []
     for trigger in detail.triggers:
         wait = _WAITING_CALLERS.get(trigger.kind)
+        if trigger.kind == "API Gateway":
+            wait = _api_wait_words(detail, trigger)[0]
         if trigger.kind == "Load balancer":
             wait = _load_balancer_wait(detail, trigger)[0]
         if wait is not None and new_timeout > wait:
-            notes.append(f"{_caller(trigger)} stops waiting after {wait} s whatever the timeout, so a longer one won't "
-                         "help its callers: make it answer sooner, or answer at once and hand the work to a queue")
+            notes.append(f"{_caller(trigger)} stops waiting after {wait:g} s whatever the timeout, so a longer one "
+                         "won't help its callers: make it answer sooner, or answer at once and hand the work to a "
+                         "queue")
     for arn, queue in detail.queues.items():
         trigger = next((t for t in detail.triggers if t.arn == arn), None)
         window = trigger.batch_window if trigger is not None else 0

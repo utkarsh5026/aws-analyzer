@@ -22,7 +22,8 @@ class StateDef:
     error handling. path is where it sits ('ProcessItems > ResizeImage' inside a Map), branch which of its Parallel's
     branches, and starts the StartAt of each state machine nested in it (a Map's one, a Parallel's per branch).
     A Map's max_concurrency is its MaxConcurrency (None or 0: as many as Step Functions allows) and distributed says
-    whether it runs its items as child executions (Mode DISTRIBUTED) rather than inline.
+    whether it runs its items as child executions (Mode DISTRIBUTED) rather than inline. child is the state machine
+    a states:startExecution task starts (its ARN; '' when taken from the input at run time).
     """
 
     name: str
@@ -43,6 +44,15 @@ class StateDef:
     starts: list[str] = field(default_factory=list)
     max_concurrency: int | None = None
     distributed: bool = False
+    child: str = ""
+
+    @property
+    def waits_for_child(self) -> bool:
+        """
+        Whether it starts another state machine and waits for it to finish (startExecution.sync), rather than
+        starting it and moving on.
+        """
+        return ":states:startExecution.sync" in self.resource
 
     @property
     def waits_for_callback(self) -> bool:
@@ -69,7 +79,9 @@ class StateMachine:
     """
     A state machine: STANDARD or EXPRESS, its states (parsed from the definition, in order), logging and tracing.
     definition is the raw ASL text; errors holds the sections that couldn't be read. lambda_settings are the
-    settings of the Lambda functions it calls, by name, once read (read_lambda_settings()).
+    settings of the Lambda functions it calls, by name, once read (read_lambda_settings()). timeout is the
+    definition's own TimeoutSeconds (None: a Standard execution may run a year, an Express one five minutes), and
+    children the state machines its tasks start, by ARN, once read (read_children()).
     """
 
     name: str
@@ -88,6 +100,8 @@ class StateMachine:
     tracing: bool = False
     errors: dict[str, str] = field(default_factory=dict)
     lambda_settings: dict[str, LambdaSettings] = field(default_factory=dict)
+    timeout: int | None = None
+    children: dict[str, StateMachine] = field(default_factory=dict)
 
     @property
     def is_express(self) -> bool:
@@ -107,6 +121,13 @@ class StateMachine:
         The Lambda functions its states call, each once, in order.
         """
         return list(dict.fromkeys(s.function for s in self.states if s.function))
+
+    @property
+    def child_machines(self) -> list[str]:
+        """
+        The state machines its tasks start (their ARNs), each once, in order.
+        """
+        return list(dict.fromkeys(s.child for s in self.states if s.child))
 
     def state(self, name: str) -> StateDef | None:
         return next((s for s in self.states if s.name == name), None)

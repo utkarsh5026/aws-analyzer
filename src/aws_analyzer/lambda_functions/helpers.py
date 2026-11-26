@@ -320,3 +320,24 @@ _STREAM_KINDS = {  # event source mapping: the source ARN's service -> what it i
 }
 
 _INVOKE_ACTIONS = ("lambda:invokefunction", "lambda:invokefunctionurl", "lambda:invoke*", "lambda:*", "*")
+
+
+def _pages(client: Any, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
+    """
+    Every item under `key` across the pages of a List / Describe call (Lambda's Marker, or nextToken).
+    """
+    call = getattr(client, operation)
+    items: list[dict[str, Any]] = []
+    token: dict[str, str] = {}
+    for _ in range(100_000):
+        resp = call(**params, **token)
+        items += resp.get(key) or []
+        if resp.get("NextMarker"):
+            token = {"Marker": resp["NextMarker"]}
+        elif resp.get("nextToken"):
+            token = {"nextToken": resp["nextToken"]}
+        elif resp.get("NextToken"):
+            token = {"NextToken": resp["NextToken"]}
+        else:
+            break
+    return items
