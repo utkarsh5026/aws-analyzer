@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-11-26
+
 ### Added
 
 - 🚪 **API Gateway: reports as pandas tables and an Excel workbook** ([#287](https://github.com/utkarsh5026/aws-analyzer/pull/287))
@@ -19,12 +21,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - A **⚙ Ran with** line under Next: the options it used, defaults included (`since='24h' · limit=5000`).
   - Open it for calls to copy (`ui.performance('etl', since='7d')`), the report's own suggestions first, and every option.
   - `ui.help('performance')` still has the whole description.
-
 - ⚡ **Lambda: when its callers give up before it does** ([#289](https://github.com/utkarsh5026/aws-analyzer/pull/289))
   - `function_info()` holds each caller's own rules against the function's settings: API Gateway's 29 s, an SQS queue's visibility timeout, a stream that stops at a bad batch.
   - Each clash is a finding with the command that lines them up; advice to raise the timeout says what else must change.
   - 🚪 API Gateway's `api_info()` notes a Lambda function whose timeout outlasts how long API Gateway waits for it.
-
 - 🔀 **Step Functions: tasks that give up before their Lambda does** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - `state_machine()` holds each Lambda task's `TimeoutSeconds`, an Express workflow's 5 minutes and a Map's parallel items against the function's timeout and concurrency.
   - A Map that can flood the region's Lambda pool, or runs more than reserved concurrency allows, is a finding with the `MaxConcurrency` to set.
@@ -32,7 +32,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `function_info()` reads the idle timeout of the load balancer in front of a target group instead of assuming 60 s, and gives the command to raise it.
 - 🤖 **Agent: "will my callers time out?"** ([#290](https://github.com/utkarsh5026/aws-analyzer/pull/290))
   - A `caller_limits` tool: each caller's own limits against the function's settings, with the fix; `function_details` includes them too.
-
 - 🔀 **Step Functions: workflows that start other workflows** ([#291](https://github.com/utkarsh5026/aws-analyzer/pull/291))
   - `state_machine()` holds a `startExecution.sync` task's `TimeoutSeconds` against how long the child may run, from its own definition.
   - It also flags a child with no timeout on either side, and says when a child started without `.sync` can fail unseen.
@@ -1578,7 +1577,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.61.0...v0.62.0
