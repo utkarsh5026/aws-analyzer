@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: remembers your models and keys, by name** ([#294](https://github.com/utkarsh5026/aws-analyzer/pull/294))
+  - The model `use_model()` or ⚙ model switches to is saved with its key; the next `AgentView()` starts on it.
+  - Name it yourself or pick a suggestion like *Haiku Hummingbird*; `use_saved_model('work gpt')` switches back.
+  - `saved_models()` lists them, `forget_model()` forgets them; `remember_model=False` turns it off.
+
 ## [0.65.0] - 2026-11-26
 
 ### Added

@@ -23,6 +23,9 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._kit.focus import Focus, FocusPart
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
+from aws_analyzer.agent.model_names import model_keywords, suggest_names
+from aws_analyzer.agent.saved_model import (SavedModel, SavedModels, read_saved_models, renamed, saved_model_note,
+                                            shelf_data, shelf_from, with_model, without_model)
 from aws_analyzer.agent import harness
 from aws_analyzer.agent.workspace.sandboxes import local as localmod
 from aws_analyzer.agent.toolkits import s3_saving
@@ -3089,6 +3092,142 @@ def test_use_model_switches_the_model_and_keeps_the_last_one_when_it_cant(seeded
     assert "Now answering with gpt-4o (OpenAI): what it sends goes to OpenAI (gpt-4o), outside AWS" in out
     out = run(capsys, view.use_model, "azure")
     assert "AZURE_OPENAI_ENDPOINT" in out and "Traceback" not in out and core.provider == "openai"
+
+
+def _no_model_environment(monkeypatch):
+    for name in ("OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_the_model_used_is_saved_with_its_key_and_the_next_agent_answers_with_it(seeded, monkeypatch, tmp_path,
+                                                                                  capsys):
+    _no_model_environment(monkeypatch)
+    saved_file = tmp_path / "agent" / "model.json"
+    monkeypatch.setenv("AWS_ANALYZER_MODEL_FILE", str(saved_file))
+    core = make()
+    assert core.model_file == saved_file and core.saved_model is None and not saved_file.exists()
+    core.use_model("openai", "gpt-4o", api_key="not-a-real-key", endpoint="http://localhost:4000")
+    data = json.loads(saved_file.read_text())
+    assert data["current"] == "GPT Gosling" and data["models"]["GPT Gosling"]["api_key"] == "not-a-real-key"
+    assert saved_file.stat().st_mode & 0o777 == 0o600 and not saved_file.with_name("model.json.part").exists()
+    assert core.model_label == "GPT Gosling"
+
+    again = make()
+    assert again.model_from_saved and again.model_label == "GPT Gosling"
+    assert (again.provider, again.model_id, again._api_key, again.endpoint) == (
+        "openai", "gpt-4o", "not-a-real-key", "http://localhost:4000")
+    assert type(again._chat()).__name__ == "ChatOpenAI"
+    assert not make(provider="bedrock").model_from_saved
+    monkeypatch.setenv("AWS_ANALYZER_AGENT_MODEL", "bedrock:haiku")
+    assert make().provider == "bedrock"
+    monkeypatch.delenv("AWS_ANALYZER_AGENT_MODEL")
+    assert make(remember_model=False).provider == "" and make(remember_model=False).model_file is None
+
+    named = make(model="gpt-4.1", api_key="another-key")
+    assert set(json.loads(saved_file.read_text())["models"]) == {"GPT Gosling"}
+    named._chat()
+    data = json.loads(saved_file.read_text())
+    assert data["current"] == "GPT Gecko" and data["models"]["GPT Gecko"]["api_key"] == "another-key"
+    with pytest.raises(_Hint, match="AZURE_OPENAI_ENDPOINT"):
+        named.use_model("azure", name="never")
+    assert "never" not in json.loads(saved_file.read_text())["models"]
+
+    view = AgentView(make(), mode="text", progress="off")
+    out = run(capsys, view.use_model, "openai", "gpt-4o", api_key="not-a-real-key", name="  work   gpt ")
+    assert "Now answering with 'work gpt', gpt-4o (OpenAI)" in out and "with its API key" in out
+    assert set(json.loads(saved_file.read_text())["models"]) == {"work gpt", "GPT Gecko", "GPT Gosling"}
+    assert "forget_model" in view._CHANGES and "rename_model" in view._CHANGES
+    out = run(capsys, view.saved_models)
+    assert "● work gpt" in out and "GPT Gecko" in out and "Keys kept" in out
+    assert "Renamed 'WORK GPT' to 'Hazel'" in run(capsys, view.rename_model, "WORK GPT", "Hazel")
+    assert view.core.model_label == "Hazel"
+    assert "Did you mean: 'Hazel'" in run(capsys, view.use_saved_model, "hazle")
+    out = run(capsys, view.use_saved_model, "gpt gecko")
+    assert "Now answering with 'GPT Gecko', gpt-4.1" in out and view.core._api_key == "another-key"
+    assert make().model_label == "GPT Gecko"
+    assert "Gentle GPT" in run(capsys, view.model_names)
+    assert "Forgot 'Hazel' and its key" in run(capsys, view.forget_model, "hazel")
+    assert "Forgot 2 saved models" in run(capsys, view.forget_model) and not saved_file.exists()
+    assert "No model is saved" in run(capsys, view.forget_model) and make().provider == ""
+
+
+def test_saved_models_are_kept_by_name_and_offered_cute_names():
+    assert model_keywords("us.anthropic.claude-haiku-4-5-20251001-v1:0") == ["claude", "haiku"]
+    assert model_keywords("llama3.1") == ["llama"] and model_keywords("o3") == ["o3"]
+    assert suggest_names("bedrock", "claude-haiku-4-5") == ["Haiku Hummingbird", "Happy Haiku", "Little Petal"]
+    assert suggest_names("openai", "gpt-4o") == ["GPT Gosling", "Gentle GPT", "Chatterbox"]
+    assert "Haiku Hummingbird" not in suggest_names("bedrock", "claude-haiku-4-5", taken=["haiku HUMMINGBIRD"])
+    assert len(set(suggest_names("x", "", most=10))) == 10
+    haiku = SavedModel("bedrock", "claude-haiku-4-5")
+    shelf = with_model(SavedModels(), haiku)
+    assert shelf.current == "Haiku Hummingbird" and shelf.in_use().name == "Haiku Hummingbird"
+    keyed = with_model(shelf, SavedModel("openai", "gpt-4o", api_key="k1"), name="work")
+    assert keyed.names() == ["Haiku Hummingbird", "work"] and keyed.current == "work"
+    again = with_model(keyed, SavedModel("openai", "gpt-4o"))
+    assert again.names() == ["Haiku Hummingbird", "work"] and again.get("WORK").api_key == "k1"
+    assert renamed(again, "work", "Hazel").current == "Hazel"
+    with pytest.raises(ValueError, match="already called 'Hazel'"):
+        renamed(renamed(again, "work", "Hazel"), "Haiku Hummingbird", "hazel")
+    assert without_model(again, "work").current == "" and without_model(again, "work").in_use().name == (
+        "Haiku Hummingbird")
+    with pytest.raises(ValueError, match="can't be empty"):
+        with_model(again, haiku, name="   ")
+    assert shelf_from(shelf_data(again)) == again
+
+
+def test_a_saved_model_file_that_cant_be_read_is_said_not_raised(tmp_path):
+    broken = tmp_path / "model.json"
+    broken.write_text("{not json")
+    assert not read_saved_models(broken)[0].models and "forget_model() deletes" in read_saved_models(broken)[1]
+    broken.write_text(json.dumps({"model": "gpt-4o"}))
+    assert read_saved_models(broken) == (SavedModels(), "")
+    broken.write_text(json.dumps({"provider": "azure", "deployment": "prod", "extra": 1}))
+    first_version = read_saved_models(broken)[0]
+    assert first_version.in_use().deployment == "prod" and first_version.current
+    broken.write_text(json.dumps({"current": "x", "models": {"x": {"provider": "openai"}, "y": {"model": "m"}}}))
+    assert read_saved_models(broken)[0].names() == ["x"]
+    assert saved_model_note(None, broken) == "" and saved_model_note(None, broken, "it broke") == "it broke"
+    assert read_saved_models(tmp_path / "none.json") == (SavedModels(), "")
+
+
+def test_the_model_settings_name_save_and_switch_between_models(seeded, monkeypatch, tmp_path):
+    _no_model_environment(monkeypatch)
+    monkeypatch.setenv("AWS_ANALYZER_MODEL_FILE", str(tmp_path / "model.json"))
+    x = window(scripted(says("etl-nightly failed.")))
+    panel = x.panel
+    x.model_button.click()
+    assert "isn&#x27;t saved" in panel.note.value and panel.rows["name"].layout.display == "none"
+    assert panel.rows["saved"].layout.display == "none"
+    panel.provider_pick.value = "openai"
+    assert "saves it under its save as name" in panel.note.value and panel.rows["name"].layout.display == ""
+    assert [chip.description for chip in panel.name_chips] == ["GPT Gecko", "Gentle GPT", "Chatterbox"]
+    panel.model_box.value, panel.key_box.value = "gpt-4o", "not-a-real-key"
+    assert panel.name_chips[0].description == "GPT Gosling"
+    assert panel.name_box.placeholder == "GPT Gosling (or a name of your own)"
+    panel.name_chips[1].click()
+    assert panel.name_box.value == "Gentle GPT"
+    panel.use_button.click()
+    saved = json.loads((tmp_path / "model.json").read_text())
+    assert saved["current"] == "Gentle GPT" and saved["models"]["Gentle GPT"]["api_key"] == "not-a-real-key"
+    assert "Gentle GPT · gpt-4o @ openai" in x.title.value
+
+    x.model_button.click()
+    assert panel.rows["saved"].layout.display == "" and panel.saved_pick.value == "Gentle GPT"
+    assert panel.name_box.value == "Gentle GPT"
+    panel.model_box.value, panel.name_box.value = "gpt-4.1", "  "
+    panel.use_button.click()
+    assert x.view.core.model_label == "GPT Gecko" and x.view.core._api_key == "not-a-real-key"
+    x.model_button.click()
+    assert panel.saved_pick.options == ("GPT Gecko", "Gentle GPT")
+    panel.saved_pick.value = "Gentle GPT"
+    panel.saved_use.click()
+    assert x.view.core.model_id == "gpt-4o" and "Gentle GPT ·" in x.title.value and not panel.is_open
+    x.model_button.click()
+    panel.saved_pick.value = "GPT Gecko"
+    panel.saved_forget.click()
+    assert panel.saved_pick.options == ("Gentle GPT",)
+    x.view.rename_model("gentle gpt", "Hazel")
+    assert "Hazel · gpt-4o" in x.title.value and panel.saved_pick.options == ("Hazel",)
 
 
 def test_the_model_settings_ask_for_what_each_provider_takes():

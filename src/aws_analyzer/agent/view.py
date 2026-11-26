@@ -73,6 +73,8 @@ from .mcp_servers import (
 )
 from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
 from .runbooks import RUNBOOK_FILE, runbook_findings
+from .saved_model import saved_model_note
+from .window.model_commands import _ModelCommands
 
 if TYPE_CHECKING:
     from .window import _AgentChat
@@ -397,7 +399,7 @@ def _mcp_tool_row(tool: McpTool, *, asks: bool) -> list[Any]:
     return [tool.qualified, says, "yes" if asks else "no", first_line]
 
 
-class AgentView(_BaseView):
+class AgentView(_ModelCommands, _BaseView):
     """
     Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
     report and returns nothing; for the data, call the matching method on `view.core` (ask() -> AgentAnswer).
@@ -416,12 +418,13 @@ class AgentView(_BaseView):
         "🔎 Look back": ("transcript", "save_charts"),
         "🗂 Saved chats": ("chats", "open_chat", "rename_chat", "delete_chat"),
         "🧠 Memory": ("memory", "forget", "forget_all"),
-        "🔑 Set up": ("setup", "use_model"),
+        "🔑 Set up": ("setup", "use_model", "saved_models", "use_saved_model", "model_names", "rename_model",
+                     "forget_model"),
         "🧰 What it can do": ("tools", "runbooks"),
         "🔌 MCP servers": ("mcp", "add_mcp", "remove_mcp", "enable_mcp", "disable_mcp", "reconnect_mcp", "import_mcp"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"save_charts", "add_mcp", "remove_mcp", "import_mcp", "forget", "forget_all", "rename_chat",
+    _CHANGES = frozenset({"save_charts", "forget_model", "rename_model", "add_mcp", "remove_mcp", "import_mcp", "forget", "forget_all", "rename_chat",
                           "delete_chat"})
     _START = (
         ("setup()", "set up the model it answers with: the steps to copy, checked against this notebook"),
@@ -469,7 +472,7 @@ class AgentView(_BaseView):
     def _tell_windows(self, what: str, *args: Any, other_than: Any = None) -> None:
         """
         Tells every window (but other_than) what changed in the conversation they share: 'added' (an answer), 'cleared',
-        'opened', 'renamed' or 'model_changed'.
+        'opened', 'renamed', 'model_changed' or 'models_saved' (a saved model renamed or forgotten).
         """
         for window in self._windows():
             if window is not other_than:
@@ -728,33 +731,6 @@ class AgentView(_BaseView):
         self._tell_windows("cleared")
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
-
-    @_friendly_errors
-    def use_model(  # noqa: PLR0913
-        self,
-        provider: str | None = None,
-        model: str | None = None,
-        *,
-        endpoint: str | None = None,
-        api_key: str | None = None,
-        api_version: str | None = None,
-        chat_model: Any = None,
-    ) -> None:
-        """
-        Switches the model the agent answers with, then says where what it sends goes and how its tokens are priced:
-        use_model('bedrock', 'sonnet'), use_model('openai', 'gpt-4.1', api_key=...), use_model('azure', 'prod-gpt-4o',
-        endpoint=...), or any LangChain provider. The chat window's ⚙ model does the same by clicking. A new
-        conversation starts, and a key or package that's missing is said here, keeping the model it had.
-        """
-        if self._busy_window() is not None:
-            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then switch.")
-        core = self.core
-        core.use_model(provider, model, endpoint=endpoint, api_key=api_key, api_version=api_version,
-                       chat_model=chat_model)
-        self._tell_windows("model_changed")
-        place = model_place(core.provider, core.model, core.endpoint)
-        self._show([_Note(f"Now answering with {core.model} ({provider_info(core.provider).title}): what it sends "
-                          f"goes to {place}. A new conversation starts with the next question.", "ok")])
 
     @_friendly_errors
     def transcript(self) -> None:
@@ -1428,6 +1404,9 @@ class AgentView(_BaseView):
                    sortable=False),
             _Title(picked.title, "the steps to copy, checked against this notebook"),
         ]
+        saved = saved_model_note(self.core.saved_model, self.core.model_file, self.core.saved_model_problem)
+        if saved:
+            blocks.insert(2, _Note(saved))
         blocks += self._provider_setup_blocks(picked)
         blocks.append(_Next([*((f"setup('{name}')", f"the steps for {provider_title(name)}") for name in others),
                              ("tools()", "the model it picked, and what it can call")]))

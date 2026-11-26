@@ -145,14 +145,29 @@ Type a question and press Enter, or click one of the questions to start from.
 
 The list holds Amazon Bedrock, OpenAI, Azure OpenAI, Anthropic, Google Gemini and Ollama, then every other provider LangChain knows. With Bedrock picked, the model box suggests the models your region offers. The panel asks only for what that provider takes: a base URL or Azure endpoint, an API key, Azure's API version. Under them it says where your questions would go and how the tokens are priced.
 
-![The chat window with its model settings open under the header, where the ⚙ model button is highlighted: provider, a list showing Amazon Bedrock; model, a box holding claude-haiku-4-5; then → what the agent sends goes to Amazon Bedrock in your own AWS account (claude-haiku-4-5), so it stays in AWS, and $ priced at Amazon Bedrock's list prices, $1.10 in and $5.50 out per 1M tokens; then the use this model and close buttons, above the empty conversation's greeting and questions to start from](images/agent-chat-model-light.webp#only-light){ width="984" height="894" loading=lazy }
-![The chat window with its model settings open under the header, where the ⚙ model button is highlighted: provider, a list showing Amazon Bedrock; model, a box holding claude-haiku-4-5; then → what the agent sends goes to Amazon Bedrock in your own AWS account (claude-haiku-4-5), so it stays in AWS, and $ priced at Amazon Bedrock's list prices, $1.10 in and $5.50 out per 1M tokens; then the use this model and close buttons, above the empty conversation's greeting and questions to start from](images/agent-chat-model-dark.webp#only-dark){ width="984" height="894" loading=lazy }
+![The chat window with its model settings open under the header, where the ⚙ model button is highlighted: provider, a list showing Amazon Bedrock; model, a box holding claude-haiku-4-5; save as, an empty box offering Haiku Hummingbird, with three names to click under it: Haiku Hummingbird, Happy Haiku and Little Petal; then → what the agent sends goes to Amazon Bedrock in your own AWS account (claude-haiku-4-5), so it stays in AWS, and $ priced at Amazon Bedrock's list prices, $1.10 in and $5.50 out per 1M tokens, and 🔑 using it saves it in ~/.cache/aws-analyzer/agent/model.json, so the next agent you start answers with it; then the use this model and close buttons, above the empty conversation's greeting and questions to start from](images/agent-chat-model-light.webp#only-light){ width="984" height="1037" loading=lazy }
+![The chat window with its model settings open under the header, where the ⚙ model button is highlighted: provider, a list showing Amazon Bedrock; model, a box holding claude-haiku-4-5; save as, an empty box offering Haiku Hummingbird, with three names to click under it: Haiku Hummingbird, Happy Haiku and Little Petal; then → what the agent sends goes to Amazon Bedrock in your own AWS account (claude-haiku-4-5), so it stays in AWS, and $ priced at Amazon Bedrock's list prices, $1.10 in and $5.50 out per 1M tokens, and 🔑 using it saves it in ~/.cache/aws-analyzer/agent/model.json, so the next agent you start answers with it; then the use this model and close buttons, above the empty conversation's greeting and questions to start from](images/agent-chat-model-dark.webp#only-dark){ width="984" height="1037" loading=lazy }
 /// caption
 **⚙ model**: pick the provider and model; the panel asks only for what that provider takes, and says where your questions go.
 ///
 
 !!! tip "Worth knowing"
-    Leave the key empty to use the provider's environment variable (`OPENAI_API_KEY`, ...). A key you type is kept for the session only and never shown again. Switching starts a new conversation: the one above stays on screen. If the model can't be made (a key or package missing), the panel says why and the agent keeps the one it had. From a cell, `agent.use_model("openai", "gpt-4.1")` does the same.
+    Leave the key empty to use the provider's environment variable (`OPENAI_API_KEY`, ...). The model you use, and a key you type, are saved in `~/.cache/aws-analyzer/agent/model.json` (readable by you only, and never shown again), so the next `AgentView()` answers with it without asking. Each saved model has a name: type your own under **save as**, or click one of the names made from the model's words (`claude-haiku-4-5` offers *Haiku Hummingbird*, *Happy Haiku*, *Little Petal*). **saved** at the top of the panel switches back to one, key and all. `AgentView(remember_model=False)` neither reads nor saves them. Switching starts a new conversation: the one above stays on screen. If the model can't be made (a key or package missing), the panel says why and the agent keeps the one it had. From a cell, `agent.use_model("openai", "gpt-4.1")` does the same.
+
+??? more "Saved models from a cell"
+    ```python
+    agent.use_model("openai", "gpt-4.1", api_key=key, name="work gpt")   # switch, and save it under a name
+    agent.saved_models()                     # every saved model: provider, model, key kept or not, last used
+    agent.use_saved_model("work gpt")        # switch back to one, any case
+    agent.model_names()                      # names made from its words: 'GPT Gecko', 'Gentle GPT', 'Chatterbox'
+    agent.rename_model("GPT Gecko", "Hazel") # a name of your own
+    agent.forget_model("Hazel")              # forget one and its key; forget_model() forgets every one
+    ```
+
+    Using the same model again keeps its name, so a key you type later replaces the old one under that name.
+
+??? more "How the saved model is picked"
+    A model named in the call (`AgentView(model=...)`, `provider=`, `api_key=`, ...) always wins, and is saved once it answers. With none named, `AWS_ANALYZER_AGENT_MODEL` comes next, then the saved model used last, then the rest of the environment (`AZURE_OPENAI_*`, `OPENAI_API_KEY`). A key read from the environment isn't saved, and neither is a `chat_model=` or Azure token provider passed in. `AWS_ANALYZER_MODEL_FILE` (or `remember_model="path"`) keeps it elsewhere, or `off` turns it off: on a SageMaker notebook instance only `~/SageMaker` survives a stop, so `AWS_ANALYZER_MODEL_FILE=~/SageMaker/.agent-model.json` keeps it there.
 
 ### Every call, with the services it reads { #chat-calls }
 
@@ -1050,7 +1065,12 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `import_mcp(path=None)` | The mcp.json files your editor keeps, and their servers; with a path, adds that file's |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
 | `setup(provider=None)` | How to set up the model, as cells to copy, checked against this notebook: every provider with whether it's ready here, then one's install line, settings cell (the key asked for with `getpass`) and start cell |
-| `use_model(provider=None, model=None, ...)` | Switches the model the agent answers with, and says where what it sends goes; the window's ⚙ model does it by clicking |
+| `use_model(provider=None, model=None, ..., name=None)` | Switches the model the agent answers with, saves it under `name=` (or one made from its words), and says where what it sends goes; the window's ⚙ model does it by clicking |
+| `saved_models()` | The models you've saved, by name: provider, model, endpoint, whether the key is kept, when last used |
+| `use_saved_model(name)` | Switches to a saved model by its name, its key and all |
+| `model_names(provider=None, model=None)` | Names to save a model under, made from its words (*Haiku Hummingbird*) |
+| `rename_model(old, new)` | Gives a saved model a name of your own |
+| `forget_model(name=None)` | Forgets one saved model and its key; without a name, every one (the file is deleted) |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

@@ -253,7 +253,15 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `~/.cache/aws-analyzer/agent/mcp.json`, `AWS_ANALYZER_MCP`'s path or the file `mcp=` names, in the `mcpServers` /
   VS Code `servers` shape; `mcp_servers/files.py`'s `write_servers` keeps its other keys, writes `<name>.part` then
   renames, mode 0600; only `add_mcp()`, `remove_mcp()`, `update_mcp()`, `import_mcp()` and the 🔌 mcp panel change
-  it, and nothing deletes the file; `tests/conftest.py` sets `AWS_ANALYZER_MCP=off`), and `sagemaker_env`'s
+  it, and nothing deletes the file; `tests/conftest.py` sets `AWS_ANALYZER_MCP=off`), the agent's saved models (`AgentAnalyzer(remember_model=True)`, the
+  default: `saved_model.py`'s one JSON file, `~/.cache/aws-analyzer/agent/model.json`, `AWS_ANALYZER_MODEL_FILE`'s path
+  or the path given, a `SavedModels`: each model's provider, model, endpoint, API version and the key given under its
+  name (the one given, `use_model(name=)`, else `model_names.py`'s `suggest_names`, cute names from the model's words),
+  and the one in use; written to `<name>.part` then renamed, mode 0600, by `_remember_model` once a model named in the
+  call or `use_model()` makes its chat model, and by `use_saved_model()`, `rename_model()` and `forget_model(name)`;
+  read when the call names no model and `AWS_ANALYZER_AGENT_MODEL` is unset; only the user's `forget_model()` deletes
+  it; `tests/conftest.py` sets `AWS_ANALYZER_MODEL_FILE=off`; the View's model commands are the `_ModelCommands`
+  mixin in `window/model_commands.py`, since `view.py` is at its line limit), and `sagemaker_env`'s
   `new_env()`, which makes a Python environment and its Jupyter kernel
   (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its

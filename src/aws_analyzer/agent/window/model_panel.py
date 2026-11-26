@@ -5,9 +5,10 @@ provider LangChain's init_chat_model knows), the model from a box that suggests 
 read when Bedrock is picked; the provider's default and an example otherwise), and the panel asks only for what that
 provider takes: a base URL or Azure endpoint, an API key (a password box, never shown back) and Azure's API version.
 
-Under them it says where what the agent sends would go and how its tokens are priced, and Use this model calls
-AgentAnalyzer.use_model(), which makes the model at once: a missing key, setting or package is said in the panel,
-and the agent keeps the model it had. A switch starts a new conversation.
+Under them it says where what the agent sends would go, how its tokens are priced and where the model is saved, and
+Use this model calls AgentAnalyzer.use_model(), which makes the model at once: a missing key, setting or package is
+said in the panel, and the agent keeps the model it had. A switch starts a new conversation, and the model and the
+key typed are saved for the next agent (saved_model.py).
 
 _FORMS holds what each provider asks for (_Form); a provider it doesn't name asks for a model, a base URL and a key.
 _PANEL_CSS is the panel's look, which the window adds to its stylesheet.
@@ -28,6 +29,7 @@ from ..._kit.render import _prose
 from ..._kit.text import _esc
 from ..._kit.window import _class_if, _running_loop
 from ..llm import AZURE_API_VERSION, model_name, model_place, model_rates, provider_info, provider_names
+from ..saved_model import home_relative
 from ..view import _ROOT
 
 if TYPE_CHECKING:
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
 
 _GIVEN_MODEL = ""
 _LABEL_WIDTH = "104px"
+_NAME_CHIPS = 3
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,12 @@ _PANEL_CSS = f"""\
 .agc-app.agc-app .agc-use{{height:26px;line-height:24px;padding:0 10px;margin:0;border-radius:6px;font-size:12px;border:1px solid var(--ag-accent);background:transparent;box-shadow:none;color:var(--ag-accent)}}
 .agc-app.agc-app .agc-use:hover:enabled{{background:var(--ag-hover)}}
 .agc-app.agc-app .agc-use:disabled{{opacity:.5}}
+.agc-app.agc-app .agc-set .agc-names{{gap:6px;margin:0 0 2px calc({_LABEL_WIDTH} + 10px);align-items:center}}
+.agc-app.agc-app .agc-set .agc-names .ag-lbl{{width:auto;font-size:12px}}
+.agc-app.agc-app .agc-name{{height:24px;line-height:22px;padding:0 10px;margin:0;border-radius:12px;font-size:12px;border:1px dashed var(--ag-line);background:transparent;box-shadow:none;color:var(--ag-dim)}}
+.agc-app.agc-app .agc-name:hover:enabled{{border-color:var(--ag-accent);color:var(--ag-accent);background:var(--ag-hover)}}
+.agc-app.agc-app .agc-set .agc-saved{{gap:6px;align-items:center}}
+.agc-app.agc-app .agc-set .agc-saved>.widget-dropdown{{flex:1 1 auto;max-width:330px}}
 .agt .ag-switch{{display:flex;align-items:center;gap:10px;margin:16px 0 6px;font-size:12px;color:var(--ag-dim)}}
 .agt .ag-switch::before,.agt .ag-switch::after{{content:"";flex:1 1 auto;border-top:1px dashed var(--ag-line)}}"""
 
@@ -228,26 +237,43 @@ class _ModelPanel:
     def is_open(self) -> bool:
         return self.root.layout.display != "none"
 
-    def _build(self) -> Any:
+    def _build(self) -> Any:  # noqa: PLR0915
         w, layout, safely = self.w, self.w.Layout, self.window._safely
         grow = {"flex": "1 1 auto", "width": "auto", "max_width": "520px"}
+        self.saved_pick = w.Dropdown(options=[], layout=layout(flex="1 1 auto", width="auto"))
+        self.saved_use = self._button("use saved", "Answer with this saved model, its key and all", self.use_saved,
+                                      "agc-use")
+        self.saved_forget = self._button("forget", "Forget this saved model and its key", self.forget_saved,
+                                         "agc-new")
+        saved_box = w.HBox([self.saved_pick, self.saved_use, self.saved_forget],
+                           layout=layout(flex="1 1 auto", max_width="520px"))
+        saved_box.add_class("agc-saved")
+        self.name_box = w.Text(continuous_update=True, layout=layout(**grow))
+        self.name_chips = [self._button("", "Save it under this name", self._chip_action(index), "agc-name")
+                           for index in range(_NAME_CHIPS)]
+        self.names_row = w.HBox([w.HTML('<span class="ag-lbl">try</span>'), *self.name_chips])
+        self.names_row.add_class("agc-names")
         self.provider_pick = w.Dropdown(options=provider_options(), layout=layout(**grow))
         self.provider_pick.observe(safely(self._picked), names="value")
+        self.provider_pick.add_class("agc-provider")
         self.model_box = w.Combobox(ensure_option=False, continuous_update=True, layout=layout(**grow))
         self.model_box.observe(safely(self._typed), names="value")
         self.endpoint_box = w.Text(continuous_update=True, layout=layout(**grow))
         self.endpoint_box.observe(safely(self._typed), names="value")
         self.key_box = w.Password(layout=layout(**grow))
         self.version_box = w.Text(placeholder=f"{AZURE_API_VERSION} (the default)", layout=layout(**grow))
-        for box in (self.model_box, self.endpoint_box, self.key_box, self.version_box):
+        for box in (self.model_box, self.endpoint_box, self.key_box, self.version_box, self.name_box):
             box.on_msg(self.window._on_enter(self.apply))
         self.labels = {name: w.HTML(layout=layout(flex="0 0 auto"))
-                       for name in ("provider", "model", "endpoint", "key", "version")}
+                       for name in ("saved", "provider", "model", "endpoint", "key", "version", "name")}
         self.labels["provider"].value = '<span class="ag-lbl">provider</span>'
         self.labels["key"].value = '<span class="ag-lbl">API key</span>'
         self.labels["version"].value = '<span class="ag-lbl">API version</span>'
-        boxes = {"provider": self.provider_pick, "model": self.model_box, "endpoint": self.endpoint_box,
-                 "key": self.key_box, "version": self.version_box}
+        self.labels["saved"].value = '<span class="ag-lbl">saved</span>'
+        self.labels["name"].value = '<span class="ag-lbl">save as</span>'
+        boxes = {"saved": saved_box, "provider": self.provider_pick, "model": self.model_box,
+                 "endpoint": self.endpoint_box, "key": self.key_box, "version": self.version_box,
+                 "name": self.name_box}
         self.rows = {name: self._row(self.labels[name], box) for name, box in boxes.items()}
         self.note = w.HTML(layout=layout(width="100%"))
         self.use_button = self._button("use this model", "Answer with this model from the next question",
@@ -255,7 +281,8 @@ class _ModelPanel:
         close = self._button("close", "Close the model settings, changing nothing", self.close, "agc-new")
         actions = w.HBox([self.use_button, close])
         actions.add_class("agc-acts")
-        root = w.VBox([*self.rows.values(), self.note, actions], layout=layout(display="none", width="100%"))
+        root = w.VBox([*self.rows.values(), self.names_row, self.note, actions],
+                      layout=layout(display="none", width="100%"))
         root.add_class("agc-set")
         return root
 
@@ -270,6 +297,15 @@ class _ModelPanel:
         button.add_class(css)
         button.on_click(self.window._safely(lambda _button: on_click()))
         return button
+
+    def _chip_action(self, index: int) -> Any:
+        """
+        What the index-th suggested name does when clicked: it goes in the name box.
+        """
+        def put_name() -> None:
+            self.name_box.value = self.name_chips[index].description
+
+        return put_name
 
     def open(self) -> None:
         """
@@ -311,7 +347,18 @@ class _ModelPanel:
         provider = self._current()
         self.window._quietly(self.provider_pick, options=provider_options(self.core.given_chat_model),
                              value=provider)
+        self._fill_saved()
         self._fill(provider)
+
+    def _fill_saved(self) -> None:
+        """
+        The saved models, newest first, the one in use picked; the row shows only when there's one.
+        """
+        core = self.core
+        names = list(reversed(core.saved_models.names()))
+        picked = core.model_label if core.model_label in names else (names[0] if names else None)
+        self.window._quietly(self.saved_pick, options=names, value=picked)
+        self.rows["saved"].layout.display = "" if names and core.model_file is not None else "none"
 
     def _picked(self, change: dict[str, Any]) -> None:
         if self.window.quiet:
@@ -323,6 +370,7 @@ class _ModelPanel:
 
     def _typed(self, change: dict[str, Any]) -> None:
         if not self.window.quiet:
+            self._draw_names()
             self._draw_note()
 
     def _fill(self, provider: str) -> None:
@@ -344,10 +392,39 @@ class _ModelPanel:
                              placeholder=key_placeholder(provider, has_key=has_key, environ=environ))
         self.labels["model"].value = f'<span class="ag-lbl">{_esc(form.model)}</span>'
         self.labels["endpoint"].value = f'<span class="ag-lbl">{_esc(form.endpoint)}</span>'
+        self.window._quietly(self.name_box, value=core.model_label if is_current else "")
         shown = {"model": bool(form.model), "endpoint": bool(form.endpoint), "key": form.key, "version": form.version}
         for name, is_shown in shown.items():
             self.rows[name].layout.display = "" if is_shown else "none"
+        self._draw_names()
         self._draw_note()
+
+    def _draw_names(self) -> None:
+        """
+        The name row: the box says the name the model would be saved under, and the chips offer names made from its
+        words. Hidden for a chat model passed in, and when models aren't saved.
+        """
+        provider, model = self._wanted()
+        can_save = provider != _GIVEN_MODEL and self.core.model_file is not None
+        self.rows["name"].layout.display = "" if can_save else "none"
+        self.names_row.layout.display = "" if can_save else "none"
+        if not can_save:
+            return
+        names = self.core.model_names(provider, model, most=_NAME_CHIPS)
+        for chip, name in zip(self.name_chips, names):
+            chip.description = name
+        self.name_box.placeholder = self._name_placeholder(provider, model, names)
+
+    def _name_placeholder(self, provider: str, model: str, names: list[str]) -> str:
+        """
+        What the name box says while empty: the name the model is saved under already, else the one it would get.
+        """
+        endpoint = _text(self.endpoint_box)
+        for saved in self.core.saved_models.models:
+            same = (saved.provider, saved.model, saved.endpoint) == (provider, model, endpoint)
+            if same:
+                return f"keeps its name: {saved.name}"
+        return f"{names[0]} (or a name of your own)"
 
     def _wanted(self) -> tuple[str, str]:
         """
@@ -371,12 +448,29 @@ class _ModelPanel:
             lines.append(("…", _esc(f"Listing Amazon Bedrock's models in {self._bedrock_region()}…")))
         elif provider == "bedrock" and self.list_problem:
             lines.append(("!", _prose(self.list_problem)))
+        lines.append(("🔑", _esc(self._saving_text(provider))))
         if any(answer.thread == self.core.thread for answer in self.core.history):
             lines.append(("↺", "Using it starts a new conversation: the one above stays on screen."))
         if self.failed:
             lines.append(("✗", f'<span class="warn">{_prose(self.failed)}</span>'))
         rows = "".join(f'<div><span class="ag-k">{mark}</span><span>{text}</span></div>' for mark, text in lines)
         self.window._set(self.note, f'<div class="{_ROOT}"><div class="ag-sn">{rows}</div></div>')
+
+    def _saving_text(self, provider: str) -> str:
+        """
+        Whether Use this model saves the model and its key for the next agent, and where.
+        """
+        core = self.core
+        if core.model_file is None:
+            return "Not saved: this agent was started with remember_model=False."
+        if provider == _GIVEN_MODEL:
+            return "A chat model passed in isn't saved: the next agent is given it again."
+        if core.saved_model_problem:
+            return core.saved_model_problem
+        with_key = ", with the key you type, readable by you only" if form_for(provider).key else ""
+        switch_back = ", and saved switches back to it" if core.saved_models.models else ""
+        return (f"Using it saves it under its save as name in {home_relative(core.model_file)}{with_key}: the next "
+                f"agent you start answers with it{switch_back}.")
 
     def _bedrock_region(self) -> str:
         try:
@@ -437,19 +531,7 @@ class _ModelPanel:
         question, in a new conversation. When the model can't be made (a key, a setting or a package missing), the
         panel says why and the agent keeps the model it had.
         """
-        if self.window.busy:
-            self.failed = "Still answering a question: wait for it, or press stop, then switch."
-            self._draw_note()
-            return
-        try:
-            self._use(self.provider_pick.value)
-        except (ValueError, ImportError, ClientError, BotoCoreError) as exc:
-            self.failed = self.window._error_text(exc)
-            self._draw_note()
-            return
-        self.failed = ""
-        self.close()
-        self.window.view._tell_windows("model_changed")
+        self._switched(lambda: self._use(self.provider_pick.value))
 
     def _use(self, provider: str) -> None:
         core = self.core
@@ -460,4 +542,42 @@ class _ModelPanel:
         core.use_model(provider, _text(self.model_box) or None,
                        endpoint=(_text(self.endpoint_box) or None) if form.endpoint else None,
                        api_key=(_text(self.key_box) or None) if form.key else None,
-                       api_version=(_text(self.version_box) or None) if form.version else None)
+                       api_version=(_text(self.version_box) or None) if form.version else None,
+                       name=_text(self.name_box) or None)
+
+    def _switched(self, switch: Any) -> None:
+        """
+        Runs a switch (to the model the panel shows, or a saved one): said in the panel when it can't be made, and
+        otherwise the panel closes and every window shows the new model.
+        """
+        if self.window.busy:
+            self.failed = "Still answering a question: wait for it, or press stop, then switch."
+            self._draw_note()
+            return
+        try:
+            switch()
+        except (ValueError, ImportError, ClientError, BotoCoreError) as exc:
+            self.failed = self.window._error_text(exc)
+            self._draw_note()
+            return
+        self.failed = ""
+        self.close()
+        self.window.view._tell_windows("model_changed")
+
+    def use_saved(self) -> None:
+        """
+        use saved: the agent answers with the saved model picked, its key and all, in a new conversation.
+        """
+        if self.saved_pick.value:
+            self._switched(lambda: self.core.use_saved_model(self.saved_pick.value))
+
+    def forget_saved(self) -> None:
+        """
+        forget: the saved model picked, and its key, are forgotten; the model the agent answers with stays.
+        """
+        name = self.saved_pick.value
+        if not name:
+            return
+        self.core.forget_model(name)
+        self.failed = ""
+        self.window.view._tell_windows("models_saved")
