@@ -5,9 +5,10 @@ provider LangChain's init_chat_model knows), the model from a box that suggests 
 read when Bedrock is picked; the provider's default and an example otherwise), and the panel asks only for what that
 provider takes: a base URL or Azure endpoint, an API key (a password box, never shown back) and Azure's API version.
 
-Under them it says where what the agent sends would go and how its tokens are priced, and Use this model calls
-AgentAnalyzer.use_model(), which makes the model at once: a missing key, setting or package is said in the panel,
-and the agent keeps the model it had. A switch starts a new conversation.
+Under them it says where what the agent sends would go, how its tokens are priced and where the model is saved, and
+Use this model calls AgentAnalyzer.use_model(), which makes the model at once: a missing key, setting or package is
+said in the panel, and the agent keeps the model it had. A switch starts a new conversation, and the model and the
+key typed are saved for the next agent (saved_model.py).
 
 _FORMS holds what each provider asks for (_Form); a provider it doesn't name asks for a model, a base URL and a key.
 _PANEL_CSS is the panel's look, which the window adds to its stylesheet.
@@ -28,6 +29,7 @@ from ..._kit.render import _prose
 from ..._kit.text import _esc
 from ..._kit.window import _class_if, _running_loop
 from ..llm import AZURE_API_VERSION, model_name, model_place, model_rates, provider_info, provider_names
+from ..saved_model import home_relative
 from ..view import _ROOT
 
 if TYPE_CHECKING:
@@ -371,12 +373,28 @@ class _ModelPanel:
             lines.append(("…", _esc(f"Listing Amazon Bedrock's models in {self._bedrock_region()}…")))
         elif provider == "bedrock" and self.list_problem:
             lines.append(("!", _prose(self.list_problem)))
+        lines.append(("🔑", _esc(self._saving_text(provider))))
         if any(answer.thread == self.core.thread for answer in self.core.history):
             lines.append(("↺", "Using it starts a new conversation: the one above stays on screen."))
         if self.failed:
             lines.append(("✗", f'<span class="warn">{_prose(self.failed)}</span>'))
         rows = "".join(f'<div><span class="ag-k">{mark}</span><span>{text}</span></div>' for mark, text in lines)
         self.window._set(self.note, f'<div class="{_ROOT}"><div class="ag-sn">{rows}</div></div>')
+
+    def _saving_text(self, provider: str) -> str:
+        """
+        Whether Use this model saves the model and its key for the next agent, and where.
+        """
+        core = self.core
+        if core.model_file is None:
+            return "Not saved: this agent was started with remember_model=False."
+        if provider == _GIVEN_MODEL:
+            return "A chat model passed in isn't saved: the next agent is given it again."
+        if core.saved_model_problem:
+            return core.saved_model_problem
+        with_key = ", with the key you type, readable by you only" if form_for(provider).key else ""
+        return (f"Using it saves it in {home_relative(core.model_file)}{with_key}: the next agent you start answers "
+                "with it (forget_model() deletes it).")
 
     def _bedrock_region(self) -> str:
         try:

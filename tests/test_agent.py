@@ -23,6 +23,7 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._kit.focus import Focus, FocusPart
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
+from aws_analyzer.agent.saved_model import SavedModel, read_saved_model, saved_model_note
 from aws_analyzer.agent import harness
 from aws_analyzer.agent.workspace.sandboxes import local as localmod
 from aws_analyzer.agent.toolkits import s3_saving
@@ -3089,6 +3090,71 @@ def test_use_model_switches_the_model_and_keeps_the_last_one_when_it_cant(seeded
     assert "Now answering with gpt-4o (OpenAI): what it sends goes to OpenAI (gpt-4o), outside AWS" in out
     out = run(capsys, view.use_model, "azure")
     assert "AZURE_OPENAI_ENDPOINT" in out and "Traceback" not in out and core.provider == "openai"
+
+
+def test_the_model_used_is_saved_with_its_key_and_the_next_agent_answers_with_it(seeded, monkeypatch, tmp_path,
+                                                                                  capsys):
+    for name in ("OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+    saved_file = tmp_path / "agent" / "model.json"
+    monkeypatch.setenv("AWS_ANALYZER_MODEL_FILE", str(saved_file))
+    core = make()
+    assert core.model_file == saved_file and core.saved_model is None and not saved_file.exists()
+    core.use_model("openai", "gpt-4o", api_key="not-a-real-key", endpoint="http://localhost:4000")
+    assert json.loads(saved_file.read_text())["api_key"] == "not-a-real-key"
+    assert saved_file.stat().st_mode & 0o777 == 0o600 and not saved_file.with_name("model.json.part").exists()
+
+    again = make()
+    assert again.model_from_saved and (again.provider, again.model_id, again._api_key, again.endpoint) == (
+        "openai", "gpt-4o", "not-a-real-key", "http://localhost:4000")
+    assert type(again._chat()).__name__ == "ChatOpenAI"
+    assert not make(provider="bedrock").model_from_saved
+    monkeypatch.setenv("AWS_ANALYZER_AGENT_MODEL", "bedrock:haiku")
+    assert make().provider == "bedrock"
+    monkeypatch.delenv("AWS_ANALYZER_AGENT_MODEL")
+    assert make(remember_model=False).provider == "" and make(remember_model=False).model_file is None
+
+    named = make(model="gpt-4.1", api_key="another-key")
+    assert json.loads(saved_file.read_text())["model"] == "gpt-4o"
+    named._chat()
+    assert json.loads(saved_file.read_text())["api_key"] == "another-key"
+    with pytest.raises(_Hint, match="AZURE_OPENAI_ENDPOINT"):
+        named.use_model("azure")
+    assert json.loads(saved_file.read_text())["provider"] == "openai"
+
+    view = AgentView(make(), mode="text", progress="off")
+    out = run(capsys, view.use_model, "openai", "gpt-4o", api_key="not-a-real-key")
+    assert "with its API key (the file is readable by you only)" in out and "forget_model()" in out
+    assert "forget_model" in view._CHANGES
+    assert "Forgot the saved model" in run(capsys, view.forget_model) and not saved_file.exists()
+    assert "No model is saved" in run(capsys, view.forget_model) and make().provider == ""
+
+
+def test_a_saved_model_file_that_cant_be_read_is_said_not_raised(tmp_path):
+    broken = tmp_path / "model.json"
+    broken.write_text("{not json")
+    assert read_saved_model(broken)[0] is None and "forget_model() deletes it" in read_saved_model(broken)[1]
+    broken.write_text(json.dumps({"model": "gpt-4o"}))
+    assert read_saved_model(broken) == (None, "")
+    broken.write_text(json.dumps({"provider": "azure", "deployment": "prod", "extra": 1}))
+    assert read_saved_model(broken)[0] == SavedModel("azure", deployment="prod")
+    assert saved_model_note(None, broken) == "" and saved_model_note(None, broken, "it broke") == "it broke"
+    assert read_saved_model(tmp_path / "none.json") == (None, "") and read_saved_model(None) == (None, "")
+
+
+def test_the_model_settings_say_where_the_model_is_saved(seeded, monkeypatch, tmp_path):
+    for name in ("OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_ANALYZER_MODEL_FILE", str(tmp_path / "model.json"))
+    x = window(scripted(says("etl-nightly failed.")))
+    panel = x.panel
+    x.model_button.click()
+    assert "isn&#x27;t saved" in panel.note.value
+    panel.provider_pick.value = "openai"
+    assert "Using it saves it in" in panel.note.value and "readable by you only" in panel.note.value
+    panel.model_box.value, panel.key_box.value = "gpt-4o", "not-a-real-key"
+    panel.use_button.click()
+    assert json.loads((tmp_path / "model.json").read_text())["api_key"] == "not-a-real-key"
 
 
 def test_the_model_settings_ask_for_what_each_provider_takes():

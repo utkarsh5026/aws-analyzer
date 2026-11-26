@@ -66,6 +66,7 @@ from .mcp_servers.config import unique_name
 from .llm import (
     AZURE_API_VERSION,
     DEFAULT_TEMPERATURE,
+    MODEL_ENV,
     answer_cost,
     azure_chat_model,
     azure_settings,
@@ -83,6 +84,7 @@ from .llm import (
     temperature_for,
 )
 from .prompt import asked_at, focus_of, looking_at, system_prompt
+from .saved_model import SavedModel, forget_saved_model, read_saved_model, saved_model_path, write_saved_model
 from .runbooks import runbook_sources
 from .runtime import as_tool
 from .toolkits import (DEFAULT_TOOLKITS, TOOLKITS, InvestigatorToolkit, PythonToolkit, RunbookToolkit, Toolkit,
@@ -100,7 +102,7 @@ if TYPE_CHECKING:
 _THREAD_ID_LENGTH = 12
 _WORKERS = 8
 _MODEL_SETTINGS = ("provider", "model_id", "deployment", "endpoint", "api_version", "_api_key", "_token_provider",
-                   "chat_model", "given_chat_model")
+                   "chat_model", "given_chat_model", "_save_pending")
 
 
 @dataclass
@@ -239,6 +241,12 @@ class AgentAnalyzer(_BaseAnalyzer):
     and GPT-5, told by name) is sent none. A chat_model= passed in keeps its own settings.
     use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
+    Remembering the model: once a model named in the call or in use_model() answers (its chat model is made), its
+    provider, model, endpoint, API version and the key given are saved in ~/.cache/aws-analyzer/agent/model.json
+    (readable by you only; AWS_ANALYZER_MODEL_FILE's path, or the path remember_model= gives), and the next
+    AgentAnalyzer() that names no model and finds no AWS_ANALYZER_AGENT_MODEL answers with it, key and all.
+    remember_model=False neither reads nor saves it, and forget_model() deletes it.
+
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
     the default is DEFAULT_TOOLKITS: Lambda, S3, Bedrock knowledge bases, Step Functions, API Gateway, SageMaker,
     DynamoDB and OpenSearch, with s3_triggers joining the first two). The Lambda toolkit reads through LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
@@ -357,11 +365,14 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         interrupt_on: bool | str | Iterable[str] | None = True,
         ask_more: bool | None = None,
         subagents: bool = False,
+        remember_model: bool | str | os.PathLike = True,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
-        self._set_model(provider, model, deployment=deployment, endpoint=endpoint, api_key=api_key,
-                        api_version=api_version, token_provider=azure_ad_token_provider, chat_model=chat_model)
+        self.model_file = saved_model_path(remember_model)
+        self._start_model(dict(provider=provider, model=model, deployment=deployment, endpoint=endpoint,
+                               api_key=api_key, api_version=api_version, token_provider=azure_ad_token_provider,
+                               chat_model=chat_model))
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.timezone = _checked_zone(timezone)
@@ -427,6 +438,63 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         if chat_model is not None:
             self.given_chat_model = chat_model
 
+    def _start_model(self, given: dict[str, Any]) -> None:
+        """
+        The model settings AgentAnalyzer() starts with: the ones the call gives, else the saved model when there is
+        one and AWS_ANALYZER_AGENT_MODEL names none, else what the environment says. Settings the call gives are
+        saved once their chat model is made.
+        """
+        self.saved_model, self.saved_model_problem = read_saved_model(self.model_file)
+        names_a_model = any(value is not None for name, value in given.items() if name != "api_version")
+        model_in_environment = bool(os.environ.get(MODEL_ENV, "").strip())
+        self.model_from_saved = bool(self.saved_model and not names_a_model and not model_in_environment)
+        if self.model_from_saved:
+            self._set_saved_model(self.saved_model)
+        else:
+            self._set_model(given.pop("provider"), given.pop("model"), **given)
+        self._save_pending = names_a_model and self._is_savable()
+
+    def _set_saved_model(self, saved: SavedModel) -> None:
+        """
+        The model settings the saved file keeps, as if they'd been passed to AgentAnalyzer().
+        """
+        self._set_model(saved.provider, saved.model or None, deployment=saved.deployment or None,
+                        endpoint=saved.endpoint or None, api_key=saved.api_key or None,
+                        api_version=saved.api_version or None, token_provider=None, chat_model=None)
+
+    def _is_savable(self) -> bool:
+        """
+        Whether the model settings can be written down: not a chat model passed in, nor an Azure token provider.
+        """
+        return bool(self.provider) and self.chat_model is None and self._token_provider is None
+
+    def _remember_model(self) -> None:
+        """
+        Saves the model it answers with, once its chat model is made, when it was named in the call or in
+        use_model(). A file that can't be written is noted in saved_model_problem: answering goes on.
+        """
+        if not self._save_pending or self.model_file is None:
+            return
+        self._save_pending = False
+        saved = SavedModel(provider=self.provider, model=self.model_id or "", deployment=self.deployment or "",
+                           endpoint=self.endpoint or "", api_version=self.api_version or "",
+                           api_key=self._api_key or "", saved_at=_utcnow().isoformat(timespec="seconds"))
+        try:
+            write_saved_model(self.model_file, saved)
+        except OSError as exc:
+            self.saved_model_problem = f"The model couldn't be saved in {self.model_file}: {exc}"
+            return
+        self.saved_model, self.saved_model_problem = saved, ""
+
+    def forget_model(self) -> bool:
+        """
+        Deletes the saved model (its key too), so the next agent answers with what it's given or the environment
+        says; whether there was one. The model it answers with now stays until use_model().
+        """
+        forgotten = forget_saved_model(self.model_file)
+        self.saved_model, self.saved_model_problem, self.model_from_saved = None, "", False
+        return forgotten
+
     def use_model(  # noqa: PLR0913
         self,
         provider: str | None = None,
@@ -454,6 +522,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
             self._api_key, self._token_provider = before["_api_key"], before["_token_provider"]
         if self.endpoint != before["endpoint"]:
             self._clients.pop("bedrock-runtime", None)
+        self._save_pending = self._is_savable()
         try:
             self._chat()
         except Exception:
@@ -686,6 +755,7 @@ has it answer in plain text, as does a model that can't be made to call a tool.
         """
         if self.chat_model is None:
             self.chat_model = self._new_chat_model()
+            self._remember_model()
         return self.chat_model
 
     def _new_chat_model(self) -> Any:

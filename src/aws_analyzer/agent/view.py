@@ -73,6 +73,7 @@ from .mcp_servers import (
 )
 from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
 from .runbooks import RUNBOOK_FILE, runbook_findings
+from .saved_model import saved_model_note
 
 if TYPE_CHECKING:
     from .window import _AgentChat
@@ -416,12 +417,12 @@ class AgentView(_BaseView):
         "🔎 Look back": ("transcript", "save_charts"),
         "🗂 Saved chats": ("chats", "open_chat", "rename_chat", "delete_chat"),
         "🧠 Memory": ("memory", "forget", "forget_all"),
-        "🔑 Set up": ("setup", "use_model"),
+        "🔑 Set up": ("setup", "use_model", "forget_model"),
         "🧰 What it can do": ("tools", "runbooks"),
         "🔌 MCP servers": ("mcp", "add_mcp", "remove_mcp", "enable_mcp", "disable_mcp", "reconnect_mcp", "import_mcp"),
         "❓ Help": ("help", "next"),
     }
-    _CHANGES = frozenset({"save_charts", "add_mcp", "remove_mcp", "import_mcp", "forget", "forget_all", "rename_chat",
+    _CHANGES = frozenset({"save_charts", "forget_model", "add_mcp", "remove_mcp", "import_mcp", "forget", "forget_all", "rename_chat",
                           "delete_chat"})
     _START = (
         ("setup()", "set up the model it answers with: the steps to copy, checked against this notebook"),
@@ -744,7 +745,8 @@ class AgentView(_BaseView):
         Switches the model the agent answers with, then says where what it sends goes and how its tokens are priced:
         use_model('bedrock', 'sonnet'), use_model('openai', 'gpt-4.1', api_key=...), use_model('azure', 'prod-gpt-4o',
         endpoint=...), or any LangChain provider. The chat window's ⚙ model does the same by clicking. A new
-        conversation starts, and a key or package that's missing is said here, keeping the model it had.
+        conversation starts, and a key or package that's missing is said here, keeping the model it had. The model
+        and the key given are saved for the next agent you start (forget_model() deletes them).
         """
         if self._busy_window() is not None:
             raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then switch.")
@@ -753,8 +755,26 @@ class AgentView(_BaseView):
                        chat_model=chat_model)
         self._tell_windows("model_changed")
         place = model_place(core.provider, core.model, core.endpoint)
-        self._show([_Note(f"Now answering with {core.model} ({provider_info(core.provider).title}): what it sends "
-                          f"goes to {place}. A new conversation starts with the next question.", "ok")])
+        blocks = [_Note(f"Now answering with {core.model} ({provider_info(core.provider).title}): what it sends "
+                        f"goes to {place}. A new conversation starts with the next question.", "ok")]
+        saved = saved_model_note(core.saved_model, core.model_file, core.saved_model_problem)
+        if saved:
+            blocks.append(_Note(saved))
+        self._show(blocks)
+
+    @_friendly_errors
+    def forget_model(self) -> None:
+        """
+        Deletes the saved model and its key (~/.cache/aws-analyzer/agent/model.json), so the next agent you start
+        answers with what it's given or what the environment says. The model it answers with now stays.
+        """
+        path = self.core.model_file
+        if not self.core.forget_model():
+            where = f"in {path}" if path else "(remember_model=False)"
+            self._show([_Note(f"No model is saved {where}: nothing to forget.")])
+            return
+        self._show([_Note(f"Forgot the saved model: {path} is deleted. The next AgentView() answers with the model "
+                          "it's given, or the one the environment names.", "ok")])
 
     @_friendly_errors
     def transcript(self) -> None:
@@ -1428,6 +1448,9 @@ class AgentView(_BaseView):
                    sortable=False),
             _Title(picked.title, "the steps to copy, checked against this notebook"),
         ]
+        saved = saved_model_note(self.core.saved_model, self.core.model_file, self.core.saved_model_problem)
+        if saved:
+            blocks.insert(2, _Note(saved))
         blocks += self._provider_setup_blocks(picked)
         blocks.append(_Next([*((f"setup('{name}')", f"the steps for {provider_title(name)}") for name in others),
                              ("tools()", "the model it picked, and what it can call")]))
