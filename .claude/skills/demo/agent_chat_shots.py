@@ -170,7 +170,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     shot("agent-chat-start")
     if "agent-chat-model" in wanted:
         page.locator(".agc-app .agc-head .agc-new", has_text="model").click()
-        page.locator(".agc-app .agc-set select").select_option(label="Amazon Bedrock")
+        page.locator(".agc-app .agc-set .agc-provider select").select_option(label="Amazon Bedrock")
         page.wait_for_function("!document.querySelector('.agc-app .ag-sn').textContent.includes('Listing')",
                                timeout=30_000)
         shot("agent-chat-model")

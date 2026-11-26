@@ -37,8 +37,11 @@ Quick start
     agent.ask("Were last night's uploads to acme-raw processed?")   # S3 and Lambda together
     agent.new_conversation()                             # forget it
     agent.tools()                                        # what it can call, its model and its budget
-    agent.use_model("openai", "gpt-4.1", api_key=key)    # another model, saved for the next AgentView()
-    agent.forget_model()                                 # delete the saved model and its key
+    agent.use_model("openai", "gpt-4.1", api_key=key, name="work gpt")   # saved for the next AgentView()
+    agent.saved_models()                                 # every model saved, by name
+    agent.use_saved_model("work gpt")                    # switch back to one, key and all
+    agent.model_names()                                  # cute names from its words: 'GPT Gecko', 'Gentle GPT'
+    agent.forget_model("work gpt")                       # forget one and its key (forget_model(): every one)
     agent.transcript()                                   # every question and answer so far, with their cost
     agent = AgentView(memory=True, notes="AGENTS.md")    # it keeps notes between conversations; yours from a file
     agent.memory()                                       # what it remembers about this account
@@ -87,8 +90,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      model's reply (its final_answer: the answer and its findings).
     memory.py        What it remembers between conversations (memory=True): its notes about the account, on a
                      deepagents StoreBackend in a local SQLite file, secrets hidden, one set per AWS account.
-    saved_model.py   The model it answered with last (remember_model=True): provider, model, endpoint and the key
-                     given, in a JSON file readable by its owner only, so the next AgentView() needs no set-up.
+    saved_model.py   The models it has answered with (remember_model=True), by name: provider, model, endpoint and
+                     the key given, in a JSON file readable by its owner only, so the next AgentView() needs no
+                     set-up; model_names.py suggests names from a model's words ('Haiku Hummingbird').
     chats.py         The saved chats (chats=True): every conversation kept with a title in a local SQLite file, its
                      answers as JSON and LangGraph's checkpoints, so a chat opened again carries on.
     runbooks/        Step-by-step guides for common problems (runbooks=): each a folder with a SKILL.md, the
@@ -187,7 +191,8 @@ from .llm import (
     pick_provider,
     temperature_for,
 )
-from .saved_model import MODEL_FILE, SavedModel, read_saved_model, saved_model_note
+from .model_names import model_keywords, suggest_names
+from .saved_model import MODEL_FILE, SavedModel, SavedModels, read_saved_models, saved_model_note
 from .chats import DEFAULT_CHATS, ChatSummary, answer_from_record, answer_record, chat_title, find_chats
 from .model_setup import OTHER_SETUPS, SETUPS, ProviderSetup, SetupVar, provider_setup, setup_findings
 from .memory import DEFAULT_MEMORY, MemoryState, Note, drop_notes, memory_findings, parse_notes, stamp_notes
@@ -389,7 +394,10 @@ __all__ = [
     "memory_findings",
     "MODEL_FILE",
     "SavedModel",
-    "read_saved_model",
+    "SavedModels",
+    "read_saved_models",
+    "suggest_names",
+    "model_keywords",
     "saved_model_note",
     "DEFAULT_CHATS",
     "ChatSummary",

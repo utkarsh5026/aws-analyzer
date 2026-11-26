@@ -943,12 +943,14 @@ class _AgentChat(_Window):
 
     def _model_where(self) -> str:
         """
-        The model and who serves it: 'claude-haiku-4-5 @ bedrock', 'gpt-test @ Scripted', or that there's none.
+        The model and who serves it, after the name it's saved under: 'Haiku Hummingbird · claude-haiku-4-5 @
+        bedrock', 'gpt-test @ Scripted', or that there's none.
         """
         core = self.view.core
         served = core.provider or (type(core.chat_model).__name__ if core.chat_model is not None else "")
         model = shown_model(core.provider, core.model) or "no model set up"
-        return f"{model} @ {served}" if served else model
+        where = f"{model} @ {served}" if served else model
+        return f"{core.model_label} · {where}" if core.model_label else where
 
     def _title_html(self) -> str:
         """
@@ -1088,6 +1090,13 @@ class _AgentChat(_Window):
         self._set(self.title, self._title_html())
         if self.chats_panel.is_open:
             self.chats_panel.refresh()
+
+    def models_saved(self) -> None:
+        """
+        A saved model was renamed or forgotten (rename_model(), forget_model()): the head and the settings show it.
+        """
+        self._set(self.title, self._title_html())
+        self.panel.refresh()
 
     def model_changed(self) -> None:
         """

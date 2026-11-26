@@ -11,10 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🤖 **Agent: remembers the model and key you set up** ([#294](https://github.com/utkarsh5026/aws-analyzer/pull/294))
-  - The model `use_model()` or ⚙ model switches to, with its key, is saved and used by the next `AgentView()`.
-  - Kept in `~/.cache/aws-analyzer/agent/model.json`, readable by you only; `forget_model()` deletes it.
-  - `AgentView(remember_model=False)` or `AWS_ANALYZER_MODEL_FILE=off` turns it off.
+- 🤖 **Agent: remembers your models and keys, by name** ([#294](https://github.com/utkarsh5026/aws-analyzer/pull/294))
+  - The model `use_model()` or ⚙ model switches to is saved with its key; the next `AgentView()` starts on it.
+  - Name it yourself or pick a suggestion like *Haiku Hummingbird*; `use_saved_model('work gpt')` switches back.
+  - `saved_models()` lists them, `forget_model()` forgets them; `remember_model=False` turns it off.
 
 ## [0.65.0] - 2026-11-26
 

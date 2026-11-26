@@ -2589,7 +2589,7 @@ window.AA_CLIPS = {
   "scenes": [
    {
     "kind": "cell",
-    "dur": 10.6,
+    "dur": 11.4,
     "chapter": "Ask in plain English",
     "label": "Ask in plain English",
     "code": "agent.chat()",
@@ -2597,7 +2597,7 @@ window.AA_CLIPS = {
      {
       "img": "agent-chat-model",
       "w": 1476,
-      "h": 1445
+      "h": 1556
      }
     ],
     "captions": [
