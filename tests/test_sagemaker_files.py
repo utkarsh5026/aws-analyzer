@@ -215,6 +215,9 @@ def test_the_agent_searches_the_notebooks_files_and_reads_one(agent):
     page = tool(agent, "read_notebook_file")("churn/train.py", lines="4")
     assert page["total_lines"] == 7 and ">> 4: def load_orders(day):" in page["lines"]
     assert page["lines"][-1] == "7: API_KEY = '[hidden]'" and "next" not in page
+    kit = agent.toolkit("sagemaker")
+    assert kit.read_notebook_file("churn/train.py", lines="4")["_summary"] == "churn/train.py: lines 1-7"
+    assert kit.read_notebook_file(".env")["_summary"].startswith(".env looks like a secrets file")
     assert "secrets file" in tool(agent, "read_notebook_file")(".env")["note"]
 
 

@@ -640,7 +640,8 @@ Amazon SageMaker
         """
         text = self.analyzer.read_file(str(file or "").strip())
         out = summarize_file_text(text, lines=str(lines or ""))
-        out["_summary"] = _clip(out.get("note") or f"{out['file']}: {out.get('showing', '')}", 80)
+        showing = out.get("showing")
+        out["_summary"] = _clip(f"{out['file']}: {showing}" if showing else out.get("note", ""), 80)
         return out
 
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:
