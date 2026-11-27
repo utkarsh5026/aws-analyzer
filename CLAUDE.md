@@ -1115,8 +1115,10 @@ functions); a test patches a name in the module that looks it up (`harness._hide
   behind a failed step or call (by the request ID the history or access log records) is read like the Lambda tools
   read it, and each result names `lambda_run: {function, request_id}` for `function_logs(search=)`; API Gateway's
   `permission_for` is `apigateway:GET` for every read. `SageMakerToolkit` (`sagemaker_tools.py`: `sagemaker_running`,
-  `training_jobs`, `training_job`, `sagemaker_endpoints`, `sagemaker_pipelines`, `pipeline_run`; the account, never the
-  notebook's own machine), `DynamoDBToolkit` (`dynamodb_tools.py`: `find_tables`, `table_details`, `table_shape`, a
+  `training_jobs`, `training_job`, `sagemaker_endpoints`, `sagemaker_pipelines`, `pipeline_run`, the account; and
+  `search_notebook_files` / `read_notebook_file`, the notebook's own files like a smart grep and `sed -n`, over
+  `SageMakerAnalyzer.search_files()` / `read_file()`: `files.py`'s `_FileReads`, whose pure side is
+  `analysis/search.py`, never reading a secrets file, a credentials folder, `/proc` or a Python environment), `DynamoDBToolkit` (`dynamodb_tools.py`: `find_tables`, `table_details`, `table_shape`, a
   parallel Scan capped by the budget's `dynamodb_items`, its read units added to the question's AWS cost, sending only
   attribute types, counts, number ranges, lengths and key shapes, never a value; the guard's `SEARCHES` let
   `dynamodb:Scan` through by name) and `OpenSearchToolkit` (`opensearch_tools.py`: `find_vector_stores`,

@@ -15,6 +15,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - The model `use_model()` or ⚙ model switches to is saved with its key; the next `AgentView()` starts on it.
   - Name it yourself or pick a suggestion like *Haiku Hummingbird*; `use_saved_model('work gpt')` switches back.
   - `saved_models()` lists them, `forget_model()` forgets them; `remember_model=False` turns it off.
+- 🤖 **Agent: searches your SageMaker notebook's files**
+  - Ask "which notebook reads churn.csv?" or "where did that KeyError come from?": it searches notebooks, scripts, data and configs.
+  - Every word must be in the file; notebooks are read cell by cell, outputs and errors too; close spellings when nothing matches.
+  - Never reads `.env` or key files, `.aws` / `.ssh`, `/proc` or Python environments, and hides secrets in what it reads.
 
 ## [0.65.0] - 2026-11-26
 
