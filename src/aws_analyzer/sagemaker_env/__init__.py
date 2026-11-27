@@ -65,7 +65,7 @@ from .models import (
     AccessEvent, AccessReport, PersonAccess, Billable, Clearable, DiskEntry, DiskReport, EnvPlan, EnvReport, EnvResult, EnvStep, Environment, GPUInfo,
     InstanceReport, KernelSpec, Machine, NotebookInfo, ProcessInfo, PythonEnv, RunningReport, Volume,
     EndpointReport, EndpointUse, HostLine, HostLog, PipelineInfo, PipelineRun, PipelineRunSummary, PipelinesReport,
-    PipelineStep, StatusChange, TrainingDetail, TrainingJob, TrainingList,
+    PipelineStep, StatusChange, TrainingDetail, TrainingJob, TrainingList, FileHit, FileSearch, FileText, LineHit,
 )
 from .analysis.training import (
     LOG_LINES, MOST_HOSTS, TRAINING_LOG_GROUP, failure_kind, find_error, host_log, host_of, parse_training_detail,
@@ -96,6 +96,11 @@ from .analysis.envs import (
     kernels_lifecycle, lost_envs, on_start_script, output_tail, package_list, parse_conda_history, plan_findings,
     step_command,
 )
+from .analysis.search import (
+    FILE_KINDS, FileQuery, close_words, file_kind, hit_score, is_environment, is_secret_file, is_skipped_folder,
+    match_file, near_misses, notebook_rows, parse_file_query, rank_hits, text_rows, wants_file,
+)
+from .files import MOST_HITS
 from .machine import METADATA_FILE
 from .analyzer import SageMakerAnalyzer
 from .view import SageMakerView
@@ -246,4 +251,24 @@ __all__ = [
     "step_command",
     "stop_command",
     "studio_idle",
+    "FileHit",
+    "FileSearch",
+    "FileText",
+    "LineHit",
+    "FILE_KINDS",
+    "FileQuery",
+    "MOST_HITS",
+    "close_words",
+    "file_kind",
+    "hit_score",
+    "is_environment",
+    "is_secret_file",
+    "is_skipped_folder",
+    "match_file",
+    "near_misses",
+    "notebook_rows",
+    "parse_file_query",
+    "rank_hits",
+    "text_rows",
+    "wants_file",
 ]

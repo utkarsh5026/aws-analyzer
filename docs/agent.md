@@ -389,6 +389,8 @@ Eighteen read-only tools over Lambda and S3, seven for [Bedrock knowledge bases]
     | `training_job(name)` | One job: why it failed and what to change, how long each stage took, its cost, and the error each instance's log ends in |
     | `sagemaker_endpoints(days)` | Every endpoint's monthly cost, requests and 5xx errors, and the idle ones |
     | `sagemaker_pipelines()` and `pipeline_run(pipeline, run)` | How the latest runs went, and one run step by step: the step that broke and the training job it started |
+    | `search_notebook_files(text, folder, files, regex, limit)` | This notebook's own files that hold every word, like a smart grep, the best first: notebooks cell by cell with their outputs and errors, scripts, data, configs and logs, each with its best lines; close spellings and near misses when nothing holds them all. Secrets files, credentials folders and Python environments are never read |
+    | `read_notebook_file(file, lines)` | One of those files numbered like `sed -n`, a notebook as its cells and outputs; `lines='42'` reads around a match |
 
     **DynamoDB**, which never sends an item's values to the model:
 

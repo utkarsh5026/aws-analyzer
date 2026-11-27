@@ -27,6 +27,7 @@ from .analysis.running import parse_endpoint, parse_processing_job, parse_traini
 from .machine import _MachineReads
 from .envs import _EnvMaking, _EnvReads
 from .jobs import _JobReads
+from .files import _FileReads
 
 
 def _missing(exc: ClientError) -> bool:
@@ -40,7 +41,7 @@ def _missing(exc: ClientError) -> bool:
     )
 
 
-class SageMakerAnalyzer(_MachineReads, _EnvReads, _EnvMaking, _JobReads, _BaseAnalyzer):
+class SageMakerAnalyzer(_MachineReads, _FileReads, _EnvReads, _EnvMaking, _JobReads, _BaseAnalyzer):
     """
     Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted. The one
     method that makes anything is create_env(), which runs the commands of an env_plan() (a Python environment and its

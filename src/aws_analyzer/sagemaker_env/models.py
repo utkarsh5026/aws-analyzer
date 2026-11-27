@@ -1019,3 +1019,80 @@ class PipelineRun:
             return None
         end = self.modified if self.is_finished else None
         return ((end or now or _utcnow()) - self.started).total_seconds()
+
+
+@dataclass
+class LineHit:
+    """
+    One matching line of a file search_files() read: its number in the file's text (a notebook's as read_file()
+    shows it), the text, how many of the search's words it holds, the notebook cell it's in ('cell 4', 'cell 4
+    output'; '' for other files) and the lines around it as (number, text).
+    """
+
+    line: int
+    text: str
+    terms: int
+    cell: str = ""
+    context: list[tuple[int, str]] = field(default_factory=list)
+
+
+@dataclass
+class FileHit:
+    """
+    One file search_files() found: its path from the folder searched, its kind ('notebook', 'python', 'data', ...),
+    size and last change, its best matching lines, how many lines matched in all, whether its path holds words of
+    the search, the words it lacks (a near miss when there are any) and why it was only partly read.
+    """
+
+    path: str
+    kind: str
+    size: int
+    modified: datetime | None
+    lines: list[LineHit] = field(default_factory=list)
+    matching_lines: int = 0
+    in_name: bool = False
+    missing: list[str] = field(default_factory=list)
+    score: float = 0.0
+    note: str = ""
+
+
+@dataclass
+class FileSearch:
+    """
+    search_files()'s answer: the files under a folder of this notebook that hold every word of a search (hits,
+    the best first), and when none does, the files that hold most of them (near) and close spellings of the words
+    nowhere (suggestions); with what was walked and read, what was left out and why (skipped: reason -> files), the
+    disks it didn't cross onto, and why it stopped early (cut_short).
+    """
+
+    query: str
+    folder: str
+    regex: bool = False
+    files: str = ""
+    hits: list[FileHit] = field(default_factory=list)
+    near: list[FileHit] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
+    files_seen: int = 0
+    files_read: int = 0
+    bytes_read: int = 0
+    skipped: dict[str, int] = field(default_factory=dict)
+    other_disks: list[str] = field(default_factory=list)
+    cut_short: str = ""
+    seconds: float = 0.0
+
+
+@dataclass
+class FileText:
+    """
+    read_file()'s answer: one file of this notebook as lines of text (a notebook's cells and their text outputs,
+    each cell under a '# %% cell 3 [code]' line), its kind, size and last change, whether only its start was read,
+    or a note saying why it wasn't read (a folder, a binary or a secrets file).
+    """
+
+    path: str
+    kind: str = ""
+    size: int = 0
+    modified: datetime | None = None
+    lines: list[str] = field(default_factory=list)
+    cut_short: bool = False
+    note: str = ""

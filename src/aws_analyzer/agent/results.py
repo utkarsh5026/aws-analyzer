@@ -15,6 +15,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from .._kit.errors import _why
+from .._kit.text import _clip
 
 _SECRETS = (
     (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[access key hidden]"),
@@ -38,6 +39,51 @@ def hide_secrets(text: Any) -> str:
     for pattern, replacement in _SECRETS:
         out = pattern.sub(replacement, out)
     return out
+
+
+_LINES_AROUND = 12
+
+_MOST_LINES = 300
+
+_LINE_CHARACTERS = 300
+
+_LINES_RE = re.compile(r"^\s*(\d+)\s*(?:[-,:]\s*(\d*)\s*)?$")
+
+
+def _numbered(lines: list[str], numbers: list[int], marked: set[int]) -> list[str]:
+    """
+    Lines by number (1-based) as '42: text', secrets hidden, '>> ' before the marked ones and '...' where numbers
+    skip.
+    """
+    numbered = []
+    previous = None
+    for number in numbers:
+        if previous is not None and number > previous + 1:
+            numbered.append("...")
+        text = hide_secrets(_clip(lines[number - 1].rstrip(), _LINE_CHARACTERS))
+        numbered.append(f"{'>> ' if number in marked else ''}{number}: {text}")
+        previous = number
+    return numbered
+
+
+def _asked_lines(spec: str, total: int) -> tuple[int, int, set[int]]:
+    """
+    The lines a read call (function_source, read_notebook_file) asks for, as (first, last, marked): '' the file's
+    start, '42' the lines around line 42 (marked), '150-300' (or sed's '150,300') that range and '150-' from line 150
+    on, each at most _MOST_LINES long. A ValueError says what it takes.
+    """
+    if not spec.strip():
+        return 1, min(total, _MOST_LINES), set()
+    match = _LINES_RE.match(spec)
+    if not match:
+        raise ValueError(f"lines={spec!r} isn't a line or a range: give one line ('42') or a range ('150-300')")
+    first = int(match[1])
+    if match[2] is None:
+        return max(1, first - _LINES_AROUND), min(total, first + _LINES_AROUND), {first}
+    last = int(match[2]) if match[2] else first + _MOST_LINES - 1
+    if last < first:
+        raise ValueError(f"lines={spec!r} ends before it starts: give a range like '150-300'")
+    return first, min(total, last, first + _MOST_LINES - 1), set()
 
 
 _SHARE_DIGITS = 1

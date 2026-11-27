@@ -22,7 +22,7 @@ from aws_analyzer.agent import (
 from aws_analyzer.agent.toolkits.apigateway_tools import APIGatewayToolkit
 from aws_analyzer.agent.window.chat import _SERVICES, _badges, _tool_words
 from aws_analyzer.agent.window.tool_words import _TOOL_WORDS
-from aws_analyzer.agent.answers import ToolCall
+from aws_analyzer.agent.answers import ToolCall, services_of
 from aws_analyzer.apigateway import APIGatewayAnalyzer
 from aws_analyzer.lambda_functions import LambdaAnalyzer
 from aws_analyzer.opensearch import OpenSearchAnalyzer
@@ -57,7 +57,7 @@ def test_each_toolkit_has_a_badge_and_words_in_the_window():
     for name in NEW_KITS:
         kit = AgentAnalyzer(region=REGION, toolkits=[name]).toolkit(name)
         assert all(fn.__name__ in _TOOL_WORDS for fn in kit.tools())
-        assert {read.split(":", 1)[0] for reads in kit.reads.values() for read in reads} <= set(_SERVICES)
+        assert {service for reads in kit.reads.values() for service in services_of(reads)} <= set(_SERVICES)
     assert _badges(["es", "aoss", "lambda"]).count('class="ag-svc ') == 2
     running = ToolCall("execution_details", {"execution": "order-pipeline/ord-7f3a"}, first="execution")
     assert _tool_words(running, running=True) == "following order-pipeline/ord-7f3a step by step"
