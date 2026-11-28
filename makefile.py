@@ -9,6 +9,7 @@ machines that have make, and this file runs them on machines that don't (Windows
     python makefile.py build                 # the PyPI sdist and wheel in dist/, checked by twine
     python makefile.py docs                  # the guide site, built the way the Docs workflow builds it
     python makefile.py docs-serve            # preview the guide at http://127.0.0.1:8000
+    python makefile.py web                   # build the web page (web/) into server/static/dist/ (needs Node)
     python makefile.py demo s3               # a service's reports on demo data in moto (no AWS account needed)
     python makefile.py local                 # try the package as pip would install it, without publishing it
     python makefile.py local --live --profile dev   # ... and against your own AWS account (read-only)
@@ -71,8 +72,9 @@ CONDA_PYTHONS = ["/opt/conda/bin/python", "~/anaconda3/bin/python", "~/anaconda3
                  "~/miniconda3/bin/python"]
 NOTEBOOK_INSTANCE_CONDA_ENVS = Path("/home/ec2-user/anaconda3/envs")
 KERNEL_NAME_UNSAFE = re.compile(r"[^a-z0-9._-]+")
+WEB = ROOT / "web"
 BUILT_FOLDERS = [LOCAL, ROOT / "dist", ROOT / "build", ROOT / "site", ROOT / ".pytest_cache", ROOT / ".ruff_cache",
-                 ROOT / "htmlcov"]
+                 ROOT / "htmlcov", WEB / "node_modules"]
 BUILT_PATTERNS = ["src/*.egg-info", "**/__pycache__"]
 SANDBOX_CACHE_NAME = "aws-analyzer"
 TEST_PYODIDE_ENV = "AWS_ANALYZER_TEST_PYODIDE"
@@ -337,6 +339,26 @@ def task_docs_serve(args: argparse.Namespace, extra: list[str]) -> int:
     if not has_module(sys.executable, "mkdocs"):
         return missing("mkdocs", DOCS_REQUIREMENTS)
     return run([sys.executable, "-m", "mkdocs", "serve", *extra])
+
+
+def task_web(args: argparse.Namespace, extra: list[str]) -> int:
+    """
+    Builds the web page (web/: Preact and TypeScript) into src/aws_analyzer/server/static/dist/, which is committed
+    so pip installs need no Node: installs web/'s pinned packages the first time, checks it (types, Biome, Vitest),
+    then builds it. Commit dist/ with the change; tests/test_server.py fails while it's older than web/.
+    """
+    npm = shutil.which("npm")
+    if not npm:
+        print("make web needs Node.js 20.19 or newer, with npm: https://nodejs.org/en/download")
+        return 1
+    if not (WEB / "node_modules").exists():
+        installed = run([npm, "ci"], cwd=WEB)
+        if installed:
+            return installed
+    checked = run([npm, "run", "check"], cwd=WEB)
+    if checked:
+        return checked
+    return run([npm, "run", "build", *extra], cwd=WEB)
 
 
 def tour_for(service: str) -> Tour | None:
@@ -1114,6 +1136,7 @@ TASKS = {
     "build": task_build,
     "docs": task_docs,
     "docs-serve": task_docs_serve,
+    "web": task_web,
     "demo": task_demo,
     "local": task_local,
     "local-agent": task_local_agent,

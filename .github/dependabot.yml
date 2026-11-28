@@ -1,5 +1,5 @@
 # Dependabot opens pull requests that bump the pins in requirements-dev.txt,
-# requirements-docs.txt and the actions used in .github/workflows. CI (and, for the docs
+# requirements-docs.txt, the web page's web/package.json and the actions used in .github/workflows. CI (and, for the docs
 # pins, the Docs workflow) runs on each one before it is merged.
 # Options: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
@@ -31,6 +31,19 @@ updates:
       # Minor and patch updates share one pull request. Major updates each get their own,
       # so one breaking upgrade doesn't hold back the rest.
       python-packages:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # The web page (web/). Its build is committed (src/aws_analyzer/server/static/dist/), so a bump's pull request
+  # fails CI's Web page job until `make web` is run and dist/ committed on it.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      web-packages:
         patterns: ["*"]
         update-types: [minor, patch]
 

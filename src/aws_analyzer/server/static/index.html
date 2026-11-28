@@ -7,31 +7,10 @@
 <meta name="aws-analyzer-version" content="__VERSION__">
 <title>aws-analyzer</title>
 <link rel="icon" href="static/icons/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="static/app.css">
-<script type="module" src="static/app.js"></script>
+__ASSETS__
 </head>
 <body>
-<header class="aa-bar">
-  <a class="aa-brand" href="#/"><span class="aa-mark" aria-hidden="true"></span>aws-analyzer <span class="aa-ver">__VERSION__</span></a>
-  <button class="aa-find" type="button" id="find" aria-keyshortcuts="Control+K Meta+K">
-    <span>Find a command…</span><kbd>Ctrl K</kbd>
-  </button>
-  <span class="aa-where" id="where"></span>
-</header>
-<div class="aa-shell">
-  <nav class="aa-side" id="side" aria-label="Services"></nav>
-  <main class="aa-main" id="main" tabindex="-1">
-    <p class="aa-loading">Loading the services…</p>
-  </main>
-</div>
-<div class="aa-palette" id="palette" hidden>
-  <div class="aa-palette-box" role="dialog" aria-modal="true" aria-label="Find a command">
-    <input id="palette-input" type="search" placeholder="A command or what you want to see: errors, largest files…"
-           autocomplete="off" spellcheck="false">
-    <ul id="palette-list" role="listbox"></ul>
-    <p class="aa-palette-hint">↑ ↓ to move · Enter to open · Esc to close</p>
-  </div>
-</div>
+<div id="app"><p class="aa-loading">Loading the services…</p></div>
 <noscript><p class="aa-loading">This page needs JavaScript. The same reports are in the notebook: <code>LambdaView().help()</code>.</p></noscript>
 </body>
 </html>

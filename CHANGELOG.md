@@ -9,6 +9,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Fixed
+
+- 🧰 **Browser tab: a list typed in a form keeps its commas in the call** ([#301](https://github.com/utkarsh5026/aws-analyzer/pull/301))
+  - `['a', 'b']` in a box now shows as `['a', 'b']` in the call to copy, not `['a' 'b']`; what ran was already right.
+
 ## [0.67.0] - 2026-11-28
 
 ### Added

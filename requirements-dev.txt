@@ -38,6 +38,9 @@ mcp==1.30.0
 fastapi==0.165.0
 uvicorn==0.54.0
 httpx==0.29.0
+# The page's tests (tests/test_web_page.py) drive Chromium with Playwright; they skip until its browser is installed
+# (python -m playwright install chromium), except in CI's Page tests job, which installs it.
+playwright==1.65.2
 # Optional for users (agent/sandboxes/: the local sandbox runs Python in Pyodide on Deno); installed here so it's
 # tested for real. Its tests download Pyodide's files once a run (CI caches them), and skip without the internet.
 deno==2.9.8

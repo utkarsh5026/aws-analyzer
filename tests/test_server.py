@@ -1,13 +1,15 @@
 """
 aws-analyzer serve (src/aws_analyzer/server/): the commands the page offers, how its boxes become arguments, the
 runner on moto's S3, the FastAPI app (its token, its headers, its answers), the address it prints on SageMaker and
-the terminal command. The page's own script is driven in a real browser by hand (see CLAUDE.md), not here.
+the terminal command. The page itself is driven in a real browser in tests/test_web_page.py.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +24,9 @@ from moto import mock_aws
 from aws_analyzer.lambda_functions import LambdaView
 from aws_analyzer.s3 import S3Analyzer, S3View
 from aws_analyzer.server import cli, ping
+from aws_analyzer.server import app as app_module
 from aws_analyzer.server.app import POLICY, TOKEN_HEADER, create_app
+from aws_analyzer.server.assets import DIST, MissingBuild, PageAssets, page_assets
 from aws_analyzer.server.catalog import (
     NOT_SERVED, SERVICES, Parameter, argument_value, served_names, view_commands,
 )
@@ -32,6 +36,8 @@ from aws_analyzer.server.runner import CantRun, ReportRunner, Settings, _form_ar
 TOKEN = "t0ken-for-tests"
 BUCKET = "acme-lake"
 STATIC = Path(__file__).resolve().parents[1] / "src" / "aws_analyzer" / "server" / "static"
+WEB = Path(__file__).resolve().parents[1] / "web"
+BUILD_SETTINGS = ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts", "sources.ts")
 
 
 @pytest.fixture
@@ -206,7 +212,8 @@ def test_the_api_needs_the_token_in_its_header(client):
 
 
 def test_every_answer_runs_only_the_servers_own_scripts(client):
-    for response in (client.get("/"), client.get("/static/app.js"), client.get("/api/catalog")):
+    script = f"/static/dist/{page_assets().scripts[0]}"
+    for response in (client.get("/"), client.get(script), client.get("/api/catalog")):
         assert response.headers["content-security-policy"] == POLICY
         assert response.headers["x-content-type-options"] == "nosniff"
     assert "script-src 'self';" in POLICY and "unsafe-eval" not in POLICY
@@ -234,12 +241,64 @@ def test_running_from_the_page(client):
 
 def test_the_pages_files_are_served_and_what_it_names_is_there(client):
     page = client.get(f"/?token={TOKEN}").text
-    assert client.get("/static/app.js").status_code == 200
+    built = page_assets()
+    assert built.scripts and built.styles
+    for path in built.scripts + built.styles:
+        assert f'"static/dist/{path}"' in page and client.get(f"/static/dist/{path}").status_code == 200
+    assert '<div id="app">' in page and "__ASSETS__" not in page
     for service in SERVICES:
         assert (STATIC / "icons" / f"{service.icon}.svg").exists()
-    for name in ("app.css", "app.js", "icons/favicon.svg"):
-        assert f"static/{name}" in page or name.startswith("icons/") and (STATIC / name).exists()
+    assert client.get("/static/icons/favicon.svg").status_code == 200
     assert client.get("/static/../app.py").status_code == 404
+
+
+def _source_hash(web: Path) -> str:
+    """
+    web/sources.ts's sourceHash, in Python: every file under web/src but tests, and the build's settings, sorted by
+    their path from web/, each as its path, a newline, the SHA-256 of its bytes (Windows line endings made Unix
+    ones) and a newline.
+    """
+    sources = [path.relative_to(web).as_posix() for path in (web / "src").rglob("*") if path.is_file()]
+    sources = [path for path in sources if not re.search(r"\.test\.tsx?$", path)]
+    digest = hashlib.sha256()
+    for path in sorted(sources + list(BUILD_SETTINGS)):
+        unix = (web / path).read_bytes().replace(b"\r\n", b"\n")
+        digest.update(f"{path}\n{hashlib.sha256(unix).hexdigest()}\n".encode())
+    return digest.hexdigest()
+
+
+NEEDS_WEB = pytest.mark.skipif(not WEB.exists(), reason="web/ isn't here (an sdist ships only its build)")
+
+
+@NEEDS_WEB
+def test_the_committed_build_is_made_from_the_web_sources_as_they_are():
+    built_from = (DIST / "sources.sha256").read_text().strip()
+    assert built_from == _source_hash(WEB), (
+        "src/aws_analyzer/server/static/dist/ was built from other sources than web/ holds: run `make web` (or "
+        "`npm run build` in web/) and commit dist/ with the change.")
+
+
+@NEEDS_WEB
+def test_the_build_settings_the_hash_reads_are_the_ones_web_lists():
+    listed = re.search(r"BUILD_SETTINGS = \[([^\]]*)\]", (WEB / "sources.ts").read_text()).group(1)
+    assert re.findall(r'"([^"]+)"', listed) == list(BUILD_SETTINGS)
+
+
+def test_without_a_build_the_page_says_how_to_make_one_and_the_log_says_where(client, tmp_path, monkeypatch, caplog):
+    with pytest.raises(MissingBuild, match="make web"):
+        page_assets(tmp_path)
+    monkeypatch.setattr(app_module, "page_assets", lambda: page_assets(tmp_path))
+    with caplog.at_level(logging.ERROR, logger="aws_analyzer.server"):
+        answer = client.get(f"/?token={TOKEN}")
+    assert answer.status_code == 500 and "make web" in answer.text
+    assert str(tmp_path) not in answer.text and TOKEN not in answer.text
+    assert str(tmp_path / "manifest.json") in caplog.text
+
+
+def test_the_pages_tags_name_its_built_files_from_the_static_folder():
+    tags = PageAssets(scripts=("assets/main-1.js",), styles=("assets/main-2.css",)).tags()
+    assert tags.splitlines() == ['<link rel="stylesheet" href="static/dist/assets/main-2.css">',
+                                 '<script type="module" src="static/dist/assets/main-1.js"></script>']
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ the Views, which escape what AWS returns, and the policy is the second wall if a
 
 from __future__ import annotations
 
+import logging
 import secrets
 from dataclasses import asdict
 from pathlib import Path
@@ -23,10 +24,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
+from .assets import MissingBuild, PageAssets, page_assets
 from .catalog import SERVICES
 from .ping import add_ping_routes
 from .runner import CantRun, ReportRunner
 
+log = logging.getLogger("aws_analyzer.server")
 STATIC = Path(__file__).with_name("static")
 TOKEN_HEADER = "X-AWS-Analyzer-Token"
 POLICY = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
@@ -34,6 +37,9 @@ POLICY = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inlin
           "base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
 SECURITY_HEADERS = {"Content-Security-Policy": POLICY, "X-Content-Type-Options": "nosniff",
                     "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
+UNBUILT_PAGE = ("<!doctype html><title>aws-analyzer</title><p>This copy of aws-analyzer has no build of its page. "
+                "In a checkout, run <code>make web</code>; an installed copy needs installing again. The terminal "
+                "running <code>aws-analyzer serve</code> says more.</p>")
 LOCKED_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>aws-analyzer</title></head>
 <body style="font:16px system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;line-height:1.6">
 <h1 style="font-size:1.4rem">This page needs its link</h1>
@@ -58,9 +64,18 @@ def _is_token(given: str | None, token: str) -> bool:
     return bool(given) and secrets.compare_digest(given.encode(), token.encode())
 
 
-def _page_html(token: str) -> str:
+def _page_html(token: str, assets: PageAssets) -> str:
     page = (STATIC / "index.html").read_text(encoding="utf-8")
-    return page.replace("__TOKEN__", token).replace("__VERSION__", __version__)
+    return page.replace("__TOKEN__", token).replace("__VERSION__", __version__).replace("__ASSETS__", assets.tags())
+
+
+def _unbuilt_page(problem: MissingBuild) -> HTMLResponse:
+    """
+    What the browser gets when the page isn't built: a fixed sentence, since the problem names the server's files;
+    the problem itself goes to the terminal's log.
+    """
+    log.error("Can't serve the page: %s", problem)
+    return HTMLResponse(UNBUILT_PAGE, status_code=500)
 
 
 def _catalog(runner: ReportRunner) -> dict[str, Any]:
@@ -74,6 +89,23 @@ def _catalog(runner: ReportRunner) -> dict[str, Any]:
             "services": services}
 
 
+def _page_response(request: Request, token: str, cookie: str) -> Response:
+    """
+    The page, for a browser with the token (in the address the first time, then in the cookie this sets), else the
+    page that asks for the link; without a build of the page, what to run to make one.
+    """
+    given = request.query_params.get("token") or request.cookies.get(cookie)
+    if not _is_token(given, token):
+        return HTMLResponse(LOCKED_PAGE, status_code=403)
+    try:
+        assets = page_assets()
+    except MissingBuild as problem:
+        return _unbuilt_page(problem)
+    response = HTMLResponse(_page_html(token, assets))
+    response.set_cookie(cookie, token, httponly=True, samesite="strict")
+    return response
+
+
 def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> None:
     def check_token(given: str | None = Header(default=None, alias=TOKEN_HEADER)) -> None:
         if not _is_token(given, token):
@@ -82,12 +114,7 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
 
     @app.get("/", response_class=HTMLResponse)
     def page(request: Request) -> Response:
-        given = request.query_params.get("token") or request.cookies.get(cookie)
-        if not _is_token(given, token):
-            return HTMLResponse(LOCKED_PAGE, status_code=403)
-        response = HTMLResponse(_page_html(token))
-        response.set_cookie(cookie, token, httponly=True, samesite="strict")
-        return response
+        return _page_response(request, token, cookie)
 
     catalog: dict[str, Any] = {}
 

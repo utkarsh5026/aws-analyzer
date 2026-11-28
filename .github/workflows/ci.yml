@@ -123,14 +123,83 @@ jobs:
                 getattr(aws_analyzer, name)
             assert s3.explorer.navigator._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
             assert s3_explorer.S3Explorer is s3.S3Explorer, "aws_analyzer.s3_explorer should re-export it"
+            from aws_analyzer.server.assets import DIST, page_assets
+            built = page_assets()
+            assert all((DIST / path).exists() for path in built.scripts + built.styles), "the web page's build is missing"
             print(f"aws-analyzer {aws_analyzer.__version__}: every module imports, the agent included")
+
+  # The web page (`aws-analyzer serve`) is built from web/ into src/aws_analyzer/server/static/dist/, which is
+  # committed so pip installs need no Node. This checks web/'s TypeScript and that the committed build is what
+  # web/ builds; tests/test_server.py checks the same without Node, from dist/sources.sha256.
+  web:
+    name: Web page
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web/'s pinned packages
+        run: npm ci
+      - name: Types, Biome and Vitest
+        run: npm run check
+      - name: Build
+        run: npm run build
+      - name: Check the committed build is the one web/ makes
+        run: |
+          if ! git diff --exit-code --stat -- ../src/aws_analyzer/server/static/dist \
+             || [ -n "$(git status --porcelain -- ../src/aws_analyzer/server/static/dist)" ]; then
+            echo "::error::src/aws_analyzer/server/static/dist/ isn't what web/ builds: run \`make web\` and commit dist/."
+            git status --short -- ../src/aws_analyzer/server/static/dist
+            exit 1
+          fi
+
+  # The page in a real browser: tests/test_web_page.py drives Chromium through Playwright on the real server over
+  # demo data in moto. They skip in the Test jobs, which have no browser; here a missing browser fails them.
+  pages:
+    name: Page tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dev requirements
+        run: python -m pip install -r requirements-dev.txt
+      - name: Find the Playwright version (its Chromium is cached under it)
+        id: playwright
+        run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Restore Playwright's Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium and the system libraries it needs
+        run: python -m playwright install --with-deps chromium
+      - name: Page tests
+        env:
+          AWS_ANALYZER_PAGE_TESTS: required
+        run: python -m pytest tests/test_web_page.py
 
   # One stable status to require in branch protection, so the rule doesn't need editing
   # when the Python matrix changes.
   ci-result:
     name: CI result
     if: always()
-    needs: [lint, test, package]
+    needs: [lint, test, package, web, pages]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
