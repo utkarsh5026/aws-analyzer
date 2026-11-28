@@ -184,3 +184,7 @@ What it never does: it never writes to AWS (the commands that do aren't offered,
 ??? question "*no region* or *Couldn't start Lambda*"
 
     boto3 found no region: start it with `--region us-east-1` (or set `AWS_DEFAULT_REGION`). On SageMaker the notebook's own region is found by itself.
+
+??? question "The terminal shows a second link, *Checking the proxy for live updates*"
+
+    It's a page that checks whether your notebook's proxy passes live updates, which a later version of this page needs (progress bars, Lambda runs as they happen). Open it, wait about fifteen seconds, and send the results it shows to the project ([an issue](https://github.com/utkarsh5026/aws-analyzer/issues) will do): it reads nothing from AWS, and the results hold no token or notebook name.

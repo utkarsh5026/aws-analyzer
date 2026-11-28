@@ -9,6 +9,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🧰 **Browser tab: a check of what the proxy passes** ([#299](https://github.com/utkarsh5026/aws-analyzer/pull/299))
+  - On SageMaker, `aws-analyzer serve` also prints a `/ping` link: a page that tests live updates through the notebook's proxy.
+  - It reads nothing from AWS; its results help choose how the next version of the page streams.
+
 ### Fixed
 
 - 🧰 **Browser tab: the right link on newer notebook instances** ([#298](https://github.com/utkarsh5026/aws-analyzer/pull/298))
