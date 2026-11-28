@@ -5,7 +5,10 @@ A report as data (_kit/datasets.py), its workbook (_kit/workbook.py) and the fol
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import json
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import openpyxl
 import pytest
@@ -19,6 +22,7 @@ from aws_analyzer._kit.datasets import (
     Recipe,
     ReportData,
     by_hour,
+    json_value,
     median_of,
     nearest_rank,
 )
@@ -67,6 +71,42 @@ def test_report_data_lists_and_explains_its_tables():
     assert "- Newest last." in guide and "df.duration_ms.median()    # the typical run" in guide
     assert repr(guide) == str(guide)
     assert "runs (3 rows)" in repr(data)
+
+
+def test_a_report_becomes_json_that_says_what_its_columns_hold():
+    data = replace(toy_data(2), cards=[("Runs", "2"), ("Timeouts", "1", "bad")], findings=[("warn", "One timed out.")])
+    as_json = data.to_json()
+    assert json.loads(json.dumps(as_json)) == as_json
+    assert as_json["cards"] == [{"label": "Runs", "value": "2", "tone": ""},
+                                {"label": "Timeouts", "value": "1", "tone": "bad"}]
+    assert as_json["findings"] == [{"level": "warn", "message": "One timed out."}]
+    runs = as_json["tables"][0]
+    assert runs["name"] == "runs" and runs["row"] == "a run" and runs["notes"] == ["Newest last."]
+    duration = runs["columns"][1]
+    assert duration == {"name": "duration_ms", "meaning": "how long it ran", "kind": "ms", "unit": "milliseconds",
+                        "is_number": True, "read": "Over 1,000 is slow.", "bar": True, "tones": {}}
+    assert runs["columns"][3]["tones"] == {"timeout": "bad"}
+    assert runs["rows"][0] == {"time": "2026-11-01T09:15:00Z", "duration_ms": 100.0, "share": 0.0,
+                               "status": "ok", "cold": True, "tags": ["a", "b"]}
+    assert runs["recipes"] == [{"code": "df.duration_ms.median()", "tells": "the typical run"}]
+    assert as_json["charts"][0]["ys"] == ["duration_ms"] and as_json["charts"][0]["kind"] == "scatter"
+    assert as_json["source"] == "toy()" and as_json["read_at"].endswith("Z")
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    (datetime(2026, 11, 1, 10, 0, tzinfo=timezone(timedelta(hours=1))), "2026-11-01T09:00:00Z"),
+    (datetime(2026, 11, 1, 9, 0), "2026-11-01T09:00:00Z"),
+    (date(2026, 11, 1), "2026-11-01"),
+    (Decimal("42"), 42),
+    (Decimal("1.5"), 1.5),
+    (float("nan"), None),
+    (float("inf"), None),
+    ({"a": {1, 2} - {2}}, {"a": [1]}),
+    (("x", None), ["x", None]),
+    (b"raw", "b'raw'"),
+])
+def test_a_cell_becomes_what_json_holds(value, expected):
+    assert json_value(value) == expected
 
 
 def test_summary_numbers():

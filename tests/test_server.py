@@ -31,7 +31,7 @@ from aws_analyzer.server.catalog import (
     NOT_SERVED, SERVICES, Parameter, argument_value, served_names, view_commands,
 )
 from aws_analyzer.server.links import page_link, read_metadata
-from aws_analyzer.server.runner import CantRun, ReportRunner, Settings, _form_arguments
+from aws_analyzer.server.runner import CantRun, NoData, ReportRunner, Settings, _form_arguments, gives_data
 
 TOKEN = "t0ken-for-tests"
 BUCKET = "acme-lake"
@@ -237,6 +237,61 @@ def test_running_from_the_page(client):
     refused = _run(client, service="s3", call="clean_downloads()")
     assert refused.status_code == 400 and "can't run clean_downloads" in refused.json()["message"]
     assert _run(client, service="s3", command="ls").json()["message"].startswith("Fill in uri first")
+
+
+def test_a_report_comes_as_its_tables_without_drawing_it(runner):
+    report = runner.data("s3", "summary", {"uri": f"s3://{BUCKET}/", "top_n": "3"})
+    assert report.call == f"summary('s3://{BUCKET}/', top_n=3)"
+    assert report.arguments == {"uri": f"s3://{BUCKET}/", "top_n": "3"}
+    assert report.data["title"] == f"Summary of s3://{BUCKET}/"
+    assert {"label": "Objects", "value": "2", "tone": ""} in report.data["cards"]
+    tables = {table["name"]: table for table in report.data["tables"]}
+    assert tables and all(table["columns"] and table["row"] for table in tables.values())
+    assert json.loads(json.dumps(report.data)) == report.data
+    assert "_show" not in vars(runner._services["s3"].view)
+
+
+def test_a_call_comes_as_its_tables_too(runner):
+    report = runner.data_call("s3", f"ui.ls('s3://{BUCKET}/raw/')")
+    assert report.command == "ls" and report.arguments == {"uri": f"s3://{BUCKET}/raw/"}
+    rows = [row for table in report.data["tables"] for row in table["rows"]]
+    assert any("events.csv" in json.dumps(row) for row in rows)
+
+
+def test_a_report_with_no_tables_says_why(runner, monkeypatch, caplog):
+    with pytest.raises(NoData, match="summary\\(\\) gave no tables. NoSuchBucket"):
+        runner.data("s3", "summary", {"uri": "s3://no-such-bucket/"})
+    with pytest.raises(NoData, match="SQS, SNS & EventBridge's reports don't come as data yet"):
+        runner.data("messaging", "overview")
+    with pytest.raises(CantRun, match="can't run download"):
+        runner.data_call("s3", f"download('s3://{BUCKET}/raw/events.csv')")
+
+    def broken(self, *args, **kwargs):
+        raise RuntimeError("the disk caught fire")
+
+    monkeypatch.setattr(S3View, "buckets", broken)
+    with caplog.at_level(logging.ERROR, logger="aws_analyzer.server"), pytest.raises(NoData, match="disk caught"):
+        runner.data("s3", "buckets")
+    assert "Traceback" in caplog.text
+
+
+def test_the_services_with_data_are_the_views_with_data_commands():
+    assert gives_data("lambda_functions") and gives_data("s3") and not gives_data("athena")
+
+
+def test_data_from_the_page(client):
+    headers = {TOKEN_HEADER: TOKEN}
+    answer = client.get("/api/data/s3/ls", params={"uri": f"s3://{BUCKET}/raw/"}, headers=headers)
+    assert answer.status_code == 200 and answer.json()["data"]["tables"]
+    called = client.get("/api/data/s3", params={"call": f"ls('s3://{BUCKET}/raw/')"}, headers=headers)
+    assert called.status_code == 200 and called.json()["data"]["tables"] == answer.json()["data"]["tables"]
+    missing = client.get("/api/data/s3/ls", params={"uri": "s3://no-such-bucket/"}, headers=headers)
+    assert missing.status_code == 422 and "NoSuchBucket" in missing.json()["message"]
+    refused = client.get("/api/data/s3/download", params={"uri": f"s3://{BUCKET}/raw/events.csv"}, headers=headers)
+    assert refused.status_code == 400 and "can't run download" in refused.json()["message"]
+    assert client.get("/api/data/s3/ls", params={"uri": f"s3://{BUCKET}/raw/"}).status_code == 403
+    services = client.get("/api/catalog", headers=headers).json()["services"]
+    assert {service["key"]: service["data"] for service in services}["s3"] is True
 
 
 def test_the_pages_files_are_served_and_what_it_names_is_there(client):

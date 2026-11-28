@@ -1516,7 +1516,12 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   runs). A `Report` carries the call, the arguments as form texts (`_form_texts`), the HTML and the seconds. What
   `@_friendly_errors` doesn't turn into a note becomes one here, its traceback in the `aws_analyzer.server` log.
 - `app.py`: `create_app(runner, token, cookie=)`: `GET /` (static/index.html with the token in a `<meta>`; needs
-  `?token=` once, then an HttpOnly SameSite=Strict cookie named for the port), `GET /api/catalog`, `POST /api/run`;
+  `?token=` once, then an HttpOnly SameSite=Strict cookie named for the port), `GET /api/catalog` (each service's
+  `data`: whether its View has `_DataCommands`), `POST /api/run`, and `GET /api/data/<service>/<command>?<name>=<text>`
+  / `GET /api/data/<service>?call=...`: `ReportRunner.data` / `data_call` run the command through the View's
+  `_read_quietly` (nothing drawn) and answer its `ReportData.to_json()` (`_kit/datasets.py`, pure: `json_value` makes
+  times ISO UTC, NaN null, Decimals numbers), 400 for `CantRun`, 422 for `NoData` (a report that was only a note, or a
+  service without data);
   the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
   `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
 - `ping.py` (temporary, Phase 0 of `/web`): `GET /ping`, a page (`static/ping.js`, `ping.css`) that checks whether

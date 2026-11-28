@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from statistics import median
 from typing import Any, Callable, Iterable
 
@@ -33,6 +34,31 @@ KINDS = {
     "flag": "True or False",
 }
 _NUMERIC = frozenset({"count", "number", "ms", "seconds", "mb", "bytes", "usd", "share"})
+_CARD_PARTS = ("label", "value", "tone")
+
+
+def json_value(value: Any) -> Any:
+    """
+    A cell as JSON holds it: a time as ISO 8601 in UTC (a time without a zone is read as UTC, as the reports
+    keep them), a date as ISO, a Decimal as a number, NaN and infinity as null, lists, sets and dicts item by item,
+    and anything else as its text.
+    """
+    if value is None or isinstance(value, (bool, str, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return json_value(int(value) if value == value.to_integral_value() else float(value))
+    if isinstance(value, dict):
+        return {str(key): json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [json_value(item) for item in value]
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -70,6 +96,14 @@ class DataColumn:
         The kind in words: 'milliseconds', 'a share from 0 to 1 (0.25 is 25%)'.
         """
         return KINDS.get(self.kind, self.kind)
+
+    def to_json(self) -> dict[str, Any]:
+        """
+        The column as JSON: its name, meaning, kind and the kind in words, how to read it, bar and tones (value ->
+        'bad' | 'warn' | 'ok').
+        """
+        return {"name": self.name, "meaning": self.meaning, "kind": self.kind, "unit": self.unit,
+                "is_number": self.is_number, "read": self.read, "bar": self.bar, "tones": dict(self.tones)}
 
 
 @dataclass(frozen=True)
@@ -126,6 +160,18 @@ class DataTable:
         frame.attrs["columns"] = {col.name: col.meaning for col in self.columns}
         return frame
 
+    def to_json(self) -> dict[str, Any]:
+        """
+        The table as JSON: its name, title, what a row is, its columns (each with its meaning and kind), its rows
+        as objects holding only its columns (times in ISO UTC: json_value), its notes and its pandas recipes.
+        """
+        names = [col.name for col in self.columns]
+        rows = [{name: json_value(row.get(name)) for name in names} for row in self.rows]
+        recipes = [{"code": recipe.code, "tells": recipe.tells} for recipe in self.recipes]
+        return {"name": self.name, "title": self.title, "row": self.row,
+                "columns": [col.to_json() for col in self.columns], "rows": rows, "notes": list(self.notes),
+                "recipes": recipes}
+
 
 @dataclass(frozen=True)
 class DataChart:
@@ -143,6 +189,13 @@ class DataChart:
     says: str = ""
     y_title: str = ""
     rows: int = 0
+
+    def to_json(self) -> dict[str, Any]:
+        """
+        The chart as JSON: its title, the table it's drawn from, its x column, y columns, kind and how to read it.
+        """
+        return {"title": self.title, "table": self.table, "x": self.x, "ys": list(self.ys), "kind": self.kind,
+                "says": self.says, "y_title": self.y_title, "rows": self.rows}
 
 
 class Guide(str):
@@ -221,6 +274,19 @@ class ReportData:
         """
         tables = [self.table(name)] if name else self.tables
         return Guide("\n\n".join(table_guide(table) for table in tables))
+
+    def to_json(self) -> dict[str, Any]:
+        """
+        The report as JSON, for a browser or any other program: its title, subtitle, verdict, cards ({label,
+        value, tone}), findings ({level, message}), its tables with every column's meaning and kind, its charts,
+        the calls that read it and when (ISO UTC). Plain values only, so json.dumps takes it as it is.
+        """
+        cards = [dict(zip(_CARD_PARTS, (*card, "")[:3])) for card in self.cards]
+        findings = [{"level": level, "message": message} for level, message in self.findings]
+        return {"title": self.title, "subtitle": self.subtitle, "verdict": self.verdict, "cards": cards,
+                "findings": findings, "tables": [table.to_json() for table in self.tables],
+                "charts": [chart.to_json() for chart in self.charts], "source": self.source, "again": self.again,
+                "read_at": json_value(self.read_at), "stem": self.stem}
 
     def to_excel(self, path: str) -> str:
         """

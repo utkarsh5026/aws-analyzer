@@ -1,7 +1,8 @@
 """
 The web app: FastAPI over the ReportRunner. GET / is the page (static/index.html with the session's token in it),
-GET /api/catalog the services and their commands, POST /api/run a command's report as HTML, and for now GET /ping, a
-check of what the notebook's proxy passes (ping.py).
+GET /api/catalog the services and their commands, POST /api/run a command's report as HTML, GET /api/data/... the
+tables a report is drawn from as JSON (for the services whose Views have data()), and for now GET /ping, a check of
+what the notebook's proxy passes (ping.py).
 
 Every request but the page's own files needs the token the terminal printed: the page's address carries it once
 (?token=...), the server keeps it in a cookie for that address, and the page sends it back with each API call in a
@@ -16,7 +17,7 @@ import logging
 import secrets
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -27,7 +28,7 @@ from .. import __version__
 from .assets import MissingBuild, PageAssets, page_assets
 from .catalog import SERVICES
 from .ping import add_ping_routes
-from .runner import CantRun, ReportRunner
+from .runner import CantRun, NoData, ReportRunner, gives_data
 
 log = logging.getLogger("aws_analyzer.server")
 STATIC = Path(__file__).with_name("static")
@@ -82,7 +83,7 @@ def _catalog(runner: ReportRunner) -> dict[str, Any]:
     """
     Every service and the commands the page offers for it (read from the View classes: nothing from AWS).
     """
-    services = [{"key": service.key, "title": service.title, "icon": service.icon,
+    services = [{"key": service.key, "title": service.title, "icon": service.icon, "data": gives_data(service.key),
                  "commands": [asdict(command) for command in runner.commands(service.key)]} for service in SERVICES]
     settings = runner.settings
     return {"version": __version__, "region": settings.region or "", "profile": settings.profile or "",
@@ -134,6 +135,37 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
         except CantRun as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return asdict(report)
+
+    _add_data_routes(app, runner, check_token)
+
+
+def _data_answer(read: Callable[[], Any]) -> dict[str, Any]:
+    """
+    A report's data as the API answers it: 400 when the page asked for something that can't run, 422 when it ran
+    and gave no tables, with the reason in words either way.
+    """
+    try:
+        return asdict(read())
+    except CantRun as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NoData as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _add_data_routes(app: FastAPI, runner: ReportRunner, check_token: Callable[..., None]) -> None:
+    """
+    GET /api/data/<service>?call=errors('orders-etl') and GET /api/data/<service>/<command>?name=orders-etl&since=7d:
+    the tables behind a report, its columns' meanings and kinds, its charts and its summary, as JSON.
+    """
+
+    @app.get("/api/data/{service}", dependencies=[Depends(check_token)])
+    def data_of_call(service: str, call: str) -> dict[str, Any]:
+        return _data_answer(lambda: runner.data_call(service, call))
+
+    @app.get("/api/data/{service}/{command}", dependencies=[Depends(check_token)])
+    def data_of_command(service: str, command: str, request: Request) -> dict[str, Any]:
+        arguments = dict(request.query_params)
+        return _data_answer(lambda: runner.data(service, command, arguments))
 
 
 def create_app(runner: ReportRunner, token: str, *, cookie: str = "aws_analyzer_token") -> FastAPI:
