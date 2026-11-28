@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
     from .stepfunctions import StepFunctionsAnalyzer, StepFunctionsExplorer, StepFunctionsView
 
-__version__ = "0.67.0"
+__version__ = "0.67.1"
 
 __all__ = [
     "__version__",
