@@ -110,11 +110,13 @@ A browser on your laptop can't reach `127.0.0.1:8765` on a SageMaker machine: th
 
 | Where it runs | The link |
 |---|---|
-| Notebook instance | `https://<instance>.notebook.<region>.sagemaker.aws/proxy/8765/` |
+| Notebook instance | `https://<instance address>.notebook.<region>.sagemaker.aws/proxy/8765/` |
 | Studio, JupyterLab space | `https://<domain id>.studio.<region>.sagemaker.aws/jupyterlab/default/proxy/8765/` |
 | Studio, Code Editor | `https://<domain id>.studio.<region>.sagemaker.aws/codeeditor/default/proxy/8765/` |
 | Studio Classic | `https://<domain id>.studio.<region>.sagemaker.aws/jupyter/default/proxy/8765/` |
 | Anywhere else | `http://127.0.0.1:8765/` |
+
+A notebook instance's address isn't always its name: newer ones carry a few letters after it (`test2-kbmv.notebook...` for an instance called `test2`). Only SageMaker knows them, so the command asks it (`sagemaker:DescribeNotebookInstance`, which most notebook roles have). When it can't, it guesses from the name and says so under the link.
 
 The `?token=...` on the end is a random key made each time the server starts. The page needs it once (it keeps it in a cookie for that address after that), and every request the page sends carries it, so another website open in the same browser can't use the server to read your AWS account.
 
@@ -157,7 +159,7 @@ Searching for *slow* finds the commands about run times in every service.
 
 ## Permissions and what it reads { #permissions }
 
-The page runs the same Views as the notebook, so it needs the same read-only permissions: each service's guide lists them ([Lambda](lambda_functions.md#permissions), [S3](s3.md#permissions), ...). It reads with the credentials the terminal has: on SageMaker, the notebook's execution role.
+The page runs the same Views as the notebook, so it needs the same read-only permissions: each service's guide lists them ([Lambda](lambda_functions.md#permissions), [S3](s3.md#permissions), ...). It reads with the credentials the terminal has: on SageMaker, the notebook's execution role. On a notebook instance, `aws-analyzer serve` also calls `sagemaker:DescribeNotebookInstance` once at start, for the notebook's address.
 
 What it never does: it never writes to AWS (the commands that do aren't offered, and the Views only read), never saves files, and never sends anything off the machine except to AWS and to your browser.
 
@@ -166,6 +168,10 @@ What it never does: it never writes to AWS (the commands that do aren't offered,
 ??? question "The page says *This page needs its link*"
 
     Open the address `aws-analyzer serve` printed, the one ending in `?token=...`. A server started again has a new token, so an old link stops working.
+
+??? question "The link opens a blank page, or not my notebook"
+
+    If the terminal says the address was *guessed from its name*, SageMaker didn't say the notebook's address (the role lacks `sagemaker:DescribeNotebookInstance`). Take the address your notebook is open at, up to `.sagemaker.aws`, and add the `/proxy/8765/?token=...` the terminal printed.
 
 ??? question "The link gives *404* or *bad gateway*"
 

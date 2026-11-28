@@ -9,6 +9,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Fixed
+
+- 🧰 **Browser tab: the right link on newer notebook instances** ([#298](https://github.com/utkarsh5026/aws-analyzer/pull/298))
+  - `aws-analyzer serve` asks SageMaker for the notebook's address (`test2-kbmv.notebook...`), not only its name.
+  - When it can't, the terminal says the link is a guess and how to mend it.
+
 ## [0.66.0] - 2026-11-28
 
 ### Added
