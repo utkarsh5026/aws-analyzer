@@ -284,12 +284,15 @@ def test_the_build_settings_the_hash_reads_are_the_ones_web_lists():
     assert re.findall(r'"([^"]+)"', listed) == list(BUILD_SETTINGS)
 
 
-def test_without_a_build_the_page_says_how_to_make_one(client, tmp_path, monkeypatch):
+def test_without_a_build_the_page_says_how_to_make_one_and_the_log_says_where(client, tmp_path, monkeypatch, caplog):
     with pytest.raises(MissingBuild, match="make web"):
         page_assets(tmp_path)
     monkeypatch.setattr(app_module, "page_assets", lambda: page_assets(tmp_path))
-    answer = client.get(f"/?token={TOKEN}")
-    assert answer.status_code == 500 and "make web" in answer.text and TOKEN not in answer.text
+    with caplog.at_level(logging.ERROR, logger="aws_analyzer.server"):
+        answer = client.get(f"/?token={TOKEN}")
+    assert answer.status_code == 500 and "make web" in answer.text
+    assert str(tmp_path) not in answer.text and TOKEN not in answer.text
+    assert str(tmp_path / "manifest.json") in caplog.text
 
 
 def test_the_pages_tags_name_its_built_files_from_the_static_folder():

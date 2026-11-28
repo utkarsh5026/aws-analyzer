@@ -12,8 +12,8 @@ the Views, which escape what AWS returns, and the policy is the second wall if a
 
 from __future__ import annotations
 
+import logging
 import secrets
-from html import escape
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from .catalog import SERVICES
 from .ping import add_ping_routes
 from .runner import CantRun, ReportRunner
 
+log = logging.getLogger("aws_analyzer.server")
 STATIC = Path(__file__).with_name("static")
 TOKEN_HEADER = "X-AWS-Analyzer-Token"
 POLICY = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
@@ -36,6 +37,9 @@ POLICY = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inlin
           "base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
 SECURITY_HEADERS = {"Content-Security-Policy": POLICY, "X-Content-Type-Options": "nosniff",
                     "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
+UNBUILT_PAGE = ("<!doctype html><title>aws-analyzer</title><p>This copy of aws-analyzer has no build of its page. "
+                "In a checkout, run <code>make web</code>; an installed copy needs installing again. The terminal "
+                "running <code>aws-analyzer serve</code> says more.</p>")
 LOCKED_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>aws-analyzer</title></head>
 <body style="font:16px system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;line-height:1.6">
 <h1 style="font-size:1.4rem">This page needs its link</h1>
@@ -66,8 +70,12 @@ def _page_html(token: str, assets: PageAssets) -> str:
 
 
 def _unbuilt_page(problem: MissingBuild) -> HTMLResponse:
-    text = escape(str(problem))
-    return HTMLResponse(f"<!doctype html><title>aws-analyzer</title><p>{text}</p>", status_code=500)
+    """
+    What the browser gets when the page isn't built: a fixed sentence, since the problem names the server's files;
+    the problem itself goes to the terminal's log.
+    """
+    log.error("Can't serve the page: %s", problem)
+    return HTMLResponse(UNBUILT_PAGE, status_code=500)
 
 
 def _catalog(runner: ReportRunner) -> dict[str, Any]:
