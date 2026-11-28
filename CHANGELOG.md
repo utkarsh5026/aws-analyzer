@@ -18,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧰 **Browser tab: what needs attention, per service, and a quick look**
+- 🧰 **Browser tab: what needs attention, per service, and a quick look** ([#309](https://github.com/utkarsh5026/aws-analyzer/pull/309))
   - Opening a service's page checks it, and only it: its overview's verdict and every warning, each naming what it's about.
   - Home's *Checked so far* lists the services checked; the others aren't read until you open them.
   - The search result you pick shows a quick look beside the results, from what's already read, with *Copy as cell*.

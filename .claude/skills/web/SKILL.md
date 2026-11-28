@@ -377,7 +377,7 @@ not started, needs the user.
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
 | 2: frontend foundation | done | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
 | 3: data, jobs, live | in progress | #306 | reports as data done (`/api/data`, `ReportData.to_json()`); next: block JSON, then jobs and live streams (the transport waits on Phase 0) |
-| 4: the frame and search | done | #307, this PR | tabs, theme, search one service at a time (`/api/resources`), the quick look (`facts`), per-service attention (`/api/attention`) and Home's "Checked so far" |
+| 4: the frame and search | done | #307, #309 | tabs, theme, search one service at a time (`/api/resources`), the quick look (`facts`), per-service attention (`/api/attention`) and Home's "Checked so far" |
 | 5: resource pages | not started | | service by service, Lambda first, from blocks as JSON; grid, Vega-Lite, ELK.js |
 | 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
 | 7: workspace | not started | | split panes, pins, history with diffs, notifications, export, the map |
