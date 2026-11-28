@@ -26,6 +26,7 @@ import pytest
 import uvicorn
 from moto import mock_aws
 
+from aws_analyzer._kit.blocks import _Title
 from aws_analyzer.lambda_functions import LambdaAnalyzer, LambdaView
 from aws_analyzer.s3 import S3Analyzer, S3View
 from aws_analyzer.server.app import create_app
@@ -91,13 +92,18 @@ def _wait_until_started(server: uvicorn.Server) -> None:
         time.sleep(0.05)
 
 
+SERVED_VIEWS: dict = {}
+
+
 @pytest.fixture(scope="module")
 def served() -> Iterator[str]:
     """
-    The page's address: the real app on uvicorn, on a free port, in a thread, over demo data in moto.
+    The page's address: the real app on uvicorn, on a free port, in a thread, over demo data in moto. Its Views are in
+    SERVED_VIEWS, for a test that holds a command back.
     """
     with mock_aws():
-        runner = ReportRunner(Settings(region="us-east-1"), views=_demo_views())
+        SERVED_VIEWS.update(_demo_views())
+        runner = ReportRunner(Settings(region="us-east-1"), views=SERVED_VIEWS)
         port = _free_port()
         config = uvicorn.Config(create_app(runner, TOKEN, cookie=f"aws_analyzer_{port}"), host="127.0.0.1",
                                 port=port, log_level="warning")
@@ -108,6 +114,7 @@ def served() -> Iterator[str]:
         yield f"http://127.0.0.1:{port}"
         server.should_exit = True
         thread.join(timeout=SERVER_START_SECONDS)
+        SERVED_VIEWS.clear()
 
 
 def _launch(playwright):
@@ -420,3 +427,79 @@ def test_in_a_dark_browser_the_reports_are_told_the_page_is_dark(chromium, troub
 def test_an_address_the_page_doesnt_know_opens_the_home_page(page, served):
     _open(page, served, "#/nothing/here")
     expect(page.locator(".aa-home-title")).to_have_text("Find anything in your account")
+
+
+HELD_TOTAL = 1000
+HELD_STEP = 10
+HELD_TICK_SECONDS = 0.05
+
+
+@pytest.fixture
+def held_summary(served) -> Iterator[threading.Event]:
+    """
+    S3's summary held back: it ticks its progress (of HELD_TOTAL objects) until the test sets the Event it gets, or
+    the page's Stop stops it, then shows a one-line report.
+    """
+    view = SERVED_VIEWS["s3"]
+    go = threading.Event()
+
+    def summary(uri: str, **options: object) -> None:
+        with view._progress("Scanning", "objects") as tick:
+            count = 0
+            while not go.is_set():
+                count = min(count + HELD_STEP, HELD_TOTAL - HELD_STEP)
+                tick(count, HELD_TOTAL)
+                time.sleep(HELD_TICK_SECONDS)
+        view._show([_Title(f"Held summary of {uri}")])
+
+    view.summary = summary
+    yield go
+    go.set()
+    del view.summary
+
+
+HELD_PAGE = "#/s3/summary?uri=s3://demo-lake/&run=1"
+
+
+def test_a_long_command_shows_its_progress_and_stops_when_asked(page, served, held_summary):
+    _open(page, served, HELD_PAGE)
+    expect(page.locator(".aa-progress-text")).to_contain_text("of 1,000 objects")
+    expect(page.locator(".aa-progress-track")).to_have_attribute("aria-valuenow", re.compile(r"\d+"))
+    expect(page.locator(".aa-jobs summary")).to_have_text("1 running")
+    page.locator(".aa-jobs summary").click()
+    expect(page.locator(".aa-job")).to_contain_text("summary('s3://demo-lake/')")
+    page.locator(".aa-jobs summary").click()
+    page.locator(".aa-status .aa-stop").click()
+    expect(_status(page)).to_contain_text("stopped after")
+    expect(page.locator(".aa-report")).to_contain_text("Stopped before it finished")
+    expect(page.locator(".aa-jobs")).to_have_count(0)
+
+
+def test_a_job_goes_on_while_you_look_elsewhere_and_after_a_reload(page, served, held_summary):
+    _open(page, served, HELD_PAGE)
+    expect(page.locator(".aa-progress")).to_be_visible()
+    page.evaluate("location.hash = '#/lambda_functions'")
+    expect(page.locator(".aa-jobs summary")).to_have_text("1 running")
+    page.reload()
+    expect(page.locator(".aa-jobs summary")).to_have_text("1 running")
+    page.locator(".aa-jobs summary").click()
+    page.locator(".aa-job-call").click()
+    expect(page.locator(".aa-progress")).to_be_visible()
+    held_summary.set()
+    _wait_for_report(page)
+    expect(page.locator(".aa-report")).to_contain_text("Held summary of s3://demo-lake/")
+    expect(page.locator(".aa-jobs")).to_have_count(0)
+    jobs = page.evaluate("fetch('api/jobs', {headers: {'X-AWS-Analyzer-Token': '%s'}}).then(r => r.json())" % TOKEN)
+    assert len(jobs["jobs"]) >= 1 and all(job["call"] != "" for job in jobs["jobs"])
+    assert sum(job["state"] == "running" for job in jobs["jobs"]) == 0
+
+
+def test_lambdas_page_shows_whats_running_now_pushed_by_the_server(page, served):
+    _open(page, served, "#/lambda_functions")
+    live = page.locator(".aa-live")
+    expect(live.locator("h2")).to_have_text("Running now")
+    expect(live.locator(".aa-live-headline")).to_have_text(re.compile(r"ran in the last 10 minutes|Nothing ran"))
+    expect(live.locator(".aa-live-foot")).to_contain_text("CloudWatch metrics a read")
+    live.locator("button", has_text="Pause").click()
+    expect(live.locator("button")).to_have_text("Watch again")
+    expect(page.locator(".aa-live-dot.aa-on")).to_have_count(0)

@@ -51,10 +51,10 @@ export function currentRoute() {
 export const reports = new Map<string, Report>();
 
 /**
- * The runs: only the newest run's answer is shown, wherever it was started, and a call run from a report's next
- * step lands on its own address marked `justRun`, so it isn't shown as "from earlier".
+ * A call run from a report's next step starts its job, then moves to its command's address: `handedOver` names the
+ * job that address's page picks up, so it shows that job rather than starting another.
  */
-export const runs = { latest: 0, justRun: "" };
+export const runs = { handedOver: { target: "", id: "" } };
 
 let nextIsNewTab = false;
 

@@ -7,6 +7,7 @@ The code every analyzer shares, written once: each service module imports what i
     errors   AWS error codes, the permission a denied call needs, and `_Hint`
     blocks   the blocks a report is made of (`_Title`, `_Cards`, `_Table`, ...) and what draws each kind (`@_draws`)
     render   how reports are drawn: the stylesheet (`_base_css`), the shared blocks' HTML and text, `_render_text`
+    blockjson  a report's blocks as JSON for the web page (`_report_json`), each kind's `@_draws(kind, "json")`
     progress the progress a long command shows: a tqdm bar, or a line with the rate and time left
     view     `_BaseView`, which every <Service>View subclasses (showing reports, progress, help()), and
              `@_friendly_errors`, which turns a command's errors into notes

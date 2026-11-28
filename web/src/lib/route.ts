@@ -22,3 +22,16 @@ export function routeFor(service: string, command: string, args: Record<string, 
   const query = new URLSearchParams(filled).toString();
   return `#/${encodeURIComponent(service)}/${encodeURIComponent(command)}${query ? `?${query}` : ""}`;
 }
+
+function withoutRun(args: Record<string, string>): string {
+  const kept = Object.entries(args).filter(([name, value]) => name !== "run" && value !== "");
+  return JSON.stringify(kept.sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** Whether two addresses name the same command with the same arguments, however each is written (encoded, ordered). */
+export function isSameRoute(first: string, second: string): boolean {
+  const one = parseRoute(first);
+  const other = parseRoute(second);
+  const isSameCommand = one.service === other.service && one.command === other.command;
+  return isSameCommand && withoutRun(one.args) === withoutRun(other.args);
+}

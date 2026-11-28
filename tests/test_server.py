@@ -165,7 +165,7 @@ def test_a_command_that_breaks_is_a_note_and_the_traceback_goes_to_the_log(runne
         report = runner.run("s3", "buckets")
     assert "RuntimeError:</span> the disk caught fire" in report.html and "terminal" in report.html
     assert "Traceback" in caplog.text
-    assert "_show" not in vars(runner._services["s3"].view)
+    assert "_show" not in vars(runner._services["s3"].lanes[0].view)
 
 
 def test_a_view_that_cant_start_says_why_and_is_tried_again_next_time(aws, monkeypatch):
@@ -186,9 +186,9 @@ def test_a_view_that_cant_start_says_why_and_is_tried_again_next_time(aws, monke
 def test_views_are_made_once_per_service_from_the_settings(aws):
     runner = ReportRunner(Settings(region="us-east-1", max_rows=7))
     runner.run("s3", "buckets")
-    view = runner._services["s3"].view
+    view = runner._services["s3"].lanes[0].view
     runner.run("s3", "buckets")
-    assert runner._services["s3"].view is view
+    assert runner._services["s3"].lanes[0].view is view
     assert view.max_rows == 7 and view.progress == "off" and view.core.region == "us-east-1"
 
 
@@ -250,7 +250,7 @@ def test_a_report_comes_as_its_tables_without_drawing_it(runner):
     tables = {table["name"]: table for table in report.data["tables"]}
     assert tables and all(table["columns"] and table["row"] for table in tables.values())
     assert json.loads(json.dumps(report.data)) == report.data
-    assert "_show" not in vars(runner._services["s3"].view)
+    assert "_show" not in vars(runner._services["s3"].lanes[0].view)
 
 
 def test_a_call_comes_as_its_tables_too(runner):

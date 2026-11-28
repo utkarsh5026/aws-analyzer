@@ -230,6 +230,25 @@ kbd { padding: 1px 6px; border: 1px solid var(--line-2); border-radius: 5px; bac
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .aa-spin { animation: none; } }
+.aa-status.aa-running { display: block; }
+.aa-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.aa-stop { margin-left: auto; }
+.aa-stop:disabled { opacity: .6; cursor: default; }
+.aa-status-note { margin: 6px 0 0; color: var(--muted); }
+.aa-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; }
+.aa-progress-track {
+  position: relative; flex: 0 1 280px; height: 6px; overflow: hidden; border-radius: 99px; background: var(--paper-2);
+}
+.aa-progress-track span {
+  position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--accent); transition: width .25s ease;
+}
+.aa-progress-track.aa-unknown span { width: 30%; animation: aa-slide 1.4s ease-in-out infinite; }
+@keyframes aa-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .aa-progress-track span { transition: none; }
+  .aa-progress-track.aa-unknown span { animation: none; width: 100%; opacity: .35; }
+}
+.aa-progress-text { color: var(--muted); font-size: .82rem; }
 .aa-report {
   padding: 4px 22px 18px; border: 1px solid var(--line); border-left: 3px solid var(--accent);
   border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); overflow-x: auto;
@@ -349,4 +368,63 @@ kbd { padding: 1px 6px; border: 1px solid var(--line-2); border-radius: 5px; bac
   .aa-side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .aa-find kbd, .aa-where, .aa-ver { display: none; }
   .aa-browse { padding-top: 0; }
+}
+
+/* The commands still running, in the bar. */
+.aa-jobs { position: relative; }
+.aa-jobs summary {
+  display: flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--line-2); border-radius: 7px;
+  background: var(--surface); color: var(--ink); font-size: .82rem; cursor: pointer; list-style: none; white-space: nowrap;
+}
+.aa-jobs summary::-webkit-details-marker { display: none; }
+.aa-jobs-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(520px, 90vw); margin: 0; padding: 6px;
+  list-style: none; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  box-shadow: 0 8px 24px rgba(43, 38, 34, .12);
+}
+.aa-job {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "call stop" "progress stop";
+  gap: 2px 10px; align-items: center; padding: 8px 10px; border-radius: 7px;
+}
+.aa-job + .aa-job { border-top: 1px solid var(--line); }
+.aa-job-call { grid-area: call; display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
+.aa-job-call code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: .82rem var(--mono); }
+.aa-job-call:hover code { color: var(--accent); }
+.aa-job .aa-ghost { grid-area: stop; }
+.aa-job-progress { grid-area: progress; color: var(--muted); font-size: .78rem; }
+
+/* Lambda's "Running now": the functions that ran in the last minutes, pushed by the live stream. */
+.aa-live {
+  margin: 4px 0 28px; padding: 14px 18px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.aa-live-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.aa-live-head .aa-group { margin: 0; display: flex; align-items: center; gap: 8px; }
+.aa-live-head .aa-ghost { margin-left: auto; }
+.aa-live-headline { color: var(--muted); font-size: .88rem; }
+.aa-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.aa-live-dot.aa-on { background: var(--ok); animation: aa-pulse 2s ease-in-out infinite; }
+@keyframes aa-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .aa-live-dot.aa-on { animation: none; } }
+.aa-live-rows { margin: 10px 0 0; padding: 0; list-style: none; }
+.aa-live-row {
+  display: grid; grid-template-columns: minmax(140px, 220px) 130px 1fr; align-items: center; gap: 14px; padding: 7px 0;
+}
+.aa-live-row + .aa-live-row { border-top: 1px solid var(--line); }
+.aa-live-row a { min-width: 0; color: var(--ink); text-decoration: none; }
+.aa-live-row a code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: .85rem var(--mono); }
+.aa-live-row a:hover code { color: var(--accent); }
+.aa-live-words { color: var(--muted); font-size: .82rem; }
+.aa-live-failed { color: var(--bad); }
+.aa-minutes { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+.aa-minute {
+  position: relative; flex: 1; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  border-radius: 2px; background: var(--line-2);
+}
+.aa-minute-bad { background: var(--bad); }
+.aa-live-note { margin: 10px 0 0; color: var(--muted); font-size: .85rem; }
+.aa-live-foot { margin: 10px 0 0; color: var(--muted); font-size: .78rem; }
+@media (max-width: 720px) {
+  .aa-live-row { grid-template-columns: 1fr 100px; }
+  .aa-live-words { grid-column: 1 / -1; }
 }

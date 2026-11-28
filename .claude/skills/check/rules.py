@@ -82,7 +82,7 @@ TOP_LEVEL_BY_OWNER = {"agent": AGENT_TOP_LEVEL, "server": SERVER_TOP_LEVEL}
 # An analyzer can be a package (agent/): its modules are checked like an analyzer's file, as one analyzer.
 PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")} - FRONTENDS
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
-KIT_UI = {"blocks", "charts", "dataview", "options", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
+KIT_UI = {"blocks", "blockjson", "charts", "dataview", "options", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
 CORE_FROM_RENDER = {"_call", "_signature"}
 MIXIN_RE = re.compile(r"_\w+(Commands|Tab|Pane)$")
 REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")

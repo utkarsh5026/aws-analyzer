@@ -1,36 +1,44 @@
 """
 The web app: FastAPI over the ReportRunner. GET / is the page (static/index.html with the session's token in it),
-GET /api/catalog the services and their commands, POST /api/run a command's report as HTML, GET /api/data/... the
-tables a report is drawn from as JSON (for the services whose Views have data()), GET /api/resources/<service> one
-service's names for the page's search (resources.py), and for now GET /ping, a check of
-what the notebook's proxy passes (ping.py).
+GET /api/catalog the services and their commands, POST /api/run a command's report (as HTML, and as blocks of JSON),
+GET /api/style/<service> the stylesheet those blocks are drawn with, the jobs (POST /api/jobs runs a command in the
+background, GET /api/jobs/<id>/events follows its progress and reports as Server-Sent Events, DELETE /api/jobs/<id>
+stops it: jobs.py), the live streams (GET /api/live/...: live.py), GET /api/data/... the tables a report is drawn from
+as JSON (for the services whose Views have data()), GET /api/resources/<service> one service's names for the page's
+search (resources.py), and for now GET /ping, a check of what the notebook's proxy passes (ping.py).
 
 Every request but the page's own files needs the token the terminal printed: the page's address carries it once
 (?token=...), the server keeps it in a cookie for that address, and the page sends it back with each API call in a
-header, which another website open in the same browser can't add (CORS), so it can't make this server read AWS for
+header (a stream, which an EventSource opens, as ?token=: it can't add a header), which another website open in the same browser can't add (CORS), so it can't make this server read AWS for
 it. Every answer carries a Content-Security-Policy that runs only this server's own scripts: a report is HTML made by
 the Views, which escape what AWS returns, and the policy is the second wall if anything slipped through.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
 from .assets import MissingBuild, PageAssets, page_assets
 from .catalog import SERVICES
+from .jobs import Job
+from .live import LiveHub, add_live_routes
 from .ping import add_ping_routes
 from .resources import is_searchable
-from .runner import CantList, CantRun, NoData, ReportRunner, gives_data
+from .runner import CantList, CantRun, NoData, ReportRunner, gives_data, style_of
+from .streams import HEARTBEAT, HEARTBEAT_SECONDS, STREAM_HEADERS, STREAM_TYPE, last_seen, sse_message
 
 log = logging.getLogger("aws_analyzer.server")
 STATIC = Path(__file__).with_name("static")
@@ -139,8 +147,118 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return asdict(report)
 
+    _add_style_route(app, check_token)
     _add_data_routes(app, runner, check_token)
     _add_resource_routes(app, runner, check_token)
+    _add_job_routes(app, runner, check_token)
+    _add_job_stream(app, runner, token)
+
+
+def _add_style_route(app: FastAPI, check_token: Callable[..., None]) -> None:
+    """
+    GET /api/style/<service>: the CSS a service's reports are drawn with (its stylesheet and the theme's rules), for
+    the reports the page draws from their blocks.
+    """
+
+    @app.get("/api/style/{service}", dependencies=[Depends(check_token)])
+    def style(service: str) -> dict[str, str]:
+        try:
+            return {"service": service, "css": style_of(service)}
+        except CantRun as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _started(start: Callable[[], Job]) -> dict[str, Any]:
+    try:
+        return start().summary()
+    except CantRun as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _job_named(runner: ReportRunner, job_id: str) -> Job:
+    job = runner.jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="There's no such job: it ended a while ago, or the server was "
+                                                    "started again.")
+    return job
+
+
+def _add_job_routes(app: FastAPI, runner: ReportRunner, check_token: Callable[..., None]) -> None:
+    """
+    POST /api/jobs starts a command (what the form's boxes hold, or a call as written in a notebook) and answers at
+    once with the job; GET /api/jobs lists them, GET /api/jobs/<id> is one with its events so far (?after=n: the
+    ones after the nth), DELETE /api/jobs/<id> stops it.
+    """
+
+    @app.post("/api/jobs", dependencies=[Depends(check_token)])
+    def start(asked: RunRequest) -> dict[str, Any]:
+        if asked.call:
+            return _started(lambda: runner.start_call_job(asked.service, asked.call))
+        return _started(lambda: runner.start_job(asked.service, asked.command, asked.arguments))
+
+    @app.get("/api/jobs", dependencies=[Depends(check_token)])
+    def jobs() -> dict[str, Any]:
+        return {"jobs": [job.summary() for job in runner.jobs.all()]}
+
+    @app.get("/api/jobs/{job_id}", dependencies=[Depends(check_token)])
+    def job(job_id: str, after: int = 0) -> dict[str, Any]:
+        found = _job_named(runner, job_id)
+        events = [asdict(event) for event in found.events_after(after)]
+        return {**found.summary(), "events_after": events}
+
+    @app.delete("/api/jobs/{job_id}", dependencies=[Depends(check_token)])
+    def stop(job_id: str) -> dict[str, Any]:
+        _job_named(runner, job_id)
+        return runner.jobs.stop(job_id).summary()
+
+
+async def _job_events(job: Job, after: int, request: Request) -> AsyncIterator[str]:
+    """
+    A job's events after the `after`th, as they come, ending with 'done' (said again to a page that comes back after
+    it ended); a heartbeat while nothing happens; nothing more once the page has gone.
+    """
+    sent = after
+    with job.listening() as woken:
+        while True:
+            woken.clear()
+            for event in job.events_after(sent):
+                sent = event.number
+                yield sse_message(event.kind, event.data, event.number)
+                if event.kind == "done":
+                    return
+            if not job.is_running:
+                yield sse_message("done", {"state": job.state, "seconds": job.seconds})
+                return
+            if await request.is_disconnected():
+                return
+            try:
+                await asyncio.wait_for(woken.wait(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield HEARTBEAT
+
+
+def _add_job_stream(app: FastAPI, runner: ReportRunner, token: str) -> None:
+    """
+    GET /api/jobs/<id>/events?token=...: the job's events as Server-Sent Events (streams.py), from the one after
+    Last-Event-ID (or ?after=) on.
+    """
+
+    @app.get("/api/jobs/{job_id}/events")
+    def events(job_id: str, request: Request, after: int | None = None,
+               last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+               given: str | None = Header(default=None, alias=TOKEN_HEADER)) -> StreamingResponse:
+        _check_stream_token(request, given, token)
+        job = _job_named(runner, job_id)
+        stream = _job_events(job, last_seen(last_event_id, after), request)
+        return StreamingResponse(stream, media_type=STREAM_TYPE, headers=STREAM_HEADERS)
+
+
+def _check_stream_token(request: Request, given: str | None, token: str) -> None:
+    """
+    A stream's token: in the header like any API call, or as ?token=, since an EventSource can't add a header.
+    """
+    if not (_is_token(given, token) or _is_token(request.query_params.get("token"), token)):
+        raise HTTPException(status_code=403, detail="This needs the page's token: open the link the terminal printed.")
 
 
 def _add_resource_routes(app: FastAPI, runner: ReportRunner, check_token: Callable[..., None]) -> None:
@@ -193,7 +311,16 @@ def create_app(runner: ReportRunner, token: str, *, cookie: str = "aws_analyzer_
     The app for one server: its runner, the token its link carries, and the cookie that keeps it (named for the
     port, so two servers on one machine don't take each other's).
     """
-    app = FastAPI(title="aws-analyzer", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+    hub = LiveHub(runner)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        runner.jobs.shutdown()
+        await hub.close()
+
+    app = FastAPI(title="aws-analyzer", version=__version__, docs_url=None, redoc_url=None, openapi_url=None,
+                  lifespan=lifespan)
 
     @app.middleware("http")
     async def secured(request: Request, call_next: Any) -> Response:
@@ -207,6 +334,8 @@ def create_app(runner: ReportRunner, token: str, *, cookie: str = "aws_analyzer_
         return JSONResponse({"message": exc.detail}, status_code=exc.status_code)
 
     _add_routes(app, runner, token, cookie)
+    add_live_routes(app, hub, check=lambda request, given: _check_stream_token(request, given, token),
+                    header=TOKEN_HEADER)
     add_ping_routes(app, token=token, cookie=cookie, is_token=lambda given: _is_token(given, token), header=TOKEN_HEADER)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
