@@ -207,7 +207,7 @@ How the first two are built (one pull request, since a toolchain alone builds no
   layout effect), and a literal typed in a box keeps its commas in the call box (`['a', 'b']`, which Phase 1 showed
   as `['a' 'b']`).
 
-### Phase 3: data, jobs and live updates
+### Phase 3: data, jobs and live updates (done)
 
 - **Reports as data:**
   - `GET /api/data/<service>/<command>?...` returns the report's `ReportData` as JSON for the services with
@@ -247,6 +247,37 @@ How reports as data are built (the first bullet group):
   no `_DataCommands` (`gives_data`, also the catalog's `data` per service).
 - `GET /api/data/<service>/<command>?<name>=<text>` and `GET /api/data/<service>?call=...`, with the token: 400 for
   `CantRun`, 422 for `NoData`. The page doesn't use it yet; Phase 5's grid will.
+
+How the rest was built (blocks, jobs and live, one pull request):
+- **Blocks as JSON:** `_kit/blockjson.py` registers `@_draws(kind, "json")` for the shared blocks (title, cards, note,
+  text, findings, verdict, next, table, tabs) and the charts (meter, split, bars, treemap, dots, as their fields); a
+  block without one is `{"kind": "html", "block": ..., "html": ...}`, its HTML without the stylesheet.
+  `_report_json` gives `box_class` (root and theme), `badge`, `rules` (what its HTML blocks added) and `blocks`.
+  `Report.reports` (in `POST /api/run`'s answer and a job's `report` events) is one per report the command showed;
+  `GET /api/style/<service>` is the CSS (`_look_css`: the stylesheet and the theme's rules, without `<style>`).
+- **Jobs:** `server/jobs.py`'s `JobBoard` runs each `Job` on a worker thread; its events are numbered from 1 and kept
+  (`progress`, `report`, `note`, `done`), so a stream opened late or again (`Last-Event-ID`, `?after=`) gets what it
+  missed. While a job runs, its View's `_show` sends each report as it's shown and `_progress` is `job_progress`,
+  whose tick sends the count (at most every `PROGRESS_EVERY`) and raises `JobStopped` (a BaseException, like
+  KeyboardInterrupt, so `@_friendly_errors` lets it through and S3's threaded scans cancel) once Stop was pressed.
+  `ReportRunner` keeps a service's Views as lanes (`_Lane`): a command takes the first free one, a new one beside
+  the main one on the same analyzer (`_view_beside`) when all are busy, up to `VIEWS_PER_SERVICE`.
+- **Transport:** Server-Sent Events (`server/streams.py`), chosen before Phase 0's results from what it found
+  locally: jupyter-server-proxy streams `text/event-stream` (which an EventSource sends), an EventSource reconnects by
+  itself with `Last-Event-ID`, WebSockets lose their close codes through the proxy, and Stop is a plain DELETE, so
+  nothing has to travel back on the stream. Every stream ends with a message (`done`), and takes `?token=`.
+- **Live:** `server/feeds.py`'s `FEEDS` (Lambda `activity` and `lines`, messaging `queue`, sagemaker_env `machine`)
+  each make a reader on the runner's analyzer (`ReportRunner.core`); `server/live.py`'s `LiveHub` reads a stream
+  once however many pages follow it (a task on the server's loop, each read in `asyncio.to_thread`), gives a newcomer
+  the newest sample at once, stops after its last follower, and a page's stream ends after `LIVE_MINUTES`.
+- **The page:** `web/src/jobs.ts` follows every job it started or found running (`followServerJobs`, before the
+  catalog is drawn, so a reloaded command page picks its job up rather than run it again; matched by `isSameRoute`);
+  `useRuns` runs commands as jobs and draws the reports as they come, `Result.tsx` the progress line
+  (`lib/progress.ts`) and ■ Stop, `Bar.tsx` the *N running* list; `api/events.ts` follows a stream; Lambda's
+  service page has `LiveActivity` (`lib/live.ts`). The page still inserts the reports' HTML: drawing `reports` with
+  components is Phase 5's.
+- Tests: `tests/test_server_jobs.py` (blocks, jobs with a held command, Stop, a second View, the hub, the feeds on
+  demo.py's Lambda) and three page tests in `test_web_page.py` (`held_summary`).
 
 ### Phase 4: the frame and search (the design above)
 
@@ -361,7 +392,7 @@ vendor. Prefer small, dependency-free libraries, and check each against the size
 |---|---|---|
 | Framework | Preact + signals + TypeScript + Vite | It shapes every later phase |
 | Ship the build | Commit `server/static/dist/`, with a freshness test | The alternative, a hatch build hook running Node at release, keeps the repo smaller but makes releases need Node |
-| Push transport | Decide from Phase 0 (WebSocket if the proxy passes it) | Depends on real SageMaker |
+| Push transport | Server-Sent Events, built in Phase 3 (see its notes); revisit if Phase 0 finds SageMaker's proxy holds them back | Depends on real SageMaker |
 | `invoke()` on the web | Leave it in the notebook | The only write; a deliberate product choice |
 | Bundle budget | 300 KB gzipped first load | Trades start-up speed against features on the first page |
 | Vega-Lite size (~250 KB gz) | Lazy-load it with the first chart | Could pick uPlot everywhere instead and lose declarative specs |
@@ -376,7 +407,7 @@ not started, needs the user.
 | 0: proven on real SageMaker | needs the user | | link works on a notebook instance; `/ping` built and passes through jupyter-server-proxy 4.6.1 locally; waiting for results from a notebook instance and Studio |
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
 | 2: frontend foundation | done | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
-| 3: data, jobs, live | in progress | #306 | reports as data done (`/api/data`, `ReportData.to_json()`); next: block JSON, then jobs and live streams (the transport waits on Phase 0) |
+| 3: data, jobs, live | done | #306, #310 | reports as data (`/api/data`), blocks as JSON (`/api/run`'s `reports`, `/api/style`), jobs with progress and Stop (`/api/jobs`, Server-Sent Events), live streams (`/api/live`: Lambda activity and lines, an SQS queue, the SageMaker machine); the page runs commands as jobs and shows Lambda's Running now |
 | 4: the frame and search | done | #307, #309 | tabs, theme, search one service at a time (`/api/resources`), the quick look (`facts`), per-service attention (`/api/attention`) and Home's "Checked so far" |
 | 5: resource pages | not started | | service by service, Lambda first, from blocks as JSON; grid, Vega-Lite, ELK.js |
 | 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
