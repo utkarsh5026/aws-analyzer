@@ -338,7 +338,7 @@ not started, needs the user.
 |---|---|---|---|
 | 0: proven on real SageMaker | needs the user | | link works on a notebook instance; `/ping` built and passes through jupyter-server-proxy 4.6.1 locally; waiting for results from a notebook instance and Studio |
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
-| 2: frontend foundation | in review | | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
+| 2: frontend foundation | in review | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
 | 3: data, jobs, live | not started | | `/api/data`, block JSON, jobs with progress and cancel, live streams |
 | 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |
 | 5: windows in the browser | not started | | Lambda first, then Step Functions, messaging, S3, ... |

@@ -20,7 +20,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - 🧰 **Browser tab: the right link on newer notebook instances** ([#298](https://github.com/utkarsh5026/aws-analyzer/pull/298))
   - `aws-analyzer serve` asks SageMaker for the notebook's address (`test2-kbmv.notebook...`), not only its name.
   - When it can't, the terminal says the link is a guess and how to mend it.
-- 🧰 **Browser tab: a list typed in a form keeps its commas in the call**
+- 🧰 **Browser tab: a list typed in a form keeps its commas in the call** ([#301](https://github.com/utkarsh5026/aws-analyzer/pull/301))
   - `['a', 'b']` in a box now shows as `['a', 'b']` in the call to copy, not `['a' 'b']`; what ran was already right.
 
 ## [0.66.0] - 2026-11-28
