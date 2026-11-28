@@ -6,8 +6,9 @@ each block by what's registered for its type: its HTML, or its lines of text. Th
 uses (render.py draws them); a service's own blocks (_Passage, _Steps, _Wiring, ...) are defined in its module and
 register how they're drawn with @_draws when it's imported.
 
-The registries @_draws fills: _HTML (block type -> its HTML), _TEXT (block type -> its lines in text mode) and
-_CELLS (table cell type -> its HTML, given the cell's text).
+The registries @_draws fills: _HTML (block type -> its HTML), _TEXT (block type -> its lines in text mode), _JSON
+(block type -> the block as JSON, for the web page: blockjson.py) and _CELLS (table cell type -> its HTML, given the
+cell's text).
 """
 
 from __future__ import annotations
@@ -184,16 +185,18 @@ class _Report:
 
 _HTML: dict[type, Callable[[Any, _Report], str]] = {}
 _TEXT: dict[type, Callable[[Any, _Report], list[str]]] = {}
+_JSON: dict[type, Callable[[Any, _Report], dict[str, Any]]] = {}
 _CELLS: dict[type, Callable[[Any, str], str]] = {}
 
 
 def _draws(kind: type, mode: str) -> Callable[[Callable], Callable]:
     """
     @_draws(_Passage, "html") makes the function under it the way a _Passage block is drawn in HTML:
-    f(block, report) -> str. "text" registers its lines in text mode, f(block, report) -> list[str], and "cell" how
-    a table cell of that type shows in HTML, f(cell, text) -> str (text mode shows str(cell)).
+    f(block, report) -> str. "text" registers its lines in text mode, f(block, report) -> list[str], "json" the block
+    as JSON for the web page, f(block, report) -> dict with its "kind" (a block without one goes to the page as its
+    HTML), and "cell" how a table cell of that type shows in HTML, f(cell, text) -> str (text mode shows str(cell)).
     """
-    registry: dict[type, Callable] = {"html": _HTML, "text": _TEXT, "cell": _CELLS}[mode]
+    registry: dict[type, Callable] = {"html": _HTML, "text": _TEXT, "json": _JSON, "cell": _CELLS}[mode]
 
     def register(draw: Callable) -> Callable:
         registry[kind] = draw

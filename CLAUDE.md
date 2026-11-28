@@ -135,7 +135,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `_clip`, `_pad`, `_width`, `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
   (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Verdict` (a report's answer in one coloured sentence), `_Next` and the
-  `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
+  `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`), `blockjson.py` (the blocks as JSON
+  for the web page: each kind's `@_draws(kind, "json")`, `_report_json`, `_look_css`) and `render.py` (`_base_css`,
   `_prose`, `_lead`, `_call`, `_signature`, the shared blocks' drawers with the tables' sorting, filters and key
   columns, `_report_html`, `_render_text`, `_blocks_html`),
   `progress.py` (`_progress_bar_class`, `_progress_bar`, `_progress_text`), `view.py` (`_BaseView`, which every
@@ -1531,6 +1532,18 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   `checkable`) and `GET /api/attention` (the checks kept, `ReportRunner.checked`, nothing read);
   the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
   `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
+- `jobs.py`: a command as a job (`POST /api/jobs`, from `ReportRunner.start_job` / `start_call_job`): `JobBoard` runs
+  each `Job` on a worker thread and keeps its numbered events (`progress`, `report`, `note`, `done`); while it runs,
+  its View's `_show` sends each report and `_progress` is `job_progress`, whose tick raises `JobStopped` (a
+  BaseException) once `DELETE /api/jobs/<id>` set `job.stop`. `GET /api/jobs/<id>/events` streams them (`app.py`'s
+  `_job_events`). A service's Views are `_Lane`s: a command takes a free one, else a new one on the same analyzer
+  (`_view_beside`, up to `VIEWS_PER_SERVICE`). Every report also comes as blocks of JSON (`Report.reports`,
+  `_kit/blockjson.py`'s `_report_json`, drawn with `GET /api/style/<service>`).
+- `streams.py`: Server-Sent Events (`sse_message`, heartbeats, `last_seen`): the notebook's proxy streams only
+  `text/event-stream`, a stream ends with a `done` message, and takes the token as `?token=` (an EventSource can't
+  add a header). `live.py`'s `LiveHub` (`GET /api/live/<service>/<feed>`) reads each of `feeds.py`'s `FEEDS` (Lambda
+  `activity` and `lines`, messaging `queue`, sagemaker_env `machine`, each a reader on `ReportRunner.core`) once
+  however many pages follow it, and a page's stream ends after `LIVE_MINUTES`.
 - `ping.py` (temporary, Phase 0 of `/web`): `GET /ping`, a page (`static/ping.js`, `ping.css`) that checks whether
   the notebook's proxy streams `/api/ping-stream` (Server-Sent Events) and passes `/api/ping-socket` (a WebSocket);
   the terminal prints its link on SageMaker. It goes once the transport is chosen.

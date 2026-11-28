@@ -1,9 +1,12 @@
 /**
- * The bar along the top: the name, the tabs, the search (Ctrl K), the theme switch and what the server reads.
+ * The bar along the top: the name, the tabs, the commands running (each with its progress and a Stop), the search
+ * (Ctrl K), the theme switch and what the server reads.
  */
 
 import { VERSION } from "../api/client";
 import type { Catalog } from "../api/types";
+import { runningJobs, stopJob, type TrackedJob } from "../jobs";
+import { progressText } from "../lib/progress";
 import { parseRoute, type Route } from "../lib/route";
 import { THEME_CHOICES, type ThemeChoice } from "../lib/theme";
 import { catalog, chooseTheme, closeTabAt, finderOpen, tabs, themeChoice } from "../state";
@@ -122,6 +125,47 @@ function whereText(): string {
   return `Region: ${region || "boto3's default"}${profile ? ` · profile ${profile}` : ""} · read-only`;
 }
 
+function RunningJob({ job }: { job: TrackedJob }) {
+  const service = catalog.value?.services.find((each) => each.key === job.service);
+  return (
+    <li class="aa-job">
+      <a href={job.target} class="aa-job-call" title={`Open ${job.call}`}>
+        {service ? <img src={`static/icons/${service.icon}.svg`} alt="" width={16} height={16} /> : null}
+        <code>{job.call}</code>
+      </a>
+      <span class="aa-job-progress">{job.progress ? progressText(job.progress) : "Starting…"}</span>
+      <button
+        type="button"
+        class="aa-ghost"
+        disabled={job.stopping}
+        onClick={() => stopJob(job.id)}
+        aria-label={`Stop ${job.call}`}
+      >
+        {job.stopping ? "Stopping…" : "■ Stop"}
+      </button>
+    </li>
+  );
+}
+
+/** The commands still running, wherever they were started: a count in the bar that opens to the list. */
+function RunningJobs() {
+  const running = runningJobs();
+  if (!running.length) return null;
+  return (
+    <details class="aa-jobs">
+      <summary title="Commands still running">
+        <span class="aa-spin" aria-hidden="true" />
+        {`${running.length} running`}
+      </summary>
+      <ul class="aa-jobs-list">
+        {running.map((job) => (
+          <RunningJob key={job.id} job={job} />
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function Bar() {
   const openFinder = () => {
     if (catalog.value) finderOpen.value = true;
@@ -133,6 +177,7 @@ export function Bar() {
         aws-analyzer <span class="aa-ver">{VERSION}</span>
       </a>
       <TabStrip />
+      <RunningJobs />
       <button class="aa-find" type="button" id="find" aria-keyshortcuts="Control+K Meta+K" onClick={openFinder}>
         <span>Search</span>
         <kbd>Ctrl K</kbd>

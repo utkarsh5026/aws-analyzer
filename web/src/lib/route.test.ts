@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute, routeFor } from "./route";
+import { isSameRoute, parseRoute, routeFor } from "./route";
 
 describe("the address", () => {
   it("names the service, the command and the form's texts", () => {
@@ -19,5 +19,14 @@ describe("the address", () => {
     const hash = routeFor("s3", "ls", { uri: "s3://acme lake/raw/", limit: "", run: "1" });
     expect(hash).toBe("#/s3/ls?uri=s3%3A%2F%2Facme+lake%2Fraw%2F&run=1");
     expect(parseRoute(hash).args).toEqual({ uri: "s3://acme lake/raw/", run: "1" });
+  });
+
+  it("knows two addresses of the same command and arguments, however they're written", () => {
+    expect(
+      isSameRoute("#/s3/summary?uri=s3://acme/&run=1", routeFor("s3", "summary", { uri: "s3://acme/", run: "1" })),
+    ).toBe(true);
+    expect(isSameRoute("#/s3/ls?uri=a&limit=5", "#/s3/ls?limit=5&uri=a")).toBe(true);
+    expect(isSameRoute("#/s3/ls?uri=a", "#/s3/ls?uri=b")).toBe(false);
+    expect(isSameRoute("#/s3/ls?uri=a", "#/s3/tree?uri=a")).toBe(false);
   });
 });

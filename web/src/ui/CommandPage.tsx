@@ -103,7 +103,7 @@ export function CommandPage({ service, command, route }: PageProps) {
   const [texts, setTexts] = useState<Texts>(() => ({ ...route.args }));
   const [flags, setFlags] = useState<Flags>(() => startingFlags(command, route.args));
   const [typedCall, setTypedCall] = useState<string | null>(null);
-  const { shown, runForm, runCall } = useRuns(service, command);
+  const { shown, runForm, runCall, stop } = useRuns(service, command);
 
   const values = formValues(command, texts, flags);
   const call = typedCall ?? callText(command, values);
@@ -167,7 +167,7 @@ export function CommandPage({ service, command, route }: PageProps) {
           </div>
         </div>
       </form>
-      <Result shown={shown} service={service} onAgain={() => runForm(true)} onStep={runCall} />
+      <Result shown={shown} service={service} onAgain={() => runForm(true)} onStop={stop} onStep={runCall} />
     </>
   );
 }

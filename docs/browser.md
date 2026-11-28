@@ -7,7 +7,7 @@ description: "How to open aws-analyzer in a browser tab from a SageMaker noteboo
 
 # Find anything in your account, and keep it open in a tab
 
-Start one command in JupyterLab's terminal and open the link it prints. Search one service at a time for a function, bucket, table or queue, see what needs attention in a service as you open it, open what you find in a tab, and read the same reports a cell draws, with room to read them.
+Start one command in JupyterLab's terminal and open the link it prints. Search one service at a time for a function, bucket, table or queue, see what needs attention in a service as you open it, open what you find in a tab, and read the same reports a cell draws, with room to read them. Long commands show their progress and stop when you ask, and Lambda's page shows what's running now.
 { .lede }
 
 <ul class="pills">
@@ -16,6 +16,8 @@ Start one command in JupyterLab's terminal and open the link it prints. Search o
   <li>Search one service at a time</li>
   <li>Everything opens in a tab</li>
   <li>What needs attention, per service</li>
+  <li>Progress, and Stop</li>
+  <li>Lambda, live</li>
   <li>Every service, the same reports</li>
   <li>Next steps run with a click</li>
   <li>Read-only</li>
@@ -48,6 +50,8 @@ Using it
 -   [What needs fixing in a service?](#attention) <span class="how">open its page</span>
 -   [Can I keep several open?](#tabs) <span class="how">tabs</span>
 -   [How do I run a command?](#run) <span class="how">a form, or type the call</span>
+-   [How long will it take? Can I stop it?](#jobs) <span class="how">the progress line, ■ Stop</span>
+-   [What's running in Lambda right now?](#live) <span class="how">Lambda's page</span>
 -   [Can I run a report's next step?](#next) <span class="how">▶ Run beside it</span>
 -   [How do I jump to something quickly?](#find) <span class="how">Ctrl K</span>
 -   [Is there a dark mode?](#tabs) <span class="how">Light, Dark or Auto</span>
@@ -188,6 +192,34 @@ Values are read the way the notebook reads them: `7d`, `10MB`, `s3://bucket/pref
 
 Commands that write files or change something (`download`, `invoke`, `new_env`, `to_excel`, ...) aren't on the page: run those in the notebook, where you see the code before it runs. Neither are the notebook windows (`explore()`, `chat()`), which are widgets.
 
+## Long commands: progress, and Stop { #jobs }
+
+A command runs in the background: the page shows how far it's got, Stop ends it, and it keeps going while you look at something else.
+{ .gist }
+
+![An S3 summary running in the browser: under its form, Running summary('s3://demo-lake/') for 6 s with a Stop button, and a progress line, Scanning, 1,000 objects, 6 s, 161 a second; in the top bar, 1 running, opened to list the same command with its progress and its own Stop](images/browser-jobs-light.webp#only-light){ width="984" height="615" loading=lazy }
+![An S3 summary running in the browser: under its form, Running summary('s3://demo-lake/') for 6 s with a Stop button, and a progress line, Scanning, 1,000 objects, 6 s, 161 a second; in the top bar, 1 running, opened to list the same command with its progress and its own Stop](images/browser-jobs-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+
+A summary of a big bucket, a few seconds in, with the list of what's running opened from the top bar.
+{ .muted }
+
+The progress line is the notebook's: what it's reading, how many so far (of how many, when the command knows), the time, the rate, and the time left. ■ Stop ends the command at its next step: a long scan stops where it is, and the page says so; run it again, or ask for less (a narrower prefix, `limit=`). A report a command shows as it goes appears at once, before the command ends.
+
+Move to another page, or reload, and the command goes on: *N running* in the top bar lists every command still running, with its progress and a Stop, and a click opens it where its report will be. Two commands for the same service run side by side.
+
+## What's running now in Lambda { #live }
+
+Lambda's page shows which functions ran in the last 10 minutes, kept up to date while the page is open.
+{ .gist }
+
+![Lambda's page below Needs attention: Running now, 4 functions ran in the last 10 minutes; report-api, 884 calls, 5 failed, up to 6 at once, called this minute; orders-etl, 218 calls, 21 failed, up to 2 at once; churn-scoring, 22 calls; support-agent-actions, 21 calls, last called 2 min ago; each with a bar a minute; under them, read just now, every 60 s, for up to 15 minutes, 15 CloudWatch metrics a read, under $0.01 an hour](images/browser-live-light.webp#only-light){ width="984" height="615" loading=lazy }
+![Lambda's page below Needs attention: Running now, 4 functions ran in the last 10 minutes; report-api, 884 calls, 5 failed, up to 6 at once, called this minute; orders-etl, 218 calls, 21 failed, up to 2 at once; churn-scoring, 22 calls; support-agent-actions, 21 calls, last called 2 min ago; each with a bar a minute; under them, read just now, every 60 s, for up to 15 minutes, 15 CloudWatch metrics a read, under $0.01 an hour](images/browser-live-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+
+*Running now* on Lambda's page: a line per function that ran, its calls a minute, the failed part in red.
+{ .muted }
+
+Each line is a function's calls, failed calls and most runs at once in the last 10 minutes, from CloudWatch, which publishes each minute a minute or two late. A name opens its report. The server reads once a minute however many tabs are open, and stops after 15 minutes so a forgotten tab doesn't read CloudWatch all day: *Watch again* goes on, and Pause stops it sooner. The line under the list says what reading costs.
+
 ## Next steps, with a click { #next }
 
 A report's Next steps each get a ▶ Run button: it runs the step here and fills in the form it opens.
@@ -232,11 +264,33 @@ The answer holds the call that ran and, under `data`, the report's title, verdic
 
     A report that's only a note (a bucket that isn't there, a permission the role hasn't got) answers 422 with the note's words in `message`, and so does a service whose reports don't come as data yet. A command the page doesn't offer (`download`, `invoke`, ...) answers 400.
 
+## Jobs and live streams, for scripts { #streams }
+
+What the page uses is there for a script too, with the same token: commands as jobs, and the live streams.
+{ .gist }
+
+```text title="A command as a job, and the live streams"
+POST   /api/jobs                       {"service": "s3", "call": "summary('s3://demo-lake/')"}
+GET    /api/jobs/<id>/events?token=... its progress, each report and its end, as Server-Sent Events
+DELETE /api/jobs/<id>                  stop it at its next step
+GET    /api/live                       the live streams there are
+GET    /api/live/lambda_functions/activity?token=...
+GET    /api/live/lambda_functions/lines?name=orders-etl&token=...
+GET    /api/live/messaging/queue?name=orders&token=...
+GET    /api/live/sagemaker_env/machine?token=...
+```
+
+A job's events are numbered, so a stream opened late, or again, gets what it missed (`Last-Event-ID`, or `?after=`), and ends with `done`. A live stream sends `sample` every few seconds (`note` when a read fails, and it goes on) and `done` after 15 minutes. A report also comes as blocks of JSON (`reports` in `POST /api/run`'s answer and in a job's `report` events), drawn with `GET /api/style/<service>`'s CSS.
+
+??? more "Why Server-Sent Events"
+
+    The notebook's proxy (jupyter-server-proxy) streams an answer only when it's asked for as `text/event-stream`, which is what a browser's EventSource asks for; anything else arrives in one piece when it ends. An EventSource also reconnects by itself and says what it got last. An EventSource can't add a header, so a stream takes the token as `?token=`.
+
 ## Permissions and what it reads { #permissions }
 
 The page runs the same Views as the notebook, so it needs the same read-only permissions: each service's guide lists them ([Lambda](lambda_functions.md#permissions), [S3](s3.md#permissions), ...). It reads with the credentials the terminal has: on SageMaker, the notebook's execution role. On a notebook instance, `aws-analyzer serve` also calls `sagemaker:DescribeNotebookInstance` once at start, for the notebook's address.
 
-What it never does: it never writes to AWS (the commands that do aren't offered, and the Views only read), never saves files, and never sends anything off the machine except to AWS and to your browser.
+What it never does: it never writes to AWS (the commands that do aren't offered, and the Views only read), never saves files, and never sends anything off the machine except to AWS and to your browser. The live streams read what the explorers' Live tabs read: Lambda's CloudWatch numbers (GetMetricData) and log lines (FilterLogEvents), an SQS queue's counts (GetQueueUrl, GetQueueAttributes; never ReceiveMessage, which would hide a message from its readers), and the SageMaker machine's own files.
 
 ## Troubleshooting { #troubleshooting }
 

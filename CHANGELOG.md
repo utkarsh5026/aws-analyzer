@@ -18,6 +18,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🧰 **Browser tab: progress, Stop, and Lambda live** ([#310](https://github.com/utkarsh5026/aws-analyzer/pull/310))
+  - A long command shows how far it's got and the time left; ■ Stop ends it, and *N running* in the top bar lists what's still going.
+  - A command keeps going when you open another page or reload; two commands for one service run side by side.
+  - Lambda's page shows which functions ran in the last 10 minutes, kept up to date while it's open (`/api/live/...` for scripts).
 - 🧰 **Browser tab: what needs attention, per service, and a quick look** ([#309](https://github.com/utkarsh5026/aws-analyzer/pull/309))
   - Opening a service's page checks it, and only it: its overview's verdict and every warning, each naming what it's about.
   - Home's *Checked so far* lists the services checked; the others aren't read until you open them.

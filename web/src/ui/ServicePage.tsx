@@ -1,16 +1,21 @@
 /**
- * A service's page: what needs attention in it (checked when the page opens, only this service read), then its
- * commands by group, each a card that opens its form.
+ * A service's page: what needs attention in it (checked when the page opens, only this service read), what's live in
+ * it (Lambda: what's running now), then its commands by group, each a card that opens its form.
  */
 
+import type { ComponentType } from "preact";
 import type { Service } from "../api/types";
 import { byGroup } from "../lib/find";
 import { routeFor } from "../lib/route";
 import { NeedsAttention } from "./Attention";
 import { Crumbs } from "./bits";
+import { LiveActivity } from "./LiveActivity";
+
+const LIVE_PANELS: Record<string, ComponentType> = { lambda_functions: LiveActivity };
 
 export function ServicePage({ service }: { service: Service }) {
   const viewName = service.title === "S3" ? "S3View" : "its View";
+  const Live = LIVE_PANELS[service.key];
   return (
     <>
       <div class="aa-head">
@@ -21,6 +26,7 @@ export function ServicePage({ service }: { service: Service }) {
         </p>
       </div>
       <NeedsAttention service={service} />
+      {Live ? <Live /> : null}
       {[...byGroup(service.commands)].map(([group, commands]) => [
         <h2 key={`${group}-title`} class="aa-group">
           {group}
