@@ -81,6 +81,14 @@ def _region_in_use(settings: Settings) -> str:
     return found or "no region (boto3 found none: pass --region us-east-1, or set AWS_DEFAULT_REGION)"
 
 
+def ping_link(url: str) -> str:
+    """
+    The proxy check's address (server/ping.py): the page's own, with ping before its ?token=.
+    """
+    base, _, query = url.partition("?")
+    return f"{base}ping?{query}" if query else f"{base}ping"
+
+
 def welcome(link: PageLink, settings: Settings, host: str, *, moved_from: int | None = None) -> str:
     """
     What the terminal shows once the server is up: where to open the page, and what it reads.
@@ -95,6 +103,7 @@ def welcome(link: PageLink, settings: Settings, host: str, *, moved_from: int | 
                       "        so this one is guessed from its name. If it doesn't open, take the address your notebook",
                       f"        is open at, up to .sagemaker.aws, and add /proxy/{link.port}/?token={link.token}"]
         lines += [f"  On this machine: {link.local}"]
+        lines += ["", f"  Checking the proxy for live updates: {ping_link(link.url)}"]
     profile = f" with the profile {settings.profile}" if settings.profile else ""
     lines += ["", f"  Reads AWS in {_region_in_use(settings)}{profile}, read-only, as the notebook does."]
     if host not in LOOPBACK:

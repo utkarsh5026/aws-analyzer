@@ -16,11 +16,12 @@ import boto3
 import pytest
 from botocore.exceptions import NoRegionError
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 from moto import mock_aws
 
 from aws_analyzer.lambda_functions import LambdaView
 from aws_analyzer.s3 import S3Analyzer, S3View
-from aws_analyzer.server import cli
+from aws_analyzer.server import cli, ping
 from aws_analyzer.server.app import POLICY, TOKEN_HEADER, create_app
 from aws_analyzer.server.catalog import (
     NOT_SERVED, SERVICES, Parameter, argument_value, served_names, view_commands,
@@ -239,6 +240,82 @@ def test_the_pages_files_are_served_and_what_it_names_is_there(client):
     for name in ("app.css", "app.js", "icons/favicon.svg"):
         assert f"static/{name}" in page or name.startswith("icons/") and (STATIC / name).exists()
     assert client.get("/static/../app.py").status_code == 404
+
+
+@pytest.fixture
+def quick_pings(monkeypatch):
+    monkeypatch.setattr(ping, "PING_SECONDS", 0.05)
+    monkeypatch.setattr(ping, "PINGS", 3)
+
+
+def _events(text: str) -> list[tuple[str, dict]]:
+    events = []
+    for block in text.strip().split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines())
+        events.append((fields["event"], json.loads(fields["data"])))
+    return events
+
+
+def test_the_proxy_check_page_needs_the_link_and_names_its_files(client):
+    assert client.get("/ping").status_code == 403
+    page = client.get(f"/ping?token={TOKEN}")
+    assert page.status_code == 200 and f'content="{TOKEN}"' in page.text
+    assert "static/ping.js" in page.text and "static/ping.css" in page.text and "socket_library" in page.text
+    assert client.get("/ping").status_code == 200
+    for name in ("ping.js", "ping.css"):
+        assert client.get(f"/static/{name}").status_code == 200
+    assert page.headers["Content-Security-Policy"] == POLICY
+
+
+def test_the_ping_stream_sends_a_line_at_a_time_then_done(client, quick_pings):
+    assert client.get("/api/ping-stream").status_code == 403
+    assert client.get("/api/ping-stream?token=wrong").status_code == 403
+    answer = client.get(f"/api/ping-stream?token={TOKEN}")
+    assert answer.headers["content-type"].startswith("text/event-stream")
+    assert answer.headers["x-accel-buffering"] == "no"
+    events = _events(answer.text)
+    assert [kind for kind, _ in events] == ["ping", "ping", "ping", "done"]
+    assert [data["n"] for _, data in events[:3]] == [1, 2, 3]
+    assert events[2][1]["sent"] - events[0][1]["sent"] >= 90
+    assert client.get("/api/ping-stream", headers={TOKEN_HEADER: TOKEN}).status_code == 200
+
+
+def test_the_ping_socket_wants_the_token_first_then_ticks_and_answers(client, quick_pings):
+    with client.websocket_connect("/api/ping-socket") as socket:
+        socket.send_text(json.dumps({"token": "wrong"}))
+        with pytest.raises(WebSocketDisconnect) as closed:
+            socket.receive_json()
+    assert closed.value.code == ping.WRONG_TOKEN
+
+    with client.websocket_connect("/api/ping-socket") as socket:
+        socket.send_text(json.dumps({"token": TOKEN}))
+        assert socket.receive_json()["kind"] == "hello"
+        socket.send_text("1")
+        messages = []
+        with pytest.raises(WebSocketDisconnect) as closed:
+            while True:
+                messages.append(socket.receive_json())
+    assert closed.value.code == 1000
+    assert [message["n"] for message in messages if message["kind"] == "tick"] == [1, 2, 3]
+    assert [message["said"] for message in messages if message["kind"] == "pong"] == ["1"]
+
+
+def test_the_server_says_which_websocket_library_it_has(monkeypatch):
+    assert ping.socket_library().startswith(("websockets", "wsproto"))
+    monkeypatch.setattr(ping.importlib.util, "find_spec", lambda name: None)
+    assert ping.socket_library() == ""
+    assert '&quot;socket_library&quot;: &quot;none&quot;' in ping.ping_page_html(TOKEN)
+
+
+def test_on_sagemaker_the_terminal_also_gives_the_proxy_checks_link():
+    metadata = {"ResourceArn": "arn:aws:sagemaker:ap-south-1:123456789012:notebook-instance/test2",
+                "ResourceName": "test2"}
+    link = page_link(8765, "abc", metadata=metadata, find_address=lambda name, region: "test2-kbmv.notebook."
+                                                                                         "ap-south-1.sagemaker.aws")
+    shown = cli.welcome(link, Settings(region="ap-south-1"), "127.0.0.1")
+    assert "https://test2-kbmv.notebook.ap-south-1.sagemaker.aws/proxy/8765/ping?token=abc" in shown
+    local = cli.welcome(page_link(8765, "abc", metadata={}), Settings(region="ap-south-1"), "127.0.0.1")
+    assert "ping" not in local
 
 
 

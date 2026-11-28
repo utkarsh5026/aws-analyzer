@@ -91,16 +91,32 @@ the same pull request.
 
 ### Phase 0: proven on real SageMaker (needs the user)
 
-Nobody has opened the page on real SageMaker yet: this container can't reach it. Ask the user to run
-`aws-analyzer serve` on a notebook instance and in a Studio JupyterLab space, and report back:
-- Does the printed link open? If not, what address does JupyterLab show, so `links.STUDIO_APP_PATHS` can be fixed?
-- Do **Server-Sent Events** stream through jupyter-server-proxy, or arrive all at once when the response ends? Some
-  proxy versions held streamed bodies back. Add a temporary `/api/ping-stream` that sends a line a second for ten
-  seconds.
-- Do **WebSockets** connect through the proxy (`/api/ping-socket`)?
+Nobody had opened the page on real SageMaker before Phase 1 shipped, since this container can't reach it. What's
+known:
+- **The link:** opens on the user's notebook instance (after #298). Studio's (`links.STUDIO_APP_PATHS`) is untried.
+- **The check is built:** `server/ping.py`, with `static/ping.js` and `ping.css`. `GET /ping` is a page that opens
+  three connections and copies its results as text, holding no token. Each connection sends a line a second for ten
+  seconds:
+  - `/api/ping-stream` as an EventSource;
+  - the same stream as a `fetch`;
+  - `/api/ping-socket` as a WebSocket, which also answers the page's messages, to check the way back.
 
-Done when: both machine kinds open the page, and the push transport for Phase 3 is chosen from what worked
-(WebSocket if both work, since it carries cancel messages back too).
+  The stream takes the token as a query parameter or the header. The socket takes it as its first message. On
+  SageMaker the terminal prints the page's link.
+- **Found locally, with jupyter-server-proxy 4.6.1:** it streams a response only when the request's `Accept` header is
+  exactly `text/event-stream` (its `handlers.py`). Anything else, a plain `fetch` included, arrives all at once when
+  the response ends. An EventSource sends that header by itself, so Phase 3's fetch-based streams must send it too.
+  WebSockets pass both ways, but the proxy drops the close code (the page sees 1005), so a job's end must be a message,
+  not a close code. Chrome's `connect-src 'self'` lets the same-origin WebSocket through.
+- **uvicorn needs a WebSocket library:** `websockets` comes only through langgraph-sdk and langsmith. Phase 3 should
+  depend on it directly. The page names the library the server has, so a missing one isn't blamed on the proxy.
+
+Still to do: the user opens `/ping` on a notebook instance and in a Studio JupyterLab space and sends the results.
+SageMaker's proxy version may differ from 4.6.1.
+
+Done when: both machine kinds report results, and the push transport for Phase 3 is chosen from what worked
+(WebSocket if both work, since it carries cancel messages back too). Then remove `ping.py`, its static files, its tests
+and the terminal's line.
 
 ### Phase 1: served reports (done, #296)
 
@@ -298,8 +314,8 @@ not started, needs the user.
 
 | Phase | Status | PR | Notes |
 |---|---|---|---|
-| 0: proven on real SageMaker | needs the user | | link on a notebook instance and in Studio; SSE and WebSocket through the proxy |
-| 1: served reports | in review | #296 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
+| 0: proven on real SageMaker | needs the user | | link works on a notebook instance; `/ping` built and passes through jupyter-server-proxy 4.6.1 locally; waiting for results from a notebook instance and Studio |
+| 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
 | 2: frontend foundation | not started | | TypeScript + Vite + Preact, committed `dist/`, Playwright in CI |
 | 3: data, jobs, live | not started | | `/api/data`, block JSON, jobs with progress and cancel, live streams |
 | 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |

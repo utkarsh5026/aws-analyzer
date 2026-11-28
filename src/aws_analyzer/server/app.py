@@ -1,6 +1,7 @@
 """
 The web app: FastAPI over the ReportRunner. GET / is the page (static/index.html with the session's token in it),
-GET /api/catalog the services and their commands, POST /api/run a command's report as HTML.
+GET /api/catalog the services and their commands, POST /api/run a command's report as HTML, and for now GET /ping, a
+check of what the notebook's proxy passes (ping.py).
 
 Every request but the page's own files needs the token the terminal printed: the page's address carries it once
 (?token=...), the server keeps it in a cookie for that address, and the page sends it back with each API call in a
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from .catalog import SERVICES
+from .ping import add_ping_routes
 from .runner import CantRun, ReportRunner
 
 STATIC = Path(__file__).with_name("static")
@@ -126,5 +128,6 @@ def create_app(runner: ReportRunner, token: str, *, cookie: str = "aws_analyzer_
         return JSONResponse({"message": exc.detail}, status_code=exc.status_code)
 
     _add_routes(app, runner, token, cookie)
+    add_ping_routes(app, token=token, cookie=cookie, is_token=lambda given: _is_token(given, token), header=TOKEN_HEADER)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

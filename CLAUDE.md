@@ -1517,6 +1517,9 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   `?token=` once, then an HttpOnly SameSite=Strict cookie named for the port), `GET /api/catalog`, `POST /api/run`;
   the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
   `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
+- `ping.py` (temporary, Phase 0 of `/web`): `GET /ping`, a page (`static/ping.js`, `ping.css`) that checks whether
+  the notebook's proxy streams `/api/ping-stream` (Server-Sent Events) and passes `/api/ping-socket` (a WebSocket);
+  the terminal prints its link on SageMaker. It goes once the transport is chosen.
 - `cli.py`: `main(argv)`, `free_port` (the next free one when the port is taken), `welcome` (the link, the region in
   use from boto3's session, a warning when `--host` isn't loopback).
 - `static/`: the page, plain HTML, CSS and an ES module with no build step (`app.js`): routes are the hash
