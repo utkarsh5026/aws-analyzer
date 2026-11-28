@@ -1,5 +1,6 @@
 """
-Runs a View's command for the web page and hands back its report as HTML, the same report a notebook cell shows.
+Runs a View's command for the web page and hands back its report as HTML, the same report a notebook cell shows, or,
+for a View with reports as data (_DataCommands), the tables the report was drawn from as JSON (ReportData.to_json).
 
 One View per service, made the first time the page asks for it and kept, like a `ui = LambdaView()` in a notebook:
 its analyzer's caches and what use() / more() / follow_up() remember carry over from one command to the next. A
@@ -20,6 +21,8 @@ from typing import Any, Callable
 from botocore.exceptions import BotoCoreError
 
 from .._kit.blocks import _Note
+from .._kit.dataview import _DataCommands
+from .._kit.errors import _Hint
 from .._kit.render import _call
 from .._kit.themes import _theme_name
 from .._kit.view import _commands, _parse_call
@@ -33,6 +36,13 @@ class CantRun(LookupError):
     """
     What the page asked for can't run: a service or command it doesn't offer, a parameter the command hasn't got, or
     one it needs left empty. The message says which, in words for the page.
+    """
+
+
+class NoData(LookupError):
+    """
+    A command ran but gave no tables: its report was a note (a missing bucket, a permission it hasn't got), or it
+    isn't one of the reports that give their data. The message says why, in words for the page.
     """
 
 
@@ -65,6 +75,21 @@ class Report:
 
 
 @dataclass
+class DataReport:
+    """
+    A command's report as data: the call it ran, what each of its parameters was given (as the form's boxes show
+    it), the report's tables, charts and summary as JSON (ReportData.to_json) and how long it took.
+    """
+
+    service: str
+    command: str
+    call: str
+    arguments: dict[str, str]
+    data: dict[str, Any]
+    seconds: float
+
+
+@dataclass
 class _Service:
     view: Any = None
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -74,6 +99,18 @@ def _service_named(key: str) -> Service:
     if key not in BY_KEY:
         raise CantRun(f"There's no service called {key!r}.")
     return BY_KEY[key]
+
+
+def _view_class(key: str) -> type:
+    service = _service_named(key)
+    return getattr(service.module(), service.view_name)
+
+
+def gives_data(key: str) -> bool:
+    """
+    Whether a service's reports come as data too: its View has data() and to_excel() (_DataCommands).
+    """
+    return issubclass(_view_class(key), _DataCommands)
 
 
 class ReportRunner:
@@ -112,17 +149,13 @@ class ReportRunner:
         """
         The commands the page offers for a service, from its View class (no View is made, nothing is read).
         """
-        service = _service_named(key)
-        return view_commands(getattr(service.module(), service.view_name))
+        return view_commands(_view_class(key))
 
     def run(self, key: str, command: str, arguments: dict[str, str] | None = None) -> Report:
         """
         Runs a command with what the form's boxes hold ({'name': 'orders-etl', 'since': '7d'}).
         """
-        offered = {each.name: each for each in self.commands(key)}
-        if command not in offered:
-            raise CantRun(f"The page can't run {command}() for {BY_KEY[key].title}.")
-        args, kwargs = _form_arguments(offered[command].parameters, arguments or {})
+        args, kwargs = self._form_call(key, command, arguments)
         return self._run(key, command, args, kwargs)
 
     def run_call(self, key: str, call: str) -> Report:
@@ -130,22 +163,81 @@ class ReportRunner:
         Runs a call written as in a notebook, "errors('orders-etl', since='7d')" or "ui.errors(...)" (a report's
         next step). Its arguments are read as Python literals and nothing in it is run (_parse_call).
         """
+        return self._run(key, *self._parsed_call(key, call))
+
+    def data(self, key: str, command: str, arguments: dict[str, str] | None = None) -> DataReport:
+        """
+        A report's tables as JSON, for the form's boxes ({'name': 'orders-etl', 'since': '7d'}): the command runs
+        without drawing its report, as ui.data('errors', 'orders-etl', since='7d') does in a notebook.
+        """
+        self._check_gives_data(key)
+        args, kwargs = self._form_call(key, command, arguments)
+        return self._read_data(key, command, args, kwargs)
+
+    def data_call(self, key: str, call: str) -> DataReport:
+        """
+        A report's tables as JSON, for a call written as in a notebook ("errors('orders-etl', since='7d')").
+        """
+        self._check_gives_data(key)
+        return self._read_data(key, *self._parsed_call(key, call))
+
+    def _form_call(self, key: str, command: str, arguments: dict[str, str] | None) -> tuple[tuple, dict[str, Any]]:
+        offered = {each.name: each for each in self.commands(key)}
+        if command not in offered:
+            raise CantRun(f"The page can't run {command}() for {BY_KEY[key].title}.")
+        return _form_arguments(offered[command].parameters, arguments or {})
+
+    def _parsed_call(self, key: str, call: str) -> tuple[str, tuple, dict[str, Any]]:
         parsed = _parse_call(_without_receiver(call.strip()))
         if parsed is None:
             raise CantRun(f"{call!r} isn't one command with plain values, like errors('orders-etl', "
                                  "since='7d').")
         service = _service_named(key)
-        if parsed.name not in served_names(getattr(service.module(), service.view_name)):
+        if parsed.name not in served_names(_view_class(key)):
             raise CantRun(f"The page can't run {parsed.name}() for {service.title}.")
-        return self._run(key, parsed.name, tuple(parsed.args), parsed.kwargs)
+        return parsed.name, tuple(parsed.args), parsed.kwargs
+
+    def _check_gives_data(self, key: str) -> None:
+        if not gives_data(key):
+            raise NoData(f"{_service_named(key).title}'s reports don't come as data yet: run them for their "
+                         "report instead.")
+
+    def _read_data(self, key: str, command: str, args: tuple, kwargs: dict[str, Any]) -> DataReport:
+        held = self._service(key)
+        started = time.monotonic()
+        with held.lock:
+            data = self._tables(key, held, command, args, kwargs)
+        texts = _form_texts(_commands(_view_class(key))[command], args, kwargs)
+        seconds = round(time.monotonic() - started, 2)
+        return DataReport(key, command, _call(command, *args, **kwargs), texts, data.to_json(), seconds)
+
+    def _tables(self, key: str, held: _Service, command: str, args: tuple, kwargs: dict) -> Any:
+        """
+        What a command read, as its View keeps it for data(): the command runs quietly, so nothing is drawn. A
+        report that's only a note (an AWS or input error, which the command's own guard says) is NoData with that
+        note's words; anything else that breaks is NoData too, its traceback in the server's log.
+        """
+        try:
+            view = self._view(key, held)
+        except BotoCoreError as exc:
+            held.view = None
+            raise NoData(f"Couldn't start {BY_KEY[key].title}: {str(exc).rstrip('.')}. Check the region (--region) "
+                         "and the AWS credentials this server runs with.") from exc
+        try:
+            return view._read_quietly(command, args, kwargs)
+        except _Hint as hint:
+            raise NoData(str(hint)) from hint
+        except Exception as exc:  # noqa: BLE001 - the server's guard: the page gets the words, the log the traceback
+            log.error("%s.%s failed:\n%s", key, command, traceback.format_exc())
+            raise NoData(f"{command}() stopped with {type(exc).__name__}: {exc}. The details are in the terminal "
+                         "running aws-analyzer serve.") from exc
 
     def _run(self, key: str, command: str, args: tuple, kwargs: dict[str, Any]) -> Report:
         held = self._service(key)
         started = time.monotonic()
         with held.lock:
             blocks = self._blocks(key, held, command, args, kwargs)
-        service = BY_KEY[key]
-        view_class = getattr(service.module(), service.view_name)
+        view_class = _view_class(key)
         html = _reports_html(view_class, self.settings.max_rows, blocks)
         texts = _form_texts(_commands(view_class)[command], args, kwargs)
         seconds = round(time.monotonic() - started, 2)

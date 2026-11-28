@@ -157,6 +157,24 @@ Searching for *slow* finds the commands about run times in every service.
 
 <p class="part">Reference</p>
 
+## A report's data, as JSON { #data }
+
+For Lambda, S3, DynamoDB, Step Functions and API Gateway, the server also hands back the tables a report is drawn from, as JSON: what `ui.data('errors', 'orders-etl')` gives in a notebook.
+{ .gist }
+
+Ask for a command with its options as the query, or for a call as you'd write it in a cell, and send the page's token in the `X-AWS-Analyzer-Token` header (the page holds it in `<meta name="aws-analyzer-token">`):
+
+```text title="Two ways to ask"
+GET /api/data/lambda_functions/errors?name=orders-etl&since=7d
+GET /api/data/lambda_functions?call=errors('orders-etl', since='7d')
+```
+
+The answer holds the call that ran and, under `data`, the report's title, verdict, cards and findings, then each table: what one row is, each column's meaning and kind (`ms`, `share` from 0 to 1, `time`, `count`, ...) and its rows, times in ISO 8601 UTC. Nothing is drawn, and nothing is written.
+
+??? more "When there's nothing to give"
+
+    A report that's only a note (a bucket that isn't there, a permission the role hasn't got) answers 422 with the note's words in `message`, and so does a service whose reports don't come as data yet. A command the page doesn't offer (`download`, `invoke`, ...) answers 400.
+
 ## Permissions and what it reads { #permissions }
 
 The page runs the same Views as the notebook, so it needs the same read-only permissions: each service's guide lists them ([Lambda](lambda_functions.md#permissions), [S3](s3.md#permissions), ...). It reads with the credentials the terminal has: on SageMaker, the notebook's execution role. On a notebook instance, `aws-analyzer serve` also calls `sagemaker:DescribeNotebookInstance` once at start, for the notebook's address.

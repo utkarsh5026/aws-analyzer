@@ -195,6 +195,17 @@ How the first two are built (one pull request, since a toolchain alone builds no
 Done when: a long S3 summary shows a real progress bar and can be cancelled, and a page can subscribe to Lambda
 activity and get pushed updates.
 
+How reports as data are built (the first bullet group):
+- `ReportData.to_json()` and each part's own (`DataTable`, `DataColumn`, `DataChart`), pure in `_kit/datasets.py`:
+  cards as `{label, value, tone}`, findings as `{level, message}`, a column's `tones` as a dict, its kind in words as
+  `unit`; `json_value` makes each cell plain JSON (times ISO UTC with `Z`, a naive time read as UTC, NaN null).
+- `ReportRunner.data(key, command, boxes)` and `data_call(key, call)` take the same input as `run` / `run_call`,
+  call the View's `_read_quietly` under the service's lock, and give a `DataReport` (call, form texts, `data`,
+  seconds). `NoData` carries the words of the note a report was instead (its `_Hint`), or says the service's View has
+  no `_DataCommands` (`gives_data`, also the catalog's `data` per service).
+- `GET /api/data/<service>/<command>?<name>=<text>` and `GET /api/data/<service>?call=...`, with the token: 400 for
+  `CantRun`, 422 for `NoData`. The page doesn't use it yet; Phase 4's grid will.
+
 ### Phase 4: reports drawn by the browser
 
 Replace the server's report HTML one block type at a time with a Preact component reading the block's JSON. Every
@@ -338,8 +349,8 @@ not started, needs the user.
 |---|---|---|---|
 | 0: proven on real SageMaker | needs the user | | link works on a notebook instance; `/ping` built and passes through jupyter-server-proxy 4.6.1 locally; waiting for results from a notebook instance and Studio |
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
-| 2: frontend foundation | in review | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
-| 3: data, jobs, live | not started | | `/api/data`, block JSON, jobs with progress and cancel, live streams |
+| 2: frontend foundation | done | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
+| 3: data, jobs, live | in progress | #306 | reports as data done (`/api/data`, `ReportData.to_json()`); next: block JSON, then jobs and live streams (the transport waits on Phase 0) |
 | 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |
 | 5: windows in the browser | not started | | Lambda first, then Step Functions, messaging, S3, ... |
 | 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
