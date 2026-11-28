@@ -2,11 +2,12 @@
  * What the whole page shares: the catalog once it's loaded, where the page is (the hash), the tabs, the theme,
  * whether the finder is open, the reports already run (by the hash that shows them, so back and forward don't run
  * them again) and the services' resources already read (so searching a service again, or Ctrl K, asks nothing).
- * The tabs, the theme and the service last searched are kept in the browser, so they come back on reload.
+ * The tabs, the theme and the service last searched are kept in the browser, so they come back on reload; what each
+ * service's check found is kept here and by the server, which hands it back after a reload.
  */
 
 import { signal } from "@preact/signals";
-import type { Catalog, Report, ResourceIndex } from "./api/types";
+import type { Attention, Catalog, Report, ResourceIndex } from "./api/types";
 import { parseRoute } from "./lib/route";
 import { afterNavigation, closeTab, normalHash, type Tabs, tabsFromText } from "./lib/tabs";
 import { resolveTheme, type ThemeChoice, themeChoiceFrom } from "./lib/theme";
@@ -41,6 +42,9 @@ export const searchService = signal(kept(SEARCH_KEY) ?? "lambda_functions");
 
 /** The services' resources already read, by service key. */
 export const indexes = signal<Map<string, ResourceIndex>>(new Map());
+
+/** What each service's check found, by service key. */
+export const attentions = signal<Map<string, Attention>>(new Map());
 
 /** The route the hash names. */
 export function currentRoute() {
@@ -96,6 +100,15 @@ export function keepIndex(index: ResourceIndex) {
   const next = new Map(indexes.value);
   next.set(index.service, index);
   indexes.value = next;
+}
+
+/** Keeps what a service's check found; one already kept is replaced only by a newer check. */
+export function keepAttention(attention: Attention) {
+  const earlier = attentions.value.get(attention.service);
+  if (earlier && Date.parse(earlier.checked_at) > Date.parse(attention.checked_at)) return;
+  const next = new Map(attentions.value);
+  next.set(attention.service, attention);
+  attentions.value = next;
 }
 
 const systemDark = matchMedia("(prefers-color-scheme: dark)");

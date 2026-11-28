@@ -256,9 +256,17 @@ How reports as data are built (the first bullet group):
   (`lib/theme.ts`), the search home with its service picker, from-memory matches and not-read services
   (`lib/search.ts`), and Ctrl K over names already read. Until resource pages exist, a result opens its service's
   main report for it (`function_info`, `bucket_info`, `table_info`, ...) as a command page in a tab.
-- **The quick look:** a preview beside the results, from the index entry and the service's cached reads.
-- **Per-service attention:** each service page's "Needs attention" block from that service's own findings, and Home's
-  "Checked so far".
+- **The quick look** (done): a preview beside the results (`ui/QuickLook.tsx`) from the index entry's `facts` (what the
+  listing call already returned: a function's runtime, handler, memory, last change; a bucket's region) and what the
+  service's check found about it (`lib/attention.ts`'s `concernsAbout`), with Open, ↗ New tab and Copy as cell. It reads
+  nothing: a service not checked yet says so and links to its page.
+- **Per-service attention** (done): `GET /api/attention/<service>` (`server/attention.py`: `CHECKS`, the overview each
+  service is checked with; `concerns_of` reads the report's own blocks, `_Findings`, a "Warnings" `_Table`, Lambda's
+  `_Todo`, S3's `_Fixes`, into `Concern`s worst first, each naming its `Target`s and the command that opens each; kept
+  for `ATTENTION_KEPT`, with the report it came from, so "See the whole report" doesn't run it again) and
+  `GET /api/attention` (the checks kept, nothing read). Each service page leads with "Needs attention in <service>"
+  (`ui/Attention.tsx`), checked when it opens, ↻ Check again; Home's "Checked so far" lists the services checked and
+  says the rest haven't been.
 
 Done when: the home page is search, everything opens in tabs that survive a reload, and no page reads a service the
 user didn't pick.
@@ -369,7 +377,7 @@ not started, needs the user.
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
 | 2: frontend foundation | done | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
 | 3: data, jobs, live | in progress | #306 | reports as data done (`/api/data`, `ReportData.to_json()`); next: block JSON, then jobs and live streams (the transport waits on Phase 0) |
-| 4: the frame and search | in progress | #307 | the design above: tabs, theme, search one service at a time (`/api/resources`); next the quick look and per-service attention |
+| 4: the frame and search | done | #307, #309 | tabs, theme, search one service at a time (`/api/resources`), the quick look (`facts`), per-service attention (`/api/attention`) and Home's "Checked so far" |
 | 5: resource pages | not started | | service by service, Lambda first, from blocks as JSON; grid, Vega-Lite, ELK.js |
 | 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
 | 7: workspace | not started | | split panes, pins, history with diffs, notifications, export, the map |
