@@ -11,6 +11,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🌐 **Every service's reports in a browser tab: `aws-analyzer serve`**
+  - Run `aws-analyzer serve` in JupyterLab's terminal and open the link it prints; on SageMaker it's the notebook's own address with `/proxy/8765/`.
+  - A form per command, the same reports as in a cell, next steps that run with a click, Ctrl K to find a command.
+  - Read-only: commands that write files or change something stay in the notebook; the link's token keeps others out.
 - 🤖 **Agent: remembers your models and keys, by name** ([#294](https://github.com/utkarsh5026/aws-analyzer/pull/294))
   - The model `use_model()` or ⚙ model switches to is saved with its key; the next `AgentView()` starts on it.
   - Name it yourself or pick a suggestion like *Haiku Hummingbird*; `use_saved_model('work gpt')` switches back.

@@ -44,8 +44,11 @@ Quick start
 
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
+Or in a browser tab, with more room: `aws-analyzer serve` in a terminal (or `python -m aws_analyzer serve`) prints
+the address to open; on SageMaker it's the notebook's own address with /proxy/8765/ after it (aws_analyzer.server).
+
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions,
-stepfunctions, apigateway, athena, messaging, agent.
+stepfunctions, apigateway, athena, messaging, agent, server.
 Importing this package loads none of them; each loads the first time one of its names is used.
 """
 
@@ -161,7 +164,7 @@ _EXPORTS = {  # name -> the module it comes from
     "clean_up": "_kit.housekeeping",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-            "lambda_functions", "stepfunctions", "apigateway", "athena", "messaging", "agent")
+            "lambda_functions", "stepfunctions", "apigateway", "athena", "messaging", "agent", "server")
 
 
 def __getattr__(name: str) -> Any:

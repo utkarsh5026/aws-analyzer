@@ -122,7 +122,7 @@ def main() -> int:
     # imports: each module of the package in a fresh interpreter, boto3 only (the agent with its dependencies).
     failures = []
     package = ROOT / "src" / "aws_analyzer"
-    modules = [p for p in package.glob("*.py") if p.name != "__init__.py"]  # and a package's own: agent/
+    modules = [p for p in package.glob("*.py") if not p.name.startswith("_")]  # and a package's own: agent/
     modules += [p.parent for p in package.glob("*/__init__.py") if not p.parent.name.startswith("_")]
     for path in sorted(modules):
         code = (f"import aws_analyzer.{path.stem}" if path.stem in WITH_DEPENDENCIES

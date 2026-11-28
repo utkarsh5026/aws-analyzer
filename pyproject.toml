@@ -53,7 +53,13 @@ dependencies = [
     "langchain-aws>=1.9",  # models on Amazon Bedrock
     "langgraph-checkpoint-sqlite>=3.1",  # AgentView(memory=True, chats=True): its notes and saved chats, in SQLite
     "mcp>=1.10",  # AgentView(mcp=...): the tools of the MCP servers you add
+    "fastapi>=0.115",  # aws-analyzer serve: the reports in a browser tab (mcp already brings Starlette and pydantic)
+    "uvicorn>=0.30",  # aws-analyzer serve's web server
 ]
+
+# `aws-analyzer serve` in a terminal (or `python -m aws_analyzer serve`): the reports in a browser tab.
+[project.scripts]
+aws-analyzer = "aws_analyzer.server.cli:main"
 
 # Everything else is optional: a command that needs a missing package says what to install.
 [project.optional-dependencies]

@@ -33,6 +33,11 @@ langchain-openai==1.8.3
 langchain-aws==1.9.3
 langgraph-checkpoint-sqlite==3.1.3
 mcp==1.30.0
+# aws-analyzer serve (server/): the reports in a browser tab. FastAPI and uvicorn are dependencies; httpx is for
+# Starlette's TestClient in tests/test_server.py.
+fastapi==0.165.0
+uvicorn==0.54.0
+httpx==0.29.0
 # Optional for users (agent/sandboxes/: the local sandbox runs Python in Pyodide on Deno); installed here so it's
 # tested for real. Its tests download Pyodide's files once a run (CI caches them), and skip without the internet.
 deno==2.9.8

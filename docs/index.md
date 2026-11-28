@@ -261,6 +261,12 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 <span class="asks"><span>Were last night's uploads to acme-raw processed?</span><span>Any question about Lambda and S3, in a sentence.</span><span>Remembers where things run, next time.</span></span>
 <span class="go" aria-hidden="true">›</span>
 </a></li>
+<li><a href="browser.html">
+<img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">In a browser tab</span><code>aws-analyzer serve</code></span>
+<span class="asks"><span>Can I read these reports with more room than a cell?</span><span>Can I click through the next steps?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
 </ul>
 
 One pattern
