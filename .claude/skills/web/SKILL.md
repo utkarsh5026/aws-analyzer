@@ -1,0 +1,315 @@
+---
+name: web
+description: The roadmap for aws-analyzer in a browser tab (`aws-analyzer serve`, src/aws_analyzer/server/) - from the served reports that exist today to a JavaScript-first app with live data, interactive tables and charts, every explorer window rebuilt in the browser and the agent streaming its answers. Holds the vision, the rules the web layer keeps, the phases with what "done" means for each, the open decisions, the list of JavaScript ideas and the progress table. Use for "/web status", "/web phase 3", or before changing anything in src/aws_analyzer/server/.
+argument-hint: "<status | phase N | ideas>"
+---
+
+# The web app: aws-analyzer in a browser tab
+
+Request: `$ARGUMENTS`. `status` means: read the progress table, check it against the tree (`ls
+src/aws_analyzer/server/ src/aws_analyzer/server/static/`) and the open pull requests, and say what's done and what's
+next. `phase N` means: do that phase, following its section below (one pull request per bullet group unless it says
+otherwise). `ideas` means: pick from "Things JavaScript can do here" with the user.
+
+Read CLAUDE.md first, its "The web page (`server/`)" section above all. Everything there still holds; this plan relaxes
+none of it except where it says so.
+
+## Why
+
+In a notebook everything has to fit in a cell. A report is HTML with no JavaScript (Jupyter strips scripts from a saved
+notebook), so sorting, filters and zoom are CSS tricks. A window is ipywidgets: every row is about six widgets, every
+click goes through the kernel, and the window is boxed inside a cell. A browser tab served by our own process has none
+of these limits. It gets a whole screen, runs any JavaScript we ship, and talks to the server directly.
+
+**The direction the user set: JavaScript-first. Use JavaScript as much as it helps.** Anything the browser can do
+better than the kernel goes to the browser: drawing, sorting, filtering, searching, laying out graphs, animating,
+reading files, keeping history. Python keeps what only it can do: AWS calls through the analyzers, and the pure
+analysis that turns AWS data into findings with actions. When a change could go either way, pick the one that puts
+more in the browser.
+
+The notebook isn't going away. Reports in cells stay the default, because they survive in a saved notebook, which a
+browser tab doesn't. The web app is a second front end on the same core, like the agent is.
+
+```
+            ┌──────── core (per service): helpers · models · analysis · analyzer ────────┐
+            └──────▲─────────────────────▲─────────────────────▲───────────────▲─────────┘
+                   │                     │                     │               │
+          View → HTML in a cell   explorer (ipywidgets)   agent toolkit   server/ → JSON + events
+                                                                                 │
+                                                                     browser: TypeScript app
+```
+
+## Rules the web layer keeps
+
+These come on top of CLAUDE.md's product goal and hard constraints, which still apply to every page.
+
+- **Read-only, like the notebook.** No endpoint runs a View's `_CHANGES` command, and no endpoint calls a write
+  operation. If a write ever comes to the web (Lambda's `invoke()` is the only candidate), it needs the user's say-so
+  first (see "Open decisions"), a confirm dialog showing exactly what will run, and a POST of its own.
+- **AWS data is untrusted.** A name, tag, log line or knowledge-base passage can hold HTML or script. Insert it with
+  `textContent` or the framework's escaping, never `innerHTML`. The one exception is the server-rendered report HTML
+  from Phase 1, which the Views escape. It goes away block by block in Phase 4.
+- **The page talks only to its own server.** The CSP stays `script-src 'self'` and `connect-src 'self'`: no CDN, no
+  `eval`, no inline scripts. Every library is vendored into the package (pinned, with its license in
+  `server/static/THIRD_PARTY.md`). Add `'wasm-unsafe-eval'` only in the phase that ships WebAssembly, and say so in the
+  pull request.
+- **Every API call carries the token** (`X-AWS-Analyzer-Token`). There's no CORS, and the cookie stays HttpOnly and
+  SameSite=Strict. A new transport (Server-Sent Events, WebSocket) checks the token too: a query parameter for an
+  EventSource, the first message for a WebSocket.
+- **Python's import rules don't move.** Analyzers stay boto3 + stdlib at import time. Only `server/` imports fastapi,
+  starlette, uvicorn and pydantic (`SERVER_TOP_LEVEL` in `rules.py`), and `server/__init__.py` imports none of them.
+  Nothing the browser needs leaks into the core: the core returns dataclasses, and the server turns them into JSON.
+- **Users never need Node.** The built JavaScript ships inside the wheel. Node is only for contributors and CI (see
+  Phase 2).
+- **A size budget.** The first page load stays under about 300 KB gzipped. Heavy libraries (charts, graph layout,
+  DuckDB-WASM, PDF.js, an editor) load with a dynamic `import()` when the page that needs them opens.
+- **It works for everyone.** Keyboard first (every action reachable without a mouse), visible focus, ARIA roles on
+  custom widgets, `prefers-reduced-motion` honoured, light and dark from `prefers-color-scheme`, and the guides' calm
+  look (warm paper, terracotta accent; see CLAUDE.md's docs section).
+- **Tested like the rest.** API endpoints with Starlette's `TestClient` on moto. Pure TypeScript with Vitest. Pages
+  with Playwright on demo.py's data, in CI. A test checks the committed build is fresh.
+- **Documented like the rest.** `docs/browser.md` grows with each phase. A rebuilt window gets a section or its own
+  page, with screenshots from a `web_shots.py` (light and dark, from demo data, like `shots.py`). README and CHANGELOG
+  follow the usual rules.
+
+### TypeScript style
+
+The Python code style in CLAUDE.md translates directly:
+- full-word names, functions as verbs, booleans as questions;
+- small functions, early returns, no nesting past three levels;
+- no magic numbers (named constants);
+- no explanatory comments: a doc comment on each exported function, and names for the rest;
+- `strict` TypeScript with no `any`; a type for data with named parts, not a loose object.
+
+One module per concern: `api/` (the client and the event streams), `blocks/` (a renderer per report block),
+`windows/<service>/`, `ui/` (shared widgets). Formatting and linting with Biome, checked in CI.
+
+## Phases
+
+Each phase lists what to build and what "done" means. One pull request per bullet group. Update the progress table in
+the same pull request.
+
+### Phase 0: proven on real SageMaker (needs the user)
+
+Nobody has opened the page on real SageMaker yet: this container can't reach it. Ask the user to run
+`aws-analyzer serve` on a notebook instance and in a Studio JupyterLab space, and report back:
+- Does the printed link open? If not, what address does JupyterLab show, so `links.STUDIO_APP_PATHS` can be fixed?
+- Do **Server-Sent Events** stream through jupyter-server-proxy, or arrive all at once when the response ends? Some
+  proxy versions held streamed bodies back. Add a temporary `/api/ping-stream` that sends a line a second for ten
+  seconds.
+- Do **WebSockets** connect through the proxy (`/api/ping-socket`)?
+
+Done when: both machine kinds open the page, and the push transport for Phase 3 is chosen from what worked
+(WebSocket if both work, since it carries cancel messages back too).
+
+### Phase 1: served reports (done, #296)
+
+`aws-analyzer serve`, the FastAPI app, the token and CSP, the SageMaker link, and a plain ES-module page:
+- services and commands from the Views;
+- a form per command, plus a call box;
+- the server-rendered report HTML;
+- ▶ Run on next steps;
+- Ctrl K to find a command;
+- hash routes, so back, forward, reload and bookmarks work.
+
+### Phase 2: the frontend foundation
+
+- **Toolchain:** TypeScript + Vite + Preact, with `@preact/signals` for state. Preact is React's model in about 4 KB,
+  so the bundle budget stays easy. Sources in `web/` at the repo root. `vite build` writes
+  `src/aws_analyzer/server/static/dist/` (hashed files plus a manifest), which **is committed**, so the wheel ships it
+  and users need no Node. `make web` builds it. `tests/test_server.py` fails when `dist/` doesn't match a fresh build
+  (compare the manifest's content hashes), the way `test_tours.py` checks `tours.js`. CI's Node job runs
+  `npm ci && npm run build && npm test && npx biome check`.
+- **Port the Phase 1 page** to that app with no visible change: router, sidebar, forms, call box, finder, report view.
+  Delete `static/app.js` and `app.css` when it's done.
+- **Playwright in CI:** a pytest fixture starting the server on demo data (the scratch `serve_demo.py` pattern: seed in
+  moto, pass `views=`, run uvicorn on a free port), and page tests for what Phase 1 does.
+
+Done when: the page looks and works as before, built from TypeScript, with page tests in CI.
+
+### Phase 3: data, jobs and live updates
+
+- **Reports as data:**
+  - `GET /api/data/<service>/<command>?...` returns the report's `ReportData` as JSON for the services with
+    `_DataCommands` (Lambda, API Gateway, Step Functions, S3, ...). Each column carries its meaning, kind (`ms`,
+    `share`, `time`, ...), `bar=` and `tones=`.
+  - Add `ReportData.to_json()` in `_kit/datasets.py`, pure.
+  - Services without it keep the HTML path until they get one.
+- **Blocks as JSON:**
+  - Add a third drawing to the block registry: `@_draws(_Table, "json")` beside `"html"` and `"text"`.
+  - `POST /api/run` returns `blocks: [...]`, each block's JSON, and keeps `html` for any block without a JSON drawing,
+    so a page always shows everything.
+  - This is the seam Phase 4 renders through.
+- **Jobs instead of one long request:**
+  - `POST /api/jobs` starts a command on a worker and returns its ID.
+  - The transport Phase 0 picked streams `progress` (from the View's `_progress` ticks: count, total, rate), `report`
+    (each `_show`), `note` and `done`.
+  - `DELETE /api/jobs/<id>` cancels it (a `threading.Event` the analyzers' long scans check).
+  - The page shows a progress bar with the time left, keeps working while jobs run, and lists running jobs.
+  - The per-service lock becomes per-View: a second View for a second concurrent job.
+- **Live endpoints:** an event stream per live thing the core already reads in a loop:
+  - Lambda `activity()` and new log lines (`_filter()` from where it stopped);
+  - SQS queue depth (`read_queue`);
+  - the SageMaker machine (CPU, memory, GPU from `/proc` and `nvidia-smi`).
+  Each read runs on the server's own schedule, at most one per stream however many tabs listen, and stops when no
+  one listens.
+
+Done when: a long S3 summary shows a real progress bar and can be cancelled, and a page can subscribe to Lambda
+activity and get pushed updates.
+
+### Phase 4: reports drawn by the browser
+
+Replace the server's report HTML one block type at a time with a Preact component reading the block's JSON. Every
+component works in light and dark, with the keyboard, and in print. Order:
+
+1. `_Title`, `_Cards`, `_Note`, `_Findings`, `_Verdict`, `_Next`. Findings and next steps become actions:
+   ▶ Run, copy, open in the notebook as `ui.call()`.
+2. `_Table` as a real data grid:
+   - virtualised rows, so 100,000 rows scroll smoothly and `--max-rows` stops mattering on the page;
+   - sort, filter and group by any column; a column picker;
+   - resizable, sticky header and first column;
+   - copy as CSV or Markdown, download as CSV;
+   - a cell that names a resource (a function, bucket, table, queue) links to its report.
+3. Charts (`_Bars`, `_Split`, `_Meter`, `_Dots`, `_Treemap`, Lambda's `_RunTimeline` / `_RunHistogram`, the error
+   chart): **Vega-Lite**, the grammar the agent's charts already use (`workspace/charts.py`'s `CHART_THEME`), so one
+   theme and one library serve both. Tooltips, brushing a time range (which re-runs the command for that range),
+   zoom, and PNG/SVG export.
+4. `_JsonTree` (fold, search, copy a path), code (Shiki or Prism, vendored, with line links), `_Outline` / `_Graph`
+   (Lambda's how-it-works: pan, zoom, click a node to see its lines), `_FlowGraph` (Step Functions) and `_HopMap`
+   (messaging) laid out with **ELK.js**, with pan, zoom and minimap.
+5. The rest: `_Passage`, `_Answer`, `_Chunks`, `_Steps`, `_Pipeline`, `_Pages`, `_Flow`, `_Media`, `_Image`, ...
+
+Done when: no report on the page uses server HTML (`blocks` only), and `POST /api/run` can drop `html`.
+
+### Phase 5: the explorer windows, rebuilt in the browser
+
+One window per pull request, on the Phase 3 APIs and Phase 4 components. Each keeps what its ipywidgets twin does
+(its `focus`, its tabs, its findings) and adds what only a browser can do. Suggested order, most gained first:
+
+1. **Lambda**:
+   - Live as a stream: runs appear and finish in place, and the timeout bar counts down.
+   - Logs in a virtualised viewer, with the query language (`analysis/query.py`, parsed in Python, highlighted in the
+     box) and regex search on the client.
+   - A timeline you brush to pick a range, and run-to-run diff.
+   - The code tree with Shiki highlighting and `how_it_works()` as an interactive graph.
+2. **Step Functions**: the graph with ELK.js, an execution replayed as an animation along its path, the waterfall
+   zoomable, and click a state to open its Lambda run.
+3. **Messaging**: the map with live queue depths animating along the arrows, and a dead-letter queue pulsing when it
+   fills.
+4. **S3**:
+   - Folders as a virtualised list with multi-select and keyboard navigation.
+   - Previews in the browser: PDF with **PDF.js**, CSV with a grid, Parquet with **hyparquet** (pure JS) or
+     **DuckDB-WASM**, so a file is queried with SQL in the tab, images zoomable.
+   - The bytes come through a server endpoint that streams the object (read-only: GetObject, already a permission S3
+     previews need).
+5. **SageMaker**: a live dashboard (CPU, memory, GPU, disk) streaming from Phase 3's machine endpoint, environments,
+   running apps, and training jobs with their logs tailing.
+6. **DynamoDB**: items in the grid with a JSON side panel, a query builder that shows the `query(...)` call it makes,
+   and the schema as a chart.
+7. **Athena**:
+   - Past queries, costs and failures as grids and charts.
+   - A SQL box with **CodeMirror 6**, highlighting and catalog autocompletion. It shows and copies SQL and the
+     boto3 / awswrangler code (`query_code()`), and **never runs a query**: Athena writes every result to S3, so
+     running one is a write.
+8. **API Gateway**, **OpenSearch**, **Bedrock knowledge bases**: the same shape as their widget windows, with real
+   grids and charts.
+
+Done when: each window's page does everything its widget twin does, and the guide for it shows the browser version.
+
+### Phase 6: the agent and the chats in the browser
+
+- The agent's chat as a page:
+  - **Answers streamed token by token.** LangChain's `astream_events` over a WebSocket. On Bedrock that means
+    `ConverseStream`, a generation call like `Converse`, so it carries the `# read-only:` marker for `rules.py`.
+  - Each tool step drawn live as it runs, the plan's checklist ticking, citations that scroll to the tool result they
+    cite, and charts as interactive Vega-Lite.
+- **✦ Ask** in every window page: the same drawer, fed the page's `focus`, with buttons that navigate the page.
+- The 🔌 MCP, 🧠 memory, 🗂 chats and ⚙ model panels as pages.
+- `bedrock_chat` as a page: the conversation streaming, the settings form from `request_schema()`, the Test tab's
+  runs filling a grid live, and sweeps as a heatmap.
+
+Done when: everything `AgentView().chat()` and `chat()` do works in the tab, with streaming.
+
+### Phase 7: a workspace, not just pages
+
+- **Tabs and split panes:** two reports side by side (yesterday's errors next to today's).
+- **Pinned dashboards:** pin any report or chart, and the dashboard re-runs them on open or on a timer. Layouts are
+  kept in the browser (IndexedDB), never on the server.
+- **History:** every report kept in IndexedDB, searchable, with a diff between two runs of the same call ("what
+  changed since this morning": new findings, gone findings, numbers that moved).
+- **Notifications** (the browser's Notification API, asked for once): a Live watch that sees a new error cause, a
+  queue that fills, or a long job that finishes, while the tab is in the background.
+- **Export:**
+  - a single-file HTML snapshot of a report (its data and a read-only viewer, no server needed) to attach to a ticket;
+  - CSV and XLSX from the grid;
+  - the notebook cell that reproduces it.
+- **Region and profile switchers** in the top bar (a View per region, made on demand), and **keyboard navigation**
+  everywhere (`j`/`k` through rows, `/` to search, `g` then a letter to go to a service, `?` for the list).
+
+### Phase 8: from a notebook cell too
+
+`aws_analyzer.serve()`: the same app on a thread with its own event loop inside the kernel (a kernel already runs
+one, so `uvicorn.run` can't be called there). It shares the notebook's Views, caches and agent conversation, prints
+the link and shows it as an `IFrame` in the cell. Stopping the kernel stops it. Same token, same rules.
+
+## Things JavaScript can do here
+
+A list to pick from when planning a phase, or when the user asks for ideas. Each item names the library it would
+vendor. Prefer small, dependency-free libraries, and check each against the size budget and the CSP.
+
+- **Grids:** virtualised tables with sort, filter, group and pivot over a whole `ReportData` table in the browser
+  (TanStack Table + TanStack Virtual, or a small grid of our own).
+- **SQL in the tab:** DuckDB-WASM over a report's tables and S3 previews ("group the runs by cold start and memory").
+  Needs `'wasm-unsafe-eval'`.
+- **Charts:** Vega-Lite for everything declarative, uPlot for high-rate live series (Live tabs, the machine
+  dashboard).
+- **Graphs:** ELK.js layout for Step Functions, messaging and how-it-works graphs, with pan and zoom (d3-zoom), a
+  minimap and animated execution replay.
+- **Code and text:** Shiki highlighting, CodeMirror 6 for the call box and Athena SQL (autocomplete from the catalog
+  and the command's parameters), and a diff viewer for `diff()` between Lambda versions.
+- **Files:** PDF.js, hyparquet / apache-arrow for Parquet and Arrow, and papaparse for CSV
+  previews.
+- **Live:** streams with auto-reconnect, a pause button, and a "new lines since you looked" marker. Animations on
+  the messaging map and the Live tabs, off under reduced motion.
+- **Command palette:** fuzzy search over commands, recent reports, resources seen in any report (functions, buckets,
+  tables) and actions ("open orders-etl's logs").
+- **Local memory:** IndexedDB for report history, pins and layouts; `localStorage` for small preferences (theme,
+  pane widths).
+- **Sharing:** a copyable link to any view (the hash already does this), single-file HTML snapshots, and copy as a
+  notebook cell.
+- **Workers:** Web Workers for heavy client work (sorting 100k rows, parsing a large log page, DuckDB) so the page
+  never stutters.
+
+## Open decisions (ask the user)
+
+| Decision | Recommendation | Why it's the user's |
+|---|---|---|
+| Framework | Preact + signals + TypeScript + Vite | It shapes every later phase |
+| Ship the build | Commit `server/static/dist/`, with a freshness test | The alternative, a hatch build hook running Node at release, keeps the repo smaller but makes releases need Node |
+| Push transport | Decide from Phase 0 (WebSocket if the proxy passes it) | Depends on real SageMaker |
+| `invoke()` on the web | Leave it in the notebook | The only write; a deliberate product choice |
+| Bundle budget | 300 KB gzipped first load | Trades start-up speed against features on the first page |
+| Vega-Lite size (~250 KB gz) | Lazy-load it with the first chart | Could pick uPlot everywhere instead and lose declarative specs |
+
+## Progress
+
+Update this table in every pull request that moves the web app on. Status is one of: done, in review, in progress,
+not started, needs the user.
+
+| Phase | Status | PR | Notes |
+|---|---|---|---|
+| 0: proven on real SageMaker | needs the user | | link on a notebook instance and in Studio; SSE and WebSocket through the proxy |
+| 1: served reports | in review | #296 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
+| 2: frontend foundation | not started | | TypeScript + Vite + Preact, committed `dist/`, Playwright in CI |
+| 3: data, jobs, live | not started | | `/api/data`, block JSON, jobs with progress and cancel, live streams |
+| 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |
+| 5: windows in the browser | not started | | Lambda first, then Step Functions, messaging, S3, ... |
+| 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
+| 7: workspace | not started | | tabs, pins, history with diffs, notifications, export |
+| 8: from a cell | not started | | `aws_analyzer.serve()` on a kernel thread |
+
+Known issues to fix on the way:
+- In dark mode, the reports' "🐼 This report as data" fold falls back to a light background
+  (`var(--card, #faf7f2)` in `_kit/dataview.py`). Notebooks have the same bug.
+- The page's notebook-only hints (`next(1)`, the data fold's `ui.data()`) are hidden or say notebook things. Phase 4's
+  components replace them with web actions.

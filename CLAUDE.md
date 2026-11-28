@@ -38,6 +38,14 @@ The service modules are being split into packages (core: `helpers`, `models`, `a
 the recipe and the progress table are in `.claude/skills/modularize/SKILL.md` (`/modularize`). Read it before
 changing a service that the table shows as started.
 
+## In progress: the web app (`aws-analyzer serve`)
+
+The reports in a browser tab, growing from the served reports of Phase 1 into a JavaScript-first app: the browser does
+the drawing, sorting, searching, graph layout and live updates, and Python keeps the AWS calls and the analysis. The
+vision, the rules the web layer keeps, the phases, the open decisions and the progress table are in
+`.claude/skills/web/SKILL.md` (`/web`). Read it before changing anything in `src/aws_analyzer/server/`, and update its
+progress table in the same pull request.
+
 ## Product goal: help the user decide what to do
 
 The tool should be simple to use, and its output should help the user decide what to do next. It should not just
