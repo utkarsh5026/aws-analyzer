@@ -1,4 +1,7 @@
-/** The page: the bar, the services down the side, the page the address names, and the finder over it all. */
+/**
+ * The page: the bar with its tabs, the page the address names (the search home, or a service's commands down the side
+ * beside the page), and the finder over it all.
+ */
 
 import { useEffect } from "preact/hooks";
 import type { Catalog } from "../api/types";
@@ -6,7 +9,8 @@ import { catalog, currentRoute, finderOpen, hash, loadError } from "../state";
 import { Bar } from "./Bar";
 import { CommandPage } from "./CommandPage";
 import { Finder } from "./Finder";
-import { Home, ServicePage } from "./Home";
+import { Home } from "./Home";
+import { ServicePage } from "./ServicePage";
 import { Side } from "./Side";
 
 const TITLE = "aws-analyzer";
@@ -23,7 +27,7 @@ function Page({ loaded }: { loaded: Catalog }) {
 
   if (service && command) return <CommandPage key={hash.value} service={service} command={command} route={route} />;
   if (service) return <ServicePage service={service} />;
-  return <Home services={loaded.services} />;
+  return <Home loaded={loaded} />;
 }
 
 function Main() {
@@ -39,6 +43,12 @@ function Main() {
       )}
     </main>
   );
+}
+
+/** Whether the address names a service the catalog has: its commands go down the side. */
+function isServicePage(): boolean {
+  const key = currentRoute().service;
+  return Boolean(key) && Boolean(catalog.value?.services.some((service) => service.key === key));
 }
 
 function isFinderKey(event: KeyboardEvent): boolean {
@@ -59,8 +69,8 @@ export function App() {
   return (
     <>
       <Bar />
-      <div class="aa-shell">
-        <Side />
+      <div class={`aa-shell${isServicePage() ? "" : " aa-wide"}`}>
+        {isServicePage() ? <Side /> : null}
         <Main />
       </div>
       <Finder />

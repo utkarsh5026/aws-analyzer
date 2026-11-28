@@ -1,7 +1,8 @@
 """
 The web app: FastAPI over the ReportRunner. GET / is the page (static/index.html with the session's token in it),
 GET /api/catalog the services and their commands, POST /api/run a command's report as HTML, GET /api/data/... the
-tables a report is drawn from as JSON (for the services whose Views have data()), and for now GET /ping, a check of
+tables a report is drawn from as JSON (for the services whose Views have data()), GET /api/resources/<service> one
+service's names for the page's search (resources.py), and for now GET /ping, a check of
 what the notebook's proxy passes (ping.py).
 
 Every request but the page's own files needs the token the terminal printed: the page's address carries it once
@@ -28,7 +29,8 @@ from .. import __version__
 from .assets import MissingBuild, PageAssets, page_assets
 from .catalog import SERVICES
 from .ping import add_ping_routes
-from .runner import CantRun, NoData, ReportRunner, gives_data
+from .resources import is_searchable
+from .runner import CantList, CantRun, NoData, ReportRunner, gives_data
 
 log = logging.getLogger("aws_analyzer.server")
 STATIC = Path(__file__).with_name("static")
@@ -84,6 +86,7 @@ def _catalog(runner: ReportRunner) -> dict[str, Any]:
     Every service and the commands the page offers for it (read from the View classes: nothing from AWS).
     """
     services = [{"key": service.key, "title": service.title, "icon": service.icon, "data": gives_data(service.key),
+                 "searchable": is_searchable(service.key),
                  "commands": [asdict(command) for command in runner.commands(service.key)]} for service in SERVICES]
     settings = runner.settings
     return {"version": __version__, "region": settings.region or "", "profile": settings.profile or "",
@@ -137,6 +140,23 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
         return asdict(report)
 
     _add_data_routes(app, runner, check_token)
+    _add_resource_routes(app, runner, check_token)
+
+
+def _add_resource_routes(app: FastAPI, runner: ReportRunner, check_token: Callable[..., None]) -> None:
+    """
+    GET /api/resources/<service>[?refresh=true]: one service's functions, buckets, tables... for the page's search,
+    kept by the runner so a second search reads nothing. 400 for a service there isn't, 422 when it can't be listed.
+    """
+
+    @app.get("/api/resources/{service}", dependencies=[Depends(check_token)])
+    def resources(service: str, refresh: bool = False) -> dict[str, Any]:
+        try:
+            return asdict(runner.resources(service, refresh=refresh))
+        except CantRun as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except CantList as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _data_answer(read: Callable[[], Any]) -> dict[str, Any]:

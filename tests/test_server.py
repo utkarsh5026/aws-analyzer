@@ -31,7 +31,9 @@ from aws_analyzer.server.catalog import (
     NOT_SERVED, SERVICES, Parameter, argument_value, served_names, view_commands,
 )
 from aws_analyzer.server.links import page_link, read_metadata
-from aws_analyzer.server.runner import CantRun, NoData, ReportRunner, Settings, _form_arguments, gives_data
+from aws_analyzer.server import resources as resources_module
+from aws_analyzer.server.resources import Resource, is_searchable
+from aws_analyzer.server.runner import CantList, CantRun, NoData, ReportRunner, Settings, _form_arguments, gives_data
 
 TOKEN = "t0ken-for-tests"
 BUCKET = "acme-lake"
@@ -292,6 +294,93 @@ def test_data_from_the_page(client):
     assert client.get("/api/data/s3/ls", params={"uri": f"s3://{BUCKET}/raw/"}).status_code == 403
     services = client.get("/api/catalog", headers=headers).json()["services"]
     assert {service["key"]: service["data"] for service in services}["s3"] is True
+
+
+class _Lister:
+    """
+    An analyzer that only lists, as each lister calls it, counting the calls.
+    """
+
+    def __init__(self, **answers):
+        self.answers = answers
+        self.calls = 0
+
+    def __getattr__(self, name):
+        def answer(*args, **kwargs):
+            self.calls += 1
+            return self.answers[name]
+
+        return answer
+
+
+def test_each_service_lists_its_things_with_the_report_that_opens_them():
+    from types import SimpleNamespace as Thing
+
+    function = Thing(name="orders-etl", runtime="python3.12", memory=512, timeout=30)
+    image = Thing(name="thumbs", runtime=None, memory=1024, timeout=60)
+    assert resources_module.lambda_resources(_Lister(list_functions=[function, image])) == [
+        Resource("function", "orders-etl", "python3.12 · 512 MB · timeout 30 s", "function_info",
+                 {"name": "orders-etl"}),
+        Resource("function", "thumbs", "container image · 1024 MB · timeout 60 s", "function_info",
+                 {"name": "thumbs"}),
+    ]
+    tables = resources_module.dynamodb_resources(_Lister(list_table_names=["orders"]))
+    assert tables == [Resource("table", "orders", "DynamoDB table", "table_info", {"table": "orders"})]
+    machines = resources_module.stepfunctions_resources(_Lister(list_state_machines=[
+        {"name": "report-flow", "type": "EXPRESS", "creationDate": None}]))
+    assert machines[0].detail == "Express workflow" and machines[0].arguments == {"name": "report-flow"}
+    apis = resources_module.apigateway_resources(_Lister(list_apis=[Thing(name="orders-api", kind="HTTP", id="a1")]))
+    assert apis[0].detail == "HTTP API · a1" and apis[0].command == "api_info"
+    found = resources_module.messaging_resources(_Lister(
+        queue_urls=["https://sqs.us-east-1.amazonaws.com/123/orders-dlq"],
+        topic_arns=["arn:aws:sns:us-east-1:123:order-events"]))
+    assert [(each.kind, each.name, each.command) for each in found] == [
+        ("queue", "orders-dlq", "queue_info"), ("topic", "order-events", "topic_info")]
+    assert is_searchable("s3") and not is_searchable("athena")
+
+
+def test_a_service_is_listed_once_then_kept_until_asked_again(runner, aws):
+    first = runner.resources("s3")
+    assert [(each.kind, each.name, each.command, each.arguments) for each in first.resources] == [
+        ("bucket", BUCKET, "bucket_info", {"bucket": BUCKET})]
+    assert not first.from_memory and first.seconds >= 0
+    aws.create_bucket(Bucket="acme-new")
+    kept = runner.resources("s3")
+    assert kept.from_memory and [each.name for each in kept.resources] == [BUCKET]
+    again = runner.resources("s3", refresh=True)
+    assert not again.from_memory and [each.name for each in again.resources] == [BUCKET, "acme-new"]
+
+
+def test_a_service_that_cant_be_listed_says_why(runner, monkeypatch):
+    with pytest.raises(CantList, match="Searching Athena & Glue isn't ready yet"):
+        runner.resources("athena")
+    with pytest.raises(CantRun, match="no service called 'ec2'"):
+        runner.resources("ec2")
+
+    def denied(core):
+        from botocore.exceptions import ClientError
+
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "not for you"}}, "ListBuckets")
+
+    monkeypatch.setitem(resources_module.LISTERS, "s3", denied)
+    with pytest.raises(CantList, match="Couldn't list S3: AccessDenied. not for you"):
+        runner.resources("s3", refresh=True)
+
+
+def test_resources_from_the_page(client):
+    headers = {TOKEN_HEADER: TOKEN}
+    answer = client.get("/api/resources/s3", headers=headers)
+    assert answer.status_code == 200
+    body = answer.json()
+    assert body["service"] == "s3" and body["resources"][0]["name"] == BUCKET and body["read_at"]
+    assert client.get("/api/resources/s3", headers=headers).json()["from_memory"] is True
+    assert client.get("/api/resources/s3", params={"refresh": "true"}, headers=headers).json()["from_memory"] is False
+    assert client.get("/api/resources/athena", headers=headers).status_code == 422
+    assert client.get("/api/resources/ec2", headers=headers).status_code == 400
+    assert client.get("/api/resources/s3").status_code == 403
+    services = client.get("/api/catalog", headers=headers).json()["services"]
+    searchable = {service["key"]: service["searchable"] for service in services}
+    assert searchable["lambda_functions"] and not searchable["sagemaker_env"]
 
 
 def test_the_pages_files_are_served_and_what_it_names_is_there(client):

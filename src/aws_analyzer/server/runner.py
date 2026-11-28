@@ -15,18 +15,20 @@ import logging
 import threading
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
-from botocore.exceptions import BotoCoreError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from .._kit.blocks import _Note
 from .._kit.dataview import _DataCommands
-from .._kit.errors import _Hint
+from .._kit.errors import _error_code, _Hint
+from .._kit.fmt import _utcnow
 from .._kit.render import _call
 from .._kit.themes import _theme_name
 from .._kit.view import _commands, _parse_call
 from .catalog import BY_KEY, Parameter, Service, argument_value, served_names, view_commands
+from .resources import LISTERS, NAMES_KEPT, ResourceIndex, sorted_resources
 
 log = logging.getLogger("aws_analyzer.server")
 _GATHERING = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
@@ -43,6 +45,13 @@ class NoData(LookupError):
     """
     A command ran but gave no tables: its report was a note (a missing bucket, a permission it hasn't got), or it
     isn't one of the reports that give their data. The message says why, in words for the page.
+    """
+
+
+class CantList(LookupError):
+    """
+    A service's resources couldn't be listed: the page can't search it yet, the credentials can't list it, or the
+    region is wrong. The message says which, in words for the page.
     """
 
 
@@ -93,6 +102,13 @@ class DataReport:
 class _Service:
     view: Any = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    names: _KeptNames | None = None
+
+
+@dataclass(frozen=True)
+class _KeptNames:
+    index: ResourceIndex
+    seconds_at: float
 
 
 def _service_named(key: str) -> Service:
@@ -180,6 +196,41 @@ class ReportRunner:
         """
         self._check_gives_data(key)
         return self._read_data(key, *self._parsed_call(key, call))
+
+    def resources(self, key: str, *, refresh: bool = False) -> ResourceIndex:
+        """
+        A service's resources, for the page's search: what its listing call returns, kept for NAMES_KEPT seconds (a
+        second search, from any tab, reads nothing), read afresh with refresh=True. Only the service asked for is
+        read.
+        """
+        service = _service_named(key)
+        if key not in LISTERS:
+            raise CantList(f"Searching {service.title} isn't ready yet: open its commands instead.")
+        held = self._service(key)
+        with held.lock:
+            kept = held.names
+            is_fresh = kept is not None and time.monotonic() - kept.seconds_at < NAMES_KEPT
+            if kept is not None and is_fresh and not refresh:
+                return replace(kept.index, from_memory=True)
+            index = self._read_names(key, held)
+            held.names = _KeptNames(index, time.monotonic())
+            return index
+
+    def _read_names(self, key: str, held: _Service) -> ResourceIndex:
+        title = BY_KEY[key].title
+        started = time.monotonic()
+        try:
+            core = self._view(key, held).core
+            found = LISTERS[key](core)
+        except ClientError as exc:
+            message = exc.response.get("Error", {}).get("Message", "")
+            raise CantList(f"Couldn't list {title}: {_error_code(exc)}. {message}".strip()) from exc
+        except BotoCoreError as exc:
+            held.view = None
+            raise CantList(f"Couldn't list {title}: {str(exc).rstrip('.')}. Check the region (--region) and the AWS "
+                           "credentials this server runs with.") from exc
+        seconds = round(time.monotonic() - started, 2)
+        return ResourceIndex(key, sorted_resources(found), _utcnow(), seconds)
 
     def _form_call(self, key: str, command: str, arguments: dict[str, str] | None) -> tuple[tuple, dict[str, Any]]:
         offered = {each.name: each for each in self.commands(key)}

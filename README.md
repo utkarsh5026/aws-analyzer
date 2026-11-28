@@ -112,8 +112,9 @@ aws-analyzer serve                    # or: python -m aws_analyzer serve
 #   Open: https://<notebook>.notebook.<region>.sagemaker.aws/proxy/8765/?token=...
 ```
 
-Open the link it prints: every service's read-only commands, a form for each, the same reports as in a cell, next
-steps you run with a click and Ctrl K to find a command. It goes through JupyterLab's own proxy, behind the notebook's
+Open the link it prints: search one service at a time for a function, bucket, table or queue, open it in a tab, and
+read the same reports as in a cell, with a form for every read-only command, next steps you run with a click, Ctrl K
+to jump anywhere, and light or dark. It goes through JupyterLab's own proxy, behind the notebook's
 sign-in, and stops with Ctrl+C. The [browser guide](https://utkarsh5026.github.io/aws-analyzer/browser.html) has the
 details.
 

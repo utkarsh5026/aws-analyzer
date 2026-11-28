@@ -10,6 +10,8 @@ const lambda: Service = {
   key: "lambda_functions",
   title: "Lambda",
   icon: "lambda",
+  data: true,
+  searchable: true,
   commands: [
     command("errors", "Why a function failed: each cause, when it started", "When something goes wrong"),
     command("logs", "A function's log lines, newest first, errors marked"),
@@ -20,6 +22,8 @@ const s3: Service = {
   key: "s3",
   title: "S3",
   icon: "s3",
+  data: true,
+  searchable: true,
   commands: [command("largest", "The largest files under a prefix"), command("ls", "Folders and files")],
 };
 

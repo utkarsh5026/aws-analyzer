@@ -1521,7 +1521,9 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   / `GET /api/data/<service>?call=...`: `ReportRunner.data` / `data_call` run the command through the View's
   `_read_quietly` (nothing drawn) and answer its `ReportData.to_json()` (`_kit/datasets.py`, pure: `json_value` makes
   times ISO UTC, NaN null, Decimals numbers), 400 for `CantRun`, 422 for `NoData` (a report that was only a note, or a
-  service without data);
+  service without data), and `GET /api/resources/<service>[?refresh=true]` (`resources.py`: a lister per service,
+  `LISTERS`, on its View's analyzer, each `Resource` naming the command and arguments that open it; `ReportRunner.resources`
+  keeps them for `NAMES_KEPT` under the service's lock; 422 for `CantList`; the catalog's `searchable`);
   the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
   `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
 - `ping.py` (temporary, Phase 0 of `/web`): `GET /ping`, a page (`static/ping.js`, `ping.css`) that checks whether
@@ -1538,12 +1540,17 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   without Babel (Vite's JSX transform). `src/main.tsx` mounts `ui/App`; `api/` is the client (the token in its header)
   and the server's shapes, `lib/` the pure logic (`route`, `call`, `find`, tested with Vitest beside it), `ui/` the
   components, `state.ts` the signals and the reports already run, `styles/app.css` the stylesheet. Routes are the hash
-  (`#/<service>/<command>?<name>=<text>&run=1`), so back, forward, reload and bookmarks work; a report is inserted as
+  (`#/<service>/<command>?<name>=<text>&run=1`), so back, forward, reload and bookmarks work. Home (`ui/Home.tsx`) is the
+  search, one service at a time (`/web`'s design: `lib/search.ts` ranks names and reads a pasted `s3://` path, ARN or
+  console link; `state.indexes` keeps each service's names for Ctrl K and the "from memory" matches); every address
+  opens in a tab (`lib/tabs.ts`: leaving Home or "↗ New tab" adds one, moving inside a tab replaces it, kept in
+  localStorage as `aa-tabs`); the Light / Dark / Auto switch (`lib/theme.ts`, `aa-theme`) sets `<html data-theme>`,
+  which the page's colours read, and `body[data-jp-theme-light]`, which the reports' do. A report is inserted as
   the server's HTML (the only `innerHTML`, in `ui/Result.tsx`; everything else is JSX), its `.next .ni code` steps
   that name an offered command get a ▶ Run (inside the step's `.nw` cell, since the numbered Next block is a grid), and
-  Ctrl K opens the finder. Every class is `aa-`-prefixed and every rule is scoped to the page's own elements, since
-  report CSS shares the page (an unscoped `[hidden]` rule once hid the reports' Copy buttons). Dark mode sets
-  `body[data-jp-theme-light]`, which the reports' `_DARK_PAGES` rules read. `npm run check` is tsc, Biome and Vitest.
+  Ctrl K opens the finder (names already read, then commands). Every class is `aa-`-prefixed and every rule is scoped to the page's own elements, since
+  report CSS shares the page (an unscoped `[hidden]` rule once hid the reports' Copy buttons); the reports'
+  `_DARK_PAGES` rules read `body[data-jp-theme-light]`. `npm run check` is tsc, Biome and Vitest.
   `web/sources.ts` writes `dist/sources.sha256`, a hash of what the build is made from, which `tests/test_server.py`
   recomputes, so a change to `web/` without `make web` fails the tests; CI's "Web page" job also builds it and fails
   when `dist/` isn't what the commit holds. The TypeScript style is `/web`'s.
