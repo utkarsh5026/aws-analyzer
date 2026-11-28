@@ -1,8 +1,8 @@
 """
 The web page (`aws-analyzer serve`, built from web/) in a real browser: Chromium through Playwright, on the real
 server running on uvicorn, over demo.py's S3 and Lambda data in moto. Each test does what someone using the page
-does (pick a command, fill its form, run it, go back, follow a next step, find a command with Ctrl K) and checks
-what they'd see. Every test also fails on an error in the page's script or a Content-Security-Policy refusal.
+does (search a service, open what it finds in a tab, switch the theme, pick a command, fill its form, run it, go back,
+follow a next step, find a command or a name with Ctrl K) and checks what they'd see. Every test also fails on an error in the page's script or a Content-Security-Policy refusal.
 
 They need Playwright's Chromium (`python -m playwright install chromium`) and skip without it, except where
 AWS_ANALYZER_PAGE_TESTS=required, as in CI's Page tests job, where a missing browser fails them. A Chromium already
@@ -170,7 +170,7 @@ def page(chromium, troubles: Troubles) -> Iterator[Page]:
 
 def _open(page: Page, served: str, hash_: str = "") -> None:
     page.goto(f"{served}/?token={TOKEN}{hash_}")
-    page.locator(".aa-svc").first.wait_for()
+    page.locator(".aa-home, .aa-svc").first.wait_for()
 
 
 def _status(page: Page):
@@ -186,18 +186,96 @@ def _hash(page: Page) -> str:
     return page.evaluate("decodeURIComponent(location.hash)")
 
 
-def test_the_home_page_lists_every_service_and_what_the_server_reads(page, served):
+def test_the_home_page_searches_one_service_and_reads_only_it(page, served):
     _open(page, served)
-    expect(page.locator(".aa-head h1")).to_have_text("What do you want to look at?")
-    expect(page.locator(".aa-cards .aa-card")).to_have_count(page.locator(".aa-svc").count())
+    expect(page.locator(".aa-home-title")).to_have_text("Find anything in your account")
+    expect(page.locator(".aa-results-head")).to_contain_text("functions in Lambda")
+    expect(page.locator(".aa-chip", has_text="Lambda").locator(".aa-read")).to_have_count(1)
+    expect(page.locator(".aa-chip", has_text="S3").locator(".aa-read")).to_have_count(0)
+    expect(page.locator(".aa-notread")).to_contain_text("S3")
+    page.fill("#search", "orders")
+    expect(page.locator(".aa-hit-name").first).to_have_text("orders-etl")
     expect(page.locator("#where")).to_have_text("Region: us-east-1 · read-only")
     expect(page.locator(".aa-ver")).not_to_be_empty()
     assert page.title() == "aws-analyzer"
 
 
+def test_a_service_read_once_shows_its_names_from_memory_in_another(page, served):
+    _open(page, served)
+    page.locator(".aa-chip", has_text="S3").click()
+    expect(page.locator(".aa-results-head")).to_contain_text("buckets in S3")
+    page.locator(".aa-chip", has_text="Lambda").click()
+    page.fill("#search", "demo-lake")
+    memory = page.locator(".aa-memory")
+    expect(memory).to_contain_text("from memory · no new reads")
+    expect(memory.locator("a", has_text="demo-lake")).to_be_visible()
+    expect(page.locator(".aa-chip", has_text="S3").locator(".aa-read")).to_have_count(1)
+
+
+def test_pasting_an_address_picks_its_service(page, served):
+    _open(page, served)
+    expect(page.locator(".aa-results-head")).to_contain_text("in Lambda")
+    page.fill("#search", "s3://demo-lake/raw/2026/")
+    expect(page.locator(".aa-chip.aa-on")).to_have_text("S3")
+    expect(page.locator("#search")).to_have_value("demo-lake")
+    expect(page.locator(".aa-hit-name").first).to_have_text("demo-lake")
+
+
+def test_a_result_opens_in_a_tab_that_comes_back_after_a_reload(page, served):
+    _open(page, served)
+    page.fill("#search", "orders-etl")
+    page.locator(".aa-hit-name", has_text="orders-etl").click()
+    _wait_for_report(page)
+    assert _hash(page) == "#/lambda_functions/function_info?name=orders-etl&run=1"
+    tab = page.locator(".aa-tab.aa-on")
+    expect(tab).to_contain_text("orders-etl")
+    expect(page.locator(".aa-tab")).to_have_count(2)
+    page.reload()
+    expect(page.locator(".aa-tab")).to_have_count(2)
+    page.locator(".aa-tab-close").click()
+    expect(page.locator(".aa-tab")).to_have_count(1)
+    expect(page.locator(".aa-home-title")).to_be_visible()
+
+
+def test_enter_opens_the_picked_result_and_new_tab_keeps_the_one_open(page, served):
+    _open(page, served)
+    page.fill("#search", "report")
+    page.keyboard.press("Enter")
+    expect(page.locator(".aa-tab.aa-on")).to_contain_text("report-api")
+    page.locator(".aa-tab", has_text="Home").click()
+    page.fill("#search", "orders-etl")
+    page.locator(".aa-hit").first.hover()
+    page.locator(".aa-hit-tab").first.click()
+    expect(page.locator(".aa-tab")).to_have_count(3)
+    expect(page.locator(".aa-tab.aa-on")).to_contain_text("orders-etl")
+
+
+def test_the_theme_switch_is_kept(page, served):
+    _open(page, served)
+    page.locator(".aa-seg button", has_text="Dark").click()
+    assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+    assert page.evaluate("document.body.dataset.jpThemeLight") == "false"
+    page.reload()
+    page.locator(".aa-home").wait_for()
+    assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+    page.locator(".aa-seg button", has_text="Light").click()
+    assert page.evaluate("document.documentElement.dataset.theme") == "light"
+
+
+def test_ctrl_k_finds_names_already_read(page, served):
+    _open(page, served)
+    expect(page.locator(".aa-results-head")).to_contain_text("in Lambda")
+    page.keyboard.press("Control+k")
+    page.keyboard.type("orders-etl")
+    first = page.locator("#palette-list li").first
+    expect(first.locator(".aa-t")).to_have_text("orders-etl · function · Lambda")
+    page.keyboard.press("Enter")
+    assert _hash(page) == "#/lambda_functions/function_info?name=orders-etl&run=1"
+
+
 def test_a_service_lists_its_commands_by_group_beside_and_on_its_page(page, served):
     _open(page, served)
-    page.locator(".aa-svc", has_text="S3").click()
+    page.locator(".aa-browse a", has_text="S3").click()
     expect(page.locator(".aa-head h1")).to_have_text("S3")
     expect(page.locator(".aa-svc.aa-on")).to_have_text("S3")
     expect(page.locator(".aa-cmds .aa-cmd", has_text=re.compile(r"^ls$"))).to_be_visible()
@@ -341,4 +419,4 @@ def test_in_a_dark_browser_the_reports_are_told_the_page_is_dark(chromium, troub
 
 def test_an_address_the_page_doesnt_know_opens_the_home_page(page, served):
     _open(page, served, "#/nothing/here")
-    expect(page.locator(".aa-head h1")).to_have_text("What do you want to look at?")
+    expect(page.locator(".aa-home-title")).to_have_text("Find anything in your account")

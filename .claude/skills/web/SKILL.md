@@ -1,6 +1,6 @@
 ---
 name: web
-description: The roadmap for aws-analyzer in a browser tab (`aws-analyzer serve`, src/aws_analyzer/server/) - from the served reports that exist today to a JavaScript-first app with live data, interactive tables and charts, every explorer window rebuilt in the browser and the agent streaming its answers. Holds the vision, the rules the web layer keeps, the phases with what "done" means for each, the open decisions, the list of JavaScript ideas and the progress table. Use for "/web status", "/web phase 3", or before changing anything in src/aws_analyzer/server/.
+description: The roadmap for aws-analyzer in a browser tab (`aws-analyzer serve`, src/aws_analyzer/server/) - from the served reports that exist today to a JavaScript-first app organised around the things in an account (search one service at a time, tabs, resource pages, per-service attention, dark mode), with live data, interactive tables and charts and the agent streaming its answers. Holds the vision, the rules the web layer keeps, the phases with what "done" means for each, the open decisions, the list of JavaScript ideas and the progress table. Use for "/web status", "/web phase 3", or before changing anything in src/aws_analyzer/server/.
 argument-hint: "<status | phase N | ideas>"
 ---
 
@@ -39,6 +39,48 @@ browser tab doesn't. The web app is a second front end on the same core, like th
                                                                      browser: TypeScript app
 ```
 
+## The design: things first, not commands (decided with the user, November 2026)
+
+The first page was a notebook in a tab: pick a command, fill a form, read the cell's report. The user set a different
+direction, worked out on a design canvas (the "aws-analyzer web: prototype UI ideas" artifact): the content stays the
+same, but the site is organised around the things in an account (a function, a bucket, a queue), not around the
+commands that read them. What was decided, in order of how much it shapes the code:
+
+- **Search is the home page, one service at a time.** A big search box with a service picker inside it ("Lambda ▾"),
+  and a "Search in" row of services under it. Only the service picked is read: its names come from
+  `GET /api/resources/<service>` (the cheap listing calls the analyzers already make: ListFunctions, ListBuckets,
+  ListTables, ...), kept by the server for `NAMES_KEPT` and by the page for the session. Services already read carry a
+  green dot and search instantly; matches in them show under the results as "from memory · no new reads". Services
+  not read yet are buttons, so reading one is a deliberate click. Pasting an `s3://` path, an ARN or a console link
+  picks the service by itself. **Nothing reads every service at once**: no global feed, no global search (the user's
+  rule, for speed and cost).
+- **Tabs.** What you open stays open as a tab across the top, like a browser's (Home pinned on the left, ✕ on the
+  rest, + for a new one), kept in the browser (localStorage) so they come back on reload. Navigating inside a tab
+  replaces it; opening from Home, or "↗ New tab", adds one.
+- **Picking a result: a quick look, then a tab.** A click (or ↑ ↓) shows a preview beside the results from what the
+  search already read; Enter or Open opens it in a tab.
+- **Needs attention is per service.** Each service's page opens with "Needs attention in <service>", checked when the
+  service is opened ("only Lambda was read", ↻ Check again). Home shows only "Checked so far": the services already
+  opened and their counts, and says the others haven't been read.
+- **Resource pages.** A thing's page leads with the verdict and a few cards, then the notebook commands as tabs
+  (Overview, Errors, Logs, Performance, Code, Settings, Cost for a function; Last run, Runs, Failures, Definition for a
+  workflow). Details (a run, an execution, an API call) open in a side panel beside the list, ‹ › stepping through
+  them, with "Open as page". Every name that's another resource links to it ("Wired to": the API, queue, table and
+  dead-letter queue around a function). A failure across services reads as one story: the workflow's failed step
+  shows the Lambda run behind it in place.
+- **Ctrl K** jumps to anything already read (no AWS calls), to actions ("Follow orders-etl live") and to the notebook
+  commands. Tab moves it to another service.
+- **The map** (the account as boxes and moving arrows, red where it breaks) is a later, separate view, once most
+  services have pages.
+- **The look:** the guides' calm look, polished for reading all day: warm paper (`#f6f1e9` page, `#fffdf9` cards),
+  soft ink, a terracotta accent (`#a85a26`); verdicts on the card colour with a thin red border, not red blocks;
+  quiet pills with a fine border; tabular numbers, numbers right-aligned in tables; monospace for every identifier,
+  ligatures off; a visible focus ring; short hover transitions, none under reduced motion. **Dark mode**: warm charcoal
+  (`#24201c` page, `#2d2823` cards), never black, an apricot accent (`#e3a56c`); a Light / Dark / Auto switch in the
+  top bar, Auto (the system's) by default, kept in localStorage.
+- **The notebook stays one click away:** every page has "Copy as cell", and the command pages (the form and the
+  cell's report) stay reachable from each service's page and Ctrl K.
+
 ## Rules the web layer keeps
 
 These come on top of CLAUDE.md's product goal and hard constraints, which still apply to every page.
@@ -48,7 +90,7 @@ These come on top of CLAUDE.md's product goal and hard constraints, which still 
   first (see "Open decisions"), a confirm dialog showing exactly what will run, and a POST of its own.
 - **AWS data is untrusted.** A name, tag, log line or knowledge-base passage can hold HTML or script. Insert it with
   `textContent` or the framework's escaping, never `innerHTML`. The one exception is the server-rendered report HTML
-  from Phase 1, which the Views escape. It goes away block by block in Phase 4.
+  from Phase 1, which the Views escape. It goes away block by block in Phase 5.
 - **The page talks only to its own server.** The CSP stays `script-src 'self'` and `connect-src 'self'`: no CDN, no
   `eval`, no inline scripts. Every library is vendored into the package (pinned, with its license in
   `server/static/THIRD_PARTY.md`). Add `'wasm-unsafe-eval'` only in the phase that ships WebAssembly, and say so in the
@@ -177,7 +219,7 @@ How the first two are built (one pull request, since a toolchain alone builds no
   - Add a third drawing to the block registry: `@_draws(_Table, "json")` beside `"html"` and `"text"`.
   - `POST /api/run` returns `blocks: [...]`, each block's JSON, and keeps `html` for any block without a JSON drawing,
     so a page always shows everything.
-  - This is the seam Phase 4 renders through.
+  - This is the seam Phase 5's pages render through.
 - **Jobs instead of one long request:**
   - `POST /api/jobs` starts a command on a worker and returns its ID.
   - The transport Phase 0 picked streams `progress` (from the View's `_progress` ticks: count, total, rate), `report`
@@ -204,66 +246,45 @@ How reports as data are built (the first bullet group):
   seconds). `NoData` carries the words of the note a report was instead (its `_Hint`), or says the service's View has
   no `_DataCommands` (`gives_data`, also the catalog's `data` per service).
 - `GET /api/data/<service>/<command>?<name>=<text>` and `GET /api/data/<service>?call=...`, with the token: 400 for
-  `CantRun`, 422 for `NoData`. The page doesn't use it yet; Phase 4's grid will.
+  `CantRun`, 422 for `NoData`. The page doesn't use it yet; Phase 5's grid will.
 
-### Phase 4: reports drawn by the browser
+### Phase 4: the frame and search (the design above)
 
-Replace the server's report HTML one block type at a time with a Preact component reading the block's JSON. Every
-component works in light and dark, with the keyboard, and in print. Order:
+- **The frame, tabs, theme and search home** (one pull request): `GET /api/resources/<service>` (`server/resources.py`:
+  a lister per service on its View's analyzer, each `Resource` naming the command and arguments that open it, cached
+  for `NAMES_KEPT`), the catalog's `searchable` per service; on the page the tab bar (`lib/tabs.ts`), the theme switch
+  (`lib/theme.ts`), the search home with its service picker, from-memory matches and not-read services
+  (`lib/search.ts`), and Ctrl K over names already read. Until resource pages exist, a result opens its service's
+  main report for it (`function_info`, `bucket_info`, `table_info`, ...) as a command page in a tab.
+- **The quick look:** a preview beside the results, from the index entry and the service's cached reads.
+- **Per-service attention:** each service page's "Needs attention" block from that service's own findings, and Home's
+  "Checked so far".
 
-1. `_Title`, `_Cards`, `_Note`, `_Findings`, `_Verdict`, `_Next`. Findings and next steps become actions:
-   ▶ Run, copy, open in the notebook as `ui.call()`.
-2. `_Table` as a real data grid:
-   - virtualised rows, so 100,000 rows scroll smoothly and `--max-rows` stops mattering on the page;
-   - sort, filter and group by any column; a column picker;
-   - resizable, sticky header and first column;
-   - copy as CSV or Markdown, download as CSV;
-   - a cell that names a resource (a function, bucket, table, queue) links to its report.
-3. Charts (`_Bars`, `_Split`, `_Meter`, `_Dots`, `_Treemap`, Lambda's `_RunTimeline` / `_RunHistogram`, the error
-   chart): **Vega-Lite**, the grammar the agent's charts already use (`workspace/charts.py`'s `CHART_THEME`), so one
-   theme and one library serve both. Tooltips, brushing a time range (which re-runs the command for that range),
-   zoom, and PNG/SVG export.
-4. `_JsonTree` (fold, search, copy a path), code (Shiki or Prism, vendored, with line links), `_Outline` / `_Graph`
-   (Lambda's how-it-works: pan, zoom, click a node to see its lines), `_FlowGraph` (Step Functions) and `_HopMap`
-   (messaging) laid out with **ELK.js**, with pan, zoom and minimap.
-5. The rest: `_Passage`, `_Answer`, `_Chunks`, `_Steps`, `_Pipeline`, `_Pages`, `_Flow`, `_Media`, `_Image`, ...
+Done when: the home page is search, everything opens in tabs that survive a reload, and no page reads a service the
+user didn't pick.
 
-Done when: no report on the page uses server HTML (`blocks` only), and `POST /api/run` can drop `html`.
+### Phase 5: resource pages, service by service
 
-### Phase 5: the explorer windows, rebuilt in the browser
+One service per pull request, each page built from Phase 3's blocks as JSON and data, drawn by Preact components
+(the components list below), in light and dark. Lambda first (the list with attention, a function's page with its
+tabs, the run side panel, "Wired to"), then Step Functions (the path a run took, where the time went, the Lambda run
+behind a failed step), Messaging, S3 (folders, previews in the browser), API Gateway, DynamoDB, Athena, OpenSearch,
+Bedrock and SageMaker. Each keeps what its notebook explorer window does (its tabs, its findings, its `focus`) and
+adds what a page can: virtualised logs, brushing a chart to set the time range, live updates once the transport is
+chosen.
 
-One window per pull request, on the Phase 3 APIs and Phase 4 components. Each keeps what its ipywidgets twin does
-(its `focus`, its tabs, its findings) and adds what only a browser can do. Suggested order, most gained first:
+The components, built as the pages need them:
+1. `_Title`, `_Cards`, `_Note`, `_Findings`, `_Verdict`, `_Next`: findings and next steps become actions (open, copy
+   as cell).
+2. `_Table` as a data grid: virtualised rows, sort, filter and group by any column, sticky header, copy as CSV or
+   Markdown, a cell that names a resource links to its page.
+3. Charts (`_Bars`, `_Split`, `_Meter`, `_Dots`, `_Treemap`, Lambda's run charts, the error chart) in **Vega-Lite**,
+   the grammar the agent's charts use, lazy-loaded; tooltips, brushing a range, PNG / SVG export.
+4. `_JsonTree`, code (vendored highlighting), `_Graph` / `_FlowGraph` / `_HopMap` laid out with **ELK.js**, pan and
+   zoom.
+5. The rest (`_Passage`, `_Answer`, `_Chunks`, `_Pages`, `_Flow`, `_Media`, ...).
 
-1. **Lambda**:
-   - Live as a stream: runs appear and finish in place, and the timeout bar counts down.
-   - Logs in a virtualised viewer, with the query language (`analysis/query.py`, parsed in Python, highlighted in the
-     box) and regex search on the client.
-   - A timeline you brush to pick a range, and run-to-run diff.
-   - The code tree with Shiki highlighting and `how_it_works()` as an interactive graph.
-2. **Step Functions**: the graph with ELK.js, an execution replayed as an animation along its path, the waterfall
-   zoomable, and click a state to open its Lambda run.
-3. **Messaging**: the map with live queue depths animating along the arrows, and a dead-letter queue pulsing when it
-   fills.
-4. **S3**:
-   - Folders as a virtualised list with multi-select and keyboard navigation.
-   - Previews in the browser: PDF with **PDF.js**, CSV with a grid, Parquet with **hyparquet** (pure JS) or
-     **DuckDB-WASM**, so a file is queried with SQL in the tab, images zoomable.
-   - The bytes come through a server endpoint that streams the object (read-only: GetObject, already a permission S3
-     previews need).
-5. **SageMaker**: a live dashboard (CPU, memory, GPU, disk) streaming from Phase 3's machine endpoint, environments,
-   running apps, and training jobs with their logs tailing.
-6. **DynamoDB**: items in the grid with a JSON side panel, a query builder that shows the `query(...)` call it makes,
-   and the schema as a chart.
-7. **Athena**:
-   - Past queries, costs and failures as grids and charts.
-   - A SQL box with **CodeMirror 6**, highlighting and catalog autocompletion. It shows and copies SQL and the
-     boto3 / awswrangler code (`query_code()`), and **never runs a query**: Athena writes every result to S3, so
-     running one is a write.
-8. **API Gateway**, **OpenSearch**, **Bedrock knowledge bases**: the same shape as their widget windows, with real
-   grids and charts.
-
-Done when: each window's page does everything its widget twin does, and the guide for it shows the browser version.
+Done when: every service has its pages, and `POST /api/run` can drop `html` (the command pages draw blocks too).
 
 ### Phase 6: the agent and the chats in the browser
 
@@ -281,19 +302,16 @@ Done when: everything `AgentView().chat()` and `chat()` do works in the tab, wit
 
 ### Phase 7: a workspace, not just pages
 
-- **Tabs and split panes:** two reports side by side (yesterday's errors next to today's).
-- **Pinned dashboards:** pin any report or chart, and the dashboard re-runs them on open or on a timer. Layouts are
-  kept in the browser (IndexedDB), never on the server.
-- **History:** every report kept in IndexedDB, searchable, with a diff between two runs of the same call ("what
-  changed since this morning": new findings, gone findings, numbers that moved).
-- **Notifications** (the browser's Notification API, asked for once): a Live watch that sees a new error cause, a
-  queue that fills, or a long job that finishes, while the tab is in the background.
-- **Export:**
-  - a single-file HTML snapshot of a report (its data and a read-only viewer, no server needed) to attach to a ticket;
-  - CSV and XLSX from the grid;
-  - the notebook cell that reproduces it.
-- **Region and profile switchers** in the top bar (a View per region, made on demand), and **keyboard navigation**
-  everywhere (`j`/`k` through rows, `/` to search, `g` then a letter to go to a service, `?` for the list).
+Tabs come in Phase 4; this phase adds the rest:
+- **Split panes:** two pages side by side (yesterday's errors next to today's), "Open beside".
+- **Pins and dashboards:** pin a report or chart; the dashboard re-runs them on open or on a timer, kept in
+  IndexedDB, never on the server.
+- **History:** every report kept in IndexedDB, searchable, with a diff between two runs of the same call.
+- **Notifications** (asked for once): a Live watch that sees a new error cause or a filling queue while the tab is in
+  the background.
+- **Export:** a single-file HTML snapshot of a page, CSV and XLSX from a grid, the notebook cell that reproduces it.
+- **The map** of the account (the design above), and a region switcher in the top bar.
+- **Keyboard everywhere:** `j` / `k` through rows, `/` to search, `?` for the list.
 
 ### Phase 8: from a notebook cell too
 
@@ -351,14 +369,14 @@ not started, needs the user.
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
 | 2: frontend foundation | done | #301 | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
 | 3: data, jobs, live | in progress | #306 | reports as data done (`/api/data`, `ReportData.to_json()`); next: block JSON, then jobs and live streams (the transport waits on Phase 0) |
-| 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |
-| 5: windows in the browser | not started | | Lambda first, then Step Functions, messaging, S3, ... |
+| 4: the frame and search | in progress | #307 | the design above: tabs, theme, search one service at a time (`/api/resources`); next the quick look and per-service attention |
+| 5: resource pages | not started | | service by service, Lambda first, from blocks as JSON; grid, Vega-Lite, ELK.js |
 | 6: agent and chats | not started | | token streaming, live tool steps, ✦ Ask everywhere |
-| 7: workspace | not started | | tabs, pins, history with diffs, notifications, export |
+| 7: workspace | not started | | split panes, pins, history with diffs, notifications, export, the map |
 | 8: from a cell | not started | | `aws_analyzer.serve()` on a kernel thread |
 
 Known issues to fix on the way:
 - In dark mode, the reports' "🐼 This report as data" fold falls back to a light background
   (`var(--card, #faf7f2)` in `_kit/dataview.py`). Notebooks have the same bug.
-- The page's notebook-only hints (`next(1)`, the data fold's `ui.data()`) are hidden or say notebook things. Phase 4's
+- The page's notebook-only hints (`next(1)`, the data fold's `ui.data()`) are hidden or say notebook things. Phase 5's
   components replace them with web actions.

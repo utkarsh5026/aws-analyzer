@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- 🧰 **Browser tab: search one service at a time, in tabs** ([#307](https://github.com/utkarsh5026/aws-analyzer/pull/307))
+  - The home page searches a service's functions, buckets, tables or queues; only the service you pick is read.
+  - What you open stays in a tab along the top, and the tabs come back after a reload; Ctrl K finds names already read.
+  - A Light, Dark and Auto switch in the top bar, kept in your browser.
+
 ### Added
 
 - 🧰 **Browser tab: a report's tables as JSON** ([#306](https://github.com/utkarsh5026/aws-analyzer/pull/306))

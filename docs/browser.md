@@ -1,29 +1,30 @@
 ---
 title: In a Browser Tab (aws-analyzer serve) Guide
-description: "How to open aws-analyzer's reports in a browser tab from a SageMaker notebook instance or Studio: run aws-analyzer serve in JupyterLab's terminal, open the link it prints (the notebook's own address with /proxy/8765/), and run every service's read-only commands with more room, a form per command, next steps that run with a click and Ctrl K to find a command."
+description: "How to open aws-analyzer in a browser tab from a SageMaker notebook instance or Studio: run aws-analyzer serve in JupyterLab's terminal, open the link it prints (the notebook's own address with /proxy/8765/), search one service at a time for your functions, buckets, tables and queues, open each in a tab, and run every service's read-only commands, light or dark."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> In a browser tab <code>aws-analyzer serve</code></p>
 
-# The notebook's reports in a tab of their own, with room to read them
+# Find anything in your account, and keep it open in a tab
 
-Start one command in JupyterLab's terminal, open the link it prints, and every service's reports are a click away in a full browser tab: the same reports as in a cell, with a form for each command, next steps you run with a click, and Ctrl K to find a command.
+Start one command in JupyterLab's terminal and open the link it prints. Search one service at a time for a function, bucket, table or queue, open what you find in a tab, and read the same reports a cell draws, with room to read them.
 { .lede }
 
 <ul class="pills">
   <li>One terminal command</li>
   <li>Behind your notebook's sign-in</li>
+  <li>Search one service at a time</li>
+  <li>Everything opens in a tab</li>
   <li>Every service, the same reports</li>
   <li>Next steps run with a click</li>
-  <li>Ctrl K finds a command</li>
   <li>Read-only</li>
-  <li>Light or dark, as your browser is</li>
+  <li>Light, dark or your system's</li>
 </ul>
 
-![The aws-analyzer page in a browser tab: the services down the left, Lambda open with its commands grouped under Functions, When something goes wrong and Code; on the right the errors command's form with orders-etl filled in, the call errors('orders-etl') beside the Run button, and below it the report: 8 events were lost, 2 causes are still failing and 1 stopped, cards for the failed calls, calls and error rate, and a chart of failures by hour](images/browser-light.webp#only-light){ width="984" height="615" loading=lazy }
-![The aws-analyzer page in a browser tab: the services down the left, Lambda open with its commands grouped under Functions, When something goes wrong and Code; on the right the errors command's form with orders-etl filled in, the call errors('orders-etl') beside the Run button, and below it the report: 8 events were lost, 2 causes are still failing and 1 stopped, cards for the failed calls, calls and error rate, and a chart of failures by hour](images/browser-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and the function orders-etl; the search box set to Lambda with a typed; chips to search S3, Lambda, DynamoDB, Step Functions, API Gateway or SQS, SNS and EventBridge, a dot on S3 and Lambda, which have been read; 5 functions in Lambda read just now, three of them matching; below, the buckets demo-lake, demo-scratch and demo-models matching from memory, with no new reads; and the services not searched yet as buttons](images/browser-light.webp#only-light){ width="984" height="615" loading=lazy }
+![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and the function orders-etl; the search box set to Lambda with a typed; chips to search S3, Lambda, DynamoDB, Step Functions, API Gateway or SQS, SNS and EventBridge, a dot on S3 and Lambda, which have been read; 5 functions in Lambda read just now, three of them matching; below, the buckets demo-lake, demo-scratch and demo-models matching from memory, with no new reads; and the services not searched yet as buttons](images/browser-dark.webp#only-dark){ width="984" height="615" loading=lazy }
 
-`errors('orders-etl')` in a browser tab: pick Lambda, then errors, type the function's name and press Run. The report is the one `LambdaView().errors('orders-etl')` draws in a cell.
+The home page, searching Lambda. S3 was read earlier, so its buckets match too, from memory; the services not read yet wait for a click.
 { .muted }
 
 ## Start here { #tour }
@@ -40,9 +41,13 @@ Getting it running
 Using it
 { .qgroup }
 
+-   [How do I find a function or a bucket?](#search) <span class="how">the search on Home</span>
+-   [Why one service at a time?](#search) <span class="how">only what you pick is read</span>
+-   [Can I keep several open?](#tabs) <span class="how">tabs</span>
 -   [How do I run a command?](#run) <span class="how">a form, or type the call</span>
 -   [Can I run a report's next step?](#next) <span class="how">▶ Run beside it</span>
--   [How do I find a command?](#find) <span class="how">Ctrl K</span>
+-   [How do I jump to something quickly?](#find) <span class="how">Ctrl K</span>
+-   [Is there a dark mode?](#tabs) <span class="how">Light, Dark or Auto</span>
 
 </div>
 
@@ -120,9 +125,32 @@ A notebook instance's address isn't always its name: newer ones carry a few lett
 
 The `?token=...` on the end is a random key made each time the server starts. The page needs it once (it keeps it in a cookie for that address after that), and every request the page sends carries it, so another website open in the same browser can't use the server to read your AWS account.
 
+## Search one service at a time { #search }
+
+The home page is a search box: pick a service, type part of a name, and open what it finds.
+{ .gist }
+
+Only the service you pick is read, with the one listing call its report would make anyway (Lambda's ListFunctions, S3's ListBuckets, DynamoDB's ListTables, ...). The server keeps the names for an hour, so searching again, from any tab, asks AWS nothing; ↻ Read again reads them afresh.
+
+- **Services already read** carry a green dot, and their matches show under the results as *from memory · no new reads*.
+- **Services not read yet** are buttons under the results: reading one is always a click you chose.
+- **Pasting** an `s3://` path, an ARN or a console link picks its service and searches for its name.
+- **↑ ↓ and Enter** open a match from the keyboard. Until each thing has a page of its own, it opens its service's main report for it (`function_info`, `bucket_info`, `table_info`, ...).
+
+Search covers Lambda, S3, DynamoDB, Step Functions, API Gateway, and SQS queues and SNS topics. The other services' commands are under *Every command, by service* on the right.
+
+## Tabs, and light or dark { #tabs }
+
+What you open stays open in a tab along the top, and the tabs come back when you reload the page.
+{ .gist }
+
+Opening something from Home adds a tab; moving inside a tab (a next step, another command) keeps to it, and ↗ New tab beside a result opens one more. A tab is named for what it shows (`orders-etl`, or `orders-etl · errors` for another of its commands); ✕ closes it, and Home is always the first. Past twelve tabs, the oldest closes to make room.
+
+The Light, Dark and Auto switch in the top bar sets the page's colours, reports included; Auto follows your system. Both choices are kept in your browser.
+
 ## Run a command { #run }
 
-Pick a service on the left, then a command; fill in its form and press Run, or type the call as you would in a cell.
+Open a service under *Every command, by service*, then a command; fill in its form and press Run, or type the call as you would in a cell.
 { .gist }
 
 Each command's page has its description (the same as `help('errors')`), a box per option with its default shown in grey, and the call those boxes make, as you'd write it in a notebook: `errors('orders-etl', since='7d')`. Copy puts it on the clipboard with `ui.` in front. Prefer typing? Edit the call itself and press Run: it takes the same values a cell does (strings, numbers, lists, `True`), and nothing else in it runs.
@@ -144,15 +172,15 @@ The errors report's next steps. ▶ Run beside the first opens the run behind th
 
 Back and forward go between the reports you've opened, and show each again without asking AWS; ↻ Run again reads it afresh.
 
-## Find a command { #find }
+## Jump anywhere with Ctrl K { #find }
 
-Ctrl K (⌘K on a Mac) opens a search over every command of every service, by name and by what it shows.
+Ctrl K (⌘K on a Mac) finds a name already read, or any command of any service, without asking AWS.
 { .gist }
 
-![The command finder open over the page: slow typed in the search box, and the matches below it: performance for API Gateway, compare for Step Functions and performance for Lambda, each with its service's icon and what it shows](images/browser-find-light.webp#only-light){ width="984" height="615" loading=lazy }
-![The command finder open over the page: slow typed in the search box, and the matches below it: performance for API Gateway, compare for Step Functions and performance for Lambda, each with its service's icon and what it shows](images/browser-find-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+![Ctrl K open over a report: orders typed, and the function orders-etl first, read earlier by the search, then DynamoDB's sql, query and get commands, each with its service's icon and what it shows](images/browser-find-light.webp#only-light){ width="984" height="615" loading=lazy }
+![Ctrl K open over a report: orders typed, and the function orders-etl first, read earlier by the search, then DynamoDB's sql, query and get commands, each with its service's icon and what it shows](images/browser-find-dark.webp#only-dark){ width="984" height="615" loading=lazy }
 
-Searching for *slow* finds the commands about run times in every service.
+Ctrl K with *orders* typed: the function the search read earlier comes first, then the commands about it.
 { .muted }
 
 <p class="part">Reference</p>
