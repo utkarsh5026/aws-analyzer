@@ -12,6 +12,7 @@ import logging
 import secrets
 import socket
 import sys
+from functools import partial
 
 import boto3
 import uvicorn
@@ -19,7 +20,7 @@ from botocore.exceptions import BotoCoreError
 
 from .. import __version__
 from .app import create_app
-from .links import PageLink, page_link
+from .links import PageLink, notebook_instance_address, page_link
 from .runner import ReportRunner, Settings
 
 DEFAULT_PORT = 8765
@@ -88,8 +89,12 @@ def welcome(link: PageLink, settings: Settings, host: str, *, moved_from: int | 
     if moved_from:
         lines += [f"        (port {moved_from} was taken, so it's on the next free one)"]
     if link.is_proxied:
-        lines += [f"        (through Jupyter's proxy on {link.where}: the same sign-in as your notebook)",
-                  f"  On this machine: {link.local}"]
+        lines += [f"        (through Jupyter's proxy on {link.where}: the same sign-in as your notebook)"]
+        if link.is_guess:
+            lines += ["        SageMaker didn't say this notebook's address (it needs sagemaker:DescribeNotebookInstance),",
+                      "        so this one is guessed from its name. If it doesn't open, take the address your notebook",
+                      f"        is open at, up to .sagemaker.aws, and add /proxy/{link.port}/?token={link.token}"]
+        lines += [f"  On this machine: {link.local}"]
     profile = f" with the profile {settings.profile}" if settings.profile else ""
     lines += ["", f"  Reads AWS in {_region_in_use(settings)}{profile}, read-only, as the notebook does."]
     if host not in LOOPBACK:
@@ -104,7 +109,9 @@ def serve(args: argparse.Namespace) -> int:
     token = secrets.token_urlsafe(24)
     app = create_app(ReportRunner(settings), token, cookie=f"aws_analyzer_{port}")
     moved_from = args.port if port != args.port else None
-    print(welcome(page_link(port, token, host=args.host), settings, args.host, moved_from=moved_from), flush=True)
+    find_address = partial(notebook_instance_address, profile=settings.profile)
+    link = page_link(port, token, host=args.host, find_address=find_address)
+    print(welcome(link, settings, args.host, moved_from=moved_from), flush=True)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
     print("Stopped.")
     return 0

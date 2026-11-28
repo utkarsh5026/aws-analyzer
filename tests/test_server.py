@@ -249,7 +249,45 @@ def test_on_a_notebook_instance_the_link_goes_through_its_own_address():
     link = page_link(8765, "abc", metadata=metadata)
     assert link.url == "https://churn-nb.notebook.eu-west-1.sagemaker.aws/proxy/8765/?token=abc"
     assert link.local == "http://127.0.0.1:8765/?token=abc" and link.is_proxied
-    assert link.where == "notebook instance churn-nb"
+    assert link.where == "notebook instance churn-nb" and link.is_guess
+
+
+def test_a_notebook_instance_link_uses_the_address_sagemaker_gives_it():
+    metadata = {"ResourceArn": "arn:aws:sagemaker:ap-south-1:123456789012:notebook-instance/test2",
+                "ResourceName": "test2"}
+    asked = []
+
+    def find_address(name, region):
+        asked.append((name, region))
+        return "test2-kbmv.notebook.ap-south-1.sagemaker.aws"
+
+    link = page_link(8765, "abc", metadata=metadata, find_address=find_address)
+    assert link.url == "https://test2-kbmv.notebook.ap-south-1.sagemaker.aws/proxy/8765/?token=abc"
+    assert asked == [("test2", "ap-south-1")] and not link.is_guess
+    shown = cli.welcome(link, Settings(region="ap-south-1"), "127.0.0.1")
+    assert "guessed" not in shown
+
+
+def test_when_sagemaker_doesnt_say_the_address_the_guess_says_how_to_mend_it():
+    metadata = {"ResourceArn": "arn:aws:sagemaker:ap-south-1:123456789012:notebook-instance/test2",
+                "ResourceName": "test2"}
+    link = page_link(8765, "abc", metadata=metadata, find_address=lambda name, region: "")
+    assert link.url == "https://test2.notebook.ap-south-1.sagemaker.aws/proxy/8765/?token=abc" and link.is_guess
+    shown = cli.welcome(link, Settings(region="ap-south-1"), "127.0.0.1")
+    assert "guessed from its name" in shown and "/proxy/8765/?token=abc" in shown
+
+
+def test_the_notebook_instance_address_is_read_from_sagemaker(aws):
+    import boto3
+
+    from aws_analyzer.server.links import notebook_instance_address
+
+    sagemaker = boto3.client("sagemaker", region_name="ap-south-1")
+    sagemaker.create_notebook_instance(NotebookInstanceName="test2", InstanceType="ml.t3.medium",
+                                       RoleArn="arn:aws:iam::123456789012:role/sm")
+    address = notebook_instance_address("test2", "ap-south-1")
+    assert address.endswith(".notebook.ap-south-1.sagemaker.aws") and not address.startswith("https://")
+    assert notebook_instance_address("missing", "ap-south-1") == ""
 
 
 @pytest.mark.parametrize(("app_type", "path"), [("JupyterLab", "jupyterlab/default"),
@@ -286,7 +324,8 @@ def test_a_taken_port_moves_to_the_next_free_one():
 def test_serve_prints_the_link_then_runs_the_app(monkeypatch, capsys):
     started = {}
     monkeypatch.setattr(cli, "free_port", lambda host, wanted: wanted + 1)
-    monkeypatch.setattr(cli, "page_link", lambda port, token, host: page_link(port, token, host=host, metadata={}))
+    monkeypatch.setattr(cli, "page_link",
+                        lambda port, token, host, **_: page_link(port, token, host=host, metadata={}))
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **options: started.update(app=app, **options))
     assert cli.main(["serve", "--region", "eu-west-1", "--port", "9000"]) == 0
     shown = capsys.readouterr().out
