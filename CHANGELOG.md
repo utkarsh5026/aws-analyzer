@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧰 **Browser tab: a report's tables as JSON** (PRLINK)
+- 🧰 **Browser tab: a report's tables as JSON** ([#306](https://github.com/utkarsh5026/aws-analyzer/pull/306))
   - `GET /api/data/lambda_functions/errors?name=orders-etl` gives what `ui.data('errors', 'orders-etl')` gives, as JSON.
   - Each column says what it means and its kind (`ms`, `share`, `time`, ...); Lambda, S3, DynamoDB, Step Functions and API Gateway.
   - In Python, `ReportData.to_json()` does the same for any report's data.
