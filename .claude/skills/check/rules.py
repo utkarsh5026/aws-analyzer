@@ -41,6 +41,11 @@ Warnings:
   - a companion package (agent/) reaching into a private name of an analyzer it builds on (core._window)
   - an alias module (ALIASES: s3_explorer.py) holding anything but its docstring, imports from the analyzer it stands
     for and __all__ (that's an error)
+
+A front end (FRONTENDS: server/, the web page behind `aws-analyzer serve`) runs every analyzer's View, so it may import
+any of them (lazily, so it still imports alone) and its web packages (SERVER_TOP_LEVEL) at the top of the modules that
+use them; it has no View and no core, so it skips the View and layer checks. __main__.py (`python -m aws_analyzer`)
+only starts it and isn't an analyzer.
 """
 
 from __future__ import annotations
@@ -58,6 +63,8 @@ ANALYZERS = ROOT / "src" / PACKAGE
 KIT = ANALYZERS / "_kit"  # the code the analyzers share: checked like them, but it has no sections or View
 ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 AGENT_TOP_LEVEL = {"deepagents", "langchain", "langchain_core", "langchain_openai", "langchain_aws", "langgraph", "mcp"}
+SERVER_TOP_LEVEL = {"fastapi", "starlette", "uvicorn", "pydantic"}
+NOT_ANALYZERS = {"__init__", "__main__"}
 # A companion builds on analyzers: it imports them (lazily, so it still imports alone), its UI class is a
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
@@ -70,8 +77,10 @@ ALIASES = {"s3_explorer": "s3"}
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
 # analyzers that import it don't define its names again.
 SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}  # the agent shows its answers with _bedrock's _Answer
+FRONTENDS = {"server"}
+TOP_LEVEL_BY_OWNER = {"agent": AGENT_TOP_LEVEL, "server": SERVER_TOP_LEVEL}
 # An analyzer can be a package (agent/): its modules are checked like an analyzer's file, as one analyzer.
-PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")}
+PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")} - FRONTENDS
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
 KIT_UI = {"blocks", "charts", "dataview", "options", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
 CORE_FROM_RENDER = {"_call", "_signature"}
@@ -251,7 +260,7 @@ def top_modules() -> set[str]:
     """
     The name of every module directly in the package, a file or a package, except _kit, which every analyzer imports.
     """
-    files = {p.stem for p in ANALYZERS.glob("*.py")} - {"__init__"}
+    files = {p.stem for p in ANALYZERS.glob("*.py")} - NOT_ANALYZERS
     packages = {p.parent.name for p in ANALYZERS.glob("*/__init__.py")} - {KIT.name}
     return files | packages
 
@@ -474,15 +483,18 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     owner, inside = _owner(path)
     in_kit = owner == KIT.name
     in_package = owner in PACKAGES
+    is_frontend = owner in FRONTENDS
     is_shared = not in_kit and not in_package and owner in SHARED
     parents = () if in_kit else COMPANIONS.get(owner, ())
+    if is_frontend:
+        parents = tuple(top_modules() - {owner, *SHARED, *ALIASES})
     uses = set() if in_kit else {module for module, users in SHARED.items() if owner in users}
     siblings = top_modules() - {owner, *parents} - uses
     kit = kit_names() if kit is None else kit
     shared = shared_names() if shared is None else shared
 
     # Imports: boto3 + stdlib (and agent/'s own dependencies) at import time, optional packages lazily, no analyzer.
-    allowed = ALLOWED_TOP_LEVEL | (AGENT_TOP_LEVEL if owner == "agent" else set())
+    allowed = ALLOWED_TOP_LEVEL | TOP_LEVEL_BY_OWNER.get(owner, set())
     future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
                  and any(a.name == "annotations" for a in n.names) for n in tree.body)
     if not future:
@@ -533,14 +545,14 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
 
     # Section banners 1..5 in order.
     banners = [int(m.group(1)) for m in re.finditer(r"^# (\d+)\. ", source, re.MULTILINE)]
-    if banners != [1, 2, 3, 4, 5] and not in_kit and not is_shared and not in_package:
+    if banners != [1, 2, 3, 4, 5] and not in_kit and not is_shared and not in_package and not is_frontend:
         report.error(rel, f"section banners are {banners or 'missing'}; expected # 1. .. # 5. in order "
                           "(Helpers, Data models, Pure analysis, <Service>Analyzer, <Service>View)")
 
     # View methods: decorated, documented, render through blocks.
     ui_classes = _ui_classes(tree, in_package=in_package, is_companion=bool(parents))
     has_view = any(isinstance(n, ast.ClassDef) and n.name.endswith("View") for n in tree.body)
-    if not has_view and not ui_classes and not in_kit and not is_shared and not in_package:
+    if not has_view and not ui_classes and not in_kit and not is_shared and not in_package and not is_frontend:
         report.error(rel, "no <Service>View class")
     for ui_class in ui_classes:
         check_commands(ui_class, rel, report, guards=_guards(ui_class.name, is_companion=bool(parents)))
@@ -550,8 +562,8 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     if in_package and parents:
         check_reach(tree, rel, report)
 
-    # print() outside the View.
-    for stmt in tree.body:
+    # print() outside the View (a front end's terminal command prints: the terminal is its UI).
+    for stmt in tree.body if not is_frontend else ():
         if stmt in ui_classes:
             continue
         for node in ast.walk(stmt):
@@ -734,9 +746,9 @@ def main() -> int:
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
     report, apis = Report(), {}
     files = [f.resolve() for f in args.files] or sorted(
-        p for p in [*ANALYZERS.glob("*.py"), *KIT.glob("*.py")] if p.name != "__init__.py")
+        p for p in [*ANALYZERS.glob("*.py"), *KIT.glob("*.py")] if p.stem not in NOT_ANALYZERS)
     if not args.files:
-        files += [path for package in sorted(PACKAGES) for path in package_files(package)]
+        files += [path for package in sorted(PACKAGES | FRONTENDS) for path in package_files(package)]
         files += [path for module in sorted(SHARED) if (ANALYZERS / module).is_dir() for path in module_files(module)]
     kit, shared = kit_names(), shared_names()
     for path in files:
@@ -760,7 +772,9 @@ def main() -> int:
     in_shared = sum(owner in SHARED for owner in owners)
     packages = sorted({owner for owner in owners if owner in PACKAGES})
     in_packages = sum(owner in PACKAGES for owner in owners)
-    modules = f"{len(owners) - in_kit - in_shared - in_packages + len(packages)} analyzers"
+    in_frontends = sum(owner in FRONTENDS for owner in owners)
+    analyzers = len(owners) - in_kit - in_shared - in_packages - in_frontends + len(packages)
+    modules = f"{analyzers} analyzers"
     if packages:
         modules += f" ({', '.join(f'{p}/' for p in packages)} as a package of {in_packages} modules)"
     shared_packages = sorted({owner for owner in owners if owner in SHARED and (ANALYZERS / owner).is_dir()})
@@ -769,6 +783,8 @@ def main() -> int:
         modules += f", {in_shared - in_shared_packages + len(shared_packages)} shared module"
     if shared_packages:
         modules += f" ({', '.join(f'{p}/' for p in shared_packages)} as a package of {in_shared_packages} modules)"
+    if in_frontends:
+        modules += f", the front end {', '.join(f'{f}/' for f in sorted(FRONTENDS))} ({in_frontends} modules)"
     print(f"\nrules: {modules} and {in_kit} _kit modules, {len(report.errors)} errors, "
           f"{len(report.warnings)} warnings")
     return 1 if report.errors else 0

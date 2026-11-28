@@ -105,6 +105,18 @@ LambdaView().explore()                # a window: every function, its logs run b
 AgentView().ask("Which Lambda failed last night?")
 ```
 
+**3. Or open it in a browser tab**, with more room. In JupyterLab's terminal (**File → New → Terminal**):
+
+```bash
+aws-analyzer serve                    # or: python -m aws_analyzer serve
+#   Open: https://<notebook>.notebook.<region>.sagemaker.aws/proxy/8765/?token=...
+```
+
+Open the link it prints: every service's read-only commands, a form for each, the same reports as in a cell, next
+steps you run with a click and Ctrl K to find a command. It goes through JupyterLab's own proxy, behind the notebook's
+sign-in, and stops with Ctrl+C. The [browser guide](https://utkarsh5026.github.io/aws-analyzer/browser.html) has the
+details.
+
 Every report ends with **⚙ Ran with**: the options its command used, defaults included, and other ways to run it
 to copy (`ui.performance('etl', since='7d')`), so you learn a command's options without opening `help()`.
 

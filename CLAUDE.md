@@ -92,6 +92,7 @@ make local                                     # the wheel in a fresh venv (.loc
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
 make local-agent                               # the same for the agent: a Python 3.11+, the wheel with [all], the
                                                # sandbox's Pyodide files, and the agent's demo question
+aws-analyzer serve                             # every service's reports in a browser tab (server/; see below)
 make clean                                     # what the tasks built in the checkout; ARGS="--all" also the
                                                # sandbox's ~/.cache/aws-analyzer, ARGS="--dry-run" only says
 make envs                                      # the Python environments here (sagemaker_env's environments())
@@ -1479,6 +1480,50 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   edits (Text widgets shown under the report's title; Enter in a box saves, like the path box), and saves where
   "⬇ Download" does: `x.downloads`, a property over `core.downloads` (`zip_folder` is its old name), which ⚙ edits too.
 
+## The web page (`server/`)
+
+`aws-analyzer serve` (the `[project.scripts]` entry, or `python -m aws_analyzer serve` through `__main__.py`) starts a
+FastAPI app on uvicorn and prints the address to open: on SageMaker the notebook's own address with `/proxy/<port>/`
+(JupyterLab's jupyter-server-proxy, behind the notebook's sign-in), worked out by `links.page_link` from the metadata
+file through `sagemaker_env`'s `parse_metadata`; elsewhere `http://127.0.0.1:<port>/`. It's a terminal process of its
+own, so a kernel restart doesn't stop it. It's a front end, not an analyzer (`FRONTENDS` in `rules.py`): it may import
+every analyzer (lazily: `aws_analyzer.server` alone loads nothing), its modules import fastapi / starlette / uvicorn /
+pydantic at the top (`SERVER_TOP_LEVEL`; fastapi and uvicorn are dependencies, and `server/__init__.py` imports none of
+them, so it still imports with only boto3), its terminal command prints, and it has no View, sections or layers.
+
+- `catalog.py` (pure): `SERVICES` (key, title, View / Analyzer prefix, icon) and what the page offers of each View,
+  read from the View itself: `served_names` is `_commands` without `_CHANGES` and `NOT_SERVED` (windows, `next`,
+  `data`, `help`), `view_commands` adds each one's signature, first paragraph, help() group and `Parameter`s, and
+  `argument_value` turns a form box's text into the value (text stays text unless it plainly isn't: flags, numbers
+  where the default is a number or None, Python literals). A new service needs a line in `SERVICES` and its icon in
+  `static/icons/`, copied unchanged from `docs/images/aws/`.
+- `runner.py`: `ReportRunner` keeps one View per service (made from `Settings` on first use, or `views=` given, as
+  the tests and demos do), and runs one command per service at a time under its lock. While a command runs, the
+  View's `_show` is an instance attribute that keeps `_prepared(blocks)`; the reports are drawn with the View class's
+  `_render_html` in `_theme_name()`'s theme. `run()` takes form boxes (`_form_arguments`: the leading required ones in
+  order, the rest by name, empty boxes left out, a missing required one a `CantRun`); `run_call()` takes a call as
+  written in a cell (a report's next step, `ui.` dropped), read by `_kit.view._parse_call` (literals only, nothing
+  runs). A `Report` carries the call, the arguments as form texts (`_form_texts`), the HTML and the seconds. What
+  `@_friendly_errors` doesn't turn into a note becomes one here, its traceback in the `aws_analyzer.server` log.
+- `app.py`: `create_app(runner, token, cookie=)`: `GET /` (static/index.html with the token in a `<meta>`; needs
+  `?token=` once, then an HttpOnly SameSite=Strict cookie named for the port), `GET /api/catalog`, `POST /api/run`;
+  the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
+  `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
+- `cli.py`: `main(argv)`, `free_port` (the next free one when the port is taken), `welcome` (the link, the region in
+  use from boto3's session, a warning when `--host` isn't loopback).
+- `static/`: the page, plain HTML, CSS and an ES module with no build step (`app.js`): routes are the hash
+  (`#/<service>/<command>?<name>=<text>&run=1`), so back, forward, reload and bookmarks work; a report is inserted as
+  the server's HTML (the only `innerHTML`; everything else is built with `textContent`), its `.next .ni code` steps
+  that name an offered command get a ▶ Run (inside the step's `.nw` cell, since the numbered Next block is a grid), and
+  Ctrl K opens the finder. Every class is `aa-`-prefixed and every rule is scoped to the page's own elements, since
+  report CSS shares the page (an unscoped `[hidden]` rule once hid the reports' Copy buttons). Dark mode sets
+  `body[data-jp-theme-light]`, which the reports' `_DARK_PAGES` rules read.
+
+`tests/test_server.py` tests it with Starlette's `TestClient` on moto; the page's script is checked in Chromium with
+Playwright on demo.py's data (a scratch script that seeds, passes `views=` and runs uvicorn). `docs/browser.md` is its
+guide; its screenshots have no `/// caption` (a plain `{ .muted }` line instead), since a clip types a call in a
+notebook cell and this page isn't opened from one.
+
 ## The PyPI package
 
 - `pyproject.toml` (hatchling) ships `src/aws_analyzer/` as the wheel's `aws_analyzer` package: each analyzer is a
@@ -1490,7 +1535,8 @@ it can run off the main thread: `_request()` makes one request and changes nothi
 - The dependencies are `boto3>=1.35.72`, the first release whose service models have every AWS operation the
   analyzers call (Bedrock's `ListKnowledgeBaseDocuments`; a call to a newer operation means raising it; otherwise
   keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with), and the agent's packages:
-  deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp. Dependabot's
+  deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite and mcp, and the web page's fastapi and
+  uvicorn (`aws-analyzer serve`). Dependabot's
   `versioning-strategy: increase-if-necessary` bumps the `==` pins in requirements files but leaves `>=` floors alone.
 - Optional packages are extras: `data` (pandas, pyarrow), `files` (the S3 file readers), `notebook` (IPython,
   ipywidgets, tqdm), `sandbox` (deno, for the agent's `LocalSandbox`), and `all`; `agent` is empty, kept so

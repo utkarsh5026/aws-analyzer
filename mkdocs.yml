@@ -46,6 +46,7 @@ nav:
   - SQS, SNS and EventBridge: messaging.md
   - Messaging explorer: messaging_explorer.md
   - Ask in plain English: agent.md
+  - In a browser tab: browser.md
   - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 
 theme:
