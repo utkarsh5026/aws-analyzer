@@ -155,6 +155,10 @@ How the first two are built (one pull request, since a toolchain alone builds no
   build's settings, and `tests/test_server.py` hashes the same files the same way. CI's "Web page" job runs
   `npm ci`, `npm run check` (tsc, Biome, Vitest), `npm run build`, then fails when `dist/` differs from the commit.
   The build is byte-identical after a fresh `npm ci`.
+- Playwright in CI: `tests/test_web_page.py`, 16 tests on demo.py's S3 and Lambda data (the `served` fixture: moto,
+  `views=`, uvicorn in a thread on a free port; the `page` fixture fails a test on a script error or a CSP refusal).
+  They skip without Playwright's Chromium and fail without it under `AWS_ANALYZER_PAGE_TESTS=required` (CI's Page
+  tests job). Putting the Ctrl K race back makes `test_typing_straight_after_ctrl_k_keeps_every_letter` fail.
 - Checked by hand against the Phase 1 page on demo data: 12 of 18 views (light and dark) pixel-identical, the rest
   differing only where the demo's Lambda report says "49m ago" against "51m ago"; the same scripted clicks give the
   same transcript. Two things moved: Ctrl K then typing at once kept every letter (the reset and focus had to be a
@@ -334,7 +338,7 @@ not started, needs the user.
 |---|---|---|---|
 | 0: proven on real SageMaker | needs the user | | link works on a notebook instance; `/ping` built and passes through jupyter-server-proxy 4.6.1 locally; waiting for results from a notebook instance and Studio |
 | 1: served reports | done | #296, #298 | `aws-analyzer serve`, FastAPI, token + CSP, plain ES-module page |
-| 2: frontend foundation | in review | | toolchain and the port in one pull request (`web/`, committed `dist/`, CI's Web page job); Playwright in CI next |
+| 2: frontend foundation | in review | | `web/` (Preact, TypeScript), committed `dist/`, CI's Web page job, and Playwright page tests in CI's Page tests job |
 | 3: data, jobs, live | not started | | `/api/data`, block JSON, jobs with progress and cancel, live streams |
 | 4: reports drawn by the browser | not started | | block by block; grid, Vega-Lite, ELK.js |
 | 5: windows in the browser | not started | | Lambda first, then Step Functions, messaging, S3, ... |

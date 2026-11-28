@@ -162,12 +162,44 @@ jobs:
             exit 1
           fi
 
+  # The page in a real browser: tests/test_web_page.py drives Chromium through Playwright on the real server over
+  # demo data in moto. They skip in the Test jobs, which have no browser; here a missing browser fails them.
+  pages:
+    name: Page tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dev requirements
+        run: python -m pip install -r requirements-dev.txt
+      - name: Find the Playwright version (its Chromium is cached under it)
+        id: playwright
+        run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Restore Playwright's Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium and the system libraries it needs
+        run: python -m playwright install --with-deps chromium
+      - name: Page tests
+        env:
+          AWS_ANALYZER_PAGE_TESTS: required
+        run: python -m pytest tests/test_web_page.py
+
   # One stable status to require in branch protection, so the rule doesn't need editing
   # when the Python matrix changes.
   ci-result:
     name: CI result
     if: always()
-    needs: [lint, test, package, web]
+    needs: [lint, test, package, web, pages]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

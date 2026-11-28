@@ -1,7 +1,7 @@
 """
 aws-analyzer serve (src/aws_analyzer/server/): the commands the page offers, how its boxes become arguments, the
 runner on moto's S3, the FastAPI app (its token, its headers, its answers), the address it prints on SageMaker and
-the terminal command. The page's own script is driven in a real browser by hand (see CLAUDE.md), not here.
+the terminal command. The page itself is driven in a real browser in tests/test_web_page.py.
 """
 
 from __future__ import annotations

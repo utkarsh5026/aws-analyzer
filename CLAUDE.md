@@ -1543,8 +1543,13 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   recomputes, so a change to `web/` without `make web` fails the tests; CI's "Web page" job also builds it and fails
   when `dist/` isn't what the commit holds. The TypeScript style is `/web`'s.
 
-`tests/test_server.py` tests it with Starlette's `TestClient` on moto; the page's script is checked in Chromium with
-Playwright on demo.py's data (a scratch script that seeds, passes `views=` and runs uvicorn). `docs/browser.md` is its
+`tests/test_server.py` tests it with Starlette's `TestClient` on moto, and `tests/test_web_page.py` drives the page in
+Chromium with Playwright (pinned in requirements-dev.txt): a module fixture runs the real app on uvicorn, in a thread,
+on a free port, over demo.py's S3 and Lambda data in moto, and each test clicks and types through what the page does,
+failing on a script error or a Content-Security-Policy refusal. They skip without Playwright's Chromium (`python -m
+playwright install chromium`; `AWS_ANALYZER_TEST_CHROMIUM` names another executable, as the cloud session's
+`/opt/pw-browsers/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell`), and fail instead
+with `AWS_ANALYZER_PAGE_TESTS=required`, which CI's Page tests job sets after installing it. `docs/browser.md` is its
 guide; its screenshots have no `/// caption` (a plain `{ .muted }` line instead), since a clip types a call in a
 notebook cell and this page isn't opened from one.
 

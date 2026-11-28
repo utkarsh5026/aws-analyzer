@@ -41,7 +41,8 @@ extras, and whether to add a Jupyter kernel for one that has none. `make install
 The browser page `aws-analyzer serve` opens is written in TypeScript and Preact, in [`web/`](web/). Changing it needs
 Node.js 20.19 or newer: `make web` installs web/'s pinned packages, checks them (types, Biome, Vitest) and builds the
 page into `src/aws_analyzer/server/static/dist/`. Commit `dist/` with your change, since users install it without
-Node; the tests fail while it's older than `web/`. Nothing else needs Node.
+Node; the tests fail while it's older than `web/`. Nothing else needs Node. `tests/test_web_page.py` drives the page in
+a real browser; it skips until you run `python -m playwright install chromium` once.
 
 `make clean` removes what these tasks built in the checkout (`.local-check/`, `dist/`, `build/`, `site/`,
 `web/node_modules/`, the test and lint caches and `__pycache__/` folders); `make clean ARGS="--all"` also removes the sandbox's Pyodide files from
@@ -106,7 +107,8 @@ just as well for people. The rules that matter most:
    only, no dark-mode pictures), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
    tick "No screenshots" when nothing a user sees changed. The release notes copy them.
 7. CI runs lint and the tests on Python 3.11 to 3.14, imports each analyzer with only boto3,
-   builds the package, checks and builds the web page (and that its committed build is current), and builds the
+   builds the package, checks and builds the web page (and that its committed build is current), drives the page in
+   Chromium, and builds the
    guide site with `--strict` when `docs/` changes.
 
 ## Releases
