@@ -1,13 +1,13 @@
 ---
 title: In a Browser Tab (aws-analyzer serve) Guide
-description: "How to open aws-analyzer in a browser tab from a SageMaker notebook instance or Studio: run aws-analyzer serve in JupyterLab's terminal, open the link it prints (the notebook's own address with /proxy/8765/), search one service at a time for your functions, buckets, tables and queues, open each in a tab, and run every service's read-only commands, light or dark."
+description: "How to open aws-analyzer in a browser tab from a SageMaker notebook instance or Studio: run aws-analyzer serve in JupyterLab's terminal, open the link it prints (the notebook's own address with /proxy/8765/), search one service at a time for your functions, buckets, tables and queues, see what needs attention in each service you open, open each thing in a tab, and run every service's read-only commands, light or dark."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> In a browser tab <code>aws-analyzer serve</code></p>
 
 # Find anything in your account, and keep it open in a tab
 
-Start one command in JupyterLab's terminal and open the link it prints. Search one service at a time for a function, bucket, table or queue, open what you find in a tab, and read the same reports a cell draws, with room to read them.
+Start one command in JupyterLab's terminal and open the link it prints. Search one service at a time for a function, bucket, table or queue, see what needs attention in a service as you open it, open what you find in a tab, and read the same reports a cell draws, with room to read them.
 { .lede }
 
 <ul class="pills">
@@ -15,16 +15,17 @@ Start one command in JupyterLab's terminal and open the link it prints. Search o
   <li>Behind your notebook's sign-in</li>
   <li>Search one service at a time</li>
   <li>Everything opens in a tab</li>
+  <li>What needs attention, per service</li>
   <li>Every service, the same reports</li>
   <li>Next steps run with a click</li>
   <li>Read-only</li>
   <li>Light, dark or your system's</li>
 </ul>
 
-![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and the function orders-etl; the search box set to Lambda with a typed; chips to search S3, Lambda, DynamoDB, Step Functions, API Gateway or SQS, SNS and EventBridge, a dot on S3 and Lambda, which have been read; 5 functions in Lambda read just now, three of them matching; below, the buckets demo-lake, demo-scratch and demo-models matching from memory, with no new reads; and the services not searched yet as buttons](images/browser-light.webp#only-light){ width="984" height="615" loading=lazy }
-![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and the function orders-etl; the search box set to Lambda with a typed; chips to search S3, Lambda, DynamoDB, Step Functions, API Gateway or SQS, SNS and EventBridge, a dot on S3 and Lambda, which have been read; 5 functions in Lambda read just now, three of them matching; below, the buckets demo-lake, demo-scratch and demo-models matching from memory, with no new reads; and the services not searched yet as buttons](images/browser-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and Lambda; the search box set to Lambda with orders typed; chips to search each service, a dot on S3 and Lambda, which have been read; the function orders-etl found, and beside it its quick look: runtime python3.9, handler etl.handler, 1,024 MB, 60 s timeout, last changed 25 Nov 2026, its description, and what Lambda's check found about it, first that it started failing after a change; on the right, Checked so far: Lambda, 7 warnings and 5 notes, just now, and 10 other services not checked](images/browser-light.webp#only-light){ width="984" height="615" loading=lazy }
+![The aws-analyzer page's search: tabs along the top for Home, the bucket demo-lake and Lambda; the search box set to Lambda with orders typed; chips to search each service, a dot on S3 and Lambda, which have been read; the function orders-etl found, and beside it its quick look: runtime python3.9, handler etl.handler, 1,024 MB, 60 s timeout, last changed 25 Nov 2026, its description, and what Lambda's check found about it, first that it started failing after a change; on the right, Checked so far: Lambda, 7 warnings and 5 notes, just now, and 10 other services not checked](images/browser-dark.webp#only-dark){ width="984" height="615" loading=lazy }
 
-The home page, searching Lambda. S3 was read earlier, so its buckets match too, from memory; the services not read yet wait for a click.
+The home page, searching Lambda: the function picked has a quick look beside the results, from what the search and Lambda's check already read.
 { .muted }
 
 ## Start here { #tour }
@@ -43,6 +44,8 @@ Using it
 
 -   [How do I find a function or a bucket?](#search) <span class="how">the search on Home</span>
 -   [Why one service at a time?](#search) <span class="how">only what you pick is read</span>
+-   [What can I see before opening it?](#look) <span class="how">the quick look</span>
+-   [What needs fixing in a service?](#attention) <span class="how">open its page</span>
 -   [Can I keep several open?](#tabs) <span class="how">tabs</span>
 -   [How do I run a command?](#run) <span class="how">a form, or type the call</span>
 -   [Can I run a report's next step?](#next) <span class="how">▶ Run beside it</span>
@@ -138,6 +141,32 @@ Only the service you pick is read, with the one listing call its report would ma
 - **↑ ↓ and Enter** open a match from the keyboard. Until each thing has a page of its own, it opens its service's main report for it (`function_info`, `bucket_info`, `table_info`, ...).
 
 Search covers Lambda, S3, DynamoDB, Step Functions, API Gateway, and SQS queues and SNS topics. The other services' commands are under *Every command, by service* on the right.
+
+## A quick look before you open it { #look }
+
+The result you pick shows a preview beside the results, made from what's already been read: it asks AWS nothing.
+{ .gist }
+
+Click a line, or move with ↑ ↓, and the quick look shows what the listing said about it (a function's runtime, handler, memory, timeout and last change; a bucket's region and when it was made; an API's kind and ID), and what its service's check found about it, when the service has been checked. A service not checked yet says so, with a link to its page. Open (or Enter) shows its report in this tab, ↗ New tab in another, and *Copy as cell* copies the same report as a line for a notebook (`ui.function_info('orders-etl')`).
+
+## What needs attention, per service { #attention }
+
+Opening a service's page checks it, and only it: the page leads with what needs attention there.
+{ .gist }
+
+![Lambda's page: the tabs Home, demo-lake and Lambda; its commands down the side; and first on the page, Needs attention in Lambda, 7 warnings and 5 notes: the verdict 4 of 5 functions need you, cards for 5 functions, 1 failing, 3 needing a fix, 192,496 calls in 30 days, 0.3% failed, $93.80 a month; then each warning with what it means and the functions it names: started failing after a change (orders-etl), open to anyone (report-api), paying for capacity nobody uses (churn-scoring), calls failing (orders-etl)](images/browser-attention-light.webp#only-light){ width="984" height="615" loading=lazy }
+![Lambda's page: the tabs Home, demo-lake and Lambda; its commands down the side; and first on the page, Needs attention in Lambda, 7 warnings and 5 notes: the verdict 4 of 5 functions need you, cards for 5 functions, 1 failing, 3 needing a fix, 192,496 calls in 30 days, 0.3% failed, $93.80 a month; then each warning with what it means and the functions it names: started failing after a change (orders-etl), open to anyone (report-api), paying for capacity nobody uses (churn-scoring), calls failing (orders-etl)](images/browser-attention-dark.webp#only-dark){ width="984" height="615" loading=lazy }
+
+Lambda's page leads with what its check found; each function's name opens its report.
+{ .muted }
+
+The check is the service's own overview, the report you'd run first in a notebook: Lambda's `functions()`, S3's `overview()`, DynamoDB's `tables()`, Step Functions' and SQS / SNS / EventBridge's `overview()`, API Gateway's `apis()`, and so on. The page shows its verdict and cards, then every warning and note, worst first, each naming the resources it's about. *See the whole report* shows that report without running it again, and ↻ Check again runs it afresh. The server keeps a check for 15 minutes.
+
+Home's *Checked so far* lists the services checked and what each found, and says how many haven't been checked: nothing is read until you open a service.
+
+??? more "What a check reads, and what it costs"
+
+    The same as the overview it runs, in a notebook: Lambda's reads each function's CloudWatch numbers, S3's each bucket's settings and size. CloudWatch's GetMetricData is the one call that costs anything, a fraction of a cent for most accounts; each report's note says how many metrics it read.
 
 ## Tabs, and light or dark { #tabs }
 

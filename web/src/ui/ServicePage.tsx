@@ -1,9 +1,13 @@
-/** A service's page: what's live in it (Lambda: what's running now), then its commands by group, each a card. */
+/**
+ * A service's page: what needs attention in it (checked when the page opens, only this service read), what's live in
+ * it (Lambda: what's running now), then its commands by group, each a card that opens its form.
+ */
 
 import type { ComponentType } from "preact";
 import type { Service } from "../api/types";
 import { byGroup } from "../lib/find";
 import { routeFor } from "../lib/route";
+import { NeedsAttention } from "./Attention";
 import { Crumbs } from "./bits";
 import { LiveActivity } from "./LiveActivity";
 
@@ -21,6 +25,7 @@ export function ServicePage({ service }: { service: Service }) {
           {`${service.commands.length} commands, the same as ${viewName} has in a notebook. Each one only reads.`}
         </p>
       </div>
+      <NeedsAttention service={service} />
       {Live ? <Live /> : null}
       {[...byGroup(service.commands)].map(([group, commands]) => [
         <h2 key={`${group}-title`} class="aa-group">

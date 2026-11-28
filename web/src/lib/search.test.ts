@@ -3,7 +3,7 @@ import type { Resource } from "../api/types";
 import { matchScore, rankResources, readPasted } from "./search";
 
 function fn(name: string, detail = "python3.12"): Resource {
-  return { kind: "function", name, detail, command: "function_info", arguments: { name } };
+  return { kind: "function", name, detail, command: "function_info", arguments: { name }, facts: [] };
 }
 
 const FUNCTIONS = [fn("process-orders-v1"), fn("orders-backfill"), fn("orders"), fn("report-api"), fn("orders-etl")];

@@ -1,7 +1,8 @@
 /**
  * What the server's API sends: the catalog of services and commands (GET /api/catalog), a report, a job and its
  * events (POST /api/jobs, GET /api/jobs/<id>/events), one service's resources for the search
- * (GET /api/resources/<service>), and the live streams' samples (GET /api/live/...).
+ * (GET /api/resources/<service>), what needs attention in one (GET /api/attention/...), and the live streams'
+ * samples (GET /api/live/...).
  */
 
 /** One of a command's parameters as its form shows it (server/catalog.py's Parameter). */
@@ -35,6 +36,8 @@ export interface Service {
   data: boolean;
   /** Whether the page can search its resources (GET /api/resources). */
   searchable: boolean;
+  /** Whether its page checks what needs attention in it (GET /api/attention). */
+  checkable: boolean;
   commands: Command[];
 }
 
@@ -154,6 +157,12 @@ export interface LiveStart {
   about: string;
 }
 
+/** One thing a listing said about a resource ('Runtime' -> 'python3.12'). */
+export interface Fact {
+  label: string;
+  value: string;
+}
+
 /** One thing the search finds (server/resources.py's Resource), with the command that opens its report. */
 export interface Resource {
   kind: string;
@@ -161,6 +170,8 @@ export interface Resource {
   detail: string;
   command: string;
   arguments: Record<string, string>;
+  /** What its listing call already said about it, for the quick look. */
+  facts: Fact[];
 }
 
 /** One service's resources, as its listing call read them (server/resources.py's ResourceIndex). */
@@ -172,4 +183,48 @@ export interface ResourceIndex {
   seconds: number;
   /** True when the server answered from what it kept rather than asking AWS. */
   from_memory: boolean;
+}
+
+/** How bad a concern is. */
+export type Level = "bad" | "warn" | "info";
+
+/** A resource a concern names, and the command that opens it ('' when there's none). */
+export interface Target {
+  name: string;
+  command: string;
+  arguments: Record<string, string>;
+}
+
+/** One thing that needs attention (server/attention.py's Concern). */
+export interface Concern {
+  level: Level;
+  /** What's wrong, the sentence's lead. */
+  headline: string;
+  /** Why it matters and what to do. */
+  detail: string;
+  targets: Target[];
+}
+
+/** What one check of a service found (server/attention.py's Attention). */
+export interface Attention {
+  service: string;
+  /** The overview it ran, as written in a notebook ('functions()'). */
+  call: string;
+  command: string;
+  verdict: string;
+  tone: string;
+  /** [label, value, tone] */
+  cards: string[][];
+  concerns: Concern[];
+  /** Why the service couldn't be read, when it couldn't. */
+  note: string;
+  checked_at: string;
+  seconds: number;
+  from_memory: boolean;
+}
+
+/** A check and the report it was read from (GET /api/attention/<service>). */
+export interface Checked {
+  attention: Attention;
+  report: Report;
 }

@@ -5,7 +5,9 @@ GET /api/style/<service> the stylesheet those blocks are drawn with, the jobs (P
 background, GET /api/jobs/<id>/events follows its progress and reports as Server-Sent Events, DELETE /api/jobs/<id>
 stops it: jobs.py), the live streams (GET /api/live/...: live.py), GET /api/data/... the tables a report is drawn from
 as JSON (for the services whose Views have data()), GET /api/resources/<service> one service's names for the page's
-search (resources.py), and for now GET /ping, a check of what the notebook's proxy passes (ping.py).
+search (resources.py), GET /api/attention/<service> what needs attention in one service (attention.py) and
+GET /api/attention the checks already made, and for now GET /ping, a check of what the notebook's proxy passes
+(ping.py).
 
 Every request but the page's own files needs the token the terminal printed: the page's address carries it once
 (?token=...), the server keeps it in a cookie for that address, and the page sends it back with each API call in a
@@ -36,6 +38,7 @@ from .catalog import SERVICES
 from .jobs import Job
 from .live import LiveHub, add_live_routes
 from .ping import add_ping_routes
+from .attention import check_for
 from .resources import is_searchable
 from .runner import CantList, CantRun, NoData, ReportRunner, gives_data, style_of
 from .streams import HEARTBEAT, HEARTBEAT_SECONDS, STREAM_HEADERS, STREAM_TYPE, last_seen, sse_message
@@ -94,7 +97,7 @@ def _catalog(runner: ReportRunner) -> dict[str, Any]:
     Every service and the commands the page offers for it (read from the View classes: nothing from AWS).
     """
     services = [{"key": service.key, "title": service.title, "icon": service.icon, "data": gives_data(service.key),
-                 "searchable": is_searchable(service.key),
+                 "searchable": is_searchable(service.key), "checkable": check_for(service.key) is not None,
                  "commands": [asdict(command) for command in runner.commands(service.key)]} for service in SERVICES]
     settings = runner.settings
     return {"version": __version__, "region": settings.region or "", "profile": settings.profile or "",
@@ -152,6 +155,28 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
     _add_resource_routes(app, runner, check_token)
     _add_job_routes(app, runner, check_token)
     _add_job_stream(app, runner, token)
+    _add_attention_routes(app, runner, check_token)
+
+
+def _add_attention_routes(app: FastAPI, runner: ReportRunner, check_token: Callable[..., None]) -> None:
+    """
+    GET /api/attention/<service>[?refresh=true]: what needs attention in one service, from its overview, with the
+    report it came from; kept by the runner, so a second look reads nothing. GET /api/attention: the checks kept,
+    for Home (nothing is read). 400 for a service there isn't, 422 when it has no overview to check.
+    """
+
+    @app.get("/api/attention", dependencies=[Depends(check_token)])
+    def checked() -> dict[str, Any]:
+        return {"checked": [asdict(attention) for attention in runner.checked()]}
+
+    @app.get("/api/attention/{service}", dependencies=[Depends(check_token)])
+    def attention(service: str, refresh: bool = False) -> dict[str, Any]:
+        try:
+            return asdict(runner.attention(service, refresh=refresh))
+        except CantRun as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except CantList as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _add_style_route(app: FastAPI, check_token: Callable[..., None]) -> None:

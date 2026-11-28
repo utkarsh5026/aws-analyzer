@@ -92,6 +92,18 @@ ready-made IAM policy.
 %pip install "aws-analyzer[all]"      # plus pandas, pyarrow, the PDF and Excel readers, progress bars
 ```
 
+To try what's on `main` before it's released, install it from GitHub (it needs `git` in the notebook, which
+SageMaker has), then restart the kernel:
+
+```python
+%pip install --upgrade "aws-analyzer @ git+https://github.com/utkarsh5026/aws-analyzer.git@main"
+%pip install --upgrade "aws-analyzer[all] @ git+https://github.com/utkarsh5026/aws-analyzer.git@main"   # with the extras
+```
+
+Swap `@main` for a branch, tag (`@v0.67.1`) or commit to pin one. `%pip install --force-reinstall --no-deps
+aws-analyzer` goes back to the latest release (main carries the last release's version number until the next one,
+so a plain `--upgrade` wouldn't switch back).
+
 **2. Look around.** It uses the notebook's IAM role, so there's nothing to configure:
 
 ```python

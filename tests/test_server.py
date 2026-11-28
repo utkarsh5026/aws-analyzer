@@ -12,6 +12,7 @@ import logging
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
@@ -31,7 +32,9 @@ from aws_analyzer.server.catalog import (
     NOT_SERVED, SERVICES, Parameter, argument_value, served_names, view_commands,
 )
 from aws_analyzer.server.links import page_link, read_metadata
+from aws_analyzer.server import attention as attention_module
 from aws_analyzer.server import resources as resources_module
+from aws_analyzer.server.attention import Target
 from aws_analyzer.server.resources import Resource, is_searchable
 from aws_analyzer.server.runner import CantList, CantRun, NoData, ReportRunner, Settings, _form_arguments, gives_data
 
@@ -314,28 +317,34 @@ class _Lister:
 
 
 def test_each_service_lists_its_things_with_the_report_that_opens_them():
-    from types import SimpleNamespace as Thing
+    from aws_analyzer.apigateway.models import Api
+    from aws_analyzer.lambda_functions.models import Function
 
-    function = Thing(name="orders-etl", runtime="python3.12", memory=512, timeout=30)
-    image = Thing(name="thumbs", runtime=None, memory=1024, timeout=60)
-    assert resources_module.lambda_resources(_Lister(list_functions=[function, image])) == [
-        Resource("function", "orders-etl", "python3.12 · 512 MB · timeout 30 s", "function_info",
-                 {"name": "orders-etl"}),
-        Resource("function", "thumbs", "container image · 1024 MB · timeout 60 s", "function_info",
-                 {"name": "thumbs"}),
+    function = Function(name="orders-etl", runtime="python3.12", memory=512, timeout=30, handler="app.handler",
+                        code_size=2_400_000, last_modified=datetime(2026, 11, 2, tzinfo=timezone.utc))
+    image = Function(name="thumbs", runtime=None, memory=1024, timeout=60, package_type="Image")
+    listed = resources_module.lambda_resources(_Lister(list_functions=[function, image]))
+    assert [(each.kind, each.name, each.detail, each.command, each.arguments) for each in listed] == [
+        ("function", "orders-etl", "python3.12 · 512 MB · timeout 30 s", "function_info", {"name": "orders-etl"}),
+        ("function", "thumbs", "container image · 1024 MB · timeout 60 s", "function_info", {"name": "thumbs"}),
     ]
+    facts = {fact.label: fact.value for fact in listed[0].facts}
+    assert facts["Handler"] == "app.handler" and facts["Package"] == "2.3 MB" and facts["Last changed"] == "02 Nov 2026"
+    assert "Description" not in facts and "Layers" not in facts
     tables = resources_module.dynamodb_resources(_Lister(list_table_names=["orders"]))
     assert tables == [Resource("table", "orders", "DynamoDB table", "table_info", {"table": "orders"})]
     machines = resources_module.stepfunctions_resources(_Lister(list_state_machines=[
         {"name": "report-flow", "type": "EXPRESS", "creationDate": None}]))
     assert machines[0].detail == "Express workflow" and machines[0].arguments == {"name": "report-flow"}
-    apis = resources_module.apigateway_resources(_Lister(list_apis=[Thing(name="orders-api", kind="HTTP", id="a1")]))
+    apis = resources_module.apigateway_resources(_Lister(list_apis=[Api(name="orders-api", kind="HTTP", id="a1")]))
     assert apis[0].detail == "HTTP API · a1" and apis[0].command == "api_info"
+    assert {fact.label: fact.value for fact in apis[0].facts} == {"Kind": "HTTP API", "ID": "a1"}
     found = resources_module.messaging_resources(_Lister(
-        queue_urls=["https://sqs.us-east-1.amazonaws.com/123/orders-dlq"],
+        queue_urls=["https://sqs.us-east-1.amazonaws.com/123/orders-dlq.fifo"],
         topic_arns=["arn:aws:sns:us-east-1:123:order-events"]))
     assert [(each.kind, each.name, each.command) for each in found] == [
-        ("queue", "orders-dlq", "queue_info"), ("topic", "order-events", "topic_info")]
+        ("queue", "orders-dlq.fifo", "queue_info"), ("topic", "order-events", "topic_info")]
+    assert found[0].facts[0].value == "FIFO queue" and found[1].facts[0].value == "Standard topic"
     assert is_searchable("s3") and not is_searchable("athena")
 
 
@@ -381,6 +390,78 @@ def test_resources_from_the_page(client):
     services = client.get("/api/catalog", headers=headers).json()["services"]
     searchable = {service["key"]: service["searchable"] for service in services}
     assert searchable["lambda_functions"] and not searchable["sagemaker_env"]
+
+
+def test_a_services_check_reads_its_overview_once_and_says_what_needs_attention(runner, aws):
+    checked = runner.attention("s3")
+    found = checked.attention
+    assert found.call == "overview()" and not found.from_memory and not found.note
+    assert checked.report.command == "overview" and "Turn on default encryption" in checked.report.html
+    encryption = next(each for each in found.concerns if each.headline == "Turn on default encryption")
+    assert encryption.level == "warn" and "SSE-S3 is free" in encryption.detail
+    assert encryption.targets == [Target(BUCKET, "bucket_info", {"bucket": BUCKET})]
+    assert [label for label, *_ in found.cards][:2] == ["Open to the internet", "Need attention"]
+    assert runner.attention("s3").attention.from_memory
+    assert not runner.attention("s3", refresh=True).attention.from_memory
+    assert [each.service for each in runner.checked()] == ["s3"]
+    with pytest.raises(CantRun, match="no service called 'ec2'"):
+        runner.attention("ec2")
+
+
+def test_a_check_that_cant_read_its_service_says_why(runner, monkeypatch):
+    from botocore.exceptions import ClientError
+
+    def denied(*args, **kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "ListBuckets")
+
+    monkeypatch.setattr(runner._services["s3"].lanes[0].view.core, "list_buckets", denied)
+    found = runner.attention("s3").attention
+    assert found.concerns == [] and "AccessDenied" in found.note
+
+
+def test_findings_become_concerns_worst_first_naming_their_resources():
+    from aws_analyzer._kit.blocks import _Findings, _Note, _Table, _Verdict
+    from aws_analyzer.lambda_functions.analysis.fleet import FINDING_KINDS, FleetIssue
+    from aws_analyzer.lambda_functions.blocks.fleet import _Todo
+
+    broken = FleetIssue(FINDING_KINDS[0], "warn", [("orders-etl (eu-west-1)", "It's in the Failed state.")])
+    reports = [[
+        _Verdict("2 of 5 functions need you.", tone="bad"),
+        _Findings([("info", "orders-events has no subscriptions: nothing gets its messages."),
+                   ("warn", "The queue orders is encrypted with a key SNS can't use: messages are dropped.")]),
+        _Table(["Table", "Warning"], [["sessions", "Point-in-time recovery is off: a bad write can't be undone."]],
+               title="Warnings (table_info(name) shows every finding)"),
+        _Todo([broken]),
+    ]]
+    concerns = attention_module.concerns_of(reports, ["orders", "orders-events", "orders-etl"])
+    assert [each.level for each in concerns] == ["warn", "warn", "warn", "info"]
+    assert concerns[0].headline == "The queue orders is encrypted with a key SNS can't use"
+    assert [target.name for target in concerns[0].targets] == ["orders"]
+    assert concerns[1].targets == [Target("sessions")]
+    assert concerns[2].headline == FINDING_KINDS[0].title and concerns[2].targets == [Target("orders-etl")]
+    assert attention_module.verdict_of(reports) == ("2 of 5 functions need you.", "bad")
+    assert attention_module.note_of([[_Note("Can't list: AccessDenied.", "warn")]]) == "Can't list: AccessDenied."
+    assert attention_module.note_of(reports) == ""
+
+    topic = Resource("topic", "orders-events", "SNS topic", "topic_info", {"name": "orders-events"})
+    opened = attention_module.opened(concerns, attention_module.CHECKS["messaging"], {"orders-events": topic})
+    assert opened[3].targets == [Target("orders-events", "topic_info", {"name": "orders-events"})]
+    assert opened[0].targets == [Target("orders")]
+
+
+def test_attention_from_the_page(client):
+    headers = {TOKEN_HEADER: TOKEN}
+    assert client.get("/api/attention", headers=headers).json() == {"checked": []}
+    answer = client.get("/api/attention/s3", headers=headers)
+    assert answer.status_code == 200
+    body = answer.json()
+    assert body["attention"]["service"] == "s3" and body["attention"]["concerns"] and body["report"]["html"]
+    kept = client.get("/api/attention", headers=headers).json()["checked"]
+    assert [each["service"] for each in kept] == ["s3"] and kept[0]["from_memory"] is True
+    assert client.get("/api/attention/ec2", headers=headers).status_code == 400
+    assert client.get("/api/attention/s3").status_code == 403
+    services = client.get("/api/catalog", headers=headers).json()["services"]
+    assert all(service["checkable"] for service in services)
 
 
 def test_the_pages_files_are_served_and_what_it_names_is_there(client):
