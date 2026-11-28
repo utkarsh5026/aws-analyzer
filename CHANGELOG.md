@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-28
+
 ### Added
 
 - 🧰 **Browser tab: a check of what the proxy passes** ([#299](https://github.com/utkarsh5026/aws-analyzer/pull/299))
@@ -1606,7 +1608,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.66.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.67.0...HEAD
+[0.67.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.63.0...v0.64.0
