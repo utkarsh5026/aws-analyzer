@@ -13,6 +13,7 @@ the Views, which escape what AWS returns, and the policy is the second wall if a
 from __future__ import annotations
 
 import secrets
+from html import escape
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
+from .assets import MissingBuild, PageAssets, page_assets
 from .catalog import SERVICES
 from .ping import add_ping_routes
 from .runner import CantRun, ReportRunner
@@ -58,9 +60,14 @@ def _is_token(given: str | None, token: str) -> bool:
     return bool(given) and secrets.compare_digest(given.encode(), token.encode())
 
 
-def _page_html(token: str) -> str:
+def _page_html(token: str, assets: PageAssets) -> str:
     page = (STATIC / "index.html").read_text(encoding="utf-8")
-    return page.replace("__TOKEN__", token).replace("__VERSION__", __version__)
+    return page.replace("__TOKEN__", token).replace("__VERSION__", __version__).replace("__ASSETS__", assets.tags())
+
+
+def _unbuilt_page(problem: MissingBuild) -> HTMLResponse:
+    text = escape(str(problem))
+    return HTMLResponse(f"<!doctype html><title>aws-analyzer</title><p>{text}</p>", status_code=500)
 
 
 def _catalog(runner: ReportRunner) -> dict[str, Any]:
@@ -74,6 +81,23 @@ def _catalog(runner: ReportRunner) -> dict[str, Any]:
             "services": services}
 
 
+def _page_response(request: Request, token: str, cookie: str) -> Response:
+    """
+    The page, for a browser with the token (in the address the first time, then in the cookie this sets), else the
+    page that asks for the link; without a build of the page, what to run to make one.
+    """
+    given = request.query_params.get("token") or request.cookies.get(cookie)
+    if not _is_token(given, token):
+        return HTMLResponse(LOCKED_PAGE, status_code=403)
+    try:
+        assets = page_assets()
+    except MissingBuild as problem:
+        return _unbuilt_page(problem)
+    response = HTMLResponse(_page_html(token, assets))
+    response.set_cookie(cookie, token, httponly=True, samesite="strict")
+    return response
+
+
 def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> None:
     def check_token(given: str | None = Header(default=None, alias=TOKEN_HEADER)) -> None:
         if not _is_token(given, token):
@@ -82,12 +106,7 @@ def _add_routes(app: FastAPI, runner: ReportRunner, token: str, cookie: str) -> 
 
     @app.get("/", response_class=HTMLResponse)
     def page(request: Request) -> Response:
-        given = request.query_params.get("token") or request.cookies.get(cookie)
-        if not _is_token(given, token):
-            return HTMLResponse(LOCKED_PAGE, status_code=403)
-        response = HTMLResponse(_page_html(token))
-        response.set_cookie(cookie, token, httponly=True, samesite="strict")
-        return response
+        return _page_response(request, token, cookie)
 
     catalog: dict[str, Any] = {}
 

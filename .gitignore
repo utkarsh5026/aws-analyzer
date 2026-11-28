@@ -11,10 +11,14 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# ...but the web page's build is committed, so pip installs need no Node (web/, `make web`)
+!src/aws_analyzer/server/static/dist/
 downloads/
 eggs/
 .eggs/
 lib/
+# ...but the web page's own lib/ is source (web/src/lib/: routes, the call text, the finder)
+!web/src/lib/
 lib64/
 parts/
 sdist/
@@ -219,3 +223,6 @@ __marimo__/
 
 # makefile.py local: the wheel, its virtual environment, the reports and notebooks
 .local-check/
+
+# The web page's packages (web/package-lock.json pins them; `make web` installs them)
+web/node_modules/

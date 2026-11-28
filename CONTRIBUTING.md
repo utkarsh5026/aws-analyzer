@@ -38,8 +38,13 @@ version each has), and `make install-env` installs this checkout into the ones y
 extras, and whether to add a Jupyter kernel for one that has none. `make install-env ARGS="--env pytorch_p310
 --extras all --kernel --yes"` does the same without questions.
 
-`make clean` removes what these tasks built in the checkout (`.local-check/`, `dist/`, `build/`, `site/`, the test and
-lint caches and `__pycache__/` folders); `make clean ARGS="--all"` also removes the sandbox's Pyodide files from
+The browser page `aws-analyzer serve` opens is written in TypeScript and Preact, in [`web/`](web/). Changing it needs
+Node.js 20.19 or newer: `make web` installs web/'s pinned packages, checks them (types, Biome, Vitest) and builds the
+page into `src/aws_analyzer/server/static/dist/`. Commit `dist/` with your change, since users install it without
+Node; the tests fail while it's older than `web/`. Nothing else needs Node.
+
+`make clean` removes what these tasks built in the checkout (`.local-check/`, `dist/`, `build/`, `site/`,
+`web/node_modules/`, the test and lint caches and `__pycache__/` folders); `make clean ARGS="--all"` also removes the sandbox's Pyodide files from
 `~/.cache/aws-analyzer`, and `ARGS="--dry-run"` says what it would remove, and how much, without removing it. It
 never uninstalls from the environments `install-env` installed into, or deletes files saved beside your notebooks: it
 prints how to do those yourself.
@@ -101,7 +106,8 @@ just as well for people. The rules that matter most:
    only, no dark-mode pictures), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
    tick "No screenshots" when nothing a user sees changed. The release notes copy them.
 7. CI runs lint and the tests on Python 3.11 to 3.14, imports each analyzer with only boto3,
-   builds the package, and builds the guide site with `--strict` when `docs/` changes.
+   builds the package, checks and builds the web page (and that its committed build is current), and builds the
+   guide site with `--strict` when `docs/` changes.
 
 ## Releases
 

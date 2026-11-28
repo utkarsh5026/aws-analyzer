@@ -12,8 +12,10 @@ notebook.
     runner    ReportRunner: one View per service, a command's report as HTML
     links     the address to open, from SageMaker's metadata file
     app       the FastAPI app (FastAPI and uvicorn come with aws-analyzer)
+    assets    the page's built files, from static/dist/manifest.json
+    ping      a check of what the notebook's proxy passes (for now)
     cli       the `aws-analyzer serve` command
-    static/   the page itself: index.html, app.js, app.css and the services' icons
+    static/   the page itself: index.html, dist/ (built from web/, Preact and TypeScript) and the services' icons
 
 Importing this package loads none of that: FastAPI loads when the server starts.
 """

@@ -88,6 +88,8 @@ python -m pytest tests/test_s3.py::test_ls     # one test
 python -m pytest -k "policy"                   # by name
 ruff check .                                   # lint: real errors and the style rules ruff can check (ruff.toml)
 python -m build                                # the PyPI sdist and wheel, in dist/ (twine check --strict dist/*)
+make web                                       # the web page: web/ (Preact, TypeScript) built into server/static/dist/;
+                                               # needs Node; commit dist/ with the change
 pip install -r requirements-docs.txt           # the guide site: mkdocs, mkdocs-material
 mkdocs serve                                   # preview docs/ at http://127.0.0.1:8000
 mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
@@ -1522,13 +1524,24 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   the terminal prints its link on SageMaker. It goes once the transport is chosen.
 - `cli.py`: `main(argv)`, `free_port` (the next free one when the port is taken), `welcome` (the link, the region in
   use from boto3's session, a warning when `--host` isn't loopback).
-- `static/`: the page, plain HTML, CSS and an ES module with no build step (`app.js`): routes are the hash
+- `assets.py`: `page_assets()` reads `static/dist/manifest.json` for the built files the page loads, and
+  `PageAssets.tags()` is what `index.html`'s `__ASSETS__` becomes; without a build, `MissingBuild` and a page saying
+  to run `make web`.
+- `static/`: `index.html` (the token, the version and a `<div id="app">`), the services' icons, and `dist/`, the page
+  built from `web/` by Vite (`make web`), **committed** so pip installs need no Node.
+- `web/` (repo root, not in the wheel): the page in TypeScript and Preact, with `@preact/signals` for state, built
+  without Babel (Vite's JSX transform). `src/main.tsx` mounts `ui/App`; `api/` is the client (the token in its header)
+  and the server's shapes, `lib/` the pure logic (`route`, `call`, `find`, tested with Vitest beside it), `ui/` the
+  components, `state.ts` the signals and the reports already run, `styles/app.css` the stylesheet. Routes are the hash
   (`#/<service>/<command>?<name>=<text>&run=1`), so back, forward, reload and bookmarks work; a report is inserted as
-  the server's HTML (the only `innerHTML`; everything else is built with `textContent`), its `.next .ni code` steps
+  the server's HTML (the only `innerHTML`, in `ui/Result.tsx`; everything else is JSX), its `.next .ni code` steps
   that name an offered command get a ▶ Run (inside the step's `.nw` cell, since the numbered Next block is a grid), and
   Ctrl K opens the finder. Every class is `aa-`-prefixed and every rule is scoped to the page's own elements, since
   report CSS shares the page (an unscoped `[hidden]` rule once hid the reports' Copy buttons). Dark mode sets
-  `body[data-jp-theme-light]`, which the reports' `_DARK_PAGES` rules read.
+  `body[data-jp-theme-light]`, which the reports' `_DARK_PAGES` rules read. `npm run check` is tsc, Biome and Vitest.
+  `web/sources.ts` writes `dist/sources.sha256`, a hash of what the build is made from, which `tests/test_server.py`
+  recomputes, so a change to `web/` without `make web` fails the tests; CI's "Web page" job also builds it and fails
+  when `dist/` isn't what the commit holds. The TypeScript style is `/web`'s.
 
 `tests/test_server.py` tests it with Starlette's `TestClient` on moto; the page's script is checked in Chromium with
 Playwright on demo.py's data (a scratch script that seeds, passes `views=` and runs uvicorn). `docs/browser.md` is its
