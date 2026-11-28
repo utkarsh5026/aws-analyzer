@@ -28,9 +28,9 @@ tqdm==4.70.1
 ipywidgets==8.1.9
 # The agent's dependencies (agent/: the agent loop, its models on OpenAI, Azure OpenAI and Bedrock, its memory and
 # saved chats, and MCP servers), pinned here so every run tests the same versions.
-deepagents==0.7.40
-langchain-openai==1.8.3
-langchain-aws==1.9.3
+deepagents==0.7.41
+langchain-openai==1.8.5
+langchain-aws==1.10.0
 langgraph-checkpoint-sqlite==3.1.3
 mcp==1.30.0
 # aws-analyzer serve (server/): the reports in a browser tab. FastAPI and uvicorn are dependencies; httpx is for
@@ -52,4 +52,4 @@ twine==7.0.0
 readme-renderer[md]==46.0
 
 # Lint
-ruff==0.17.5
+ruff==0.17.6
