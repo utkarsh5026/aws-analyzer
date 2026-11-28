@@ -40,7 +40,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -53,7 +53,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -305,7 +305,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -318,7 +318,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -540,7 +540,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -553,7 +553,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -807,7 +807,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -820,7 +820,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -1072,7 +1072,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -1085,7 +1085,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -1307,7 +1307,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -1320,7 +1320,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -1604,7 +1604,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -1617,7 +1617,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -1743,7 +1743,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -1756,7 +1756,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -1915,7 +1915,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -1928,7 +1928,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -2150,7 +2150,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -2163,7 +2163,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -2418,7 +2418,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -2431,7 +2431,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -2709,7 +2709,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -2722,7 +2722,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -2908,7 +2908,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -2921,7 +2921,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -3078,7 +3078,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -3091,7 +3091,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -3276,7 +3276,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -3289,7 +3289,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -3415,7 +3415,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -3428,7 +3428,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -3616,7 +3616,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -3629,7 +3629,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -3848,7 +3848,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -3861,7 +3861,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -4087,7 +4087,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -4100,7 +4100,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -4319,7 +4319,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -4332,7 +4332,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
@@ -4550,7 +4550,7 @@ window.AA_TOURS = {
        },
        {
         "at": 0.2,
-        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.0-py3-none-any.whl"
+        "html": "&nbsp;&nbsp;Downloading aws_analyzer-0.67.1-py3-none-any.whl"
        },
        {
         "at": 0.3,
@@ -4563,7 +4563,7 @@ window.AA_TOURS = {
        },
        {
         "at": 1.05,
-        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.0"
+        "html": "<span class=\"ok\">✓</span> Successfully installed aws-analyzer-0.67.1"
        }
       ]
      }
