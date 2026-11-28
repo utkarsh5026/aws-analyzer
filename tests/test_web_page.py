@@ -420,3 +420,39 @@ def test_in_a_dark_browser_the_reports_are_told_the_page_is_dark(chromium, troub
 def test_an_address_the_page_doesnt_know_opens_the_home_page(page, served):
     _open(page, served, "#/nothing/here")
     expect(page.locator(".aa-home-title")).to_have_text("Find anything in your account")
+
+
+def test_the_result_picked_has_a_quick_look_from_what_the_search_read(page, served):
+    _open(page, served)
+    page.fill("#search", "orders-etl")
+    look = page.locator(".aa-look")
+    expect(look.locator(".aa-look-name")).to_have_text("orders-etl")
+    expect(look.locator(".aa-facts")).to_contain_text("Handler")
+    expect(look.locator(".aa-facts")).to_contain_text("Memory")
+    expect(look.locator(".aa-run-link")).to_have_attribute("href", "#/lambda_functions/function_info?name=orders-etl&run=1")
+    page.fill("#search", "")
+    page.locator("#search").press("ArrowDown")
+    second = page.locator(".aa-hit").nth(1).locator(".aa-hit-name").inner_text()
+    expect(look.locator(".aa-look-name")).to_have_text(second)
+
+
+def test_a_service_page_says_what_needs_attention_and_home_remembers_it(page, served):
+    _open(page, served, "#/lambda_functions")
+    block = page.locator(".aa-attention")
+    expect(block.locator("h2")).to_have_text("Needs attention in Lambda")
+    expect(block.locator(".aa-verdict")).to_contain_text("need you")
+    failing = block.locator(".aa-concern", has_text="Started failing after a change")
+    expect(failing.locator(".aa-targets a", has_text="orders-etl")).to_have_attribute(
+        "href", "#/lambda_functions/function_info?name=orders-etl&run=1")
+    expect(block.locator(".aa-attention-meta")).to_contain_text("From functions()")
+    block.locator("a", has_text="See the whole report").click()
+    _wait_for_report(page)
+    expect(_status(page)).to_contain_text("shown from earlier")
+
+    page.goto(f"{served}/?token={TOKEN}#/")
+    checked = page.locator(".aa-checked")
+    expect(checked.locator(".aa-checked-line", has_text="Lambda")).to_contain_text("warning")
+    expect(checked.locator(".aa-checked-line", has_text="S3")).to_have_count(0)
+    page.fill("#search", "orders-etl")
+    expect(page.locator(".aa-look-check")).to_contain_text("What functions() found")
+    expect(page.locator(".aa-look-check")).to_contain_text("Started failing after a change")

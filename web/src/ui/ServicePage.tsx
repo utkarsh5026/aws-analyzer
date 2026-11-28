@@ -1,8 +1,12 @@
-/** A service's page: its commands by group, each a card that opens its form. */
+/**
+ * A service's page: what needs attention in it (checked when the page opens, only this service read), then its
+ * commands by group, each a card that opens its form.
+ */
 
 import type { Service } from "../api/types";
 import { byGroup } from "../lib/find";
 import { routeFor } from "../lib/route";
+import { NeedsAttention } from "./Attention";
 import { Crumbs } from "./bits";
 
 export function ServicePage({ service }: { service: Service }) {
@@ -16,6 +20,7 @@ export function ServicePage({ service }: { service: Service }) {
           {`${service.commands.length} commands, the same as ${viewName} has in a notebook. Each one only reads.`}
         </p>
       </div>
+      <NeedsAttention service={service} />
       {[...byGroup(service.commands)].map(([group, commands]) => [
         <h2 key={`${group}-title`} class="aa-group">
           {group}

@@ -27,6 +27,7 @@ from .._kit.fmt import _utcnow
 from .._kit.render import _call
 from .._kit.themes import _theme_name
 from .._kit.view import _commands, _parse_call
+from .attention import ATTENTION_KEPT, Attention, cards_of, check_for, concerns_of, note_of, opened, verdict_of
 from .catalog import BY_KEY, Parameter, Service, argument_value, served_names, view_commands
 from .resources import LISTERS, NAMES_KEPT, ResourceIndex, sorted_resources
 
@@ -103,12 +104,31 @@ class _Service:
     view: Any = None
     lock: threading.Lock = field(default_factory=threading.Lock)
     names: _KeptNames | None = None
+    attention: _KeptAttention | None = None
 
 
 @dataclass(frozen=True)
 class _KeptNames:
     index: ResourceIndex
     seconds_at: float
+
+
+@dataclass(frozen=True)
+class _KeptAttention:
+    attention: Attention
+    report: Report
+    seconds_at: float
+
+
+@dataclass(frozen=True)
+class Checked:
+    """
+    One check of a service, as the page gets it: what needs attention, and the report it was read from (so "See
+    the whole report" shows it without running it again).
+    """
+
+    attention: Attention
+    report: Report
 
 
 def _service_named(key: str) -> Service:
@@ -216,6 +236,44 @@ class ReportRunner:
             held.names = _KeptNames(index, time.monotonic())
             return index
 
+    def attention(self, key: str, *, refresh: bool = False) -> Checked:
+        """
+        What needs attention in one service: its overview run as a notebook runs it, its findings read out of the
+        report (attention.py), kept for ATTENTION_KEPT seconds (Home and the quick look reuse it), run afresh with
+        refresh=True. Only the service asked for is read.
+        """
+        service = _service_named(key)
+        check = check_for(key)
+        if check is None:
+            raise CantList(f"{service.title} has no overview to check yet: open its commands instead.")
+        held = self._service(key)
+        with held.lock:
+            kept = held.attention
+            is_fresh = kept is not None and time.monotonic() - kept.seconds_at < ATTENTION_KEPT
+            if kept is not None and is_fresh and not refresh:
+                return Checked(replace(kept.attention, from_memory=True), kept.report)
+        report, blocks = self._run_blocks(key, check.command, (), dict(check.kwargs))
+        with held.lock:
+            names = held.names.index.resources if held.names else []
+        by_name = {resource.name: resource for resource in names}
+        concerns = opened(concerns_of(blocks, list(by_name)), check, by_name)
+        verdict, tone = verdict_of(blocks)
+        found = Attention(key, report.call, check.command, verdict, tone, cards_of(blocks), concerns, note_of(blocks),
+                          _utcnow(), report.seconds)
+        with held.lock:
+            held.attention = _KeptAttention(found, report, time.monotonic())
+        return Checked(found, report)
+
+    def checked(self) -> list[Attention]:
+        """
+        The checks the server still keeps, one per service checked, for Home's "Checked so far": nothing is read.
+        """
+        with self._making:
+            held = list(self._services.values())
+        now = time.monotonic()
+        return [replace(each.attention.attention, from_memory=True) for each in held
+                if each.attention is not None and now - each.attention.seconds_at < ATTENTION_KEPT]
+
     def _read_names(self, key: str, held: _Service) -> ResourceIndex:
         title = BY_KEY[key].title
         started = time.monotonic()
@@ -284,6 +342,12 @@ class ReportRunner:
                          "running aws-analyzer serve.") from exc
 
     def _run(self, key: str, command: str, args: tuple, kwargs: dict[str, Any]) -> Report:
+        return self._run_blocks(key, command, args, kwargs)[0]
+
+    def _run_blocks(self, key: str, command: str, args: tuple, kwargs: dict[str, Any]) -> tuple[Report, list]:
+        """
+        A command's report, and the blocks it was drawn from.
+        """
         held = self._service(key)
         started = time.monotonic()
         with held.lock:
@@ -292,7 +356,7 @@ class ReportRunner:
         html = _reports_html(view_class, self.settings.max_rows, blocks)
         texts = _form_texts(_commands(view_class)[command], args, kwargs)
         seconds = round(time.monotonic() - started, 2)
-        return Report(key, command, _call(command, *args, **kwargs), texts, html, seconds)
+        return Report(key, command, _call(command, *args, **kwargs), texts, html, seconds), blocks
 
     def _blocks(self, key: str, held: _Service, command: str, args: tuple, kwargs: dict) -> list[list[Any]]:
         """

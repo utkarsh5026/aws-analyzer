@@ -18,6 +18,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- 🧰 **Browser tab: what needs attention, per service, and a quick look**
+  - Opening a service's page checks it, and only it: its overview's verdict and every warning, each naming what it's about.
+  - Home's *Checked so far* lists the services checked; the others aren't read until you open them.
+  - The search result you pick shows a quick look beside the results, from what's already read, with *Copy as cell*.
 - 🧰 **Browser tab: a report's tables as JSON** ([#306](https://github.com/utkarsh5026/aws-analyzer/pull/306))
   - `GET /api/data/lambda_functions/errors?name=orders-etl` gives what `ui.data('errors', 'orders-etl')` gives, as JSON.
   - Each column says what it means and its kind (`ms`, `share`, `time`, ...); Lambda, S3, DynamoDB, Step Functions and API Gateway.

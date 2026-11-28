@@ -1523,7 +1523,12 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   times ISO UTC, NaN null, Decimals numbers), 400 for `CantRun`, 422 for `NoData` (a report that was only a note, or a
   service without data), and `GET /api/resources/<service>[?refresh=true]` (`resources.py`: a lister per service,
   `LISTERS`, on its View's analyzer, each `Resource` naming the command and arguments that open it; `ReportRunner.resources`
-  keeps them for `NAMES_KEPT` under the service's lock; 422 for `CantList`; the catalog's `searchable`);
+  keeps them for `NAMES_KEPT` under the service's lock; 422 for `CantList`; the catalog's `searchable`; each `Resource`
+  carries `facts`, what the listing already returned, for the page's quick look), `GET /api/attention/<service>[?refresh=true]`
+  (`attention.py`: `CHECKS`, the overview each service is checked with; `ReportRunner.attention` runs it like any
+  command and `concerns_of` reads its blocks, `_Findings`, a "Warnings" `_Table`, Lambda's `_Todo` and S3's `_Fixes`,
+  into `Concern`s worst first with the `Target`s they name; kept for `ATTENTION_KEPT` with its `Report`; the catalog's
+  `checkable`) and `GET /api/attention` (the checks kept, `ReportRunner.checked`, nothing read);
   the API needs the token in the `X-AWS-Analyzer-Token` header (another site can't add it), and every answer has
   `SECURITY_HEADERS`, a Content-Security-Policy that runs only the server's own scripts.
 - `ping.py` (temporary, Phase 0 of `/web`): `GET /ping`, a page (`static/ping.js`, `ping.css`) that checks whether
@@ -1542,7 +1547,11 @@ them, so it still imports with only boto3), its terminal command prints, and it 
   components, `state.ts` the signals and the reports already run, `styles/app.css` the stylesheet. Routes are the hash
   (`#/<service>/<command>?<name>=<text>&run=1`), so back, forward, reload and bookmarks work. Home (`ui/Home.tsx`) is the
   search, one service at a time (`/web`'s design: `lib/search.ts` ranks names and reads a pasted `s3://` path, ARN or
-  console link; `state.indexes` keeps each service's names for Ctrl K and the "from memory" matches); every address
+  console link; `state.indexes` keeps each service's names for Ctrl K and the "from memory" matches), with the quick
+  look beside the results (`ui/QuickLook.tsx`: the picked line's `facts` and what its service's check said about it,
+  `lib/attention.ts`) and "Checked so far"; a service's page leads with "Needs attention in <service>"
+  (`ui/Attention.tsx`, checked when it opens, kept in `state.attentions`, its report put in `reports` so "See the
+  whole report" doesn't run it again); every address
   opens in a tab (`lib/tabs.ts`: leaving Home or "↗ New tab" adds one, moving inside a tab replaces it, kept in
   localStorage as `aa-tabs`); the Light / Dark / Auto switch (`lib/theme.ts`, `aa-theme`) sets `<html data-theme>`,
   which the page's colours read, and `body[data-jp-theme-light]`, which the reports' do. A report is inserted as

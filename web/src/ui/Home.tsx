@@ -1,37 +1,26 @@
 /**
  * The home page: search one service at a time. The service picked is the only one read (its listing call, through
  * GET /api/resources); services read before search instantly and their matches show "from memory"; the others are
- * buttons, so reading one is a click. A pasted s3:// path, ARN or console link picks its service by itself.
+ * buttons, so reading one is a click. A pasted s3:// path, ARN or console link picks its service by itself. The line
+ * picked has a quick look beside the results, and "Checked so far" lists what each service's check found.
  */
 
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api/client";
 import type { Catalog, Resource, ResourceIndex, Service } from "../api/types";
-import { routeFor } from "../lib/route";
+import { readAgo } from "../lib/ago";
 import { rankResources, readPasted } from "../lib/search";
 import { chooseSearchService, indexes, keepIndex, openInNewTab, searchService } from "../state";
+import { CheckedSoFar } from "./Attention";
 import { ServiceIcon } from "./bits";
+import { openTarget, QuickLook } from "./QuickLook";
 
 const FROM_MEMORY_EACH = 3;
 const FROM_MEMORY_MOST = 6;
-const SECOND = 1000;
-const MINUTE = 60 * SECOND;
 
 interface Reading {
   key: string;
   error: string;
-}
-
-/** 'just now', '4 min ago', '2 h ago': how long ago something was read. */
-function readAgo(iso: string, now = Date.now()): string {
-  const gone = now - Date.parse(iso);
-  if (Number.isNaN(gone) || gone < MINUTE) return "just now";
-  const minutes = Math.round(gone / MINUTE);
-  return minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`;
-}
-
-function openTarget(service: string, resource: Resource): string {
-  return routeFor(service, resource.command, { ...resource.arguments, run: "1" });
 }
 
 function kindsOf(index: ResourceIndex): string {
@@ -202,6 +191,7 @@ function NotRead({ services }: { services: Service[] }) {
 function Browse({ services }: { services: Service[] }) {
   return (
     <aside class="aa-browse">
+      <CheckedSoFar services={services} />
       <p class="aa-label">Every command, by service</p>
       {services.map((service) => (
         <a key={service.key} href={`#/${service.key}`}>
@@ -298,16 +288,19 @@ export function Home({ loaded }: { loaded: Catalog }) {
           />
         </div>
         <ServiceChips services={searchable} current={key} />
-        <Results
-          service={service}
-          index={index}
-          reading={reading}
-          hits={hits}
-          picked={picked}
-          query={query}
-          onPick={setPicked}
-          onAgain={readAgain}
-        />
+        <div class={`aa-found${hits[picked] ? " aa-with-look" : ""}`}>
+          <Results
+            service={service}
+            index={index}
+            reading={reading}
+            hits={hits}
+            picked={picked}
+            query={query}
+            onPick={setPicked}
+            onAgain={readAgain}
+          />
+          <QuickLook service={service} resource={index ? hits[picked] : undefined} />
+        </div>
         <MemoryHits hits={fromMemory(searchable, key, query)} />
         <NotRead services={searchable} />
       </div>
