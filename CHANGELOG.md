@@ -9,9 +9,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-11-28
+
 ### Added
 
-- 🌐 **Every service's reports in a browser tab: `aws-analyzer serve`**
+- 🧰 **Every service's reports in a browser tab** ([#296](https://github.com/utkarsh5026/aws-analyzer/pull/296))
   - Run `aws-analyzer serve` in JupyterLab's terminal and open the link it prints; on SageMaker it's the notebook's own address with `/proxy/8765/`.
   - A form per command, the same reports as in a cell, next steps that run with a click, Ctrl K to find a command.
   - Read-only: commands that write files or change something stay in the notebook; the link's token keeps others out.
@@ -19,7 +21,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - The model `use_model()` or ⚙ model switches to is saved with its key; the next `AgentView()` starts on it.
   - Name it yourself or pick a suggestion like *Haiku Hummingbird*; `use_saved_model('work gpt')` switches back.
   - `saved_models()` lists them, `forget_model()` forgets them; `remember_model=False` turns it off.
-- 🤖 **Agent: searches your SageMaker notebook's files**
+- 🤖 **Agent: searches your SageMaker notebook's files** ([#295](https://github.com/utkarsh5026/aws-analyzer/pull/295))
   - Ask "which notebook reads churn.csv?" or "where did that KeyError come from?": it searches notebooks, scripts, data and configs.
   - Every word must be in the file; notebooks are read cell by cell, outputs and errors too; close spellings when nothing matches.
   - Never reads `.env` or key files, `.aws` / `.ssh`, `/proc` or Python environments, and hides secrets in what it reads.
@@ -1592,7 +1594,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.65.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.66.0...HEAD
+[0.66.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.62.0...v0.63.0
